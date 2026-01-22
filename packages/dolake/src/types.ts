@@ -3,60 +3,49 @@
  *
  * Types for the lakehouse component that receives CDC streams from DoSQL
  * and writes to R2 as Parquet/Iceberg.
+ *
+ * This module re-exports unified types from @dotdo/lake.do (which uses @dotdo/sql.do
+ * and @dotdo/shared-types) and provides server-specific types.
  */
 
 // =============================================================================
-// CDC Event Types (from DoSQL)
+// Re-export Unified Types from lake.do and sql.do
 // =============================================================================
 
-/**
- * Operation types for CDC events
- */
-export type CDCOperation = 'INSERT' | 'UPDATE' | 'DELETE';
+export {
+  // CDC Types from shared-types via sql.do
+  type CDCOperation,
+  type CDCEvent,
+  CDCOperationCode,
+  type ClientCDCOperation,
 
-/**
- * Numeric operation codes for efficient binary encoding
- */
-export const CDCOperationCode = {
-  INSERT: 0,
-  UPDATE: 1,
-  DELETE: 2,
-} as const;
+  // Client Capabilities from shared-types via sql.do
+  type ClientCapabilities,
+  DEFAULT_CLIENT_CAPABILITIES,
 
-export type CDCOperationCodeValue = (typeof CDCOperationCode)[CDCOperation];
+  // Type Guards
+  isServerCDCEvent,
+  isClientCDCEvent,
+  isDateTimestamp,
+  isNumericTimestamp,
 
-/**
- * A single CDC event from DoSQL
- */
-export interface CDCEvent<T = unknown> {
-  /** Monotonically increasing sequence number */
-  sequence: number;
+  // Type Converters
+  serverToClientCDCEvent,
+  clientToServerCDCEvent,
+} from '@dotdo/lake.do';
 
-  /** Unix timestamp in milliseconds */
-  timestamp: number;
+// =============================================================================
+// CDC Operation Codes (for efficient binary encoding)
+// =============================================================================
 
-  /** Type of database operation */
-  operation: CDCOperation;
-
-  /** Table name where the change occurred */
-  table: string;
-
-  /** Primary key or row identifier */
-  rowId: string;
-
-  /** Row data before the change (for UPDATE/DELETE) */
-  before?: T;
-
-  /** Row data after the change (for INSERT/UPDATE) */
-  after?: T;
-
-  /** Optional metadata */
-  metadata?: Record<string, unknown>;
-}
+// CDCOperationCode is re-exported from lake.do above
+export type CDCOperationCodeValue = 0 | 1 | 2 | 3;
 
 // =============================================================================
 // RPC Message Types (DoSQL -> DoLake)
 // =============================================================================
+
+import type { CDCEvent, ClientCapabilities } from '@dotdo/lake.do';
 
 /**
  * Message type discriminator
@@ -295,32 +284,6 @@ export interface StatusMessage extends RpcMessage {
   /** Next scheduled flush */
   nextFlushTime?: number;
 }
-
-// =============================================================================
-// Client Capabilities
-// =============================================================================
-
-/**
- * Capabilities advertised by the client
- */
-export interface ClientCapabilities {
-  binaryProtocol: boolean;
-  compression: boolean;
-  batching: boolean;
-  maxBatchSize: number;
-  maxMessageSize: number;
-}
-
-/**
- * Default client capabilities
- */
-export const DEFAULT_CLIENT_CAPABILITIES: ClientCapabilities = {
-  binaryProtocol: true,
-  compression: false,
-  batching: true,
-  maxBatchSize: 1000,
-  maxMessageSize: 4 * 1024 * 1024,
-};
 
 // =============================================================================
 // Buffer Types

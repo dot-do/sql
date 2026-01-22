@@ -79,7 +79,7 @@ export class DoSQLClient implements SQLClient {
   // ===========================================================================
 
   private async ensureConnection(): Promise<WebSocket> {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws && this.ws.readyState === WebSocket.READY_STATE_OPEN) {
       return this.ws;
     }
 
@@ -87,15 +87,15 @@ export class DoSQLClient implements SQLClient {
       const wsUrl = this.config.url.replace(/^http/, 'ws');
       this.ws = new WebSocket(wsUrl);
 
-      this.ws.onopen = () => {
+      this.ws.addEventListener('open', () => {
         resolve(this.ws!);
-      };
+      });
 
-      this.ws.onerror = (event) => {
+      this.ws.addEventListener('error', (event: Event) => {
         reject(new Error(`WebSocket error: ${event}`));
-      };
+      });
 
-      this.ws.onclose = () => {
+      this.ws.addEventListener('close', () => {
         this.ws = null;
         // Reject all pending requests
         for (const [id, pending] of this.pendingRequests) {
@@ -103,11 +103,11 @@ export class DoSQLClient implements SQLClient {
           pending.reject(new Error('Connection closed'));
           this.pendingRequests.delete(id);
         }
-      };
+      });
 
-      this.ws.onmessage = (event) => {
-        this.handleMessage(event.data);
-      };
+      this.ws.addEventListener('message', (event: MessageEvent) => {
+        this.handleMessage(event.data as string | ArrayBuffer);
+      });
     });
   }
 

@@ -4,82 +4,87 @@
  * Defines the message types for CapnWeb RPC communication between
  * DoSQL clients and Durable Objects.
  *
+ * This module re-exports unified types from @dotdo/shared-types via @dotdo/sql.do
+ * and provides server-specific types.
+ *
  * @packageDocumentation
  */
 
 // =============================================================================
-// Core Query Types
+// Additional Type Imports (for extends clauses)
 // =============================================================================
 
-/**
- * Request to execute a SQL query
- *
- * Supports:
- * - Standard SQL execution
- * - Parameterized queries for security
- * - Branch-based queries for multi-tenancy
- * - Time travel queries via LSN
- */
-export interface QueryRequest {
-  /** SQL query string */
-  sql: string;
-  /** Positional parameters (prevents SQL injection) */
-  params?: unknown[];
-  /** Named parameters (alternative to positional) */
-  namedParams?: Record<string, unknown>;
-  /** Branch/namespace for multi-tenant isolation */
-  branch?: string;
-  /** LSN (Log Sequence Number) for time travel queries */
-  asOf?: bigint;
-  /** Query timeout in milliseconds */
-  timeoutMs?: number;
-  /** Whether to return results as streaming chunks */
-  streaming?: boolean;
-  /** Maximum rows to return (for pagination) */
-  limit?: number;
-  /** Offset for pagination */
-  offset?: number;
-}
-
-/**
- * Response from a SQL query execution
- */
-export interface QueryResponse {
-  /** Column names in result order */
-  columns: string[];
-  /** Column types (for client-side type reconstruction) */
-  columnTypes: ColumnType[];
-  /** Result rows (columnar format for efficiency) */
-  rows: unknown[][];
-  /** Total row count returned */
-  rowCount: number;
-  /** Current LSN after query execution */
-  lsn: bigint;
-  /** Execution time in milliseconds */
-  executionTimeMs: number;
-  /** Whether there are more rows available (pagination) */
-  hasMore?: boolean;
-  /** Cursor for fetching next page */
-  cursor?: string;
-}
-
-/**
- * Column type metadata for client-side type reconstruction
- */
-export type ColumnType =
-  | 'string'
-  | 'number'
-  | 'bigint'
-  | 'boolean'
-  | 'date'
-  | 'timestamp'
-  | 'json'
-  | 'blob'
-  | 'null'
-  | 'unknown';
+import type {
+  QueryRequest as BaseQueryRequest,
+  QueryResponse as BaseQueryResponse,
+  CDCEvent as BaseCDCEvent,
+  CDCOperation as BaseCDCOperation,
+  TransactionHandle as BaseTransactionHandle,
+  ServerIsolationLevel as BaseServerIsolationLevel,
+  ConnectionStats as BaseConnectionStats,
+} from '@dotdo/sql.do';
 
 // =============================================================================
-// Streaming Types
+// Re-export Unified Types from shared-types
+// =============================================================================
+
+export {
+  // Column Types
+  type ColumnType,
+  type SQLColumnType,
+  type JSColumnType,
+  SQL_TO_JS_TYPE_MAP,
+  JS_TO_SQL_TYPE_MAP,
+  sqlToJsType,
+  jsToSqlType,
+
+  // Query Types
+  type QueryRequest,
+  type QueryResponse,
+  type QueryResult,
+  type QueryOptions,
+
+  // CDC Types
+  type CDCOperation,
+  type CDCEvent,
+  CDCOperationCode,
+
+  // Transaction Types
+  type IsolationLevel,
+  type ServerIsolationLevel,
+  type TransactionOptions,
+  type TransactionState,
+  type TransactionHandle,
+
+  // RPC Types
+  RPCErrorCode,
+  type RPCError,
+  type RPCRequest,
+  type RPCResponse,
+
+  // Client Capabilities
+  type ClientCapabilities,
+  DEFAULT_CLIENT_CAPABILITIES,
+
+  // Connection Types
+  type ConnectionOptions,
+  type ConnectionStats,
+
+  // Type Guards
+  isServerCDCEvent,
+  isClientCDCEvent,
+  isDateTimestamp,
+  isNumericTimestamp,
+
+  // Type Converters
+  serverToClientCDCEvent,
+  clientToServerCDCEvent,
+  responseToResult,
+  resultToResponse,
+} from '@dotdo/sql.do';
+
+// =============================================================================
+// Streaming Types (Server-specific)
 // =============================================================================
 
 /**
@@ -132,7 +137,7 @@ export interface StreamComplete {
 }
 
 // =============================================================================
-// CDC (Change Data Capture) Types
+// CDC (Change Data Capture) Server Types
 // =============================================================================
 
 /**
@@ -146,40 +151,13 @@ export interface CDCRequest {
   /** Tables to subscribe to (empty = all tables) */
   tables?: string[];
   /** Operations to filter (empty = all operations) */
-  operations?: CDCOperation[];
+  operations?: BaseCDCOperation[];
   /** Branch to subscribe to */
   branch?: string;
   /** Include row data in events */
   includeRowData?: boolean;
   /** Maximum events to buffer before backpressure */
   maxBufferSize?: number;
-}
-
-/**
- * CDC operation type
- */
-export type CDCOperation = 'INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE';
-
-/**
- * A single CDC event
- */
-export interface CDCEvent {
-  /** LSN of this change */
-  lsn: bigint;
-  /** Table that was modified */
-  table: string;
-  /** Type of operation */
-  operation: CDCOperation;
-  /** Timestamp of the change */
-  timestamp: number;
-  /** Transaction ID (for grouping related changes) */
-  txId: string;
-  /** Old row data (for UPDATE and DELETE) */
-  oldRow?: Record<string, unknown>;
-  /** New row data (for INSERT and UPDATE) */
-  newRow?: Record<string, unknown>;
-  /** Primary key values */
-  primaryKey?: Record<string, unknown>;
 }
 
 /**
@@ -195,7 +173,7 @@ export interface CDCAck {
 }
 
 // =============================================================================
-// Transaction Types
+// Transaction Server Types
 // =============================================================================
 
 /**
@@ -203,7 +181,7 @@ export interface CDCAck {
  */
 export interface BeginTransactionRequest {
   /** Isolation level */
-  isolation?: 'READ_COMMITTED' | 'REPEATABLE_READ' | 'SERIALIZABLE';
+  isolation?: BaseServerIsolationLevel;
   /** Transaction timeout in milliseconds */
   timeoutMs?: number;
   /** Branch for the transaction */
@@ -213,21 +191,9 @@ export interface BeginTransactionRequest {
 }
 
 /**
- * Transaction handle returned after begin
- */
-export interface TransactionHandle {
-  /** Transaction ID */
-  txId: string;
-  /** LSN at transaction start */
-  startLSN: bigint;
-  /** Expiration timestamp */
-  expiresAt: number;
-}
-
-/**
  * Request to execute within a transaction
  */
-export interface TransactionQueryRequest extends QueryRequest {
+export interface TransactionQueryRequest extends BaseQueryRequest {
   /** Transaction ID */
   txId: string;
 }
@@ -271,7 +237,7 @@ export interface TransactionResult {
  */
 export interface BatchRequest {
   /** Array of queries to execute */
-  queries: QueryRequest[];
+  queries: BaseQueryRequest[];
   /** Whether to execute in a single transaction */
   atomic?: boolean;
   /** Whether to continue on error */
@@ -285,7 +251,7 @@ export interface BatchRequest {
  */
 export interface BatchResponse {
   /** Results for each query (in order) */
-  results: Array<QueryResponse | BatchError>;
+  results: Array<BaseQueryResponse | BatchError>;
   /** Number of successful queries */
   successCount: number;
   /** Number of failed queries */
@@ -339,7 +305,7 @@ export interface SchemaResponse {
 }
 
 /**
- * Schema for a single table
+ * Schema for a single table (server-specific with full details)
  */
 export interface TableSchema {
   /** Table name */
@@ -403,107 +369,6 @@ export interface ForeignKeySchema {
 }
 
 // =============================================================================
-// Error Types
-// =============================================================================
-
-/**
- * RPC error response
- */
-export interface RPCError {
-  /** Error code */
-  code: RPCErrorCode;
-  /** Human-readable message */
-  message: string;
-  /** Additional error details */
-  details?: Record<string, unknown>;
-  /** Stack trace (in development) */
-  stack?: string;
-}
-
-/**
- * RPC error codes
- */
-export enum RPCErrorCode {
-  // General errors
-  UNKNOWN = 'UNKNOWN',
-  INVALID_REQUEST = 'INVALID_REQUEST',
-  TIMEOUT = 'TIMEOUT',
-  INTERNAL_ERROR = 'INTERNAL_ERROR',
-
-  // Query errors
-  SYNTAX_ERROR = 'SYNTAX_ERROR',
-  TABLE_NOT_FOUND = 'TABLE_NOT_FOUND',
-  COLUMN_NOT_FOUND = 'COLUMN_NOT_FOUND',
-  CONSTRAINT_VIOLATION = 'CONSTRAINT_VIOLATION',
-  TYPE_MISMATCH = 'TYPE_MISMATCH',
-
-  // Transaction errors
-  TRANSACTION_NOT_FOUND = 'TRANSACTION_NOT_FOUND',
-  TRANSACTION_ABORTED = 'TRANSACTION_ABORTED',
-  DEADLOCK_DETECTED = 'DEADLOCK_DETECTED',
-  SERIALIZATION_FAILURE = 'SERIALIZATION_FAILURE',
-
-  // CDC errors
-  INVALID_LSN = 'INVALID_LSN',
-  SUBSCRIPTION_ERROR = 'SUBSCRIPTION_ERROR',
-  BUFFER_OVERFLOW = 'BUFFER_OVERFLOW',
-
-  // Authentication/Authorization
-  UNAUTHORIZED = 'UNAUTHORIZED',
-  FORBIDDEN = 'FORBIDDEN',
-
-  // Resource errors
-  RESOURCE_EXHAUSTED = 'RESOURCE_EXHAUSTED',
-  QUOTA_EXCEEDED = 'QUOTA_EXCEEDED',
-}
-
-// =============================================================================
-// Connection Types
-// =============================================================================
-
-/**
- * Connection options for DoSQL client
- */
-export interface ConnectionOptions {
-  /** WebSocket URL or HTTP endpoint */
-  url: string;
-  /** Default branch */
-  defaultBranch?: string;
-  /** Connection timeout in milliseconds */
-  connectTimeoutMs?: number;
-  /** Query timeout in milliseconds */
-  queryTimeoutMs?: number;
-  /** Auto-reconnect on disconnect */
-  autoReconnect?: boolean;
-  /** Maximum reconnect attempts */
-  maxReconnectAttempts?: number;
-  /** Reconnect delay in milliseconds */
-  reconnectDelayMs?: number;
-}
-
-/**
- * Connection statistics
- */
-export interface ConnectionStats {
-  /** Whether currently connected */
-  connected: boolean;
-  /** Connection ID (if connected) */
-  connectionId?: string;
-  /** Current branch */
-  branch?: string;
-  /** Current LSN */
-  currentLSN?: bigint;
-  /** Round-trip latency in milliseconds */
-  latencyMs?: number;
-  /** Messages sent */
-  messagesSent: number;
-  /** Messages received */
-  messagesReceived: number;
-  /** Reconnect count */
-  reconnectCount: number;
-}
-
-// =============================================================================
 // DoSQL API Interface
 // =============================================================================
 
@@ -515,11 +380,11 @@ export interface ConnectionStats {
  */
 export interface DoSQLAPI {
   // Query operations
-  query(request: QueryRequest): Promise<QueryResponse>;
+  query(request: BaseQueryRequest): Promise<BaseQueryResponse>;
   queryStream(request: StreamRequest): AsyncIterable<StreamChunk>;
 
   // Transaction operations
-  beginTransaction(request: BeginTransactionRequest): Promise<TransactionHandle>;
+  beginTransaction(request: BeginTransactionRequest): Promise<BaseTransactionHandle>;
   commit(request: CommitRequest): Promise<TransactionResult>;
   rollback(request: RollbackRequest): Promise<TransactionResult>;
 
@@ -527,7 +392,7 @@ export interface DoSQLAPI {
   batch(request: BatchRequest): Promise<BatchResponse>;
 
   // CDC operations
-  subscribeCDC(request: CDCRequest): AsyncIterable<CDCEvent>;
+  subscribeCDC(request: CDCRequest): AsyncIterable<BaseCDCEvent>;
   unsubscribeCDC(subscriptionId: string): Promise<void>;
 
   // Schema operations
@@ -535,5 +400,5 @@ export interface DoSQLAPI {
 
   // Connection operations
   ping(): Promise<{ pong: true; lsn: bigint; timestamp: number }>;
-  getStats(): Promise<ConnectionStats>;
+  getStats(): Promise<BaseConnectionStats>;
 }

@@ -2,9 +2,28 @@
  * CDC (Change Data Capture) Types for DoSQL
  *
  * Types for streaming changes from the WAL to subscribers.
+ *
+ * This module re-exports unified CDC types from @dotdo/shared-types via @dotdo/sql.do
+ * and provides CDC-specific types for the server implementation.
  */
 
 import type { WALEntry, WALOperation, WALReader } from '../wal/types.js';
+
+// =============================================================================
+// Re-export Unified CDC Types from shared-types via sql.do
+// =============================================================================
+
+export {
+  type CDCOperation,
+  type CDCEvent as UnifiedCDCEvent,
+  CDCOperationCode,
+  isServerCDCEvent,
+  isClientCDCEvent,
+  isDateTimestamp,
+  isNumericTimestamp,
+  serverToClientCDCEvent,
+  clientToServerCDCEvent,
+} from '@dotdo/sql.do';
 
 // =============================================================================
 // CDC Filter Types
@@ -43,7 +62,7 @@ export interface CDCSubscriptionOptions {
 }
 
 // =============================================================================
-// CDC Event Types
+// CDC Event Types (module-specific, compatible with shared types)
 // =============================================================================
 
 /**
@@ -85,7 +104,10 @@ export interface TransactionEvent {
 }
 
 /**
- * Union type for all CDC events
+ * Union type for all CDC events (module-specific)
+ *
+ * Note: This is compatible with the unified CDCEvent from shared-types
+ * but includes transaction boundary events specific to the server.
  */
 export type CDCEvent<T = unknown> = ChangeEvent<T> | TransactionEvent;
 

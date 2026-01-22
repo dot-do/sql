@@ -845,17 +845,165 @@ export class RateLimiter {
   }
 
   /**
+   * Validate that a value is a finite, non-negative number
+   * Returns the validated integer value (clamped to bounds)
+   * Throws if the value is invalid and cannot be sanitized
+   */
+  private validateRateLimitValue(
+    value: unknown,
+    fieldName: string,
+    options: {
+      minValue?: number;
+      maxValue?: number;
+      allowZero?: boolean;
+    } = {}
+  ): number {
+    const { minValue = 0, maxValue = 1_000_000, allowZero = true } = options;
+
+    // Type validation - must be a number
+    if (typeof value !== 'number') {
+      throw new Error(
+        `Invalid rate limit value: ${fieldName} must be type number, got ${typeof value}`
+      );
+    }
+
+    // NaN check
+    if (Number.isNaN(value)) {
+      throw new Error(
+        `Invalid rate limit value: ${fieldName} is NaN`
+      );
+    }
+
+    // Infinity check
+    if (!Number.isFinite(value)) {
+      throw new Error(
+        `Invalid rate limit value: ${fieldName} is ${value > 0 ? 'Infinity' : '-Infinity'}`
+      );
+    }
+
+    // Round floating point values to integers
+    let intValue = Math.floor(value);
+
+    // Clamp negative values to minValue (usually 0)
+    if (intValue < minValue) {
+      intValue = minValue;
+    }
+
+    // Clamp to max value
+    if (intValue > maxValue) {
+      intValue = maxValue;
+    }
+
+    // Check zero constraint
+    if (!allowZero && intValue === 0) {
+      intValue = 1; // Use minimum valid value
+    }
+
+    return intValue;
+  }
+
+  /**
+   * Validate the rateLimit object exists and has required fields
+   */
+  private validateRateLimitResult(result: RateLimitResult): void {
+    if (!result || typeof result !== 'object') {
+      throw new Error('Invalid rate limit result: rateLimit result is required');
+    }
+
+    if (!result.rateLimit || typeof result.rateLimit !== 'object') {
+      throw new Error('Invalid rate limit result: rateLimit object is required');
+    }
+
+    const { limit, remaining, resetAt } = result.rateLimit;
+
+    // Validate all fields exist and are the right type
+    if (limit === undefined || limit === null) {
+      throw new Error('Invalid rate limit result: limit is required');
+    }
+    if (remaining === undefined || remaining === null) {
+      throw new Error('Invalid rate limit result: remaining is required');
+    }
+    if (resetAt === undefined || resetAt === null) {
+      throw new Error('Invalid rate limit result: resetAt is required');
+    }
+  }
+
+  /**
    * Get HTTP headers for rate limit response
+   *
+   * Validates all numeric values before converting to strings:
+   * - Ensures values are finite numbers (not NaN or Infinity)
+   * - Clamps negative values to 0
+   * - Ensures remaining <= limit
+   * - Validates reset time is reasonable
+   * - Validates retryDelayMs is positive when present
    */
   getRateLimitHeaders(result: RateLimitResult): Record<string, string> {
+    // Validate the result structure first
+    this.validateRateLimitResult(result);
+
+    const now = Math.floor(Date.now() / 1000);
+    const maxResetTime = now + 24 * 60 * 60; // Max 24 hours from now
+
+    // Validate and sanitize limit (must be positive, max 1 million)
+    const limit = this.validateRateLimitValue(
+      result.rateLimit.limit,
+      'limit',
+      { minValue: 1, maxValue: 1_000_000, allowZero: false }
+    );
+
+    // Validate and sanitize remaining (must be non-negative, capped at limit)
+    let remaining = this.validateRateLimitValue(
+      result.rateLimit.remaining,
+      'remaining',
+      { minValue: 0, maxValue: 1_000_000, allowZero: true }
+    );
+
+    // Ensure remaining does not exceed limit
+    if (remaining > limit) {
+      remaining = limit;
+    }
+
+    // Validate and sanitize resetAt (must be in the future or at least now)
+    let resetAt = this.validateRateLimitValue(
+      result.rateLimit.resetAt,
+      'resetAt',
+      { minValue: now, maxValue: maxResetTime, allowZero: false }
+    );
+
     const headers: Record<string, string> = {
-      'X-RateLimit-Limit': result.rateLimit.limit.toString(),
-      'X-RateLimit-Remaining': result.rateLimit.remaining.toString(),
-      'X-RateLimit-Reset': result.rateLimit.resetAt.toString(),
+      'X-RateLimit-Limit': limit.toString(),
+      'X-RateLimit-Remaining': remaining.toString(),
+      'X-RateLimit-Reset': resetAt.toString(),
     };
 
-    if (!result.allowed && result.retryDelayMs) {
-      headers['Retry-After'] = Math.ceil(result.retryDelayMs / 1000).toString();
+    // Validate retryDelayMs if present
+    if (!result.allowed && result.retryDelayMs !== undefined && result.retryDelayMs !== null) {
+      // Explicit validation for invalid retryDelayMs
+      if (typeof result.retryDelayMs !== 'number') {
+        throw new Error('Invalid rate limit value: retryDelayMs must be type number');
+      }
+
+      if (Number.isNaN(result.retryDelayMs)) {
+        // NaN is falsy in condition, but we explicitly skip
+        // Don't add header for NaN
+      } else if (!Number.isFinite(result.retryDelayMs)) {
+        // Infinity - clamp to max retry delay
+        const maxSeconds = Math.ceil(this.config.maxRetryDelayMs / 1000);
+        headers['Retry-After'] = maxSeconds.toString();
+      } else if (result.retryDelayMs < 0) {
+        // Negative values - throw error for explicit validation
+        throw new Error('Invalid rate limit value: retryDelayMs must be positive');
+      } else if (result.retryDelayMs === 0) {
+        // Zero is falsy, don't add header
+      } else {
+        // Valid positive value - cap to maxRetryDelayMs
+        const delayMs = Math.min(result.retryDelayMs, this.config.maxRetryDelayMs);
+        const retryAfterSeconds = Math.ceil(delayMs / 1000);
+        if (retryAfterSeconds > 0) {
+          headers['Retry-After'] = retryAfterSeconds.toString();
+        }
+      }
     }
 
     return headers;

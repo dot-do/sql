@@ -1,9 +1,12 @@
 /**
  * @dotdo/lake.do - Shared types for DoLake client and server
+ *
+ * This module re-exports types from @dotdo/sql.do (which uses @dotdo/shared-types)
+ * and adds lake-specific type definitions.
  */
 
 // =============================================================================
-// Branded Types
+// Branded Types for Lake.do
 // =============================================================================
 
 declare const CDCEventIdBrand: unique symbol;
@@ -38,16 +41,42 @@ export function createCompactionJobId(id: string): CompactionJobId {
   return id as CompactionJobId;
 }
 
-// Re-export common types from sql.do for consistency
-export type { TransactionId, LSN, SQLValue, CDCOperation, CDCEvent } from '@dotdo/sql.do';
+// =============================================================================
+// Re-export common types from sql.do (which uses shared-types)
+// =============================================================================
+
+export type {
+  TransactionId,
+  LSN,
+  SQLValue,
+  CDCOperation,
+  CDCEvent,
+  ClientCDCOperation,
+  ClientCapabilities,
+} from '@dotdo/sql.do';
+
+export {
+  CDCOperationCode,
+  DEFAULT_CLIENT_CAPABILITIES,
+  // Type Guards
+  isServerCDCEvent,
+  isClientCDCEvent,
+  isDateTimestamp,
+  isNumericTimestamp,
+  // Converters
+  serverToClientCDCEvent,
+  clientToServerCDCEvent,
+} from '@dotdo/sql.do';
 
 // =============================================================================
 // CDC Streaming Types
 // =============================================================================
 
+import type { CDCEvent, LSN } from '@dotdo/sql.do';
+
 export interface CDCStreamOptions {
   /** Starting LSN (exclusive) */
-  fromLSN?: bigint;
+  fromLSN?: bigint | LSN;
   /** Tables to subscribe to (empty = all) */
   tables?: string[];
   /** Operations to subscribe to */

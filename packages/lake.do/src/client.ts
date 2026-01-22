@@ -18,7 +18,6 @@ import type {
   LakeRPCRequest,
   LakeRPCResponse,
   LakeRPCError,
-  CDCEvent,
 } from './types.js';
 import { createPartitionKey, createCompactionJobId, createSnapshotId } from './types.js';
 
@@ -77,7 +76,7 @@ export class DoLakeClient implements LakeClient {
   // ===========================================================================
 
   private async ensureConnection(): Promise<WebSocket> {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws && this.ws.readyState === WebSocket.READY_STATE_OPEN) {
       return this.ws;
     }
 
@@ -85,15 +84,15 @@ export class DoLakeClient implements LakeClient {
       const wsUrl = this.config.url.replace(/^http/, 'ws');
       this.ws = new WebSocket(wsUrl);
 
-      this.ws.onopen = () => {
+      this.ws.addEventListener('open', () => {
         resolve(this.ws!);
-      };
+      });
 
-      this.ws.onerror = (event) => {
+      this.ws.addEventListener('error', (event: Event) => {
         reject(new Error(`WebSocket error: ${event}`));
-      };
+      });
 
-      this.ws.onclose = () => {
+      this.ws.addEventListener('close', () => {
         this.ws = null;
         // Reject all pending requests
         for (const [id, pending] of this.pendingRequests) {
@@ -106,11 +105,11 @@ export class DoLakeClient implements LakeClient {
           this.cdcStream.close();
           this.cdcStream = null;
         }
-      };
+      });
 
-      this.ws.onmessage = (event) => {
-        this.handleMessage(event.data);
-      };
+      this.ws.addEventListener('message', (event: MessageEvent) => {
+        this.handleMessage(event.data as string | ArrayBuffer);
+      });
     });
   }
 
@@ -201,18 +200,28 @@ export class DoLakeClient implements LakeClient {
   async getMetadata(tableName: string): Promise<TableMetadata> {
     const result = await this.rpc<TableMetadata>('getMetadata', { tableName });
     // Convert snapshot IDs
-    return {
-      ...result,
-      currentSnapshotId: result.currentSnapshotId
-        ? createSnapshotId(result.currentSnapshotId as unknown as string)
-        : undefined,
-      snapshots: result.snapshots.map((s) => ({
-        ...s,
-        id: createSnapshotId(s.id as unknown as string),
-        parentId: s.parentId ? createSnapshotId(s.parentId as unknown as string) : undefined,
-        timestamp: new Date(s.timestamp),
-      })),
+    const metadata: TableMetadata = {
+      tableId: result.tableId,
+      schema: result.schema,
+      partitionSpec: result.partitionSpec,
+      properties: result.properties,
+      snapshots: result.snapshots.map((s): Snapshot => {
+        const snapshot: Snapshot = {
+          id: createSnapshotId(s.id as unknown as string),
+          timestamp: new Date(s.timestamp),
+          summary: s.summary,
+          manifestList: s.manifestList,
+        };
+        if (s.parentId) {
+          snapshot.parentId = createSnapshotId(s.parentId as unknown as string);
+        }
+        return snapshot;
+      }),
     };
+    if (result.currentSnapshotId) {
+      metadata.currentSnapshotId = createSnapshotId(result.currentSnapshotId as unknown as string);
+    }
+    return metadata;
   }
 
   async listPartitions(tableName: string): Promise<PartitionInfo[]> {
@@ -238,23 +247,47 @@ export class DoLakeClient implements LakeClient {
   }
 
   private transformCompactionJob(job: CompactionJob): CompactionJob {
-    return {
-      ...job,
+    const result: CompactionJob = {
       id: createCompactionJobId(job.id as unknown as string),
       partition: createPartitionKey(job.partition as unknown as string),
-      startedAt: job.startedAt ? new Date(job.startedAt) : undefined,
-      completedAt: job.completedAt ? new Date(job.completedAt) : undefined,
+      status: job.status,
+      inputFiles: job.inputFiles,
     };
+    if (job.outputFiles) {
+      result.outputFiles = job.outputFiles;
+    }
+    if (job.error) {
+      result.error = job.error;
+    }
+    if (job.bytesRead !== undefined) {
+      result.bytesRead = job.bytesRead;
+    }
+    if (job.bytesWritten !== undefined) {
+      result.bytesWritten = job.bytesWritten;
+    }
+    if (job.startedAt) {
+      result.startedAt = new Date(job.startedAt);
+    }
+    if (job.completedAt) {
+      result.completedAt = new Date(job.completedAt);
+    }
+    return result;
   }
 
   async listSnapshots(tableName: string): Promise<Snapshot[]> {
     const result = await this.rpc<Snapshot[]>('listSnapshots', { tableName });
-    return result.map((s) => ({
-      ...s,
-      id: createSnapshotId(s.id as unknown as string),
-      parentId: s.parentId ? createSnapshotId(s.parentId as unknown as string) : undefined,
-      timestamp: new Date(s.timestamp),
-    }));
+    return result.map((s): Snapshot => {
+      const snapshot: Snapshot = {
+        id: createSnapshotId(s.id as unknown as string),
+        timestamp: new Date(s.timestamp),
+        summary: s.summary,
+        manifestList: s.manifestList,
+      };
+      if (s.parentId) {
+        snapshot.parentId = createSnapshotId(s.parentId as unknown as string);
+      }
+      return snapshot;
+    });
   }
 
   async ping(): Promise<{ latency: number }> {

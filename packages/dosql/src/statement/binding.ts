@@ -8,6 +8,19 @@
  */
 
 import type { SqlValue, NamedParameters, BindParameters } from './types.js';
+import {
+  BindingError,
+  BindingErrorCode,
+  createMissingNamedParamError,
+  createMissingPositionalParamError,
+  createInvalidTypeError,
+  createCountMismatchError,
+  createNamedExpectedError,
+  createNonFiniteNumberError,
+} from '../errors/index.js';
+
+// Re-export BindingError for backwards compatibility
+export { BindingError, BindingErrorCode } from '../errors/index.js';
 
 // =============================================================================
 // PARAMETER TOKEN TYPES
@@ -312,16 +325,6 @@ export function parseParameters(sql: string): ParsedParameters {
 // =============================================================================
 
 /**
- * Error thrown when parameter binding fails
- */
-export class BindingError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'BindingError';
-  }
-}
-
-/**
  * Check if parameters are named (object) vs positional (array)
  */
 export function isNamedParameters(params: BindParameters): params is NamedParameters {
@@ -349,7 +352,7 @@ export function coerceValue(value: unknown): SqlValue {
 
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) {
-      throw new BindingError(`Cannot bind non-finite number: ${value}`);
+      throw createNonFiniteNumberError(value);
     }
     return value;
   }
@@ -385,7 +388,7 @@ export function coerceValue(value: unknown): SqlValue {
     return JSON.stringify(value);
   }
 
-  throw new BindingError(`Cannot bind value of type ${typeof value}`);
+  throw createInvalidTypeError(typeof value);
 }
 
 /**
@@ -423,9 +426,7 @@ export function bindParameters(
     switch (token.type) {
       case 'positional':
         if (positionalIndex >= positionalParams.length) {
-          throw new BindingError(
-            `Missing positional parameter at index ${positionalIndex + 1}`
-          );
+          throw createMissingPositionalParamError(positionalIndex + 1);
         }
         value = positionalParams[positionalIndex++];
         break;
@@ -433,9 +434,7 @@ export function bindParameters(
       case 'numbered':
         const numIndex = (token.key as number) - 1; // Convert to 0-indexed
         if (numIndex >= positionalParams.length) {
-          throw new BindingError(
-            `Missing numbered parameter ?${token.key}`
-          );
+          throw createMissingPositionalParamError(token.key as number);
         }
         value = positionalParams[numIndex];
         break;
@@ -443,9 +442,7 @@ export function bindParameters(
       case 'named':
         const name = token.key as string;
         if (!(name in namedParams)) {
-          throw new BindingError(
-            `Missing named parameter :${name}`
-          );
+          throw createMissingNamedParamError(name);
         }
         value = namedParams[name];
         break;
@@ -472,16 +469,14 @@ export function validateParameters(
   const isNamed = params.length === 1 && isNamedParameters(firstParam as BindParameters);
 
   if (parsed.hasNamedParameters && !isNamed) {
-    throw new BindingError(
-      'SQL contains named parameters but positional parameters were provided'
-    );
+    throw createNamedExpectedError();
   }
 
   if (isNamed) {
     const namedParams = firstParam as NamedParameters;
     for (const name of parsed.namedParameterNames) {
       if (!(name in namedParams)) {
-        throw new BindingError(`Missing named parameter :${name}`);
+        throw createMissingNamedParamError(name);
       }
     }
   } else {
@@ -491,14 +486,10 @@ export function validateParameters(
 
     if (parsed.hasNumberedParameters) {
       if (params.length < parsed.maxNumberedIndex) {
-        throw new BindingError(
-          `Expected at least ${parsed.maxNumberedIndex} parameters, got ${params.length}`
-        );
+        throw createCountMismatchError(parsed.maxNumberedIndex, params.length);
       }
     } else if (params.length < positionalCount) {
-      throw new BindingError(
-        `Expected ${positionalCount} parameters, got ${params.length}`
-      );
+      throw createCountMismatchError(positionalCount, params.length);
     }
   }
 }

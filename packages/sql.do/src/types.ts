@@ -1,166 +1,119 @@
 /**
  * @dotdo/sql.do - Shared types for DoSQL client and server
+ *
+ * This module re-exports types from @dotdo/shared-types for backward compatibility
+ * and adds any client-specific type definitions.
  */
 
 // =============================================================================
-// Branded Types
+// Re-export all shared types
 // =============================================================================
 
-declare const TransactionIdBrand: unique symbol;
-declare const LSNBrand: unique symbol;
-declare const StatementHashBrand: unique symbol;
-declare const ShardIdBrand: unique symbol;
+export {
+  // Branded Types
+  type TransactionId,
+  type LSN,
+  type StatementHash,
+  type ShardId,
 
-export type TransactionId = string & { readonly [TransactionIdBrand]: never };
-export type LSN = bigint & { readonly [LSNBrand]: never };
-export type StatementHash = string & { readonly [StatementHashBrand]: never };
-export type ShardId = string & { readonly [ShardIdBrand]: never };
+  // Brand constructors
+  createTransactionId,
+  createLSN,
+  createStatementHash,
+  createShardId,
 
-export function createTransactionId(id: string): TransactionId {
-  return id as TransactionId;
-}
+  // SQL Value Types
+  type SQLValue,
 
-export function createLSN(lsn: bigint): LSN {
-  return lsn as LSN;
-}
+  // Column Types
+  type ColumnType,
+  type SQLColumnType,
+  type JSColumnType,
+  SQL_TO_JS_TYPE_MAP,
+  JS_TO_SQL_TYPE_MAP,
+  sqlToJsType,
+  jsToSqlType,
 
-export function createStatementHash(hash: string): StatementHash {
-  return hash as StatementHash;
-}
+  // Query Types
+  type QueryRequest,
+  type QueryOptions,
+  type QueryResponse,
+  type QueryResult,
 
-export function createShardId(id: string): ShardId {
-  return id as ShardId;
-}
+  // CDC Types
+  type CDCOperation,
+  type ClientCDCOperation,
+  type CDCEvent,
+  CDCOperationCode,
+  type CDCOperationCodeValue,
 
-// =============================================================================
-// Query Types
-// =============================================================================
+  // Transaction Types
+  type IsolationLevel,
+  type ServerIsolationLevel,
+  type TransactionOptions,
+  type TransactionState,
+  type TransactionHandle,
 
-export type SQLValue = string | number | boolean | null | Uint8Array | bigint;
+  // RPC Types
+  type RPCMethod,
+  type RPCRequest,
+  type RPCResponse,
+  type RPCError,
+  RPCErrorCode,
 
-export interface QueryResult<T = Record<string, SQLValue>> {
-  rows: T[];
-  columns: string[];
-  rowsAffected: number;
-  lastInsertRowid?: bigint;
-  duration: number;
-}
+  // Client Capabilities
+  type ClientCapabilities,
+  DEFAULT_CLIENT_CAPABILITIES,
 
-export interface PreparedStatement {
-  sql: string;
-  hash: StatementHash;
-}
+  // Schema Types
+  type ColumnDefinition,
+  type IndexDefinition,
+  type ForeignKeyDefinition,
+  type TableSchema,
 
-export interface QueryOptions {
-  /** Transaction ID for transactional queries */
-  transactionId?: TransactionId;
-  /** Read from a specific point in time */
-  asOf?: Date | LSN;
-  /** Timeout in milliseconds */
-  timeout?: number;
-  /** Target shard for sharded queries */
-  shardId?: ShardId;
-}
+  // Sharding Types
+  type ShardConfig,
+  type ShardInfo,
 
-// =============================================================================
-// Transaction Types
-// =============================================================================
+  // Connection Types
+  type ConnectionOptions,
+  type ConnectionStats,
 
-export type IsolationLevel =
-  | 'READ_UNCOMMITTED'
-  | 'READ_COMMITTED'
-  | 'REPEATABLE_READ'
-  | 'SERIALIZABLE'
-  | 'SNAPSHOT';
+  // Prepared Statement Types
+  type PreparedStatement,
 
-export interface TransactionOptions {
-  isolationLevel?: IsolationLevel;
-  readOnly?: boolean;
-  timeout?: number;
-}
+  // Type Guards
+  isServerCDCEvent,
+  isClientCDCEvent,
+  isDateTimestamp,
+  isNumericTimestamp,
 
-export interface TransactionState {
-  id: TransactionId;
-  isolationLevel: IsolationLevel;
-  readOnly: boolean;
-  startedAt: Date;
-  snapshotLSN: LSN;
-}
-
-// =============================================================================
-// Schema Types
-// =============================================================================
-
-export type ColumnType =
-  | 'INTEGER'
-  | 'REAL'
-  | 'TEXT'
-  | 'BLOB'
-  | 'NULL'
-  | 'BOOLEAN'
-  | 'DATETIME'
-  | 'JSON';
-
-export interface ColumnDefinition {
-  name: string;
-  type: ColumnType;
-  nullable: boolean;
-  primaryKey: boolean;
-  autoIncrement: boolean;
-  defaultValue?: SQLValue;
-  unique: boolean;
-}
-
-export interface TableSchema {
-  name: string;
-  columns: ColumnDefinition[];
-  primaryKey: string[];
-  indexes: IndexDefinition[];
-}
-
-export interface IndexDefinition {
-  name: string;
-  columns: string[];
-  unique: boolean;
-}
+  // Type Converters
+  serverToClientCDCEvent,
+  clientToServerCDCEvent,
+  responseToResult,
+  resultToResponse,
+} from '@dotdo/shared-types';
 
 // =============================================================================
-// RPC Message Types
+// Client Interface (sql.do specific)
 // =============================================================================
 
-export type RPCMethod =
-  | 'exec'
-  | 'query'
-  | 'prepare'
-  | 'execute'
-  | 'beginTransaction'
-  | 'commit'
-  | 'rollback'
-  | 'getSchema'
-  | 'ping';
+import type {
+  TransactionId,
+  LSN,
+  SQLValue,
+  QueryResult,
+  QueryOptions,
+  PreparedStatement,
+  TransactionOptions,
+  TransactionState,
+  TableSchema,
+} from '@dotdo/shared-types';
 
-export interface RPCRequest {
-  id: string;
-  method: RPCMethod;
-  params: unknown;
-}
-
-export interface RPCResponse<T = unknown> {
-  id: string;
-  result?: T;
-  error?: RPCError;
-}
-
-export interface RPCError {
-  code: string;
-  message: string;
-  details?: unknown;
-}
-
-// =============================================================================
-// Client Interface
-// =============================================================================
-
+/**
+ * SQL Client interface for sql.do
+ */
 export interface SQLClient {
   /**
    * Execute a SQL statement (INSERT, UPDATE, DELETE, DDL)
@@ -219,37 +172,4 @@ export interface SQLClient {
    * Close the connection
    */
   close(): Promise<void>;
-}
-
-// =============================================================================
-// Sharding Types
-// =============================================================================
-
-export interface ShardConfig {
-  shardCount: number;
-  shardKey: string;
-  shardFunction: 'hash' | 'range' | 'list';
-}
-
-export interface ShardInfo {
-  shardId: ShardId;
-  keyRange?: { min: SQLValue; max: SQLValue };
-  rowCount?: number;
-}
-
-// =============================================================================
-// CDC Types (for cross-package compatibility)
-// =============================================================================
-
-export type CDCOperation = 'INSERT' | 'UPDATE' | 'DELETE';
-
-export interface CDCEvent {
-  lsn: LSN;
-  timestamp: Date;
-  table: string;
-  operation: CDCOperation;
-  primaryKey: Record<string, SQLValue>;
-  before?: Record<string, SQLValue>;
-  after?: Record<string, SQLValue>;
-  transactionId: TransactionId;
 }

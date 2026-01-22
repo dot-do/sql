@@ -89,5 +89,27 @@ export {
   createCompactionJobId,
 } from './types.js';
 
-// Re-export common types from sql.do
-export type { TransactionId, LSN, SQLValue, CDCOperation, CDCEvent } from './types.js';
+// Re-export common types from sql.do (via types.ts which imports from sql.do)
+export type {
+  TransactionId,
+  LSN,
+  SQLValue,
+  CDCOperation,
+  CDCEvent,
+  ClientCDCOperation,
+  ClientCapabilities,
+} from './types.js';
+
+// Re-export values from sql.do
+export {
+  CDCOperationCode,
+  DEFAULT_CLIENT_CAPABILITIES,
+  // Type Guards
+  isServerCDCEvent,
+  isClientCDCEvent,
+  isDateTimestamp,
+  isNumericTimestamp,
+  // Converters
+  serverToClientCDCEvent,
+  clientToServerCDCEvent,
+} from './types.js';

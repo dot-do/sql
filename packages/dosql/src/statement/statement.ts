@@ -18,20 +18,16 @@ import {
   validateParameters,
   type ParsedParameters,
 } from './binding.js';
+import {
+  StatementError,
+  StatementErrorCode,
+  createFinalizedStatementError,
+  createTableNotFoundError,
+  createUnsupportedSqlError,
+} from '../errors/index.js';
 
-// =============================================================================
-// STATEMENT ERRORS
-// =============================================================================
-
-/**
- * Error thrown when statement execution fails
- */
-export class StatementError extends Error {
-  constructor(message: string, public readonly sql?: string) {
-    super(message);
-    this.name = 'StatementError';
-  }
-}
+// Re-export StatementError for backwards compatibility
+export { StatementError, StatementErrorCode } from '../errors/index.js';
 
 // =============================================================================
 // EXECUTION CONTEXT
@@ -151,10 +147,7 @@ export class PreparedStatement<T = unknown, P extends BindParameters = BindParam
    */
   private checkUsable(): void {
     if (this._finalized) {
-      throw new StatementError(
-        'Statement has been finalized and cannot be used',
-        this.source
-      );
+      throw createFinalizedStatementError(this.source);
     }
   }
 
@@ -179,6 +172,7 @@ export class PreparedStatement<T = unknown, P extends BindParameters = BindParam
     }
 
     throw new StatementError(
+      StatementErrorCode.EXECUTION_ERROR,
       `Expected ${this.parsed.tokens.length} parameters, got 0`,
       this.source
     );
@@ -436,7 +430,7 @@ export class InMemoryEngine implements ExecutionEngine {
       return this.executeDelete(sql, params);
     }
 
-    throw new StatementError(`Unsupported SQL: ${sql}`);
+    throw createUnsupportedSqlError(sql);
   }
 
   /**
@@ -477,7 +471,7 @@ export class InMemoryEngine implements ExecutionEngine {
     );
 
     if (!match) {
-      throw new StatementError('Invalid CREATE TABLE syntax', sql);
+      throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid CREATE TABLE syntax', sql);
     }
 
     const tableName = match[1];
@@ -519,7 +513,7 @@ export class InMemoryEngine implements ExecutionEngine {
     );
 
     if (!match) {
-      throw new StatementError('Invalid INSERT syntax', sql);
+      throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid INSERT syntax', sql);
     }
 
     const tableName = match[1];
@@ -528,7 +522,7 @@ export class InMemoryEngine implements ExecutionEngine {
 
     const table = this.storage.tables.get(tableName);
     if (!table) {
-      throw new StatementError(`Table ${tableName} does not exist`, sql);
+      throw createTableNotFoundError(tableName, sql);
     }
 
     // Build row from params
@@ -579,7 +573,7 @@ export class InMemoryEngine implements ExecutionEngine {
     );
 
     if (!match) {
-      throw new StatementError('Invalid SELECT syntax', sql);
+      throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid SELECT syntax', sql);
     }
 
     const columnList = match[1];
@@ -590,7 +584,7 @@ export class InMemoryEngine implements ExecutionEngine {
 
     const table = this.storage.tables.get(tableName);
     if (!table) {
-      throw new StatementError(`Table ${tableName} does not exist`, sql);
+      throw createTableNotFoundError(tableName, sql);
     }
 
     // Filter rows
@@ -644,7 +638,7 @@ export class InMemoryEngine implements ExecutionEngine {
     );
 
     if (!match) {
-      throw new StatementError('Invalid UPDATE syntax', sql);
+      throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid UPDATE syntax', sql);
     }
 
     const tableName = match[1];
@@ -653,14 +647,14 @@ export class InMemoryEngine implements ExecutionEngine {
 
     const table = this.storage.tables.get(tableName);
     if (!table) {
-      throw new StatementError(`Table ${tableName} does not exist`, sql);
+      throw createTableNotFoundError(tableName, sql);
     }
 
     // Parse SET clause - handle expressions like "col = col + ?"
     const assignments = setClause.split(',').map(a => {
       const eqIndex = a.indexOf('=');
       if (eqIndex === -1) {
-        throw new StatementError(`Invalid SET clause: ${a}`, sql);
+        throw new StatementError(StatementErrorCode.INVALID_SQL, `Invalid SET clause: ${a}`, sql);
       }
       const col = a.slice(0, eqIndex).trim();
       const expr = a.slice(eqIndex + 1).trim();
@@ -770,7 +764,7 @@ export class InMemoryEngine implements ExecutionEngine {
     );
 
     if (!match) {
-      throw new StatementError('Invalid DELETE syntax', sql);
+      throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid DELETE syntax', sql);
     }
 
     const tableName = match[1];
@@ -778,7 +772,7 @@ export class InMemoryEngine implements ExecutionEngine {
 
     const table = this.storage.tables.get(tableName);
     if (!table) {
-      throw new StatementError(`Table ${tableName} does not exist`, sql);
+      throw createTableNotFoundError(tableName, sql);
     }
 
     // Find rows to delete

@@ -28,20 +28,15 @@ import {
 import { StatementCache, type CacheOptions } from './statement/cache.js';
 import { parseParameters } from './statement/binding.js';
 import { tokenizeSQL } from './database/tokenizer.js';
+import {
+  DatabaseError,
+  DatabaseErrorCode,
+  createClosedDatabaseError,
+  createSavepointNotFoundError,
+} from './errors/index.js';
 
-// =============================================================================
-// DATABASE ERRORS
-// =============================================================================
-
-/**
- * Error thrown for database operations
- */
-export class DatabaseError extends Error {
-  constructor(message: string, public readonly code?: string) {
-    super(message);
-    this.name = 'DatabaseError';
-  }
-}
+// Re-export DatabaseError for backwards compatibility
+export { DatabaseError, DatabaseErrorCode } from './errors/index.js';
 
 // =============================================================================
 // USER-DEFINED FUNCTIONS
@@ -169,7 +164,7 @@ export class Database implements IDatabase {
    */
   private checkOpen(): void {
     if (!this._open) {
-      throw new DatabaseError('Database is closed');
+      throw createClosedDatabaseError(this.name);
     }
   }
 
@@ -179,7 +174,7 @@ export class Database implements IDatabase {
   private checkWritable(): void {
     this.checkOpen();
     if (this.readonly) {
-      throw new DatabaseError('Database is read-only', 'READONLY');
+      throw new DatabaseError(DatabaseErrorCode.READ_ONLY, 'Database is read-only');
     }
   }
 
@@ -353,7 +348,7 @@ export class Database implements IDatabase {
 
     const index = this.savepoints.lastIndexOf(name);
     if (index === -1) {
-      throw new DatabaseError(`Savepoint '${name}' not found`);
+      throw createSavepointNotFoundError(name);
     }
 
     this.savepoints.splice(index, 1);
@@ -377,7 +372,7 @@ export class Database implements IDatabase {
     if (name) {
       const index = this.savepoints.lastIndexOf(name);
       if (index === -1) {
-        throw new DatabaseError(`Savepoint '${name}' not found`);
+        throw createSavepointNotFoundError(name);
       }
       this.savepoints.splice(index);
     }
