@@ -33,6 +33,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@dotdo/lake.do": "workspace:*",
     "hyparquet": "^1.9.0",
     "zod": "^4.3.5"
   },
