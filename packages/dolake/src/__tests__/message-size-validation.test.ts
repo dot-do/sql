@@ -198,7 +198,7 @@ describe('Pre-Parse Message Size Validation', () => {
    * Currently, JSON.parse is called first, then size is checked - this is vulnerable.
    */
 
-  it.fails('should check message size BEFORE calling JSON.parse', async () => {
+  it('should check message size BEFORE calling JSON.parse', async () => {
     const id = env.DOLAKE.idFromName('test-pre-parse-order-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -224,7 +224,7 @@ describe('Pre-Parse Message Size Validation', () => {
     }
   });
 
-  it.fails('should not invoke TextDecoder for oversized binary messages', async () => {
+  it('should not invoke TextDecoder for oversized binary messages', async () => {
     const id = env.DOLAKE.idFromName('test-no-decode-oversize-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -488,7 +488,7 @@ describe('Error Response Quality', () => {
    * Error responses for size violations must be informative.
    */
 
-  it.fails('should include actualSize in oversized message rejection', async () => {
+  it('should include actualSize in oversized message rejection', async () => {
     const id = env.DOLAKE.idFromName('test-actual-size-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -511,7 +511,7 @@ describe('Error Response Quality', () => {
     }
   });
 
-  it.fails('should include human-readable size in error message', async () => {
+  it('should include human-readable size in error message', async () => {
     const id = env.DOLAKE.idFromName('test-human-readable-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -530,7 +530,7 @@ describe('Error Response Quality', () => {
     }
   });
 
-  it.fails('should use sequenceNumber 0 for pre-parse rejections', async () => {
+  it('should use sequenceNumber 0 for pre-parse rejections', async () => {
     const id = env.DOLAKE.idFromName('test-seq-zero-preparse-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -695,7 +695,7 @@ describe('Connection Behavior with Size Violations', () => {
    * Repeated size violations should affect connection state.
    */
 
-  it.fails('should track size violations separately from other violations', async () => {
+  it('should track size violations separately from other violations', async () => {
     const id = env.DOLAKE.idFromName('test-separate-tracking-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -717,7 +717,7 @@ describe('Connection Behavior with Size Violations', () => {
     }
   });
 
-  it.fails('should implement exponential backoff for size violation retries', async () => {
+  it('should implement exponential backoff for size violation retries', async () => {
     const id = env.DOLAKE.idFromName('test-backoff-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -781,7 +781,7 @@ describe('Binary Message Size Handling', () => {
    * Binary (ArrayBuffer) messages need special handling.
    */
 
-  it.fails('should check ArrayBuffer.byteLength before any decoding', async () => {
+  it('should check ArrayBuffer.byteLength before any decoding', async () => {
     const id = env.DOLAKE.idFromName('test-arraybuffer-check-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -802,7 +802,7 @@ describe('Binary Message Size Handling', () => {
     }
   });
 
-  it.fails('should validate UTF-8 validity before size-based JSON parse', async () => {
+  it('should validate UTF-8 validity before size-based JSON parse', async () => {
     const id = env.DOLAKE.idFromName('test-utf8-validity-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -821,7 +821,7 @@ describe('Binary Message Size Handling', () => {
     }
   });
 
-  it.fails('should handle mixed binary and text messages consistently', async () => {
+  it('should handle mixed binary and text messages consistently', async () => {
     const id = env.DOLAKE.idFromName('test-mixed-format-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -853,7 +853,7 @@ describe('Size Validation and Rate Limiting Integration', () => {
    * Size validation should integrate properly with rate limiting.
    */
 
-  it.fails('should count pre-parse rejections in rate limit metrics', async () => {
+  it('should count pre-parse rejections in rate limit metrics', async () => {
     const id = env.DOLAKE.idFromName('test-preparse-metrics-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -884,7 +884,7 @@ describe('Size Validation and Rate Limiting Integration', () => {
     }
   });
 
-  it.fails('should NOT consume rate limit tokens for pre-parse rejections', async () => {
+  it('should NOT consume rate limit tokens for pre-parse rejections', async () => {
     const id = env.DOLAKE.idFromName('test-no-token-consume-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -955,7 +955,7 @@ describe('Message Size Edge Cases', () => {
     }
   });
 
-  it.fails('should reject payload one byte over maxPayloadSize', async () => {
+  it('should reject payload one byte over maxPayloadSize', async () => {
     const id = env.DOLAKE.idFromName('test-one-over-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -974,7 +974,7 @@ describe('Message Size Edge Cases', () => {
     }
   });
 
-  it.fails('should handle zero-length message gracefully', async () => {
+  it('should handle zero-length message gracefully', async () => {
     const id = env.DOLAKE.idFromName('test-zero-length-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -991,7 +991,7 @@ describe('Message Size Edge Cases', () => {
     }
   });
 
-  it.fails('should handle null byte in message', async () => {
+  it('should handle null byte in message', async () => {
     const id = env.DOLAKE.idFromName('test-null-byte-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -1020,7 +1020,7 @@ describe('Concurrent Size Violation Handling', () => {
    * Multiple simultaneous size violations should be handled safely.
    */
 
-  it.fails('should handle concurrent oversized messages without crash', async () => {
+  it('should handle concurrent oversized messages without crash', async () => {
     const id = env.DOLAKE.idFromName('test-concurrent-oversized-' + Date.now());
     const stub = env.DOLAKE.get(id);
 

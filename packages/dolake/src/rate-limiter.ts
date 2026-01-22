@@ -708,25 +708,63 @@ export class RateLimiter {
     return false;
   }
 
+  /**
+   * Check if an IP address is within a CIDR range using proper bitwise matching.
+   *
+   * @param ip - The IP address to check (e.g., '192.168.1.100')
+   * @param cidr - The CIDR notation (e.g., '192.168.0.0/16')
+   * @returns true if the IP is within the CIDR range
+   */
   private isInCidr(ip: string, cidr: string): boolean {
     const parts = cidr.split('/');
     const network = parts[0];
     const maskBits = parts[1];
     if (!network || !maskBits) return false;
-    const _mask = parseInt(maskBits, 10);
 
-    // Simple check for private ranges
-    if (cidr === '10.0.0.0/8' && ip.startsWith('10.')) return true;
-    if (cidr === '172.16.0.0/12' && ip.startsWith('172.')) {
-      const secondOctet = ip.split('.')[1];
-      if (secondOctet) {
-        const octetValue = parseInt(secondOctet, 10);
-        if (octetValue >= 16 && octetValue <= 31) return true;
-      }
+    const mask = parseInt(maskBits, 10);
+
+    // Validate mask is within valid range (0-32 for IPv4)
+    if (Number.isNaN(mask) || mask < 0 || mask > 32) return false;
+
+    // Parse the network address
+    const networkInt = this.ipToInt(network);
+    if (networkInt === null) return false;
+
+    // Parse the IP address to check
+    const ipInt = this.ipToInt(ip);
+    if (ipInt === null) return false;
+
+    // Special case: /0 matches all IPs
+    if (mask === 0) return true;
+
+    // Create the subnet mask (e.g., /24 = 0xFFFFFF00)
+    // Use >>> 0 to ensure unsigned 32-bit integer
+    const subnetMask = mask === 32 ? 0xFFFFFFFF : ((0xFFFFFFFF << (32 - mask)) >>> 0);
+
+    // Apply mask and compare
+    // Use >>> 0 to ensure unsigned comparison
+    return ((ipInt & subnetMask) >>> 0) === ((networkInt & subnetMask) >>> 0);
+  }
+
+  /**
+   * Convert an IPv4 address string to a 32-bit unsigned integer.
+   *
+   * @param ip - The IP address string (e.g., '192.168.1.100')
+   * @returns The integer representation, or null if invalid
+   */
+  private ipToInt(ip: string): number | null {
+    const octets = ip.split('.');
+    if (octets.length !== 4) return null;
+
+    let result = 0;
+    for (const octet of octets) {
+      const value = parseInt(octet, 10);
+      // Validate octet is a valid number in range 0-255
+      if (Number.isNaN(value) || value < 0 || value > 255) return null;
+      result = ((result << 8) | value) >>> 0; // >>> 0 ensures unsigned
     }
-    if (cidr === '192.168.0.0/16' && ip.startsWith('192.168.')) return true;
 
-    return false;
+    return result;
   }
 
   private maskIp(ip: string): string {
@@ -750,8 +788,9 @@ export class RateLimiter {
       baseDelay * multiplier,
       this.config.maxRetryDelayMs
     );
-    // Add jitter
-    return Math.floor(delay * (WEBSOCKET.JITTER_MIN + Math.random() * WEBSOCKET.JITTER_MIN));
+    // Add jitter: random value in [JITTER_MIN, JITTER_MAX] range
+    const jitterRange = WEBSOCKET.JITTER_MAX - WEBSOCKET.JITTER_MIN;
+    return Math.floor(delay * (WEBSOCKET.JITTER_MIN + Math.random() * jitterRange));
   }
 
   private getRateLimitInfo(state: ConnectionState, now: number): RateLimitInfo {

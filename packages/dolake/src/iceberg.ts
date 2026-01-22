@@ -683,16 +683,33 @@ export class R2IcebergStorage implements IcebergStorage {
 
   async writeDataFile(path: string, content: Uint8Array): Promise<void> {
     const fullPath = path.startsWith(this.basePath) ? path : `${this.basePath}/${path}`;
-    await this.bucket.put(fullPath, content, {
-      httpMetadata: {
-        contentType: 'application/octet-stream',
-      },
-    });
+    try {
+      await this.bucket.put(fullPath, content, {
+        httpMetadata: {
+          contentType: 'application/octet-stream',
+        },
+      });
+    } catch (error) {
+      const originalError = error instanceof Error ? error : new Error(String(error));
+      throw new IcebergError(
+        `R2 put failed for data file '${path}': ${originalError.message}`,
+        { cause: originalError }
+      );
+    }
   }
 
   async readDataFile(path: string): Promise<Uint8Array> {
     const fullPath = path.startsWith(this.basePath) ? path : `${this.basePath}/${path}`;
-    const object = await this.bucket.get(fullPath);
+    let object: R2ObjectBody | null;
+    try {
+      object = await this.bucket.get(fullPath);
+    } catch (error) {
+      const originalError = error instanceof Error ? error : new Error(String(error));
+      throw new IcebergError(
+        `R2 get failed for data file '${path}': ${originalError.message}`,
+        { cause: originalError }
+      );
+    }
     if (!object) {
       throw new IcebergError(`Data file not found: ${path}`);
     }
@@ -701,12 +718,29 @@ export class R2IcebergStorage implements IcebergStorage {
 
   async deleteDataFile(path: string): Promise<void> {
     const fullPath = path.startsWith(this.basePath) ? path : `${this.basePath}/${path}`;
-    await this.bucket.delete(fullPath);
+    try {
+      await this.bucket.delete(fullPath);
+    } catch (error) {
+      const originalError = error instanceof Error ? error : new Error(String(error));
+      throw new IcebergError(
+        `R2 delete failed for data file '${path}': ${originalError.message}`,
+        { cause: originalError }
+      );
+    }
   }
 
   async listDataFiles(prefix: string): Promise<string[]> {
     const fullPrefix = prefix.startsWith(this.basePath) ? prefix : `${this.basePath}/${prefix}`;
-    const listed = await this.bucket.list({ prefix: fullPrefix });
+    let listed: R2Objects;
+    try {
+      listed = await this.bucket.list({ prefix: fullPrefix });
+    } catch (error) {
+      const originalError = error instanceof Error ? error : new Error(String(error));
+      throw new IcebergError(
+        `R2 list failed for prefix '${prefix}': ${originalError.message}`,
+        { cause: originalError }
+      );
+    }
     return listed.objects.map((o) => o.key);
   }
 
@@ -719,16 +753,33 @@ export class R2IcebergStorage implements IcebergStorage {
     const json = JSON.stringify(metadata, (_, v) =>
       typeof v === 'bigint' ? v.toString() : v
     );
-    await this.bucket.put(fullPath, json, {
-      httpMetadata: {
-        contentType: 'application/json',
-      },
-    });
+    try {
+      await this.bucket.put(fullPath, json, {
+        httpMetadata: {
+          contentType: 'application/json',
+        },
+      });
+    } catch (error) {
+      const originalError = error instanceof Error ? error : new Error(String(error));
+      throw new IcebergError(
+        `R2 put failed for metadata file '${path}': ${originalError.message}`,
+        { cause: originalError }
+      );
+    }
   }
 
   async readMetadata(path: string): Promise<IcebergTableMetadata> {
     const fullPath = path.startsWith(this.basePath) ? path : `${this.basePath}/${path}`;
-    const object = await this.bucket.get(fullPath);
+    let object: R2ObjectBody | null;
+    try {
+      object = await this.bucket.get(fullPath);
+    } catch (error) {
+      const originalError = error instanceof Error ? error : new Error(String(error));
+      throw new IcebergError(
+        `R2 get failed for metadata file '${path}': ${originalError.message}`,
+        { cause: originalError }
+      );
+    }
     if (!object) {
       throw new IcebergError(`Metadata file not found: ${path}`);
     }

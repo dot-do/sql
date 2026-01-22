@@ -143,8 +143,10 @@ export const WEBSOCKET = {
   CLOSE_CODE_POLICY_VIOLATION: 1008,
   /** Heartbeat bucket multiplier (more lenient than message bucket) */
   HEARTBEAT_BUCKET_MULTIPLIER: 2,
-  /** Jitter range for retry delay (0.5 - 1.0) */
+  /** Minimum jitter multiplier for retry delay (0.5x base delay) */
   JITTER_MIN: 0.5,
+  /** Maximum jitter multiplier for retry delay (1.5x base delay) */
+  JITTER_MAX: 1.5,
 } as const;
 
 // =============================================================================

@@ -636,3 +636,83 @@ export {
   // Options type
   type IcebergSerializationOptions,
 } from './serialization.js';
+
+// =============================================================================
+// WebSocket Handler (Modular)
+// =============================================================================
+
+export {
+  WebSocketHandler,
+  restoreFromHibernation,
+  setupWebSocketAutoResponse,
+  type ExtendedWebSocketAttachment,
+  type FlushTriggerCallback,
+  type FlushCallback,
+  type WebSocketHandlerConfig,
+  type WebSocketHandlerDeps,
+} from './websocket-handler.js';
+
+// =============================================================================
+// State Machine (Modular)
+// =============================================================================
+
+export {
+  DoLakeStateMachine,
+  createStatePersistence,
+  handleAlarm,
+  scheduleAlarm,
+  createRecoveryHandler,
+  type StateTransition,
+  type StateChangeEvent,
+  type StatePersistence,
+  type ScheduledCompaction,
+  type StateMachineConfig,
+  type AlarmHandlerConfig,
+  type AlarmHandlerDeps,
+  type RecoveryResult as StateMachineRecoveryResult,
+  DEFAULT_STATE_MACHINE_CONFIG,
+} from './state-machine.js';
+
+// =============================================================================
+// Catalog Router (Modular)
+// =============================================================================
+
+export {
+  CatalogRouter,
+  type CatalogRouterDeps,
+  type CatalogRouterConfig,
+} from './catalog-router.js';
+
+// =============================================================================
+// Flush Manager (Modular)
+// =============================================================================
+
+export {
+  FlushManager,
+  recoverFromFallback,
+  estimateFlushTime,
+  determineOptimalFlushTrigger,
+  groupEventsByTable,
+  groupEventsByPartition,
+  type PartitionBuffer,
+  type TableFlushResult,
+  type FlushManagerDeps,
+  type FlushManagerConfig,
+} from './flush-manager.js';
+
+// =============================================================================
+// Cache Invalidation
+// =============================================================================
+
+export {
+  CacheInvalidator,
+  type CacheInvalidationConfig,
+  type CacheInvalidationResult,
+  type CacheEntryStatus,
+  type CacheMetrics,
+  type PartitionCacheStatus,
+  type ReplicaStatus,
+  type ReplicaConfig,
+  type TableTTLConfig,
+  DEFAULT_CACHE_INVALIDATION_CONFIG,
+} from './cache-invalidation.js';

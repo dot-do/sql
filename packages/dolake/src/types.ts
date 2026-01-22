@@ -809,9 +809,12 @@ export class ParquetWriteError extends DoLakeError {
  * Iceberg metadata error
  */
 export class IcebergError extends DoLakeError {
-  constructor(message: string) {
+  constructor(message: string, options?: { cause?: Error }) {
     super(message, 'ICEBERG_ERROR', false);
     this.name = 'IcebergError';
+    if (options?.cause) {
+      this.cause = options.cause;
+    }
   }
 }
 

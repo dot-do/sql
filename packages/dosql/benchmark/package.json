@@ -1,0 +1,61 @@
+{
+  "name": "@dotdo/dosql-benchmark",
+  "version": "0.1.0",
+  "description": "Benchmark suite for comparing DoSQL against D1 and DO-SQLite",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "dosql-benchmark": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bench": "npx tsx src/cli.ts",
+    "bench:dosql": "npx tsx src/cli.ts -a dosql -s simple-select -v",
+    "bench:insert": "npx tsx src/cli.ts -a dosql -s insert -v",
+    "bench:transaction": "npx tsx src/cli.ts -a dosql -s transaction -v",
+    "bench:all": "npm run bench:dosql && npm run bench:insert && npm run bench:transaction",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "benchmark",
+    "dosql",
+    "d1",
+    "sqlite",
+    "durable-objects",
+    "cloudflare",
+    "workers"
+  ],
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^2.1.9"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@cloudflare/workers-types": {
+      "optional": true
+    }
+  }
+}

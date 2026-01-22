@@ -362,6 +362,7 @@ export class CDCBufferManager {
 
   /**
    * Check if a key has been seen (duplicate)
+   * Updates access time for LRU tracking when key exists.
    */
   isDuplicate(key: string): boolean {
     this.dedupStats.totalChecks++;
@@ -369,6 +370,9 @@ export class CDCBufferManager {
 
     const timestamp = this.dedupSet.get(key);
     if (timestamp !== undefined) {
+      // Update access time for LRU tracking
+      this.dedupSet.delete(key);
+      this.dedupSet.set(key, Date.now());
       this.dedupStats.duplicatesFound++;
       return true;
     }
@@ -377,10 +381,41 @@ export class CDCBufferManager {
 
   /**
    * Mark a key as seen
+   * Enforces maxEntries limit with LRU eviction.
    */
   markSeen(key: string): void {
+    // If key already exists, delete it first to update position in Map iteration order
+    if (this.dedupSet.has(key)) {
+      this.dedupSet.delete(key);
+    }
+
     this.dedupSet.set(key, Date.now());
+
+    // Enforce maxEntries limit with LRU eviction
+    this.evictLRUEntries();
+
     this.dedupStats.entriesTracked = this.dedupSet.size;
+  }
+
+  /**
+   * Evict oldest entries when exceeding maxEntries limit.
+   * Uses Map iteration order (insertion order) for LRU eviction.
+   */
+  private evictLRUEntries(): void {
+    const excess = this.dedupSet.size - this.dedupConfig.maxEntries;
+    if (excess <= 0) {
+      return;
+    }
+
+    // Map maintains insertion order, so first entries are oldest (LRU)
+    let evicted = 0;
+    for (const key of this.dedupSet.keys()) {
+      if (evicted >= excess) {
+        break;
+      }
+      this.dedupSet.delete(key);
+      evicted++;
+    }
   }
 
   /**
@@ -630,12 +665,13 @@ export class CDCBufferManager {
    */
   static restore(
     snapshot: BufferSnapshot | Omit<BufferSnapshot, 'version'>,
-    config: Partial<DoLakeConfig> = {}
+    config: Partial<DoLakeConfig> = {},
+    dedupConfig: Partial<DedupConfig> = {}
   ): CDCBufferManager {
     // Validate and migrate version
     const validatedSnapshot = CDCBufferManager.validateAndMigrateSnapshot(snapshot);
 
-    const manager = new CDCBufferManager(config);
+    const manager = new CDCBufferManager(config, dedupConfig);
 
     // Restore batches
     for (const batch of validatedSnapshot.batches) {
