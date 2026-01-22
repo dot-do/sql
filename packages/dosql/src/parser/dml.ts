@@ -48,6 +48,7 @@ import type {
   ReturningColumn,
   FromClause,
   TableReference,
+  IndexHint,
   ParseResult,
   ParseSuccess,
   ParseError,
@@ -358,20 +359,61 @@ function parseSubquery(state: ParserState): { state: ParserState; expr: Subquery
 }
 
 /**
+ * Parse a qualified identifier (table name or schema.table name)
+ * Returns the full qualified name as a string
+ */
+function parseQualifiedIdentifier(state: ParserState): { state: ParserState; value: string } | null {
+  const first = parseIdentifier(state);
+  if (!first) return null;
+
+  let value = first.value;
+  let newState = first.state;
+
+  // Check for schema.table format
+  let rest = remaining(newState);
+  if (rest.startsWith('.')) {
+    newState = advance(newState, 1);
+    const second = parseIdentifier(newState);
+    if (second) {
+      value = value + '.' + second.value;
+      newState = second.state;
+    }
+  }
+
+  return { state: newState, value };
+}
+
+/**
  * Parse column reference (possibly qualified)
+ * Supports: column, table.column, schema.table.column
  */
 function parseColumnReference(state: ParserState): { state: ParserState; expr: ColumnReference } | null {
   const first = parseIdentifier(state);
   if (!first) return null;
 
   let newState = skipWhitespace(first.state);
-  const rest = remaining(newState);
+  let rest = remaining(newState);
 
-  // Check for qualified name (table.column)
+  // Check for qualified name (table.column or schema.table.column)
   if (rest.startsWith('.')) {
     newState = advance(newState, 1);
     const second = parseIdentifier(newState);
     if (second) {
+      newState = skipWhitespace(second.state);
+      rest = remaining(newState);
+
+      // Check for third part (schema.table.column)
+      if (rest.startsWith('.')) {
+        newState = advance(newState, 1);
+        const third = parseIdentifier(newState);
+        if (third) {
+          return {
+            state: third.state,
+            expr: { type: 'column', name: third.value, table: second.value, schema: first.value },
+          };
+        }
+      }
+
       return {
         state: second.state,
         expr: { type: 'column', name: second.value, table: first.value },
@@ -440,9 +482,34 @@ function parseFunctionCall(state: ParserState): { state: ParserState; expr: Func
   if (!remaining(newState).startsWith(')')) return null;
   newState = advance(newState, 1);
 
+  // Check for OVER clause (window function)
+  let hasOver = false;
+  newState = skipWhitespace(newState);
+  const overMatch = matchKeyword(newState, 'OVER');
+  if (overMatch) {
+    hasOver = true;
+    newState = skipWhitespace(overMatch);
+    // Consume the OVER clause content (parentheses with partition/order specifications)
+    if (remaining(newState).startsWith('(')) {
+      let depth = 1;
+      let i = 1;
+      const rest = remaining(newState);
+      while (i < rest.length && depth > 0) {
+        if (rest[i] === '(') depth++;
+        if (rest[i] === ')') depth--;
+        i++;
+      }
+      newState = advance(newState, i);
+    }
+  }
+
+  const funcExpr: FunctionCall = { type: 'function', name: identResult.value.toUpperCase(), args, distinct };
+  if (hasOver) {
+    funcExpr.hasOver = true;
+  }
   return {
     state: newState,
-    expr: { type: 'function', name: identResult.value.toUpperCase(), args, distinct },
+    expr: funcExpr,
   };
 }
 
@@ -922,16 +989,84 @@ function parseLimitClause(state: ParserState): { state: ParserState; limit: Limi
 }
 
 /**
+ * Check if an expression contains a window function (OVER clause)
+ */
+function containsWindowFunction(expr: Expression): boolean {
+  if (expr.type === 'function') {
+    // Check if this function has an OVER clause (window function)
+    if (expr.hasOver) {
+      return true;
+    }
+    // Check arguments recursively
+    for (const arg of expr.args) {
+      if (containsWindowFunction(arg)) return true;
+    }
+  }
+  if (expr.type === 'binary') {
+    return containsWindowFunction(expr.left) || containsWindowFunction(expr.right);
+  }
+  if (expr.type === 'unary') {
+    return containsWindowFunction(expr.operand);
+  }
+  return false;
+}
+
+/**
+ * Check if an expression contains an aggregate function at the top level (not in subquery)
+ */
+function containsAggregateFunction(expr: Expression): boolean {
+  if (expr.type === 'function') {
+    const aggregateFuncs = ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'GROUP_CONCAT', 'TOTAL'];
+    if (aggregateFuncs.includes(expr.name.toUpperCase())) {
+      return true;
+    }
+    // Check arguments recursively
+    for (const arg of expr.args) {
+      if (containsAggregateFunction(arg)) return true;
+    }
+  }
+  if (expr.type === 'binary') {
+    return containsAggregateFunction(expr.left) || containsAggregateFunction(expr.right);
+  }
+  if (expr.type === 'unary') {
+    return containsAggregateFunction(expr.operand);
+  }
+  return false;
+}
+
+/**
+ * Reserved keywords that cannot be implicit aliases
+ */
+const RESERVED_KEYWORDS = new Set([
+  'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'IS', 'NULL', 'LIKE', 'GLOB',
+  'BETWEEN', 'EXISTS', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'AS', 'ON', 'USING',
+  'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'CROSS', 'NATURAL', 'GROUP', 'BY',
+  'HAVING', 'ORDER', 'LIMIT', 'OFFSET', 'UNION', 'INTERSECT', 'EXCEPT', 'INSERT',
+  'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER', 'TABLE', 'INDEX', 'VIEW',
+  'RETURNING', 'SET', 'VALUES', 'DEFAULT', 'INTO', 'TRUE', 'FALSE',
+]);
+
+/**
+ * RETURNING clause parse result - can be success, error, or not found
+ */
+type ReturningParseResult =
+  | { type: 'success'; state: ParserState; returning: ReturningClause }
+  | { type: 'error'; message: string; position: number }
+  | { type: 'not_found' };
+
+/**
  * Parse RETURNING clause
  */
-function parseReturningClause(state: ParserState): { state: ParserState; returning: ReturningClause } | null {
+function parseReturningClause(state: ParserState): ReturningParseResult {
   state = skipWhitespace(state);
   const returningMatch = matchKeyword(state, 'RETURNING');
-  if (!returningMatch) return null;
+  if (!returningMatch) return { type: 'not_found' };
 
   state = skipWhitespace(returningMatch);
+  const startPosition = state.position;
 
   const columns: ReturningColumn[] = [];
+  let requiresWildcardExpansion = false;
 
   while (true) {
     state = skipWhitespace(state);
@@ -939,10 +1074,28 @@ function parseReturningClause(state: ParserState): { state: ParserState; returni
     // Check for *
     if (remaining(state).startsWith('*')) {
       columns.push({ expression: '*' });
+      requiresWildcardExpansion = true;
       state = advance(state, 1);
     } else {
       const exprResult = parseExpression(state);
       if (!exprResult) break;
+
+      // Check for window functions - these are errors in RETURNING
+      if (containsWindowFunction(exprResult.expr)) {
+        return {
+          type: 'error',
+          message: 'Window functions are not allowed in RETURNING clause',
+          position: startPosition,
+        };
+      }
+      // Check for aggregate functions - these are errors in RETURNING
+      if (containsAggregateFunction(exprResult.expr)) {
+        return {
+          type: 'error',
+          message: 'Aggregate functions are not allowed in RETURNING clause',
+          position: startPosition,
+        };
+      }
 
       let alias: string | undefined;
       state = skipWhitespace(exprResult.state);
@@ -955,6 +1108,21 @@ function parseReturningClause(state: ParserState): { state: ParserState; returni
           alias = aliasResult.value;
           state = aliasResult.state;
         }
+      } else {
+        // Check for implicit alias (identifier without AS keyword)
+        // The implicit alias must not be a reserved keyword and must not start with punctuation
+        const rest = remaining(state);
+        if (!rest.startsWith(',') && !rest.startsWith(';') && rest.length > 0) {
+          const aliasResult = parseIdentifier(state);
+          if (aliasResult) {
+            const upperAlias = aliasResult.value.toUpperCase();
+            // Only use as implicit alias if not a reserved keyword
+            if (!RESERVED_KEYWORDS.has(upperAlias)) {
+              alias = aliasResult.value;
+              state = aliasResult.state;
+            }
+          }
+        }
       }
 
       columns.push({ expression: exprResult.expr, alias });
@@ -966,9 +1134,13 @@ function parseReturningClause(state: ParserState): { state: ParserState; returni
     state = advance(state, 1);
   }
 
-  if (columns.length === 0) return null;
+  if (columns.length === 0) return { type: 'not_found' };
 
-  return { state, returning: { type: 'returning', columns } };
+  const returning: ReturningClause = { type: 'returning', columns };
+  if (requiresWildcardExpansion) {
+    returning.requiresWildcardExpansion = true;
+  }
+  return { type: 'success', state, returning };
 }
 
 /**
@@ -1138,6 +1310,45 @@ function parseFromClause(state: ParserState): { state: ParserState; from: FromCl
   if (tables.length === 0) return null;
 
   return { state, from: { type: 'from', tables } };
+}
+
+/**
+ * Parse INDEXED BY or NOT INDEXED hint
+ */
+function parseIndexHint(state: ParserState): { state: ParserState; hint: IndexHint } | null {
+  state = skipWhitespace(state);
+
+  // Check for NOT INDEXED
+  const notMatch = matchKeyword(state, 'NOT');
+  if (notMatch) {
+    let newState = skipWhitespace(notMatch);
+    const indexedMatch = matchKeyword(newState, 'INDEXED');
+    if (indexedMatch) {
+      return {
+        state: indexedMatch,
+        hint: { type: 'not_indexed' },
+      };
+    }
+  }
+
+  // Check for INDEXED BY index_name
+  const indexedMatch = matchKeyword(state, 'INDEXED');
+  if (indexedMatch) {
+    let newState = skipWhitespace(indexedMatch);
+    const byMatch = matchKeyword(newState, 'BY');
+    if (byMatch) {
+      newState = skipWhitespace(byMatch);
+      const indexName = parseIdentifier(newState);
+      if (indexName) {
+        return {
+          state: indexName.state,
+          hint: { type: 'indexed_by', indexName: indexName.value },
+        };
+      }
+    }
+  }
+
+  return null;
 }
 
 // =============================================================================
@@ -1315,7 +1526,10 @@ function parseInsertStatement(state: ParserState): ParseResult<InsertStatement> 
   // Check for RETURNING
   let returning: ReturningClause | undefined;
   const returningResult = parseReturningClause(state);
-  if (returningResult) {
+  if (returningResult.type === 'error') {
+    return { success: false, error: returningResult.message, position: returningResult.position, input: state.input };
+  }
+  if (returningResult.type === 'success') {
     returning = returningResult.returning;
     state = returningResult.state;
   }
@@ -1367,8 +1581,8 @@ function parseUpdateStatement(state: ParserState): ParseResult<UpdateStatement> 
     state = skipWhitespace(conflictResult.state);
   }
 
-  // Parse table name
-  const tableResult = parseIdentifier(state);
+  // Parse table name (possibly qualified with schema: schema.table)
+  const tableResult = parseQualifiedIdentifier(state);
   if (!tableResult) {
     return { success: false, error: 'Expected table name', position: state.position, input: state.input };
   }
@@ -1443,7 +1657,10 @@ function parseUpdateStatement(state: ParserState): ParseResult<UpdateStatement> 
   // Check for RETURNING
   let returning: ReturningClause | undefined;
   const returningResult = parseReturningClause(state);
-  if (returningResult) {
+  if (returningResult.type === 'error') {
+    return { success: false, error: returningResult.message, position: returningResult.position, input: state.input };
+  }
+  if (returningResult.type === 'success') {
     returning = returningResult.returning;
     state = returningResult.state;
   }
@@ -1504,6 +1721,14 @@ function parseDeleteStatement(state: ParserState): ParseResult<DeleteStatement> 
   const table = tableResult.value;
   state = skipWhitespace(tableResult.state);
 
+  // Check for INDEXED BY or NOT INDEXED (must come before alias)
+  let indexHint: IndexHint | undefined;
+  const indexHintResult = parseIndexHint(state);
+  if (indexHintResult) {
+    indexHint = indexHintResult.hint;
+    state = skipWhitespace(indexHintResult.state);
+  }
+
   // Check for alias
   let alias: string | undefined;
   if (matchKeyword(state, 'AS')) {
@@ -1515,10 +1740,11 @@ function parseDeleteStatement(state: ParserState): ParseResult<DeleteStatement> 
     }
   } else {
     // Check for alias without AS (before WHERE)
+    // But NOT if it's INDEXED or NOT (those are hints, not aliases)
     const nextWord = parseIdentifier(state);
     if (nextWord) {
       const upper = nextWord.value.toUpperCase();
-      if (!['WHERE', 'ORDER', 'LIMIT', 'RETURNING'].includes(upper)) {
+      if (!['WHERE', 'ORDER', 'LIMIT', 'RETURNING', 'INDEXED', 'NOT'].includes(upper)) {
         alias = nextWord.value;
         state = nextWord.state;
       }
@@ -1553,7 +1779,10 @@ function parseDeleteStatement(state: ParserState): ParseResult<DeleteStatement> 
   // Check for RETURNING
   let returning: ReturningClause | undefined;
   const returningResult = parseReturningClause(state);
-  if (returningResult) {
+  if (returningResult.type === 'error') {
+    return { success: false, error: returningResult.message, position: returningResult.position, input: state.input };
+  }
+  if (returningResult.type === 'success') {
     returning = returningResult.returning;
     state = returningResult.state;
   }
@@ -1571,6 +1800,7 @@ function parseDeleteStatement(state: ParserState): ParseResult<DeleteStatement> 
   };
 
   if (alias) statement.alias = alias;
+  if (indexHint) statement.indexHint = indexHint;
   if (where) statement.where = where;
   if (orderBy) statement.orderBy = orderBy;
   if (limit) statement.limit = limit;
@@ -1730,7 +1960,10 @@ function parseReplaceStatement(state: ParserState): ParseResult<ReplaceStatement
   // Check for RETURNING
   let returning: ReturningClause | undefined;
   const returningResult = parseReturningClause(state);
-  if (returningResult) {
+  if (returningResult.type === 'error') {
+    return { success: false, error: returningResult.message, position: returningResult.position, input: state.input };
+  }
+  if (returningResult.type === 'success') {
     returning = returningResult.returning;
     state = returningResult.state;
   }

@@ -43,6 +43,8 @@ export interface ColumnReference {
   name: string;
   /** Table name or alias (optional) */
   table?: string;
+  /** Schema name (optional, for schema.table.column syntax) */
+  schema?: string;
 }
 
 /**
@@ -54,6 +56,8 @@ export interface FunctionCall {
   args: Expression[];
   /** Whether DISTINCT is used (e.g., COUNT(DISTINCT x)) */
   distinct?: boolean;
+  /** Whether this function has an OVER clause (window function) */
+  hasOver?: boolean;
 }
 
 /**
@@ -344,6 +348,15 @@ export interface UpdateStatement {
 // =============================================================================
 
 /**
+ * Index hint for forcing/disabling index usage
+ */
+export interface IndexHint {
+  type: 'indexed_by' | 'not_indexed';
+  /** Index name (only for 'indexed_by' type) */
+  indexName?: string;
+}
+
+/**
  * DELETE statement AST
  */
 export interface DeleteStatement {
@@ -352,6 +365,8 @@ export interface DeleteStatement {
   table: string;
   /** Optional table alias */
   alias?: string;
+  /** Optional index hint (INDEXED BY or NOT INDEXED) */
+  indexHint?: IndexHint;
   /** Optional WHERE clause */
   where?: WhereClause;
   /** ORDER BY clause (SQLite extension) */
@@ -442,6 +457,8 @@ export interface ReturningClause {
   type: 'returning';
   /** Columns to return (* for all, or specific columns/expressions) */
   columns: ReturningColumn[];
+  /** Whether the clause contains a wildcard (*) that needs schema expansion */
+  requiresWildcardExpansion?: boolean;
 }
 
 /**

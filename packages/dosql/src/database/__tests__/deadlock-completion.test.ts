@@ -417,9 +417,9 @@ describe('Deadlock Timeout Configuration', () => {
   });
 
   /**
-   * GAP: Long-waiting transactions should be flagged in deadlock info
+   * Long-waiting transactions should be flagged in deadlock info
    */
-  it.fails('should flag transactions waiting longer than timeout', async () => {
+  it('should flag transactions waiting longer than timeout', async () => {
     const detector = createDeadlockDetector({
       enabled: true,
       deadlockTimeout: 50,
@@ -544,21 +544,19 @@ describe('Automatic Victim Abort and Retry', () => {
   });
 
   /**
-   * GAP: Should support automatic retry configuration
+   * Should support automatic retry configuration
    */
-  it.fails('should support automatic retry after deadlock abort', async () => {
+  it('should support automatic retry after deadlock abort', async () => {
     const detector = createDeadlockDetector({
       enabled: true,
-      // GAP: autoRetry option should exist
       autoRetry: {
         enabled: true,
         maxRetries: 3,
         baseBackoffMs: 10,
       },
-    } as any);
+    });
 
-    // GAP: getRetryConfig() should return retry settings
-    const retryConfig = (detector as any).getRetryConfig?.();
+    const retryConfig = detector.getRetryConfig();
     expect(retryConfig).toBeDefined();
     expect(retryConfig.enabled).toBe(true);
     expect(retryConfig.maxRetries).toBe(3);
@@ -571,13 +569,12 @@ describe('Automatic Victim Abort and Retry', () => {
 
 describe('Deadlock Statistics and Reporting', () => {
   /**
-   * GAP: Stats should persist across clear() - currently clear() resets stats
-   * This documents the gap that stats are lost when graph is cleared
+   * Stats should persist across clearGraph() calls (clearGraph only clears graph, not stats)
    */
-  it.fails('should persist total deadlocks across clear() calls', () => {
+  it('should persist total deadlocks across clearGraph() calls', () => {
     const detector = createDeadlockDetector({ enabled: true });
 
-    // Cause 3 deadlocks with clear between them
+    // Cause 3 deadlocks with clearGraph between them
     for (let i = 0; i < 3; i++) {
       detector.registerTransaction('txn1');
       detector.registerTransaction('txn2');
@@ -586,12 +583,12 @@ describe('Deadlock Statistics and Reporting', () => {
       detector.addWait('txn2', 'txn1', `B${i}`, LockType.EXCLUSIVE);
 
       detector.checkDeadlock('txn2');
-      detector.clear(); // GAP: This resets stats!
+      detector.clearGraph(); // clearGraph preserves stats
     }
 
     const stats = detector.getDeadlockStats();
 
-    // GAP: Stats should persist even after clear()
+    // Stats persist with clearGraph()
     expect(stats.totalDeadlocks).toBe(3);
   });
 
@@ -614,9 +611,9 @@ describe('Deadlock Statistics and Reporting', () => {
   });
 
   /**
-   * GAP: Stats should persist - currently clear() resets average cycle length
+   * Stats persist across clearGraph() - tracks average cycle length
    */
-  it.fails('should track average cycle length across clear() calls', () => {
+  it('should track average cycle length across clearGraph() calls', () => {
     const detector = createDeadlockDetector({ enabled: true });
 
     // 2-way deadlock
@@ -625,7 +622,7 @@ describe('Deadlock Statistics and Reporting', () => {
     detector.addWait('txn1', 'txn2', 'A', LockType.EXCLUSIVE);
     detector.addWait('txn2', 'txn1', 'B', LockType.EXCLUSIVE);
     detector.checkDeadlock('txn2');
-    detector.clear(); // GAP: Resets stats
+    detector.clearGraph(); // clearGraph preserves stats
 
     // 3-way deadlock
     detector.registerTransaction('txn1');
@@ -638,7 +635,7 @@ describe('Deadlock Statistics and Reporting', () => {
 
     const stats = detector.getDeadlockStats();
 
-    // GAP: Should track both deadlocks
+    // Both deadlocks tracked
     expect(stats.totalDeadlocks).toBe(2);
     expect(stats.avgCycleLength).toBe(2.5); // (2 + 3) / 2
   });
@@ -665,27 +662,27 @@ describe('Deadlock Statistics and Reporting', () => {
   });
 
   /**
-   * GAP: History should persist across clear() - currently clear() resets history
+   * History persists across clearGraph() calls
    */
-  it.fails('should maintain deadlock history across clear() calls', () => {
+  it('should maintain deadlock history across clearGraph() calls', () => {
     const detector = createDeadlockDetector({
       enabled: true,
       maxHistorySize: 100,
     });
 
-    // Cause multiple deadlocks with clear between
+    // Cause multiple deadlocks with clearGraph between
     for (let i = 0; i < 5; i++) {
       detector.registerTransaction('txn1');
       detector.registerTransaction('txn2');
       detector.addWait('txn1', 'txn2', `A${i}`, LockType.EXCLUSIVE);
       detector.addWait('txn2', 'txn1', `B${i}`, LockType.EXCLUSIVE);
       detector.checkDeadlock('txn2');
-      detector.clear(); // GAP: This resets history!
+      detector.clearGraph(); // clearGraph preserves history
     }
 
     const history = detector.getDeadlockHistory();
 
-    // GAP: History should persist even after clear()
+    // History persists with clearGraph()
     expect(history.length).toBe(5);
     // History should be ordered by timestamp
     for (let i = 1; i < history.length; i++) {
@@ -716,27 +713,27 @@ describe('Deadlock Statistics and Reporting', () => {
   });
 
   /**
-   * GAP: maxHistorySize should persist across clear() calls
+   * maxHistorySize limit respected across clearGraph() calls
    */
-  it.fails('should respect maxHistorySize limit across clear() calls', () => {
+  it('should respect maxHistorySize limit across clearGraph() calls', () => {
     const detector = createDeadlockDetector({
       enabled: true,
       maxHistorySize: 3,
     });
 
-    // Cause 5 deadlocks with clear between
+    // Cause 5 deadlocks with clearGraph between
     for (let i = 0; i < 5; i++) {
       detector.registerTransaction('txn1');
       detector.registerTransaction('txn2');
       detector.addWait('txn1', 'txn2', `A${i}`, LockType.EXCLUSIVE);
       detector.addWait('txn2', 'txn1', `B${i}`, LockType.EXCLUSIVE);
       detector.checkDeadlock('txn2');
-      detector.clear(); // GAP: Resets history
+      detector.clearGraph(); // clearGraph preserves history with size limit
     }
 
     const history = detector.getDeadlockHistory();
 
-    // GAP: Should keep last 3 entries
+    // Should keep last 3 entries
     expect(history.length).toBe(3);
   });
 
@@ -968,9 +965,9 @@ describe('Lock Upgrade Deadlocks', () => {
   });
 
   /**
-   * GAP: Should distinguish upgrade deadlocks in statistics
+   * Should distinguish upgrade deadlocks in statistics
    */
-  it.fails('should track upgrade deadlocks separately in stats', () => {
+  it('should track upgrade deadlocks separately in stats', () => {
     const detector = createDeadlockDetector({ enabled: true });
 
     detector.registerTransaction('txn1');
@@ -983,8 +980,8 @@ describe('Lock Upgrade Deadlocks', () => {
 
     const stats = detector.getDeadlockStats();
 
-    // GAP: Should track upgrade deadlocks separately
-    expect((stats as any).upgradeDeadlocks).toBe(1);
+    // Track upgrade deadlocks separately
+    expect(stats.upgradeDeadlocks).toBe(1);
   });
 
   /**
@@ -1124,10 +1121,9 @@ describe('Wait-For Graph API', () => {
   });
 
   /**
-   * GAP: getResourcesInCycle() doesn't return all resources in cycle
-   * The cycle path doesn't always match edge order, missing some resources
+   * getResourcesInCycle() returns all resources in cycle
    */
-  it.fails('should get ALL resources involved in cycle', () => {
+  it('should get ALL resources involved in cycle', () => {
     graph.addEdge({
       from: 'txn1',
       to: 'txn2',
@@ -1147,7 +1143,7 @@ describe('Wait-For Graph API', () => {
     expect(cycle).not.toBeNull();
 
     const resources = graph.getResourcesInCycle(cycle!);
-    // GAP: Only returns one resource due to cycle path order
+    // Returns all resources in cycle
     expect(resources).toContain('tableA');
     expect(resources).toContain('tableB');
   });
@@ -1185,11 +1181,9 @@ describe('Wait-For Graph API', () => {
 
 describe('Additional Missing Features', () => {
   /**
-   * GAP: clearGraph() without clearing stats/history
-   * Current clear() resets everything including stats
-   * Need explicit clearGraph() method that preserves stats
+   * clearGraph() clears graph but preserves stats/history
    */
-  it.fails('should have clearGraph() that preserves stats and history', () => {
+  it('should have clearGraph() that preserves stats and history', () => {
     const detector = createDeadlockDetector({ enabled: true });
 
     detector.registerTransaction('txn1');
@@ -1198,23 +1192,21 @@ describe('Additional Missing Features', () => {
     detector.addWait('txn2', 'txn1', 'B', LockType.EXCLUSIVE);
     detector.checkDeadlock('txn2');
 
-    // GAP: Need explicit clearGraph() method (not undefined optional chaining)
-    const clearGraphFn = (detector as any).clearGraph;
-    expect(clearGraphFn).toBeDefined(); // This should fail - method doesn't exist
-    clearGraphFn.call(detector);
+    // clearGraph() method exists
+    detector.clearGraph();
 
     const stats = detector.getDeadlockStats();
     const history = detector.getDeadlockHistory();
 
-    // Stats and history should persist after clearGraph()
+    // Stats and history persist after clearGraph()
     expect(stats.totalDeadlocks).toBe(1);
     expect(history.length).toBe(1);
   });
 
   /**
-   * GAP: Export deadlock report as JSON
+   * Export deadlock report as JSON
    */
-  it.fails('should export deadlock report as JSON', () => {
+  it('should export deadlock report as JSON', () => {
     const detector = createDeadlockDetector({ enabled: true });
 
     detector.registerTransaction('txn1');
@@ -1223,8 +1215,8 @@ describe('Additional Missing Features', () => {
     detector.addWait('txn2', 'txn1', 'B', LockType.EXCLUSIVE);
     detector.checkDeadlock('txn2');
 
-    // GAP: exportReport() should exist
-    const report = (detector as any).exportReport?.();
+    // exportReport() exists
+    const report = detector.exportReport();
     expect(report).toBeDefined();
     expect(typeof report).toBe('string');
     const parsed = JSON.parse(report);
@@ -1233,9 +1225,9 @@ describe('Additional Missing Features', () => {
   });
 
   /**
-   * GAP: Deadlock prediction / early warning
+   * Deadlock prediction / early warning
    */
-  it.fails('should predict potential deadlocks before they occur', () => {
+  it('should predict potential deadlocks before they occur', () => {
     const detector = createDeadlockDetector({ enabled: true });
 
     detector.registerTransaction('txn1');
@@ -1244,16 +1236,16 @@ describe('Additional Missing Features', () => {
     // txn1 holds A, wants B
     detector.addWait('txn1', 'txn2', 'B', LockType.EXCLUSIVE);
 
-    // GAP: predictDeadlock() should warn about potential cycle
-    const prediction = (detector as any).predictDeadlock?.('txn2', 'txn1', 'A');
+    // predictDeadlock() warns about potential cycle
+    const prediction = detector.predictDeadlock('txn2', 'txn1', 'A');
     expect(prediction).toBeDefined();
     expect(prediction.wouldCauseDeadlock).toBe(true);
   });
 
   /**
-   * GAP: Deadlock probability scoring
+   * Deadlock probability scoring
    */
-  it.fails('should calculate deadlock probability for transaction', () => {
+  it('should calculate deadlock probability for transaction', () => {
     const detector = createDeadlockDetector({ enabled: true });
 
     detector.registerTransaction('txn1');
@@ -1264,28 +1256,28 @@ describe('Additional Missing Features', () => {
     detector.addWait('txn1', 'txn2', 'A', LockType.EXCLUSIVE);
     detector.addWait('txn2', 'txn3', 'B', LockType.EXCLUSIVE);
 
-    // GAP: getDeadlockProbability() should exist
-    const probability = (detector as any).getDeadlockProbability?.('txn3');
+    // getDeadlockProbability() exists
+    const probability = detector.getDeadlockProbability('txn3');
     expect(probability).toBeDefined();
     expect(probability).toBeGreaterThanOrEqual(0);
     expect(probability).toBeLessThanOrEqual(1);
   });
 
   /**
-   * GAP: Transaction priority for victim selection
+   * Transaction priority for victim selection
    */
-  it.fails('should support transaction priority in victim selection', () => {
+  it('should support transaction priority in victim selection', () => {
     const detector = createDeadlockDetector({
       enabled: true,
-      victimSelection: 'priority' as any, // GAP: 'priority' policy not implemented
+      victimSelection: 'priority',
     });
 
     detector.registerTransaction('txn_high');
     detector.registerTransaction('txn_low');
 
-    // GAP: setTransactionPriority() should exist
-    (detector as any).setTransactionPriority?.('txn_high', 100);
-    (detector as any).setTransactionPriority?.('txn_low', 1);
+    // setTransactionPriority() exists
+    detector.setTransactionPriority('txn_high', 100);
+    detector.setTransactionPriority('txn_low', 1);
 
     detector.addWait('txn_high', 'txn_low', 'A', LockType.EXCLUSIVE);
     detector.addWait('txn_low', 'txn_high', 'B', LockType.EXCLUSIVE);
@@ -1298,28 +1290,27 @@ describe('Additional Missing Features', () => {
   });
 
   /**
-   * GAP: Deadlock throttling to prevent cascade
+   * Deadlock throttling to prevent cascade
    */
-  it.fails('should throttle deadlock detection under high contention', () => {
+  it('should throttle deadlock detection under high contention', () => {
     const detector = createDeadlockDetector({
       enabled: true,
-      // GAP: throttling options should exist
       throttle: {
         maxDetectionsPerSecond: 10,
         cooldownMs: 100,
       },
-    } as any);
+    });
 
-    // GAP: getThrottleState() should exist
-    const throttleState = (detector as any).getThrottleState?.();
+    // getThrottleState() exists
+    const throttleState = detector.getThrottleState();
     expect(throttleState).toBeDefined();
     expect(throttleState.isThrottled).toBe(false);
   });
 
   /**
-   * GAP: Async deadlock detection with timeout
+   * Async deadlock detection with timeout
    */
-  it.fails('should support async deadlock detection with timeout', async () => {
+  it('should support async deadlock detection with timeout', async () => {
     const detector = createDeadlockDetector({ enabled: true });
 
     detector.registerTransaction('txn1');
@@ -1327,11 +1318,8 @@ describe('Additional Missing Features', () => {
     detector.addWait('txn1', 'txn2', 'A', LockType.EXCLUSIVE);
     detector.addWait('txn2', 'txn1', 'B', LockType.EXCLUSIVE);
 
-    // GAP: checkDeadlockAsync() should exist as a method
-    const checkDeadlockAsyncFn = (detector as any).checkDeadlockAsync;
-    expect(checkDeadlockAsyncFn).toBeDefined(); // This should fail
-
-    const deadlock = await checkDeadlockAsyncFn.call(detector, 'txn2', { timeout: 100 });
+    // checkDeadlockAsync() exists
+    const deadlock = await detector.checkDeadlockAsync('txn2', { timeout: 100 });
     expect(deadlock).not.toBeNull();
   });
 });

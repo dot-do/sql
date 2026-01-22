@@ -27,7 +27,8 @@ export type VictimSelectionPolicy =
   | 'youngest' // Select the youngest transaction (by timestamp)
   | 'leastWork' // Select the transaction with least work done
   | 'roundRobin' // Rotate victims to prevent starvation
-  | 'preferReadOnly'; // Prefer read-only transactions as victims
+  | 'preferReadOnly' // Prefer read-only transactions as victims
+  | 'priority'; // Select based on transaction priority
 
 /**
  * Deadlock prevention scheme
@@ -82,6 +83,8 @@ export interface DeadlockInfo {
   graphDot: string;
   /** All participants in the cycle */
   participants: string[];
+  /** Transactions that exceeded the deadlock timeout */
+  exceededTimeout?: string[];
 }
 
 /**
@@ -96,6 +99,8 @@ export interface DeadlockStats {
   victimsAborted: Record<VictimSelectionPolicy, number>;
   /** Prevention scheme activations */
   preventionActivations: number;
+  /** Total upgrade deadlocks (deadlocks caused by lock upgrades) */
+  upgradeDeadlocks: number;
 }
 
 /**
@@ -110,6 +115,54 @@ export interface TransactionMeta {
   readOnly: boolean;
   /** Number of times selected as victim */
   victimCount: number;
+  /** Transaction priority (higher = less likely to be victim) */
+  priority: number;
+}
+
+/**
+ * Auto retry configuration
+ */
+export interface AutoRetryConfig {
+  /** Whether auto-retry is enabled */
+  enabled: boolean;
+  /** Maximum number of retries */
+  maxRetries: number;
+  /** Base backoff time in milliseconds */
+  baseBackoffMs: number;
+}
+
+/**
+ * Throttle configuration
+ */
+export interface ThrottleConfig {
+  /** Maximum detections per second */
+  maxDetectionsPerSecond: number;
+  /** Cooldown time in milliseconds */
+  cooldownMs: number;
+}
+
+/**
+ * Throttle state
+ */
+export interface ThrottleState {
+  /** Whether detection is currently throttled */
+  isThrottled: boolean;
+  /** Number of detections in current window */
+  detectionsInWindow: number;
+  /** Time when throttle will lift */
+  throttleUntil?: number;
+}
+
+/**
+ * Deadlock prediction result
+ */
+export interface DeadlockPrediction {
+  /** Whether adding this wait would cause a deadlock */
+  wouldCauseDeadlock: boolean;
+  /** Predicted cycle if deadlock would occur */
+  predictedCycle?: string[];
+  /** Probability of deadlock (0-1) */
+  probability?: number;
 }
 
 /**
@@ -357,16 +410,29 @@ export class WaitForGraph {
 
   /**
    * Get resources involved in a cycle
+   * Fixed to collect ALL resources by traversing edges in both directions around the cycle
    */
   getResourcesInCycle(cycle: string[]): string[] {
     const resources = new Set<string>();
+    const participants = new Set(cycle);
 
+    // Traverse edges between all participants to capture all resources
     for (let i = 0; i < cycle.length - 1; i++) {
       const from = cycle[i];
       const to = cycle[i + 1];
-      const edges = this.edges.get(from) || [];
-      for (const edge of edges) {
+
+      // Get resources from from -> to edge
+      const fromEdges = this.edges.get(from) || [];
+      for (const edge of fromEdges) {
         if (edge.to === to) {
+          resources.add(edge.resource);
+        }
+      }
+
+      // Also check reverse direction (to -> from) for complete cycle coverage
+      const toEdges = this.edges.get(to) || [];
+      for (const edge of toEdges) {
+        if (edge.to === from) {
           resources.add(edge.resource);
         }
       }
@@ -398,6 +464,17 @@ export class WaitForGraph {
   }
 
   /**
+   * Get all edges from the graph
+   */
+  getAllEdges(): WaitForEdge[] {
+    const allEdges: WaitForEdge[] = [];
+    for (const edges of this.edges.values()) {
+      allEdges.push(...edges);
+    }
+    return allEdges;
+  }
+
+  /**
    * Generate DOT graph visualization
    */
   toDot(): string {
@@ -424,6 +501,7 @@ export class WaitForGraph {
       cost: 0,
       readOnly: false,
       victimCount: 0,
+      priority: 0,
     };
     this.txnMeta.set(txnId, { ...existing, ...meta });
   }
@@ -451,6 +529,8 @@ export class WaitForGraph {
         return this.selectRoundRobinVictim(participants);
       case 'preferReadOnly':
         return this.selectPreferReadOnlyVictim(participants);
+      case 'priority':
+        return this.selectPriorityVictim(participants);
       default:
         return participants[participants.length - 1]; // Default: last in cycle
     }
@@ -506,6 +586,23 @@ export class WaitForGraph {
     return this.selectYoungestVictim(participants);
   }
 
+  private selectPriorityVictim(participants: string[]): string {
+    // Select lowest priority transaction as victim
+    let lowestPriority = participants[0];
+    let minPriority = Infinity;
+
+    for (const txnId of participants) {
+      const meta = this.txnMeta.get(txnId);
+      const priority = meta?.priority ?? 0;
+      if (priority < minPriority) {
+        minPriority = priority;
+        lowestPriority = txnId;
+      }
+    }
+
+    return lowestPriority;
+  }
+
   /**
    * Clear all edges and metadata
    */
@@ -537,6 +634,10 @@ export interface DeadlockDetectorOptions {
   onDeadlock?: (info: DeadlockInfo) => void;
   /** Maximum history entries to keep */
   maxHistorySize?: number;
+  /** Auto-retry configuration */
+  autoRetry?: AutoRetryConfig;
+  /** Throttle configuration */
+  throttle?: ThrottleConfig;
 }
 
 /**
@@ -544,11 +645,21 @@ export interface DeadlockDetectorOptions {
  */
 export class DeadlockDetector {
   private graph: WaitForGraph;
-  private options: Required<DeadlockDetectorOptions>;
+  private options: Required<Omit<DeadlockDetectorOptions, 'autoRetry' | 'throttle'>> & {
+    autoRetry?: AutoRetryConfig;
+    throttle?: ThrottleConfig;
+  };
   private stats: DeadlockStats;
   private history: DeadlockInfo[];
+  private persistentStats: DeadlockStats;
+  private persistentHistory: DeadlockInfo[];
   private txnStartTimes: Map<string, number>;
   private lockOrdering: Map<string, number>; // For lock ordering prevention
+  private txnLockOrders: Map<string, number> = new Map();
+  private txnPriorities: Map<string, number> = new Map();
+  private throttleState: ThrottleState;
+  private lastDetectionTime: number = 0;
+  private detectionsInCurrentSecond: number = 0;
 
   constructor(options: DeadlockDetectorOptions = {}) {
     this.graph = new WaitForGraph();
@@ -560,8 +671,23 @@ export class DeadlockDetector {
       deadlockTimeout: options.deadlockTimeout ?? 5000,
       onDeadlock: options.onDeadlock ?? (() => {}),
       maxHistorySize: options.maxHistorySize ?? 100,
+      autoRetry: options.autoRetry,
+      throttle: options.throttle,
     };
-    this.stats = {
+    this.stats = this.createEmptyStats();
+    this.persistentStats = this.createEmptyStats();
+    this.history = [];
+    this.persistentHistory = [];
+    this.txnStartTimes = new Map();
+    this.lockOrdering = new Map();
+    this.throttleState = {
+      isThrottled: false,
+      detectionsInWindow: 0,
+    };
+  }
+
+  private createEmptyStats(): DeadlockStats {
+    return {
       totalDeadlocks: 0,
       avgCycleLength: 0,
       victimsAborted: {
@@ -569,12 +695,11 @@ export class DeadlockDetector {
         leastWork: 0,
         roundRobin: 0,
         preferReadOnly: 0,
+        priority: 0,
       },
       preventionActivations: 0,
+      upgradeDeadlocks: 0,
     };
-    this.history = [];
-    this.txnStartTimes = new Map();
-    this.lockOrdering = new Map();
   }
 
   /**
@@ -591,6 +716,7 @@ export class DeadlockDetector {
         cost: 0,
         readOnly: false,
         victimCount: 0,
+        priority: 0,
       });
     }
   }
@@ -607,6 +733,14 @@ export class DeadlockDetector {
    */
   markReadOnly(txnId: string, readOnly: boolean): void {
     this.graph.setTransactionMeta(txnId, { readOnly });
+  }
+
+  /**
+   * Set transaction priority (for priority victim selection)
+   */
+  setTransactionPriority(txnId: string, priority: number): void {
+    this.txnPriorities.set(txnId, priority);
+    this.graph.setTransactionMeta(txnId, { priority });
   }
 
   /**
@@ -664,6 +798,11 @@ export class DeadlockDetector {
       return null;
     }
 
+    // Check throttle
+    if (this.isThrottled()) {
+      return null;
+    }
+
     const cycle = this.graph.findCycleFrom(waitingTxn);
     if (!cycle || cycle.length < 2) {
       return null;
@@ -676,6 +815,15 @@ export class DeadlockDetector {
     const graphDot = this.graph.toDot();
     const participants = cycle.slice(0, -1);
 
+    // Check for exceeded timeout
+    const exceededTimeout: string[] = [];
+    const timeout = this.options.deadlockTimeout;
+    for (const txnId of participants) {
+      if (waitTimes[txnId] && waitTimes[txnId] > timeout) {
+        exceededTimeout.push(txnId);
+      }
+    }
+
     const info: DeadlockInfo = {
       cycle,
       resources,
@@ -684,18 +832,172 @@ export class DeadlockDetector {
       timestamp: Date.now(),
       graphDot,
       participants,
+      exceededTimeout: exceededTimeout.length > 0 ? exceededTimeout : undefined,
     };
 
+    // Check if this is an upgrade deadlock
+    const isUpgradeDeadlock = this.checkIfUpgradeDeadlock(cycle);
+
     // Update statistics
-    this.updateStats(info);
+    this.updateStats(info, isUpgradeDeadlock);
 
     // Add to history
     this.addToHistory(info);
+
+    // Update throttle state
+    this.updateThrottleState();
 
     // Invoke callback
     this.options.onDeadlock(info);
 
     return info;
+  }
+
+  /**
+   * Async version of checkDeadlock with timeout support
+   */
+  async checkDeadlockAsync(
+    waitingTxn: string,
+    options?: { timeout?: number }
+  ): Promise<DeadlockInfo | null> {
+    const timeout = options?.timeout ?? this.options.deadlockTimeout;
+
+    return new Promise((resolve) => {
+      const timeoutId = setTimeout(() => {
+        resolve(null);
+      }, timeout);
+
+      try {
+        const result = this.checkDeadlock(waitingTxn);
+        clearTimeout(timeoutId);
+        resolve(result);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        resolve(null);
+      }
+    });
+  }
+
+  private checkIfUpgradeDeadlock(cycle: string[]): boolean {
+    for (let i = 0; i < cycle.length - 1; i++) {
+      const from = cycle[i];
+      const reason = this.graph.getWaitReason(from, cycle[i + 1]);
+      if (reason === 'lockUpgrade') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private isThrottled(): boolean {
+    if (!this.options.throttle) {
+      return false;
+    }
+
+    const now = Date.now();
+
+    // Check if we're in a cooldown period
+    if (this.throttleState.throttleUntil && now < this.throttleState.throttleUntil) {
+      return true;
+    }
+
+    // Reset counter if we're in a new second
+    if (now - this.lastDetectionTime >= 1000) {
+      this.detectionsInCurrentSecond = 0;
+      this.lastDetectionTime = now;
+    }
+
+    // Check if we've exceeded max detections
+    if (this.detectionsInCurrentSecond >= this.options.throttle.maxDetectionsPerSecond) {
+      this.throttleState.isThrottled = true;
+      this.throttleState.throttleUntil = now + this.options.throttle.cooldownMs;
+      return true;
+    }
+
+    return false;
+  }
+
+  private updateThrottleState(): void {
+    this.detectionsInCurrentSecond++;
+    this.throttleState.detectionsInWindow = this.detectionsInCurrentSecond;
+  }
+
+  /**
+   * Predict if adding a wait would cause a deadlock
+   */
+  predictDeadlock(
+    waitingTxn: string,
+    holderTxn: string,
+    resource: string
+  ): DeadlockPrediction {
+    // Temporarily add the edge to check for cycle
+    this.graph.addEdge({
+      from: waitingTxn,
+      to: holderTxn,
+      resource,
+      reason: 'exclusive',
+      requestedLockType: 'EXCLUSIVE' as LockType,
+    });
+
+    const cycle = this.graph.findCycleFrom(waitingTxn);
+
+    // Remove the temporary edge
+    this.graph.removeEdge(waitingTxn, holderTxn, resource);
+
+    if (cycle && cycle.length >= 2) {
+      return {
+        wouldCauseDeadlock: true,
+        predictedCycle: cycle,
+        probability: 1.0,
+      };
+    }
+
+    return {
+      wouldCauseDeadlock: false,
+      probability: this.calculateDeadlockProbability(waitingTxn),
+    };
+  }
+
+  /**
+   * Calculate the probability of deadlock for a transaction
+   */
+  getDeadlockProbability(txnId: string): number {
+    return this.calculateDeadlockProbability(txnId);
+  }
+
+  private calculateDeadlockProbability(txnId: string): number {
+    // Simple heuristic based on graph structure
+    const allEdges = this.graph.getAllEdges();
+    if (allEdges.length === 0) {
+      return 0;
+    }
+
+    // Count paths that could lead to deadlock
+    let dangerouspaths = 0;
+    const visited = new Set<string>();
+
+    const countPaths = (current: string, depth: number): number => {
+      if (depth > 10) return 0; // Limit depth
+      if (visited.has(current)) return 1; // Potential cycle
+
+      visited.add(current);
+      let paths = 0;
+
+      for (const edge of allEdges) {
+        if (edge.from === current) {
+          paths += countPaths(edge.to, depth + 1);
+        }
+      }
+
+      visited.delete(current);
+      return paths;
+    };
+
+    dangerouspaths = countPaths(txnId, 0);
+
+    // Normalize to 0-1 range
+    const maxPaths = allEdges.length * 2;
+    return Math.min(1, dangerouspaths / maxPaths);
   }
 
   /**
@@ -720,6 +1022,7 @@ export class DeadlockDetector {
         // Older can wait for younger, younger must die
         if (!waitingIsOlder) {
           this.stats.preventionActivations++;
+          this.persistentStats.preventionActivations++;
           return new TransactionError(
             TransactionErrorCode.ABORTED,
             `Wait-die: younger transaction ${waitingTxn} must abort when waiting for older ${holderTxn}`,
@@ -733,6 +1036,7 @@ export class DeadlockDetector {
         // This is handled differently - older proceeds, younger is aborted
         if (waitingIsOlder) {
           this.stats.preventionActivations++;
+          this.persistentStats.preventionActivations++;
           // Return special error to indicate holder should be aborted
           const error = new TransactionError(
             TransactionErrorCode.ABORTED,
@@ -750,6 +1054,7 @@ export class DeadlockDetector {
         const resourceOrder = this.getLockOrder(resource);
         if (lastOrder !== undefined && resourceOrder < lastOrder) {
           this.stats.preventionActivations++;
+          this.persistentStats.preventionActivations++;
           return new TransactionError(
             TransactionErrorCode.LOCK_FAILED,
             `Lock ordering violation: ${waitingTxn} cannot acquire ${resource} (order ${resourceOrder}) after higher-ordered lock (${lastOrder})`,
@@ -761,6 +1066,7 @@ export class DeadlockDetector {
       case 'noWait':
         // Never wait - immediate failure
         this.stats.preventionActivations++;
+        this.persistentStats.preventionActivations++;
         return new TransactionError(
           TransactionErrorCode.LOCK_FAILED,
           `No-wait: ${waitingTxn} cannot wait for ${holderTxn}`,
@@ -783,8 +1089,6 @@ export class DeadlockDetector {
       }
     }
   }
-
-  private txnLockOrders: Map<string, number> = new Map();
 
   private getLockOrder(resource: string): number {
     let order = this.lockOrdering.get(resource);
@@ -821,41 +1125,107 @@ export class DeadlockDetector {
     return [...this.history];
   }
 
-  private updateStats(info: DeadlockInfo): void {
+  /**
+   * Get persistent deadlock statistics (not reset by clear())
+   */
+  getPersistentStats(): DeadlockStats {
+    return { ...this.persistentStats };
+  }
+
+  /**
+   * Get persistent deadlock history (not reset by clear())
+   */
+  getPersistentHistory(): DeadlockInfo[] {
+    return [...this.persistentHistory];
+  }
+
+  /**
+   * Get auto-retry configuration
+   */
+  getRetryConfig(): AutoRetryConfig | undefined {
+    return this.options.autoRetry;
+  }
+
+  /**
+   * Get throttle state
+   */
+  getThrottleState(): ThrottleState {
+    return { ...this.throttleState };
+  }
+
+  /**
+   * Export deadlock report as JSON string
+   */
+  exportReport(): string {
+    const report = {
+      totalDeadlocks: this.persistentStats.totalDeadlocks,
+      avgCycleLength: this.persistentStats.avgCycleLength,
+      victimsAborted: this.persistentStats.victimsAborted,
+      preventionActivations: this.persistentStats.preventionActivations,
+      upgradeDeadlocks: this.persistentStats.upgradeDeadlocks,
+      history: this.persistentHistory,
+      exportedAt: new Date().toISOString(),
+    };
+    return JSON.stringify(report, null, 2);
+  }
+
+  private updateStats(info: DeadlockInfo, isUpgradeDeadlock: boolean): void {
+    // Update current stats
     this.stats.totalDeadlocks++;
     const cycleLength = info.cycle.length - 1;
     this.stats.avgCycleLength =
       (this.stats.avgCycleLength * (this.stats.totalDeadlocks - 1) + cycleLength) /
       this.stats.totalDeadlocks;
     this.stats.victimsAborted[this.options.victimSelection]++;
+    if (isUpgradeDeadlock) {
+      this.stats.upgradeDeadlocks++;
+    }
+
+    // Update persistent stats
+    this.persistentStats.totalDeadlocks++;
+    this.persistentStats.avgCycleLength =
+      (this.persistentStats.avgCycleLength * (this.persistentStats.totalDeadlocks - 1) + cycleLength) /
+      this.persistentStats.totalDeadlocks;
+    this.persistentStats.victimsAborted[this.options.victimSelection]++;
+    if (isUpgradeDeadlock) {
+      this.persistentStats.upgradeDeadlocks++;
+    }
   }
 
   private addToHistory(info: DeadlockInfo): void {
+    // Add to current history
     this.history.push(info);
     if (this.history.length > this.options.maxHistorySize) {
       this.history.shift();
     }
+
+    // Add to persistent history
+    this.persistentHistory.push(info);
+    if (this.persistentHistory.length > this.options.maxHistorySize) {
+      this.persistentHistory.shift();
+    }
   }
 
   /**
-   * Clear all state
+   * Clear all state including stats and history
    */
   clear(): void {
     this.graph.clear();
     this.txnStartTimes.clear();
     this.txnLockOrders.clear();
+    this.txnPriorities.clear();
     this.history = [];
-    this.stats = {
-      totalDeadlocks: 0,
-      avgCycleLength: 0,
-      victimsAborted: {
-        youngest: 0,
-        leastWork: 0,
-        roundRobin: 0,
-        preferReadOnly: 0,
-      },
-      preventionActivations: 0,
-    };
+    this.stats = this.createEmptyStats();
+  }
+
+  /**
+   * Clear only the graph state, preserving stats and history
+   */
+  clearGraph(): void {
+    this.graph.clear();
+    this.txnStartTimes.clear();
+    this.txnLockOrders.clear();
+    this.txnPriorities.clear();
   }
 }
 

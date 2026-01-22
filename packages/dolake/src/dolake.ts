@@ -470,15 +470,53 @@ export class DoLake implements DurableObject {
       return;
     }
 
+    // CRITICAL: Calculate payload size BEFORE any parsing to prevent memory exhaustion
+    const payloadSize = typeof message === 'string'
+      ? new TextEncoder().encode(message).length
+      : message.byteLength;
+
+    // Check for empty message
+    if (payloadSize === 0) {
+      this.sendNack(ws, 0, 'invalid_format', 'Message is empty - no data received', false);
+      return;
+    }
+
+    // Pre-parse size validation: reject oversized messages BEFORE JSON.parse
+    if (payloadSize > this.rateLimitConfig.maxPayloadSize) {
+      // Track size violation
+      const connectionState = this.rateLimiter['connections'].get(attachment.connectionId);
+      if (connectionState) {
+        connectionState.sizeViolationCount++;
+      }
+      this.rateLimiter['metrics'].payloadRejections++;
+
+      // Format human-readable size message
+      const actualSizeMB = (payloadSize / (1024 * 1024)).toFixed(2);
+      const maxSizeMB = (this.rateLimitConfig.maxPayloadSize / (1024 * 1024)).toFixed(2);
+
+      // Send nack with payload_too_large reason BEFORE parsing
+      // Use sequenceNumber 0 since we haven't parsed the message yet
+      this.sendPreParseNack(
+        ws,
+        0, // sequenceNumber unknown - message not parsed
+        'payload_too_large',
+        `Payload size ${actualSizeMB} MB exceeded limit of ${maxSizeMB} MB`,
+        false, // shouldRetry: false - client should not retry with same payload
+        this.rateLimitConfig.maxPayloadSize,
+        payloadSize
+      );
+
+      // Check if connection should be closed due to violations
+      if (this.rateLimiter.shouldCloseConnection(attachment.connectionId)) {
+        ws.close(1008, 'Too many size violations');
+      }
+      return;
+    }
+
     try {
       const rpcMessage = this.decodeMessage(message);
 
-      // Calculate payload size
-      const payloadSize = typeof message === 'string'
-        ? new TextEncoder().encode(message).length
-        : message.byteLength;
-
-      // Calculate event sizes for CDC batch
+      // Calculate event sizes for CDC batch (only after successful parse)
       let eventSizes: number[] = [];
       if (isCDCBatchMessage(rpcMessage)) {
         const cdcMessage = rpcMessage as CDCBatchMessage;
@@ -487,7 +525,7 @@ export class DoLake implements DurableObject {
         );
       }
 
-      // Check message rate limit
+      // Check message rate limit (excluding size check which was done pre-parse)
       const stats = this.buffer.getStats();
       const rateLimitResult = this.rateLimiter.checkMessage(
         attachment.connectionId,
@@ -832,6 +870,35 @@ export class DoLake implements DurableObject {
     if (rateLimit) {
       (message as any).rateLimit = rateLimit;
     }
+    ws.send(JSON.stringify(message));
+  }
+
+  /**
+   * Send a NACK for pre-parse size rejections.
+   * This is used when the message is rejected BEFORE JSON.parse.
+   * Includes actualSize for debugging and human-readable error message.
+   */
+  private sendPreParseNack(
+    ws: WebSocket,
+    sequenceNumber: number,
+    reason: NackMessage['reason'],
+    errorMessage: string,
+    shouldRetry: boolean,
+    maxSize: number,
+    actualSize: number
+  ): void {
+    const message: NackMessage & { actualSize: number; receivedSize: number } = {
+      type: 'nack',
+      timestamp: Date.now(),
+      sequenceNumber,
+      reason,
+      errorMessage,
+      shouldRetry,
+      retryDelayMs: undefined,
+      maxSize,
+      actualSize,
+      receivedSize: actualSize,
+    };
     ws.send(JSON.stringify(message));
   }
 
@@ -1349,6 +1416,10 @@ dolake_messages_rate_limited ${rateLimitMetrics.messagesRateLimited}
 # HELP dolake_payload_rejections Payload size rejections
 # TYPE dolake_payload_rejections counter
 dolake_payload_rejections ${rateLimitMetrics.payloadRejections}
+
+# HELP dolake_preparse_size_rejections Pre-parse size rejections (before JSON.parse)
+# TYPE dolake_preparse_size_rejections counter
+dolake_preparse_size_rejections ${rateLimitMetrics.payloadRejections}
 
 # HELP dolake_event_size_rejections Event size rejections
 # TYPE dolake_event_size_rejections counter
