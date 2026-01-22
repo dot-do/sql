@@ -24,8 +24,8 @@ import type {
   ParseSelectExpression,
   ParseSelectExpressions,
   AggregateFunctionName,
-} from './aggregates.js';
-import type { ColumnType, TableSchema } from './parser.js';
+} from '../aggregates.js';
+import type { ColumnType, TableSchema } from '../parser.js';
 
 // =============================================================================
 // TEST DATABASE SCHEMA

@@ -13,6 +13,10 @@
     "./types": {
       "types": "./dist/types.d.ts",
       "import": "./dist/types.js"
+    },
+    "./experimental": {
+      "types": "./dist/experimental.d.ts",
+      "import": "./dist/experimental.js"
     }
   },
   "files": [

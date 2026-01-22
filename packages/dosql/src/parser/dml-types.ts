@@ -497,15 +497,26 @@ export interface ParseSuccess<T extends DMLStatement> {
 }
 
 /**
- * Failed parse result
+ * Failed parse result with enhanced location information
  */
 export interface ParseError {
   success: false;
+  /** Error message */
   error: string;
-  /** Position where error occurred */
+  /** Character offset where error occurred (0-indexed) */
   position: number;
   /** The input that caused the error */
   input: string;
+  /** Line number (1-indexed) */
+  line?: number;
+  /** Column number (1-indexed) */
+  column?: number;
+  /** The problematic token (if available) */
+  token?: string;
+  /** Expected token(s) (if available) */
+  expected?: string;
+  /** Suggestion for fix (if available) */
+  suggestion?: string;
 }
 
 /**

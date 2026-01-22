@@ -10,6 +10,16 @@
  * - Backpressure signaling
  */
 
+import {
+  RATE_LIMIT,
+  SIZE_LIMITS,
+  TIMEOUTS,
+  THRESHOLDS,
+  VALIDATION,
+  WEBSOCKET,
+  WHITELISTED_NETWORKS,
+} from './constants.js';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -71,22 +81,22 @@ export interface RateLimitConfig {
  * Default rate limit configuration
  */
 export const DEFAULT_RATE_LIMIT_CONFIG: RateLimitConfig = {
-  connectionsPerSecond: 20,
-  messagesPerSecond: 100,
-  burstCapacity: 50,
-  refillRate: 10,
-  maxPayloadSize: 4 * 1024 * 1024, // 4MB
-  maxEventSize: 1 * 1024 * 1024, // 1MB
-  maxConnectionsPerSource: 5,
-  maxConnectionsPerIp: 30,
-  subnetRateLimitThreshold: 100,
-  whitelistedIps: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.1'],
-  windowMs: 1000,
-  backpressureThreshold: 0.8,
+  connectionsPerSecond: RATE_LIMIT.CONNECTIONS_PER_SECOND,
+  messagesPerSecond: RATE_LIMIT.MESSAGES_PER_SECOND,
+  burstCapacity: RATE_LIMIT.BURST_CAPACITY,
+  refillRate: RATE_LIMIT.REFILL_RATE,
+  maxPayloadSize: SIZE_LIMITS.MAX_PAYLOAD_SIZE,
+  maxEventSize: SIZE_LIMITS.MAX_EVENT_SIZE,
+  maxConnectionsPerSource: RATE_LIMIT.MAX_CONNECTIONS_PER_SOURCE,
+  maxConnectionsPerIp: RATE_LIMIT.MAX_CONNECTIONS_PER_IP,
+  subnetRateLimitThreshold: RATE_LIMIT.SUBNET_RATE_LIMIT_THRESHOLD,
+  whitelistedIps: [...WHITELISTED_NETWORKS],
+  windowMs: RATE_LIMIT.WINDOW_MS,
+  backpressureThreshold: RATE_LIMIT.BACKPRESSURE_THRESHOLD,
   highPriorityHeader: 'X-Priority',
-  baseRetryDelayMs: 100,
-  maxRetryDelayMs: 30000,
-  maxSizeViolations: 3,
+  baseRetryDelayMs: RATE_LIMIT.BASE_RETRY_DELAY_MS,
+  maxRetryDelayMs: RATE_LIMIT.MAX_RETRY_DELAY_MS,
+  maxSizeViolations: RATE_LIMIT.MAX_SIZE_VIOLATIONS,
 };
 
 /**
@@ -389,8 +399,8 @@ export class RateLimiter {
         this.config.refillRate
       ),
       heartbeatBucket: this.createBucket(
-        this.config.burstCapacity * 2, // More lenient for heartbeats
-        this.config.refillRate * 2
+        this.config.burstCapacity * WEBSOCKET.HEARTBEAT_BUCKET_MULTIPLIER,
+        this.config.refillRate * WEBSOCKET.HEARTBEAT_BUCKET_MULTIPLIER
       ),
       sizeViolationCount: 0,
       consecutiveRateLimits: 0,
@@ -531,8 +541,8 @@ export class RateLimiter {
         rateLimit: this.getRateLimitInfo(state, now),
         reason: 'buffer_full',
         bufferUtilization,
-        suggestedDelayMs: 1000,
-        retryDelayMs: 1000,
+        suggestedDelayMs: TIMEOUTS.BUFFER_FULL_DELAY_MS,
+        retryDelayMs: TIMEOUTS.BUFFER_FULL_DELAY_MS,
       };
     }
 
@@ -577,7 +587,7 @@ export class RateLimiter {
         bufferUtilization,
         suggestedDelayMs:
           bufferUtilization > this.config.backpressureThreshold
-            ? Math.floor(bufferUtilization * 1000)
+            ? Math.floor(bufferUtilization * TIMEOUTS.BUFFER_FULL_DELAY_MS)
             : undefined,
       };
     }
@@ -594,7 +604,7 @@ export class RateLimiter {
       bufferUtilization,
       suggestedDelayMs:
         bufferUtilization > this.config.backpressureThreshold
-          ? Math.floor(bufferUtilization * 500)
+          ? Math.floor(bufferUtilization * TIMEOUTS.BACKPRESSURE_MULTIPLIER_MS)
           : undefined,
     };
   }
@@ -731,13 +741,13 @@ export class RateLimiter {
   private calculateRetryDelay(state: ConnectionState): number {
     // Exponential backoff
     const baseDelay = this.config.baseRetryDelayMs;
-    const multiplier = Math.pow(2, Math.min(state.consecutiveRateLimits, 10));
+    const multiplier = Math.pow(2, Math.min(state.consecutiveRateLimits, RATE_LIMIT.MAX_EXPONENTIAL_BACKOFF_POWER));
     const delay = Math.min(
       baseDelay * multiplier,
       this.config.maxRetryDelayMs
     );
     // Add jitter
-    return Math.floor(delay * (0.5 + Math.random() * 0.5));
+    return Math.floor(delay * (WEBSOCKET.JITTER_MIN + Math.random() * WEBSOCKET.JITTER_MIN));
   }
 
   private getRateLimitInfo(state: ConnectionState, now: number): RateLimitInfo {
@@ -774,7 +784,7 @@ export class RateLimiter {
       (this.connectionRateLimit.windowStart + this.config.windowMs) / 1000
     );
     const retryDelay = Math.max(
-      100,
+      VALIDATION.MIN_DELAY_MS,
       (this.connectionRateLimit.windowStart +
         this.config.windowMs -
         now) as number
@@ -795,15 +805,15 @@ export class RateLimiter {
 
   private updateLoadLevel(): void {
     const utilizationRatio =
-      this.metrics.activeConnections / (this.config.connectionsPerSecond * 10);
+      this.metrics.activeConnections / (this.config.connectionsPerSecond * THRESHOLDS.LOAD_CONNECTION_MULTIPLIER);
 
-    if (utilizationRatio > 0.9) {
+    if (utilizationRatio > THRESHOLDS.LOAD_LEVEL_CRITICAL) {
       this.loadLevel = 'critical';
       this.degradedMode = true;
-    } else if (utilizationRatio > 0.7) {
+    } else if (utilizationRatio > THRESHOLDS.LOAD_LEVEL_HIGH) {
       this.loadLevel = 'high';
       this.degradedMode = true;
-    } else if (utilizationRatio > 0.5) {
+    } else if (utilizationRatio > THRESHOLDS.LOAD_LEVEL_ELEVATED) {
       this.loadLevel = 'elevated';
       this.degradedMode = false;
     } else {
@@ -858,7 +868,7 @@ export class RateLimiter {
       allowZero?: boolean;
     } = {}
   ): number {
-    const { minValue = 0, maxValue = 1_000_000, allowZero = true } = options;
+    const { minValue = VALIDATION.MIN_RATE_LIMIT_VALUE, maxValue = VALIDATION.MAX_RATE_LIMIT_VALUE, allowZero = true } = options;
 
     // Type validation - must be a number
     if (typeof value !== 'number') {
@@ -943,20 +953,20 @@ export class RateLimiter {
     this.validateRateLimitResult(result);
 
     const now = Math.floor(Date.now() / 1000);
-    const maxResetTime = now + 24 * 60 * 60; // Max 24 hours from now
+    const maxResetTime = now + TIMEOUTS.MAX_RESET_TIME_OFFSET_SECONDS;
 
     // Validate and sanitize limit (must be positive, max 1 million)
     const limit = this.validateRateLimitValue(
       result.rateLimit.limit,
       'limit',
-      { minValue: 1, maxValue: 1_000_000, allowZero: false }
+      { minValue: 1, maxValue: VALIDATION.MAX_RATE_LIMIT_VALUE, allowZero: false }
     );
 
     // Validate and sanitize remaining (must be non-negative, capped at limit)
     let remaining = this.validateRateLimitValue(
       result.rateLimit.remaining,
       'remaining',
-      { minValue: 0, maxValue: 1_000_000, allowZero: true }
+      { minValue: VALIDATION.MIN_RATE_LIMIT_VALUE, maxValue: VALIDATION.MAX_RATE_LIMIT_VALUE, allowZero: true }
     );
 
     // Ensure remaining does not exceed limit

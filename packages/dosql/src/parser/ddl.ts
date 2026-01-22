@@ -10,6 +10,13 @@
  * - CREATE VIEW AS SELECT
  */
 
+import {
+  calculateLocation,
+  getSuggestionForTypo,
+  formatErrorSnippet,
+  type SourceLocation,
+} from './shared/errors.js';
+
 import type {
   DDLStatement,
   CreateTableStatement,
@@ -321,13 +328,40 @@ function tokenize(sql: string): Token[] {
 // =============================================================================
 
 /**
+ * DDL Parse Error with enhanced information
+ */
+class DDLParseError extends Error {
+  token: string;
+  expected: string;
+  position: number;
+  suggestion?: string;
+
+  constructor(
+    message: string,
+    token: string,
+    expected: string,
+    position: number,
+    suggestion?: string
+  ) {
+    super(message);
+    this.name = 'DDLParseError';
+    this.token = token;
+    this.expected = expected;
+    this.position = position;
+    this.suggestion = suggestion;
+  }
+}
+
+/**
  * Parser state
  */
 class Parser {
   private tokens: Token[];
   private pos: number = 0;
+  private sql: string;
 
   constructor(sql: string) {
+    this.sql = sql;
     this.tokens = tokenize(sql).filter((t) => t.type !== 'WHITESPACE');
   }
 
@@ -365,14 +399,31 @@ class Parser {
   }
 
   /**
+   * Create an enhanced error with token and suggestion
+   */
+  private createError(expected: string, context?: string): DDLParseError {
+    const token = this.current();
+    const tokenValue = token.value || 'end of input';
+    const suggestion = getSuggestionForTypo(tokenValue);
+    const contextStr = context ? ` ${context}` : '';
+    const suggestionStr = suggestion ? ` (did you mean '${suggestion}'?)` : '';
+    const message = `Expected ${expected}${contextStr} but got '${tokenValue}' at position ${token.position}${suggestionStr}`;
+
+    return new DDLParseError(
+      message,
+      tokenValue,
+      expected,
+      token.position,
+      suggestion
+    );
+  }
+
+  /**
    * Expect a token or throw error
    */
   private expect(type: TokenType, value?: string): Token {
     if (!this.match(type, value)) {
-      const token = this.current();
-      throw new Error(
-        `Expected ${value || type} but got ${token.value || token.type} at position ${token.position}`
-      );
+      throw this.createError(value || type);
     }
     return this.advance();
   }
@@ -404,7 +455,7 @@ class Parser {
       }
       return name;
     }
-    throw new Error(`Expected identifier but got ${token.value || token.type} at position ${token.position}`);
+    throw this.createError('identifier');
   }
 
   /**
@@ -1306,7 +1357,7 @@ class Parser {
       this.expect('KEYWORD', 'OF');
       timing = 'INSTEAD OF';
     } else {
-      throw new Error('Expected BEFORE, AFTER, or INSTEAD OF in trigger definition');
+      throw this.createError('BEFORE, AFTER, or INSTEAD OF', 'in trigger definition');
     }
 
     // Parse event: DELETE | INSERT | UPDATE [OF column_list]
@@ -1328,7 +1379,7 @@ class Parser {
         } while (this.match('PUNCTUATION', ','));
       }
     } else {
-      throw new Error('Expected DELETE, INSERT, or UPDATE in trigger definition');
+      throw this.createError('DELETE, INSERT, or UPDATE', 'in trigger definition');
     }
 
     // ON table_name
@@ -1494,7 +1545,7 @@ class Parser {
         return this.parseCreateTrigger();
       }
 
-      throw new Error(`Unexpected token after CREATE: ${nextToken.value}`);
+      throw this.createError('TABLE, INDEX, VIEW, or TRIGGER', 'after CREATE');
     }
 
     if (this.consumeKeyword('DROP')) {
@@ -1516,14 +1567,14 @@ class Parser {
         return this.parseDropTrigger();
       }
 
-      throw new Error(`Unexpected token after DROP: ${nextToken.value}`);
+      throw this.createError('TABLE, INDEX, VIEW, or TRIGGER', 'after DROP');
     }
 
     if (this.consumeKeyword('ALTER')) {
       return this.parseAlterTable();
     }
 
-    throw new Error(`Unknown DDL statement starting with: ${token.value}`);
+    throw this.createError('CREATE, ALTER, or DROP', 'at start of DDL statement');
   }
 }
 
@@ -1543,7 +1594,38 @@ export function parseDDL(sql: string): ParseResult {
     const statement = parser.parse();
     return { success: true, statement };
   } catch (error) {
+    if (error instanceof DDLParseError) {
+      // Create enhanced error result
+      const location = calculateLocation(sql, error.position);
+      return {
+        success: false,
+        error: error.message,
+        position: error.position,
+        line: location.line,
+        column: location.column,
+        token: error.token,
+        expected: error.expected,
+        suggestion: error.suggestion,
+      };
+    }
+
+    // Handle regular errors (e.g., from throw new Error(...))
     const message = error instanceof Error ? error.message : String(error);
+
+    // Try to extract position from error message
+    const posMatch = message.match(/at position (\d+)/);
+    if (posMatch) {
+      const position = parseInt(posMatch[1], 10);
+      const location = calculateLocation(sql, position);
+      return {
+        success: false,
+        error: message,
+        position,
+        line: location.line,
+        column: location.column,
+      };
+    }
+
     return { success: false, error: message };
   }
 }

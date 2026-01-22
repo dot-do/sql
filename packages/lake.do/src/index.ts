@@ -1,23 +1,62 @@
 /**
- * @dotdo/lake.do - Client SDK for DoLake
+ * @dotdo/lake.do - Client SDK for DoLake Lakehouse
  *
- * Lakehouse client for Cloudflare Workers using CapnWeb RPC.
+ * @description A TypeScript client library for interacting with DoLake, a lakehouse
+ * solution built on Cloudflare Workers and R2. Provides real-time CDC streaming,
+ * SQL queries, time travel, partition management, and file compaction.
+ *
+ * ## Stability
+ *
+ * This package follows semantic versioning. Exports are marked with stability annotations:
+ *
+ * - **stable**: No breaking changes in minor versions. Safe for production use.
+ * - **experimental**: May change in any version. Use with caution.
+ *
+ * See {@link https://github.com/dot-do/sql/blob/main/docs/STABILITY.md | STABILITY.md} for details.
+ *
+ * ## Features
+ *
+ * - **SQL Queries**: Execute SQL queries against Parquet data stored in R2
+ * - **CDC Streaming**: Subscribe to real-time change data capture events (experimental)
+ * - **Time Travel**: Query historical data at any point in time
+ * - **Partition Management**: Inspect and manage table partitions
+ * - **Compaction**: Trigger and monitor file compaction jobs (experimental)
+ * - **Type Safety**: Full TypeScript support with branded types for IDs
+ *
+ * ## Installation
+ *
+ * ```bash
+ * npm install @dotdo/lake.do
+ * ```
+ *
+ * ## Quick Start
  *
  * @example
  * ```typescript
  * import { createLakeClient } from '@dotdo/lake.do';
  *
+ * // Create a client
  * const client = createLakeClient({
  *   url: 'https://lake.example.com',
  *   token: 'your-token',
  * });
  *
- * // Query lakehouse data
- * const result = await client.query<{ date: string; total: number }>(
+ * // Query lakehouse data with typed results
+ * interface OrderSummary {
+ *   date: string;
+ *   total: number;
+ * }
+ *
+ * const result = await client.query<OrderSummary>(
  *   'SELECT date, SUM(amount) as total FROM orders GROUP BY date'
  * );
  *
- * // Subscribe to CDC stream
+ * console.log(`Scanned ${result.bytesScanned} bytes in ${result.duration}ms`);
+ * for (const row of result.rows) {
+ *   console.log(`${row.date}: $${row.total}`);
+ * }
+ *
+ * // Subscribe to CDC stream for real-time updates
  * for await (const batch of client.subscribe({ tables: ['orders'] })) {
  *   console.log(`Received ${batch.events.length} events`);
  *   for (const event of batch.events) {
@@ -25,62 +64,226 @@
  *   }
  * }
  *
- * // Time travel query
+ * // Time travel query to see historical data
  * const historical = await client.query(
  *   'SELECT * FROM inventory',
  *   { asOf: new Date('2024-01-01') }
  * );
  *
+ * // Always close the client when done
  * await client.close();
  * ```
+ *
+ * ## API Reference
+ *
+ * ### Client
+ * - {@link createLakeClient} - Factory function to create a client
+ * - {@link DoLakeClient} - Client class implementation
+ * - {@link LakeClient} - Client interface
+ * - {@link LakeError} - Error type thrown by client operations
+ *
+ * ### Types
+ * - {@link LakeQueryOptions} - Options for query execution
+ * - {@link LakeQueryResult} - Query result with statistics
+ * - {@link CDCStreamOptions} - Options for CDC subscription
+ * - {@link CDCBatch} - Batch of CDC events
+ * - {@link TableMetadata} - Table schema and metadata
+ * - {@link PartitionInfo} - Partition statistics
+ * - {@link CompactionJob} - Compaction job status
+ * - {@link Snapshot} - Table snapshot for time travel
+ *
+ * ### Branded Types
+ * - {@link CDCEventId} - CDC event identifier
+ * - {@link PartitionKey} - Partition identifier
+ * - {@link ParquetFileId} - Parquet file identifier
+ * - {@link SnapshotId} - Snapshot identifier
+ * - {@link CompactionJobId} - Compaction job identifier
+ *
+ * @packageDocumentation
+ * @module @dotdo/lake.do
  */
 
-// Client
+// =============================================================================
+// Stable Client Exports
+// =============================================================================
+
+/**
+ * Client class and factory function for creating DoLake connections.
+ *
+ * @see {@link createLakeClient} - Recommended way to create a client
+ * @see {@link DoLakeClient} - Client class implementation
+ * @see {@link LakeError} - Error type for lake operations
+ *
+ * @public
+ * @stability stable
+ */
 export { DoLakeClient, LakeError, createLakeClient } from './client.js';
+
+/**
+ * Configuration types for client initialization.
+ *
+ * @see {@link LakeClientConfig} - Main configuration interface
+ * @see {@link RetryConfig} - Retry behavior configuration
+ *
+ * @public
+ * @stability stable
+ */
 export type { LakeClientConfig, RetryConfig } from './client.js';
 
-// Types
+// =============================================================================
+// Stable Type Exports
+// =============================================================================
+
+/**
+ * Branded types for type-safe identifiers - stable.
+ *
+ * @public
+ * @stability stable
+ */
 export type {
-  // Branded types
   CDCEventId,
   PartitionKey,
   ParquetFileId,
   SnapshotId,
   CompactionJobId,
-  // CDC types
-  CDCStreamOptions,
-  CDCBatch,
-  CDCStreamState,
-  // Query types
+} from './types.js';
+
+/**
+ * Query types - stable.
+ *
+ * @public
+ * @stability stable
+ */
+export type {
   LakeQueryOptions,
   LakeQueryResult,
-  // Partition types
+} from './types.js';
+
+/**
+ * Partition types - stable.
+ *
+ * @public
+ * @stability stable
+ */
+export type {
   PartitionStrategy,
   PartitionConfig,
   PartitionInfo,
-  // Compaction types
-  CompactionConfig,
-  CompactionJob,
-  // Snapshot types
+} from './types.js';
+
+/**
+ * Snapshot and time travel types - stable.
+ *
+ * @public
+ * @stability stable
+ */
+export type {
   Snapshot,
   TimeTravelOptions,
-  // Schema types
+} from './types.js';
+
+/**
+ * Schema types - stable.
+ *
+ * @public
+ * @stability stable
+ */
+export type {
   LakeColumnType,
   LakeColumn,
   LakeSchema,
   TableMetadata,
-  // RPC types
+} from './types.js';
+
+/**
+ * Client interface - stable.
+ *
+ * @public
+ * @stability stable
+ */
+export type {
+  LakeClient,
+} from './types.js';
+
+// =============================================================================
+// Experimental Type Exports
+// =============================================================================
+
+/**
+ * CDC streaming types - experimental, subject to change.
+ *
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export type {
+  CDCStreamOptions,
+  CDCBatch,
+  CDCStreamState,
+} from './types.js';
+
+/**
+ * Compaction types - experimental, subject to change.
+ *
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export type {
+  CompactionConfig,
+  CompactionJob,
+} from './types.js';
+
+/**
+ * RPC types - internal, for advanced usage only.
+ *
+ * @internal
+ */
+export type {
   LakeRPCMethod,
   LakeRPCRequest,
   LakeRPCResponse,
   LakeRPCError,
-  // Client interface
-  LakeClient,
-  // Metrics
+} from './types.js';
+
+/**
+ * Metrics types - experimental, subject to change.
+ *
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export type {
   LakeMetrics,
 } from './types.js';
 
-// Brand constructors
+// =============================================================================
+// Stable Brand Constructor Exports
+// =============================================================================
+
+/**
+ * Factory functions for creating branded type instances - stable.
+ *
+ * These functions convert plain strings to type-safe branded types,
+ * ensuring compile-time type safety when working with identifiers.
+ *
+ * @see {@link createCDCEventId} - Create a CDCEventId
+ * @see {@link createPartitionKey} - Create a PartitionKey
+ * @see {@link createParquetFileId} - Create a ParquetFileId
+ * @see {@link createSnapshotId} - Create a SnapshotId
+ * @see {@link createCompactionJobId} - Create a CompactionJobId
+ *
+ * @example
+ * ```typescript
+ * import { createPartitionKey, createSnapshotId } from '@dotdo/lake.do';
+ *
+ * const partitionKey = createPartitionKey('date=2024-01-15');
+ * const snapshotId = createSnapshotId('snap_123');
+ * ```
+ *
+ * @public
+ * @stability stable
+ */
 export {
   createCDCEventId,
   createPartitionKey,
@@ -89,21 +292,58 @@ export {
   createCompactionJobId,
 } from './types.js';
 
-// Re-export common types from sql.do (via types.ts which imports from sql.do)
+// =============================================================================
+// Re-exported Types from sql.do
+// =============================================================================
+
+/**
+ * Common types re-exported from @dotdo/sql.do for convenience - stable.
+ *
+ * These types are used in CDC events and are provided here to avoid
+ * requiring a separate import from sql.do.
+ *
+ * @see {@link TransactionId} - Transaction identifier
+ * @see {@link LSN} - Log sequence number
+ * @see {@link SQLValue} - SQL value union type
+ *
+ * @public
+ * @stability stable
+ */
 export type {
   TransactionId,
   LSN,
   SQLValue,
+} from './types.js';
+
+/**
+ * CDC types re-exported from @dotdo/sql.do - experimental.
+ *
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export type {
   CDCOperation,
   CDCEvent,
   ClientCDCOperation,
   ClientCapabilities,
 } from './types.js';
 
-// Re-export values from sql.do
+/**
+ * CDC constants and utilities - experimental.
+ *
+ * @see {@link CDCOperationCode} - Enum of CDC operation codes
+ * @see {@link isServerCDCEvent} - Type guard for server CDC events
+ * @see {@link isClientCDCEvent} - Type guard for client CDC events
+ * @see {@link serverToClientCDCEvent} - Convert server event format
+ * @see {@link clientToServerCDCEvent} - Convert client event format
+ *
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
 export {
   CDCOperationCode,
-  DEFAULT_CLIENT_CAPABILITIES,
   // Type Guards
   isServerCDCEvent,
   isClientCDCEvent,
@@ -112,4 +352,15 @@ export {
   // Converters
   serverToClientCDCEvent,
   clientToServerCDCEvent,
+} from './types.js';
+
+/**
+ * Default client capabilities - experimental.
+ *
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export {
+  DEFAULT_CLIENT_CAPABILITIES,
 } from './types.js';

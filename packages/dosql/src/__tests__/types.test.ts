@@ -5,8 +5,8 @@
  * We use @ts-expect-error to assert type mismatches.
  */
 
-import type { SQL, QueryResult, DatabaseSchema } from './parser.js';
-import { createDatabase, createQuery } from './parser.js';
+import type { SQL, QueryResult, DatabaseSchema } from '../parser.js';
+import { createDatabase, createQuery } from '../parser.js';
 
 // =============================================================================
 // TEST DATABASE SCHEMA

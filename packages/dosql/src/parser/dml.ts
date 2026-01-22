@@ -11,6 +11,11 @@
  * - INSERT OR REPLACE/IGNORE/ABORT
  */
 
+import {
+  calculateLocation,
+  getSuggestionForTypo,
+} from './shared/errors.js';
+
 import type {
   DMLStatement,
   InsertStatement,
@@ -71,6 +76,31 @@ interface ParserState {
  */
 function createState(input: string): ParserState {
   return { input: input.trim(), position: 0 };
+}
+
+/**
+ * Create an enhanced parse error with location information
+ */
+function createParseError(
+  error: string,
+  position: number,
+  input: string,
+  options?: { token?: string; expected?: string }
+): ParseError {
+  const location = calculateLocation(input, position);
+  const suggestion = options?.token ? getSuggestionForTypo(options.token) : undefined;
+
+  return {
+    success: false,
+    error,
+    position,
+    input,
+    line: location.line,
+    column: location.column,
+    token: options?.token,
+    expected: options?.expected,
+    suggestion,
+  };
 }
 
 /**
@@ -1364,7 +1394,14 @@ function parseInsertStatement(state: ParserState): ParseResult<InsertStatement> 
   // Check for INSERT keyword
   const insertMatch = matchKeyword(state, 'INSERT');
   if (!insertMatch) {
-    return { success: false, error: 'Expected INSERT', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0];
+    return createParseError(
+      `Expected INSERT but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'INSERT' }
+    );
   }
   state = skipWhitespace(insertMatch);
 
@@ -1379,14 +1416,28 @@ function parseInsertStatement(state: ParserState): ParseResult<InsertStatement> 
   // Expect INTO
   const intoMatch = matchKeyword(state, 'INTO');
   if (!intoMatch) {
-    return { success: false, error: 'Expected INTO', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0] || 'end of input';
+    return createParseError(
+      `Expected INTO after INSERT but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'INTO' }
+    );
   }
   state = skipWhitespace(intoMatch);
 
   // Parse table name
   const tableResult = parseIdentifier(state);
   if (!tableResult) {
-    return { success: false, error: 'Expected table name', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0] || 'end of input';
+    return createParseError(
+      `Expected table name after INTO but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'table name' }
+    );
   }
   const table = tableResult.value;
   state = skipWhitespace(tableResult.state);
@@ -1418,7 +1469,14 @@ function parseInsertStatement(state: ParserState): ParseResult<InsertStatement> 
       }
 
       if (!remaining(state).startsWith(')')) {
-        return { success: false, error: 'Expected )', position: state.position, input: state.input };
+        const rest = remaining(state);
+        const token = rest.split(/[\s,)]/)[0] || 'end of input';
+        return createParseError(
+          `Expected ')' after column list but got '${token}'`,
+          state.position,
+          state.input,
+          { token, expected: ')' }
+        );
       }
       state = advance(state, 1);
       state = skipWhitespace(state);
@@ -1435,7 +1493,14 @@ function parseInsertStatement(state: ParserState): ParseResult<InsertStatement> 
     state = skipWhitespace(matchKeyword(state, 'DEFAULT')!);
     const valuesMatch = matchKeyword(state, 'VALUES');
     if (!valuesMatch) {
-      return { success: false, error: 'Expected VALUES after DEFAULT', position: state.position, input: state.input };
+      const rest = remaining(state);
+      const token = rest.split(/\s/)[0] || 'end of input';
+      return createParseError(
+        `Expected VALUES after DEFAULT but got '${token}'`,
+        state.position,
+        state.input,
+        { token, expected: 'VALUES' }
+      );
     }
     state = valuesMatch;
     source = { type: 'insert_default' };
@@ -1448,7 +1513,12 @@ function parseInsertStatement(state: ParserState): ParseResult<InsertStatement> 
       state = skipWhitespace(state);
       if (!remaining(state).startsWith('(')) {
         if (rows.length === 0) {
-          return { success: false, error: 'Expected (', position: state.position, input: state.input };
+          return createParseError(
+            "Expected '(' to start values list",
+            state.position,
+            state.input,
+            { expected: '(' }
+          );
         }
         break;
       }
@@ -1457,12 +1527,24 @@ function parseInsertStatement(state: ParserState): ParseResult<InsertStatement> 
 
       const valuesResult = parseExpressionList(state);
       if (!valuesResult) {
-        return { success: false, error: 'Expected values', position: state.position, input: state.input };
+        return createParseError(
+          'Expected value expression in VALUES clause',
+          state.position,
+          state.input,
+          { expected: 'value expression' }
+        );
       }
 
       state = skipWhitespace(valuesResult.state);
       if (!remaining(state).startsWith(')')) {
-        return { success: false, error: 'Expected )', position: state.position, input: state.input };
+        const rest = remaining(state);
+        const token = rest.split(/[\s,)]/)[0] || 'end of input';
+        return createParseError(
+          `Expected ')' after values but got '${token}'`,
+          state.position,
+          state.input,
+          { token, expected: ')' }
+        );
       }
       state = advance(state, 1);
 
@@ -1510,7 +1592,14 @@ function parseInsertStatement(state: ParserState): ParseResult<InsertStatement> 
 
     source = { type: 'insert_select', query: selectQuery };
   } else {
-    return { success: false, error: 'Expected VALUES, SELECT, or DEFAULT VALUES', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0] || 'end of input';
+    return createParseError(
+      `Expected VALUES, SELECT, or DEFAULT VALUES but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'VALUES, SELECT, or DEFAULT VALUES' }
+    );
   }
 
   state = skipWhitespace(state);
@@ -1527,7 +1616,12 @@ function parseInsertStatement(state: ParserState): ParseResult<InsertStatement> 
   let returning: ReturningClause | undefined;
   const returningResult = parseReturningClause(state);
   if (returningResult.type === 'error') {
-    return { success: false, error: returningResult.message, position: returningResult.position, input: state.input };
+    return createParseError(
+      returningResult.message,
+      returningResult.position,
+      state.input,
+      { expected: 'RETURNING clause' }
+    );
   }
   if (returningResult.type === 'success') {
     returning = returningResult.returning;
@@ -1569,7 +1663,14 @@ function parseUpdateStatement(state: ParserState): ParseResult<UpdateStatement> 
   // Check for UPDATE keyword
   const updateMatch = matchKeyword(state, 'UPDATE');
   if (!updateMatch) {
-    return { success: false, error: 'Expected UPDATE', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0];
+    return createParseError(
+      `Expected UPDATE but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'UPDATE' }
+    );
   }
   state = skipWhitespace(updateMatch);
 
@@ -1584,7 +1685,14 @@ function parseUpdateStatement(state: ParserState): ParseResult<UpdateStatement> 
   // Parse table name (possibly qualified with schema: schema.table)
   const tableResult = parseQualifiedIdentifier(state);
   if (!tableResult) {
-    return { success: false, error: 'Expected table name', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0] || 'end of input';
+    return createParseError(
+      `Expected table name after UPDATE but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'table name' }
+    );
   }
   const table = tableResult.value;
   state = skipWhitespace(tableResult.state);
@@ -1611,14 +1719,28 @@ function parseUpdateStatement(state: ParserState): ParseResult<UpdateStatement> 
   // Expect SET
   const setMatch = matchKeyword(state, 'SET');
   if (!setMatch) {
-    return { success: false, error: 'Expected SET', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0] || 'end of input';
+    return createParseError(
+      `Expected SET after table name but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'SET' }
+    );
   }
   state = skipWhitespace(setMatch);
 
   // Parse SET clauses
   const setsResult = parseSetClauses(state);
   if (!setsResult) {
-    return { success: false, error: 'Expected SET clause', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/[\s=,]/)[0] || 'end of input';
+    return createParseError(
+      `Expected column assignment (column = value) but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'column = value' }
+    );
   }
   state = setsResult.state;
 
@@ -1658,7 +1780,12 @@ function parseUpdateStatement(state: ParserState): ParseResult<UpdateStatement> 
   let returning: ReturningClause | undefined;
   const returningResult = parseReturningClause(state);
   if (returningResult.type === 'error') {
-    return { success: false, error: returningResult.message, position: returningResult.position, input: state.input };
+    return createParseError(
+      returningResult.message,
+      returningResult.position,
+      state.input,
+      { expected: 'RETURNING clause' }
+    );
   }
   if (returningResult.type === 'success') {
     returning = returningResult.returning;
@@ -1702,21 +1829,42 @@ function parseDeleteStatement(state: ParserState): ParseResult<DeleteStatement> 
   // Check for DELETE keyword
   const deleteMatch = matchKeyword(state, 'DELETE');
   if (!deleteMatch) {
-    return { success: false, error: 'Expected DELETE', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0];
+    return createParseError(
+      `Expected DELETE but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'DELETE' }
+    );
   }
   state = skipWhitespace(deleteMatch);
 
   // Expect FROM
   const fromMatch = matchKeyword(state, 'FROM');
   if (!fromMatch) {
-    return { success: false, error: 'Expected FROM', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0] || 'end of input';
+    return createParseError(
+      `Expected FROM after DELETE but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'FROM' }
+    );
   }
   state = skipWhitespace(fromMatch);
 
   // Parse table name
   const tableResult = parseIdentifier(state);
   if (!tableResult) {
-    return { success: false, error: 'Expected table name', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0] || 'end of input';
+    return createParseError(
+      `Expected table name after FROM but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'table name' }
+    );
   }
   const table = tableResult.value;
   state = skipWhitespace(tableResult.state);
@@ -1780,7 +1928,12 @@ function parseDeleteStatement(state: ParserState): ParseResult<DeleteStatement> 
   let returning: ReturningClause | undefined;
   const returningResult = parseReturningClause(state);
   if (returningResult.type === 'error') {
-    return { success: false, error: returningResult.message, position: returningResult.position, input: state.input };
+    return createParseError(
+      returningResult.message,
+      returningResult.position,
+      state.input,
+      { expected: 'RETURNING clause' }
+    );
   }
   if (returningResult.type === 'success') {
     returning = returningResult.returning;
@@ -1822,21 +1975,42 @@ function parseReplaceStatement(state: ParserState): ParseResult<ReplaceStatement
   // Check for REPLACE keyword
   const replaceMatch = matchKeyword(state, 'REPLACE');
   if (!replaceMatch) {
-    return { success: false, error: 'Expected REPLACE', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0];
+    return createParseError(
+      `Expected REPLACE but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'REPLACE' }
+    );
   }
   state = skipWhitespace(replaceMatch);
 
   // Expect INTO
   const intoMatch = matchKeyword(state, 'INTO');
   if (!intoMatch) {
-    return { success: false, error: 'Expected INTO', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0] || 'end of input';
+    return createParseError(
+      `Expected INTO after REPLACE but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'INTO' }
+    );
   }
   state = skipWhitespace(intoMatch);
 
   // Parse table name
   const tableResult = parseIdentifier(state);
   if (!tableResult) {
-    return { success: false, error: 'Expected table name', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0] || 'end of input';
+    return createParseError(
+      `Expected table name after INTO but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'table name' }
+    );
   }
   const table = tableResult.value;
   state = skipWhitespace(tableResult.state);
@@ -1867,7 +2041,14 @@ function parseReplaceStatement(state: ParserState): ParseResult<ReplaceStatement
       }
 
       if (!remaining(state).startsWith(')')) {
-        return { success: false, error: 'Expected )', position: state.position, input: state.input };
+        const rest = remaining(state);
+        const token = rest.split(/[\s,)]/)[0] || 'end of input';
+        return createParseError(
+          `Expected ')' after column list but got '${token}'`,
+          state.position,
+          state.input,
+          { token, expected: ')' }
+        );
       }
       state = advance(state, 1);
       state = skipWhitespace(state);
@@ -1883,7 +2064,14 @@ function parseReplaceStatement(state: ParserState): ParseResult<ReplaceStatement
     state = skipWhitespace(matchKeyword(state, 'DEFAULT')!);
     const valuesMatch = matchKeyword(state, 'VALUES');
     if (!valuesMatch) {
-      return { success: false, error: 'Expected VALUES after DEFAULT', position: state.position, input: state.input };
+      const rest = remaining(state);
+      const token = rest.split(/\s/)[0] || 'end of input';
+      return createParseError(
+        `Expected VALUES after DEFAULT but got '${token}'`,
+        state.position,
+        state.input,
+        { token, expected: 'VALUES' }
+      );
     }
     state = valuesMatch;
     source = { type: 'insert_default' };
@@ -1896,7 +2084,12 @@ function parseReplaceStatement(state: ParserState): ParseResult<ReplaceStatement
       state = skipWhitespace(state);
       if (!remaining(state).startsWith('(')) {
         if (rows.length === 0) {
-          return { success: false, error: 'Expected (', position: state.position, input: state.input };
+          return createParseError(
+            "Expected '(' to start values list",
+            state.position,
+            state.input,
+            { expected: '(' }
+          );
         }
         break;
       }
@@ -1905,12 +2098,24 @@ function parseReplaceStatement(state: ParserState): ParseResult<ReplaceStatement
 
       const valuesResult = parseExpressionList(state);
       if (!valuesResult) {
-        return { success: false, error: 'Expected values', position: state.position, input: state.input };
+        return createParseError(
+          'Expected value expression in VALUES clause',
+          state.position,
+          state.input,
+          { expected: 'value expression' }
+        );
       }
 
       state = skipWhitespace(valuesResult.state);
       if (!remaining(state).startsWith(')')) {
-        return { success: false, error: 'Expected )', position: state.position, input: state.input };
+        const rest = remaining(state);
+        const token = rest.split(/[\s,)]/)[0] || 'end of input';
+        return createParseError(
+          `Expected ')' after values but got '${token}'`,
+          state.position,
+          state.input,
+          { token, expected: ')' }
+        );
       }
       state = advance(state, 1);
 
@@ -1952,7 +2157,14 @@ function parseReplaceStatement(state: ParserState): ParseResult<ReplaceStatement
 
     source = { type: 'insert_select', query: selectQuery };
   } else {
-    return { success: false, error: 'Expected VALUES, SELECT, or DEFAULT VALUES', position: state.position, input: state.input };
+    const rest = remaining(state);
+    const token = rest.split(/\s/)[0] || 'end of input';
+    return createParseError(
+      `Expected VALUES, SELECT, or DEFAULT VALUES but got '${token}'`,
+      state.position,
+      state.input,
+      { token, expected: 'VALUES, SELECT, or DEFAULT VALUES' }
+    );
   }
 
   state = skipWhitespace(state);
@@ -1961,7 +2173,12 @@ function parseReplaceStatement(state: ParserState): ParseResult<ReplaceStatement
   let returning: ReturningClause | undefined;
   const returningResult = parseReturningClause(state);
   if (returningResult.type === 'error') {
-    return { success: false, error: returningResult.message, position: returningResult.position, input: state.input };
+    return createParseError(
+      returningResult.message,
+      returningResult.position,
+      state.input,
+      { expected: 'RETURNING clause' }
+    );
   }
   if (returningResult.type === 'success') {
     returning = returningResult.returning;
@@ -2019,12 +2236,14 @@ export function parseDML(sql: string): ParseResult<DMLStatement> {
     return parseReplaceStatement(state);
   }
 
-  return {
-    success: false,
-    error: 'Expected INSERT, UPDATE, DELETE, or REPLACE',
-    position: 0,
-    input: sql,
-  };
+  // Extract the first token for better error message
+  const firstToken = trimmed.split(/\s/)[0] || 'empty input';
+  return createParseError(
+    `Expected DML statement (INSERT, UPDATE, DELETE, or REPLACE) but got '${firstToken}'`,
+    0,
+    sql,
+    { token: firstToken, expected: 'INSERT, UPDATE, DELETE, or REPLACE' }
+  );
 }
 
 /**

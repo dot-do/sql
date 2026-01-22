@@ -5,6 +5,8 @@
  * prepared statements, transactions, and pragma support.
  */
 
+import { TIMEOUTS, SIZE_LIMITS, PRAGMA_DEFAULTS } from './constants.js';
+
 import type {
   Database as IDatabase,
   Statement,
@@ -129,7 +131,7 @@ export class Database implements IDatabase {
 
     // Initialize cache
     const cacheOptions: CacheOptions = {
-      maxSize: options.statementCacheSize ?? 100,
+      maxSize: options.statementCacheSize ?? SIZE_LIMITS.DEFAULT_STATEMENT_CACHE_SIZE,
     };
     this.cache = new StatementCache(cacheOptions);
 
@@ -423,11 +425,11 @@ export class Database implements IDatabase {
     // Simple pragma handling for in-memory database
     const pragmaValues: Record<string, unknown> = {
       journal_mode: 'memory',
-      synchronous: 2,
-      foreign_keys: 1,
-      cache_size: -2000,
-      page_size: 4096,
-      busy_timeout: this.options.timeout ?? 5000,
+      synchronous: PRAGMA_DEFAULTS.SYNCHRONOUS,
+      foreign_keys: PRAGMA_DEFAULTS.FOREIGN_KEYS,
+      cache_size: PRAGMA_DEFAULTS.CACHE_SIZE,
+      page_size: PRAGMA_DEFAULTS.PAGE_SIZE,
+      busy_timeout: this.options.timeout ?? TIMEOUTS.DEFAULT_BUSY_TIMEOUT_MS,
       user_version: 0,
       application_id: 0,
       integrity_check: ['ok'],

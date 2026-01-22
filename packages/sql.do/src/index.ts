@@ -3,6 +3,15 @@
  *
  * SQL database client for Cloudflare Workers using CapnWeb RPC.
  *
+ * ## Stability
+ *
+ * This package follows semantic versioning. Exports are marked with stability annotations:
+ *
+ * - **stable**: No breaking changes in minor versions. Safe for production use.
+ * - **experimental**: May change in any version. Use with caution.
+ *
+ * See {@link https://github.com/dot-do/sql/blob/main/docs/STABILITY.md | STABILITY.md} for details.
+ *
  * @example
  * ```typescript
  * import { createSQLClient } from '@dotdo/sql.do';
@@ -23,13 +32,43 @@
  *
  * await client.close();
  * ```
+ *
+ * @packageDocumentation
  */
 
-// Client
+// =============================================================================
+// Stable Client Exports
+// =============================================================================
+
+/**
+ * @public
+ * @stability stable
+ */
 export { DoSQLClient, TransactionContext, SQLError, createSQLClient } from './client.js';
+
+/**
+ * Idempotency utilities for mutation safety.
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export { generateIdempotencyKey, isMutationQuery } from './client.js';
+
+/**
+ * @public
+ * @stability stable
+ */
 export type { SQLClientConfig, RetryConfig } from './client.js';
 
-// Types - re-exported from shared-types via types.ts
+// =============================================================================
+// Stable Type Exports
+// =============================================================================
+
+/**
+ * Core types for SQL operations - all stable.
+ * @public
+ * @stability stable
+ */
 export type {
   // Branded types
   TransactionId,
@@ -64,33 +103,99 @@ export type {
   RPCError,
   // Client interface
   SQLClient,
-  // Sharding types
+} from './types.js';
+
+/**
+ * Sharding types - experimental, subject to change.
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export type {
   ShardConfig,
   ShardInfo,
-  // CDC types
+} from './types.js';
+
+/**
+ * CDC (Change Data Capture) types - experimental, subject to change.
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export type {
   CDCOperation,
   ClientCDCOperation,
   CDCEvent,
   CDCOperationCodeValue,
-  // Client capabilities
+} from './types.js';
+
+/**
+ * Client capabilities - experimental, subject to change.
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export type {
   ClientCapabilities,
-  // Connection types
+} from './types.js';
+
+/**
+ * Connection types - experimental, subject to change.
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export type {
   ConnectionOptions,
   ConnectionStats,
 } from './types.js';
 
-// Brand constructors and utilities
+// =============================================================================
+// Stable Utility Exports
+// =============================================================================
+
+/**
+ * Brand constructors for typed identifiers - stable.
+ * @public
+ * @stability stable
+ */
 export {
   createTransactionId,
   createLSN,
   createStatementHash,
   createShardId,
-  // Column type utilities
+} from './types.js';
+
+/**
+ * Column type mapping utilities - stable.
+ * @public
+ * @stability stable
+ */
+export {
   SQL_TO_JS_TYPE_MAP,
   JS_TO_SQL_TYPE_MAP,
   sqlToJsType,
   jsToSqlType,
-  // CDC utilities
+} from './types.js';
+
+/**
+ * RPC error codes - stable.
+ * @public
+ * @stability stable
+ */
+export { RPCErrorCode } from './types.js';
+
+// =============================================================================
+// Experimental Utility Exports
+// =============================================================================
+
+/**
+ * CDC utilities - experimental, subject to change.
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export {
   CDCOperationCode,
   // Type guards
   isServerCDCEvent,
@@ -100,11 +205,25 @@ export {
   // Type converters
   serverToClientCDCEvent,
   clientToServerCDCEvent,
-  responseToResult,
-  resultToResponse,
-  // Default values
-  DEFAULT_CLIENT_CAPABILITIES,
 } from './types.js';
 
-// Re-export RPCErrorCode enum
-export { RPCErrorCode } from './types.js';
+/**
+ * Response/Result converters - experimental, subject to change.
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export {
+  responseToResult,
+  resultToResponse,
+} from './types.js';
+
+/**
+ * Default client capabilities - experimental, subject to change.
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export {
+  DEFAULT_CLIENT_CAPABILITIES,
+} from './types.js';

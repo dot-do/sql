@@ -20,7 +20,7 @@ import type {
   TableRef,
   DatabaseSchema,
   TableSchema,
-} from './join-parser.js';
+} from '../join-parser.js';
 
 // =============================================================================
 // TEST DATABASE SCHEMA

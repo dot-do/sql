@@ -15,6 +15,8 @@ import {
   type RpcSessionOptions,
 } from 'capnweb';
 
+import { TIMEOUTS, SIZE_LIMITS, CDC, STREAMS } from '../constants.js';
+
 import type {
   DoSQLAPI,
   QueryRequest,
@@ -181,8 +183,8 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
     super();
     this.#executor = executor;
     this.#cdcManager = cdcManager;
-    this.#streamTTLMs = options?.streamTTLMs ?? 30 * 60 * 1000; // Default: 30 minutes
-    this.#maxConcurrentStreams = options?.maxConcurrentStreams ?? 100;
+    this.#streamTTLMs = options?.streamTTLMs ?? TIMEOUTS.DEFAULT_STREAM_TTL_MS;
+    this.#maxConcurrentStreams = options?.maxConcurrentStreams ?? STREAMS.MAX_CONCURRENT_STREAMS;
     this.#onScheduleAlarm = options?.onScheduleAlarm;
   }
 
@@ -246,7 +248,7 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
       sql: request.sql,
       params: request.params,
       branch: request.branch,
-      chunkSize: request.chunkSize ?? 1000,
+      chunkSize: request.chunkSize ?? SIZE_LIMITS.DEFAULT_CHUNK_SIZE,
       maxRows: request.maxRows,
       offset: 0,
       totalRowsSent: 0,
@@ -334,7 +336,7 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
         timeoutMs: request.timeoutMs,
       });
 
-      const expiresAt = Date.now() + (request.timeoutMs ?? 30000);
+      const expiresAt = Date.now() + (request.timeoutMs ?? TIMEOUTS.DEFAULT_TRANSACTION_MS);
 
       return {
         txId,
@@ -495,10 +497,10 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
 
     // Poll with timeout
     const timeoutPromise = new Promise<{ done: true }>((resolve) =>
-      setTimeout(() => resolve({ done: true }), 100)
+      setTimeout(() => resolve({ done: true }), CDC.POLL_TIMEOUT_MS)
     );
 
-    while (events.length < 100) { // Max 100 events per poll
+    while (events.length < CDC.MAX_EVENTS_PER_POLL) {
       const result = await Promise.race([
         iterator.next(),
         timeoutPromise,
@@ -693,7 +695,7 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
 
     this.#alarmPending = true;
     // Schedule alarm for TTL + 1 minute buffer
-    this.#onScheduleAlarm(this.#streamTTLMs + 60000);
+    this.#onScheduleAlarm(this.#streamTTLMs + TIMEOUTS.STREAM_CLEANUP_BUFFER_MS);
   }
 
   #convertNamedParams(request: QueryRequest): unknown[] {

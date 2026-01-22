@@ -8,6 +8,12 @@
  * and @dotdo/shared-types) and provides server-specific types.
  */
 
+import {
+  SIZE_LIMITS,
+  TIMEOUTS,
+  THRESHOLDS,
+} from './constants.js';
+
 // =============================================================================
 // Re-export Unified Types from lake.do and sql.do
 // =============================================================================
@@ -426,16 +432,16 @@ export interface DoLakeConfig {
 export const DEFAULT_DOLAKE_CONFIG: DoLakeConfig = {
   r2BucketName: 'lakehouse-data',
   r2BasePath: 'warehouse',
-  flushThresholdEvents: 10000,
-  flushThresholdBytes: 32 * 1024 * 1024,
-  flushThresholdMs: 60_000,
-  flushIntervalMs: 30_000,
-  maxBufferSize: 128 * 1024 * 1024,
+  flushThresholdEvents: THRESHOLDS.FLUSH_THRESHOLD_EVENTS,
+  flushThresholdBytes: SIZE_LIMITS.FLUSH_THRESHOLD_BYTES,
+  flushThresholdMs: TIMEOUTS.FLUSH_THRESHOLD_MS,
+  flushIntervalMs: TIMEOUTS.FLUSH_INTERVAL_MS,
+  maxBufferSize: SIZE_LIMITS.MAX_BUFFER_SIZE,
   enableFallback: true,
-  maxFallbackSize: 64 * 1024 * 1024,
+  maxFallbackSize: SIZE_LIMITS.MAX_FALLBACK_SIZE,
   enableDeduplication: true,
-  deduplicationWindowMs: 300_000,
-  parquetRowGroupSize: 100_000,
+  deduplicationWindowMs: TIMEOUTS.DEDUPLICATION_WINDOW_MS,
+  parquetRowGroupSize: THRESHOLDS.PARQUET_ROW_GROUP_SIZE,
   parquetCompression: 'snappy',
 };
 

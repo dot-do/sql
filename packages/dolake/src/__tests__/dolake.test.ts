@@ -18,13 +18,13 @@ import {
   DEFAULT_DOLAKE_CONFIG,
   DEFAULT_DEDUP_CONFIG,
   DEFAULT_CLIENT_CAPABILITIES,
-} from './index.js';
+} from '../index.js';
 import {
   inferSchemaFromEvents,
   eventsToRows,
   writeParquet,
   createDataFile,
-} from './parquet.js';
+} from '../parquet.js';
 import {
   createSchema,
   createUnpartitionedSpec,
@@ -39,7 +39,7 @@ import {
   manifestListPath,
   dataFilePath,
   partitionToPath,
-} from './iceberg.js';
+} from '../iceberg.js';
 
 // =============================================================================
 // Test Utilities

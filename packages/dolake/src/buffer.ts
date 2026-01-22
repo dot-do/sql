@@ -14,6 +14,7 @@ import {
   generateBatchId,
   BufferOverflowError,
 } from './types.js';
+import { TIMEOUTS, THRESHOLDS, BUFFER } from './constants.js';
 
 // =============================================================================
 // Source Connection State
@@ -64,8 +65,8 @@ export interface DedupConfig {
 
 export const DEFAULT_DEDUP_CONFIG: DedupConfig = {
   enabled: true,
-  windowMs: 300_000,
-  maxEntries: 100_000,
+  windowMs: TIMEOUTS.DEDUPLICATION_WINDOW_MS,
+  maxEntries: THRESHOLDS.MAX_DEDUP_ENTRIES,
 };
 
 /**
@@ -584,7 +585,7 @@ export class CDCBufferManager {
    */
   private estimateEventSize(event: CDCEvent): number {
     // Rough estimate: JSON serialization + overhead
-    let size = 100; // Base overhead
+    let size = BUFFER.EVENT_SIZE_BASE_OVERHEAD;
     size += event.table.length;
     size += event.rowId.length;
     if (event.before) size += JSON.stringify(event.before).length;
