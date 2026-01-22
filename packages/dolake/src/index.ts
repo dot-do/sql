@@ -479,3 +479,44 @@ export {
   type VFSStorage,
   DEFAULT_DURABILITY_CONFIG,
 } from './durability.js';
+
+// =============================================================================
+// KV Fallback Storage
+// =============================================================================
+
+export {
+  KVFallbackStorage,
+  type KVFallbackConfig,
+  type ExtendedKVStorage,
+  type FallbackWriteResult,
+  type RecoveryResult as KVRecoveryResult,
+  type BulkRecoveryResult,
+  type StoredBatch,
+  type PendingBatchInfo,
+  type RecoveryMetrics as KVRecoveryMetrics,
+  type ExpirationWarnings,
+  type FallbackStatus,
+  type StartupRecoveryResult,
+  type AlarmHandlerResult,
+  type ChunkInfo,
+  DEFAULT_KV_FALLBACK_CONFIG,
+} from './kv-fallback.js';
+
+// =============================================================================
+// VFS Fallback Storage
+// =============================================================================
+
+export {
+  VFSFallbackStorage,
+  VFSStorageError,
+  type VFSFallbackConfig,
+  type VFSStorageStats,
+  type VFSWriteOptions,
+  type VFSWriteResult,
+  type VFSBatchWriteResult,
+  type BufferRotationResult,
+  type RecoveryResult as VFSRecoveryResult,
+  type AlarmResult as VFSAlarmResult,
+  type VFSBackend,
+  DEFAULT_VFS_FALLBACK_CONFIG,
+} from './vfs-fallback.js';
