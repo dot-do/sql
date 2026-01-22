@@ -109,6 +109,12 @@ export interface TraceCDCEvent extends CDCEvent {
 // =============================================================================
 
 /**
+ * Factory function for creating WebSocket connections.
+ * Enables dependency injection for testing with real DOs.
+ */
+export type WebSocketFactory = (shardId: string) => Promise<WebSocket>;
+
+/**
  * Configuration for TailWorkerCDCStreamer
  */
 export interface TailWorkerConfig {
@@ -134,6 +140,12 @@ export interface TailWorkerConfig {
   initialRetryDelayMs: number;
   /** Maximum retry delay (ms) */
   maxRetryDelayMs: number;
+  /**
+   * Custom WebSocket factory for testing.
+   * If provided, this overrides the default URL-based connection.
+   * Use this to inject real DO connections in tests.
+   */
+  webSocketFactory?: WebSocketFactory;
 }
 
 /**
@@ -627,43 +639,60 @@ export class TailWorkerCDCStreamer {
     if (!state) return false;
 
     try {
-      const url = this.config.doLakeUrlPattern.replace('{shard}', shardId);
-      const ws = new WebSocket(url);
+      // Use factory if provided (for testing with real DOs), otherwise use URL pattern
+      const ws = this.config.webSocketFactory
+        ? await this.config.webSocketFactory(shardId)
+        : await this.createWebSocketFromUrl(shardId);
 
-      return new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          ws.close();
-          resolve(false);
-        }, this.config.ackTimeoutMs);
+      if (!ws) {
+        state.reconnectAttempts++;
+        return false;
+      }
 
-        ws.addEventListener('open', () => {
-          clearTimeout(timeout);
-          this.connections.set(shardId, ws);
-          state.isConnected = true;
-          state.reconnectAttempts = 0;
-          resolve(true);
-        });
+      this.connections.set(shardId, ws);
+      state.isConnected = true;
+      state.reconnectAttempts = 0;
 
-        ws.addEventListener('error', () => {
-          clearTimeout(timeout);
-          state.reconnectAttempts++;
-          resolve(false);
-        });
-
-        ws.addEventListener('close', () => {
-          state.isConnected = false;
-          this.connections.delete(shardId);
-        });
-
-        // Handle ACKs
-        ws.addEventListener('message', (event) => {
-          this.handleAck(shardId, event.data);
-        });
+      // Setup event handlers
+      ws.addEventListener('close', () => {
+        state.isConnected = false;
+        this.connections.delete(shardId);
       });
+
+      ws.addEventListener('message', (event) => {
+        this.handleAck(shardId, event.data);
+      });
+
+      return true;
     } catch {
       state.reconnectAttempts++;
       return false;
     }
+  }
+
+  /**
+   * Create WebSocket connection from URL pattern (production use)
+   */
+  private createWebSocketFromUrl(shardId: string): Promise<WebSocket | null> {
+    const url = this.config.doLakeUrlPattern.replace('{shard}', shardId);
+    const ws = new WebSocket(url);
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        ws.close();
+        resolve(null);
+      }, this.config.ackTimeoutMs);
+
+      ws.addEventListener('open', () => {
+        clearTimeout(timeout);
+        resolve(ws);
+      });
+
+      ws.addEventListener('error', () => {
+        clearTimeout(timeout);
+        resolve(null);
+      });
+    });
   }
 
   /**
