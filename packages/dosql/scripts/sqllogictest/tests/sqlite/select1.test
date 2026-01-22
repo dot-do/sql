@@ -1,0 +1,126 @@
+# Basic SELECT tests from SQLLogicTest
+
+statement ok
+CREATE TABLE t1(x INTEGER, y INTEGER, z INTEGER)
+
+statement ok
+INSERT INTO t1(x, y, z) VALUES(1, 2, 3)
+
+statement ok
+INSERT INTO t1(x, y, z) VALUES(2, 3, 4)
+
+statement ok
+INSERT INTO t1(x, y, z) VALUES(3, 4, 5)
+
+statement ok
+INSERT INTO t1(x, y, z) VALUES(4, 5, 6)
+
+statement ok
+INSERT INTO t1(x, y, z) VALUES(5, 6, 7)
+
+query I rowsort
+SELECT x FROM t1
+----
+1
+2
+3
+4
+5
+
+query I rowsort
+SELECT y FROM t1
+----
+2
+3
+4
+5
+6
+
+query I rowsort
+SELECT z FROM t1
+----
+3
+4
+5
+6
+7
+
+query II rowsort
+SELECT x, y FROM t1
+----
+1
+2
+2
+3
+3
+4
+4
+5
+5
+6
+
+query III rowsort
+SELECT x, y, z FROM t1
+----
+1
+2
+3
+2
+3
+4
+3
+4
+5
+4
+5
+6
+5
+6
+7
+
+query I rowsort
+SELECT x FROM t1 WHERE y > 3
+----
+3
+4
+5
+
+query I rowsort
+SELECT x FROM t1 WHERE z < 6
+----
+1
+2
+3
+
+query II rowsort
+SELECT x, z FROM t1 WHERE y = 4
+----
+3
+5
+
+statement ok
+CREATE TABLE t2(a INTEGER, b TEXT)
+
+statement ok
+INSERT INTO t2(a, b) VALUES(1, 'one')
+
+statement ok
+INSERT INTO t2(a, b) VALUES(2, 'two')
+
+statement ok
+INSERT INTO t2(a, b) VALUES(3, 'three')
+
+query IT rowsort
+SELECT a, b FROM t2
+----
+1
+one
+2
+two
+3
+three
+
+query I rowsort
+SELECT a FROM t2 WHERE b = 'two'
+----
+2

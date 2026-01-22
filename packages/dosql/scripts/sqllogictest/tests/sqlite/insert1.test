@@ -1,0 +1,34 @@
+# INSERT tests
+
+statement ok
+CREATE TABLE insert_test(id INTEGER, value TEXT)
+
+statement ok
+INSERT INTO insert_test(id, value) VALUES(1, 'first')
+
+statement ok
+INSERT INTO insert_test(id, value) VALUES(2, 'second')
+
+statement ok
+INSERT INTO insert_test(id, value) VALUES(3, 'third')
+
+query IT rowsort
+SELECT id, value FROM insert_test
+----
+1
+first
+2
+second
+3
+third
+
+statement ok
+INSERT INTO insert_test(id, value) VALUES(4, 'fourth')
+
+query I rowsort
+SELECT id FROM insert_test
+----
+1
+2
+3
+4

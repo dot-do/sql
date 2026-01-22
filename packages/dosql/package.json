@@ -1,0 +1,109 @@
+{
+  "name": "@dotdo/dosql",
+  "version": "0.1.0-rc.1",
+  "description": "Type-safe SQL for TypeScript with compile-time query validation",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./rpc": {
+      "types": "./dist/rpc/index.d.ts",
+      "import": "./dist/rpc/index.js"
+    },
+    "./wal": {
+      "types": "./dist/wal/index.d.ts",
+      "import": "./dist/wal/index.js"
+    },
+    "./cdc": {
+      "types": "./dist/cdc/index.d.ts",
+      "import": "./dist/cdc/index.js"
+    },
+    "./transaction": {
+      "types": "./dist/transaction/index.d.ts",
+      "import": "./dist/transaction/index.js"
+    },
+    "./orm/prisma": {
+      "types": "./dist/orm/prisma/index.d.ts",
+      "import": "./dist/orm/prisma/index.js"
+    },
+    "./orm/kysely": {
+      "types": "./dist/orm/kysely/index.d.ts",
+      "import": "./dist/orm/kysely/index.js"
+    },
+    "./orm/knex": {
+      "types": "./dist/orm/knex/index.d.ts",
+      "import": "./dist/orm/knex/index.js"
+    },
+    "./orm/drizzle": {
+      "types": "./dist/orm/drizzle/index.d.ts",
+      "import": "./dist/orm/drizzle/index.js"
+    },
+    "./e2e": {
+      "types": "./e2e/index.d.ts",
+      "import": "./e2e/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:types": "tsc --noEmit",
+    "test:e2e": "vitest run --config e2e/vitest.config.ts",
+    "test:e2e:deploy": "npx tsx e2e/setup.ts deploy",
+    "test:e2e:cleanup": "npx tsx e2e/setup.ts cleanup",
+    "test:e2e:ci": "E2E_AUTO_DEPLOY=1 vitest run --config e2e/vitest.config.ts",
+    "test:e2e:watch": "vitest --config e2e/vitest.config.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "sql",
+    "typescript",
+    "type-safe",
+    "cloudflare",
+    "workers",
+    "durable-objects",
+    "capnweb",
+    "rpc"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "ai-evaluate": "^2.1.5",
+    "capnweb": "^0.4.0",
+    "drizzle-orm": "^0.45.1",
+    "iceberg-js": "^0.8.1",
+    "knex": "^3.1.0",
+    "kysely": "^0.27.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.5",
+    "@cloudflare/workers-types": "^4.0.0",
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^22.0.0",
+    "@types/sql.js": "^1.4.9",
+    "@vitest/runner": "^2.1.9",
+    "@vitest/snapshot": "^2.1.9",
+    "better-sqlite3": "^12.6.2",
+    "cloudflare-worker-sqlite-wasm": "^0.0.1-alpha.5",
+    "sql.js": "^1.13.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^2.1.9",
+    "wrangler": "^4.59.3"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@cloudflare/workers-types": {
+      "optional": true
+    }
+  }
+}

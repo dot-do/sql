@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dosql-capnweb-rpc-example",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Durable Objects bindings
+  "durable_objects": {
+    "bindings": [
+      { "name": "DOSQL_DB", "class_name": "DoSQLDatabase" }
+    ]
+  },
+
+  // DO Migrations
+  "migrations": [
+    { "tag": "v1", "new_classes": ["DoSQLDatabase"] }
+  ],
+
+  // R2 bucket for persistent storage (optional)
+  "r2_buckets": [
+    { "binding": "R2_BUCKET", "bucket_name": "dosql-data" }
+  ]
+}

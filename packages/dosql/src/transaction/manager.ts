@@ -1,0 +1,717 @@
+/**
+ * Transaction Manager for DoSQL
+ *
+ * Implements SQLite-compatible transaction semantics with:
+ * - BEGIN/COMMIT/ROLLBACK
+ * - Savepoints for nested transactions
+ * - Integration with WAL for durability
+ * - Lock management for isolation
+ *
+ * @packageDocumentation
+ */
+
+import type { WALWriter, LSN, TransactionId } from '../wal/types.js';
+import { createLSN, createTransactionId } from '../wal/types.js';
+import { generateTxnId } from '../wal/writer.js';
+import {
+  type TransactionManager,
+  type TransactionContext,
+  type TransactionOptions,
+  type TransactionLog,
+  type TransactionLogEntry,
+  type Savepoint,
+  type SavepointStack,
+  type ApplyFunction,
+  type HeldLock,
+  TransactionState,
+  TransactionMode,
+  IsolationLevel,
+  LockType,
+  TransactionError,
+  TransactionErrorCode,
+  createTransactionLog,
+  createSavepointStack,
+} from './types.js';
+
+// =============================================================================
+// Transaction Manager Implementation
+// =============================================================================
+
+/**
+ * Options for creating the transaction manager
+ */
+export interface TransactionManagerOptions {
+  /** WAL writer for durability */
+  walWriter?: WALWriter;
+  /** Default isolation level */
+  defaultIsolationLevel?: IsolationLevel;
+  /** Default lock timeout in milliseconds */
+  defaultLockTimeout?: number;
+  /** Enable MVCC for snapshot isolation */
+  enableMVCC?: boolean;
+}
+
+/**
+ * Creates a new transaction manager
+ *
+ * @example
+ * ```typescript
+ * const manager = createTransactionManager({
+ *   walWriter: walWriter,
+ *   defaultIsolationLevel: IsolationLevel.SERIALIZABLE
+ * });
+ *
+ * // Begin transaction
+ * await manager.begin();
+ *
+ * // Perform operations...
+ * manager.logOperation({ op: 'INSERT', table: 'users', afterValue: data });
+ *
+ * // Commit
+ * await manager.commit();
+ * ```
+ */
+export function createTransactionManager(
+  options: TransactionManagerOptions = {}
+): TransactionManager {
+  const {
+    walWriter,
+    defaultIsolationLevel = IsolationLevel.SERIALIZABLE,
+    defaultLockTimeout = 5000,
+    enableMVCC = false,
+  } = options;
+
+  // Current transaction state
+  let currentContext: TransactionContext | null = null;
+  let applyFn: ApplyFunction | null = null;
+
+  // Active transactions tracking (for MVCC)
+  const activeTransactions = new Set<TransactionId>();
+
+  /**
+   * Create a new transaction context
+   */
+  function createContext(txnOptions: TransactionOptions): TransactionContext {
+    const txnId: TransactionId = txnOptions.txnId ?? createTransactionId(generateTxnId());
+    const now = Date.now();
+
+    return {
+      txnId,
+      state: TransactionState.ACTIVE,
+      mode: txnOptions.mode ?? TransactionMode.DEFERRED,
+      isolationLevel: txnOptions.isolationLevel ?? defaultIsolationLevel,
+      savepoints: createSavepointStack(),
+      log: createTransactionLog(txnId),
+      locks: [],
+      startedAt: now,
+      readOnly: txnOptions.readOnly ?? false,
+      autoCommit: false,
+      snapshot:
+        txnOptions.isolationLevel === IsolationLevel.SNAPSHOT || enableMVCC
+          ? {
+              txnId,
+              snapshotLsn: walWriter?.getCurrentLSN() ?? createLSN(0n),
+              timestamp: now,
+              activeTransactions: new Set(activeTransactions),
+            }
+          : undefined,
+    };
+  }
+
+  /**
+   * Write transaction control entry to WAL
+   */
+  async function writeToWAL(
+    op: 'BEGIN' | 'COMMIT' | 'ROLLBACK',
+    txnId: TransactionId
+  ): Promise<LSN> {
+    if (!walWriter) {
+      return createLSN(0n);
+    }
+
+    const result = await walWriter.append(
+      {
+        timestamp: Date.now(),
+        txnId,
+        op,
+        table: '',
+      },
+      { sync: op === 'COMMIT' || op === 'ROLLBACK' }
+    );
+
+    return result.lsn;
+  }
+
+  /**
+   * Apply rollback for entries from endIndex (exclusive) to startIndex (inclusive)
+   */
+  async function applyRollback(
+    log: TransactionLog,
+    startIndex: number,
+    endIndex: number
+  ): Promise<void> {
+    if (!applyFn) {
+      throw new TransactionError(
+        TransactionErrorCode.ROLLBACK_FAILED,
+        'No apply function set for rollback operations',
+        log.txnId
+      );
+    }
+
+    // Apply in reverse order for proper undo
+    for (let i = endIndex - 1; i >= startIndex; i--) {
+      const entry = log.entries[i];
+
+      // Skip savepoint-related entries
+      if (
+        entry.op === 'SAVEPOINT' ||
+        entry.op === 'RELEASE' ||
+        entry.op === 'ROLLBACK_TO'
+      ) {
+        continue;
+      }
+
+      // Determine undo operation
+      switch (entry.op) {
+        case 'INSERT':
+          // Undo INSERT by DELETE
+          await applyFn('DELETE', entry.table, entry.key, entry.beforeValue);
+          break;
+        case 'UPDATE':
+          // Undo UPDATE by restoring previous value
+          await applyFn('UPDATE', entry.table, entry.key, entry.beforeValue);
+          break;
+        case 'DELETE':
+          // Undo DELETE by INSERT
+          await applyFn('INSERT', entry.table, entry.key, entry.beforeValue);
+          break;
+      }
+    }
+  }
+
+  /**
+   * Find savepoint by name
+   */
+  function findSavepoint(
+    stack: SavepointStack,
+    name: string
+  ): { savepoint: Savepoint; index: number } | null {
+    const index = stack.savepoints.findIndex((sp) => sp.name === name);
+    if (index === -1) {
+      return null;
+    }
+    return { savepoint: stack.savepoints[index], index };
+  }
+
+  // Public interface
+  const manager: TransactionManager = {
+    async begin(options: TransactionOptions = {}): Promise<TransactionContext> {
+      if (currentContext !== null) {
+        throw new TransactionError(
+          TransactionErrorCode.TRANSACTION_ALREADY_ACTIVE,
+          `Transaction ${currentContext.txnId} is already active`,
+          currentContext.txnId
+        );
+      }
+
+      const context = createContext(options);
+      currentContext = context;
+      activeTransactions.add(context.txnId);
+
+      // Write BEGIN to WAL
+      try {
+        await writeToWAL('BEGIN', context.txnId);
+      } catch (error) {
+        currentContext = null;
+        activeTransactions.delete(context.txnId);
+        throw new TransactionError(
+          TransactionErrorCode.WAL_FAILURE,
+          'Failed to write BEGIN to WAL',
+          context.txnId,
+          error instanceof Error ? error : undefined
+        );
+      }
+
+      return context;
+    },
+
+    async commit(): Promise<LSN> {
+      if (!currentContext) {
+        throw new TransactionError(
+          TransactionErrorCode.NO_ACTIVE_TRANSACTION,
+          'No active transaction to commit'
+        );
+      }
+
+      const context = currentContext;
+
+      // Write COMMIT to WAL
+      let commitLsn: LSN;
+      try {
+        commitLsn = await writeToWAL('COMMIT', context.txnId);
+      } catch (error) {
+        throw new TransactionError(
+          TransactionErrorCode.WAL_FAILURE,
+          'Failed to write COMMIT to WAL',
+          context.txnId,
+          error instanceof Error ? error : undefined
+        );
+      }
+
+      // Clear state
+      activeTransactions.delete(context.txnId);
+      currentContext = null;
+
+      return commitLsn;
+    },
+
+    async rollback(): Promise<void> {
+      if (!currentContext) {
+        throw new TransactionError(
+          TransactionErrorCode.NO_ACTIVE_TRANSACTION,
+          'No active transaction to rollback'
+        );
+      }
+
+      const context = currentContext;
+
+      // Apply rollback for all logged operations that need undo
+      const undoableEntries = context.log.entries.filter(
+        (e) => e.op === 'INSERT' || e.op === 'UPDATE' || e.op === 'DELETE'
+      );
+
+      if (undoableEntries.length > 0) {
+        if (!applyFn) {
+          throw new TransactionError(
+            TransactionErrorCode.ROLLBACK_FAILED,
+            'No apply function set for rollback operations',
+            context.txnId
+          );
+        }
+
+        try {
+          await applyRollback(context.log, 0, context.log.entries.length);
+        } catch (error) {
+          throw new TransactionError(
+            TransactionErrorCode.ROLLBACK_FAILED,
+            'Failed to apply rollback operations',
+            context.txnId,
+            error instanceof Error ? error : undefined
+          );
+        }
+      }
+
+      // Write ROLLBACK to WAL
+      try {
+        await writeToWAL('ROLLBACK', context.txnId);
+      } catch (error) {
+        // Log but don't fail - rollback already applied in memory
+        console.error('Failed to write ROLLBACK to WAL:', error);
+      }
+
+      // Clear state
+      activeTransactions.delete(context.txnId);
+      currentContext = null;
+    },
+
+    async savepoint(name: string): Promise<Savepoint> {
+      if (!currentContext) {
+        throw new TransactionError(
+          TransactionErrorCode.NO_ACTIVE_TRANSACTION,
+          'No active transaction for savepoint'
+        );
+      }
+
+      const context = currentContext;
+
+      // Check for duplicate savepoint name
+      if (findSavepoint(context.savepoints, name)) {
+        throw new TransactionError(
+          TransactionErrorCode.DUPLICATE_SAVEPOINT,
+          `Savepoint '${name}' already exists`,
+          context.txnId
+        );
+      }
+
+      const savepoint: Savepoint = {
+        name,
+        lsn: walWriter?.getCurrentLSN() ?? createLSN(0n),
+        timestamp: Date.now(),
+        logSnapshotIndex: context.log.entries.length,
+        depth: context.savepoints.savepoints.length,
+      };
+
+      // Push to stack
+      context.savepoints.savepoints.push(savepoint);
+      context.savepoints.maxDepth = Math.max(
+        context.savepoints.maxDepth,
+        savepoint.depth + 1
+      );
+
+      // Update state if first savepoint
+      if (context.state === TransactionState.ACTIVE) {
+        context.state = TransactionState.SAVEPOINT;
+      }
+
+      // Log the savepoint operation
+      manager.logOperation({
+        op: 'SAVEPOINT',
+        table: '',
+        savepointName: name,
+      });
+
+      return savepoint;
+    },
+
+    async release(name: string): Promise<void> {
+      if (!currentContext) {
+        throw new TransactionError(
+          TransactionErrorCode.NO_ACTIVE_TRANSACTION,
+          'No active transaction for release'
+        );
+      }
+
+      const context = currentContext;
+      const found = findSavepoint(context.savepoints, name);
+
+      if (!found) {
+        throw new TransactionError(
+          TransactionErrorCode.SAVEPOINT_NOT_FOUND,
+          `Savepoint '${name}' not found`,
+          context.txnId
+        );
+      }
+
+      // Remove this savepoint and all nested ones
+      context.savepoints.savepoints = context.savepoints.savepoints.slice(
+        0,
+        found.index
+      );
+
+      // Update state if no more savepoints
+      if (context.savepoints.savepoints.length === 0) {
+        context.state = TransactionState.ACTIVE;
+      }
+
+      // Log the release operation
+      manager.logOperation({
+        op: 'RELEASE',
+        table: '',
+        savepointName: name,
+      });
+    },
+
+    async rollbackTo(name: string): Promise<void> {
+      if (!currentContext) {
+        throw new TransactionError(
+          TransactionErrorCode.NO_ACTIVE_TRANSACTION,
+          'No active transaction for rollback to savepoint'
+        );
+      }
+
+      const context = currentContext;
+      const found = findSavepoint(context.savepoints, name);
+
+      if (!found) {
+        throw new TransactionError(
+          TransactionErrorCode.SAVEPOINT_NOT_FOUND,
+          `Savepoint '${name}' not found`,
+          context.txnId
+        );
+      }
+
+      // Apply rollback for operations after the savepoint
+      if (applyFn && context.log.entries.length > found.savepoint.logSnapshotIndex) {
+        try {
+          await applyRollback(
+            context.log,
+            found.savepoint.logSnapshotIndex,
+            context.log.entries.length
+          );
+        } catch (error) {
+          throw new TransactionError(
+            TransactionErrorCode.ROLLBACK_FAILED,
+            `Failed to rollback to savepoint '${name}'`,
+            context.txnId,
+            error instanceof Error ? error : undefined
+          );
+        }
+      }
+
+      // Truncate log to savepoint
+      context.log.entries = context.log.entries.slice(
+        0,
+        found.savepoint.logSnapshotIndex
+      );
+      context.log.currentSequence = found.savepoint.logSnapshotIndex;
+
+      // Remove savepoints after this one (but keep this one)
+      context.savepoints.savepoints = context.savepoints.savepoints.slice(
+        0,
+        found.index + 1
+      );
+
+      // Log the rollback_to operation
+      manager.logOperation({
+        op: 'ROLLBACK_TO',
+        table: '',
+        savepointName: name,
+      });
+    },
+
+    getContext(): TransactionContext | null {
+      return currentContext;
+    },
+
+    isActive(): boolean {
+      return currentContext !== null;
+    },
+
+    getState(): TransactionState {
+      return currentContext?.state ?? TransactionState.NONE;
+    },
+
+    logOperation(
+      entry: Omit<TransactionLogEntry, 'sequence' | 'timestamp'>
+    ): void {
+      if (!currentContext) {
+        throw new TransactionError(
+          TransactionErrorCode.NO_ACTIVE_TRANSACTION,
+          'No active transaction for logging operation'
+        );
+      }
+
+      if (
+        currentContext.readOnly &&
+        (entry.op === 'INSERT' || entry.op === 'UPDATE' || entry.op === 'DELETE')
+      ) {
+        throw new TransactionError(
+          TransactionErrorCode.READ_ONLY_VIOLATION,
+          'Cannot modify data in read-only transaction',
+          currentContext.txnId
+        );
+      }
+
+      const logEntry: TransactionLogEntry = {
+        ...entry,
+        sequence: currentContext.log.currentSequence++,
+        timestamp: Date.now(),
+      };
+
+      currentContext.log.entries.push(logEntry);
+    },
+
+    setApplyFunction(fn: ApplyFunction): void {
+      applyFn = fn;
+    },
+  };
+
+  return manager;
+}
+
+// =============================================================================
+// Transaction Wrapper for Execute Function Pattern
+// =============================================================================
+
+/**
+ * Result type for transaction execution
+ */
+export interface TransactionResult<T> {
+  /** Whether transaction was committed */
+  committed: boolean;
+  /** Result value (if committed) */
+  value?: T;
+  /** Error (if rolled back) */
+  error?: Error;
+  /** Commit LSN (if committed) */
+  commitLsn?: bigint;
+}
+
+/**
+ * Execute a function within a transaction
+ *
+ * @example
+ * ```typescript
+ * const result = await executeInTransaction(manager, async (ctx) => {
+ *   // Operations within transaction
+ *   return { success: true };
+ * });
+ *
+ * if (result.committed) {
+ *   console.log('Committed at LSN:', result.commitLsn);
+ * }
+ * ```
+ */
+export async function executeInTransaction<T>(
+  manager: TransactionManager,
+  fn: (context: TransactionContext) => Promise<T>,
+  options?: TransactionOptions
+): Promise<TransactionResult<T>> {
+  const context = await manager.begin(options);
+
+  try {
+    const value = await fn(context);
+    const commitLsn = await manager.commit();
+
+    return {
+      committed: true,
+      value,
+      commitLsn,
+    };
+  } catch (error) {
+    try {
+      await manager.rollback();
+    } catch (rollbackError) {
+      // Log rollback failure but return original error
+      console.error('Rollback failed:', rollbackError);
+    }
+
+    return {
+      committed: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+// =============================================================================
+// Savepoint Wrapper for Nested Transaction Pattern
+// =============================================================================
+
+/**
+ * Execute a function within a savepoint (nested transaction)
+ *
+ * @example
+ * ```typescript
+ * await executeInTransaction(manager, async (ctx) => {
+ *   // Outer operations
+ *
+ *   const inner = await executeWithSavepoint(manager, 'sp1', async () => {
+ *     // Inner operations - can be rolled back independently
+ *     return { nested: true };
+ *   });
+ *
+ *   if (!inner.committed) {
+ *     // Inner failed but outer can continue
+ *   }
+ *
+ *   return { outer: true };
+ * });
+ * ```
+ */
+export async function executeWithSavepoint<T>(
+  manager: TransactionManager,
+  name: string,
+  fn: () => Promise<T>
+): Promise<TransactionResult<T>> {
+  const savepoint = await manager.savepoint(name);
+
+  try {
+    const value = await fn();
+    await manager.release(name);
+
+    return {
+      committed: true,
+      value,
+    };
+  } catch (error) {
+    try {
+      await manager.rollbackTo(name);
+    } catch (rollbackError) {
+      console.error('Rollback to savepoint failed:', rollbackError);
+    }
+
+    return {
+      committed: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+// =============================================================================
+// Auto-Commit Transaction Manager Wrapper
+// =============================================================================
+
+/**
+ * Wrapper that provides auto-commit behavior (each operation is its own transaction)
+ */
+export function createAutoCommitManager(
+  baseManager: TransactionManager
+): TransactionManager {
+  let autoCommitEnabled = true;
+
+  const wrapper: TransactionManager = {
+    async begin(options?: TransactionOptions): Promise<TransactionContext> {
+      const context = await baseManager.begin(options);
+      autoCommitEnabled = false;
+      return { ...context, autoCommit: true };
+    },
+
+    async commit(): Promise<LSN> {
+      const result = await baseManager.commit();
+      autoCommitEnabled = true;
+      return result;
+    },
+
+    async rollback(): Promise<void> {
+      await baseManager.rollback();
+      autoCommitEnabled = true;
+    },
+
+    async savepoint(name: string): Promise<Savepoint> {
+      return baseManager.savepoint(name);
+    },
+
+    async release(name: string): Promise<void> {
+      return baseManager.release(name);
+    },
+
+    async rollbackTo(name: string): Promise<void> {
+      return baseManager.rollbackTo(name);
+    },
+
+    getContext(): TransactionContext | null {
+      return baseManager.getContext();
+    },
+
+    isActive(): boolean {
+      return baseManager.isActive();
+    },
+
+    getState(): TransactionState {
+      return baseManager.getState();
+    },
+
+    logOperation(entry: Omit<TransactionLogEntry, 'sequence' | 'timestamp'>): void {
+      baseManager.logOperation(entry);
+    },
+
+    setApplyFunction(fn: ApplyFunction): void {
+      baseManager.setApplyFunction(fn);
+    },
+  };
+
+  return wrapper;
+}
+
+// =============================================================================
+// Read-Only Transaction Helper
+// =============================================================================
+
+/**
+ * Execute a read-only transaction
+ */
+export async function executeReadOnly<T>(
+  manager: TransactionManager,
+  fn: (context: TransactionContext) => Promise<T>
+): Promise<T> {
+  const context = await manager.begin({ readOnly: true });
+
+  try {
+    const result = await fn(context);
+    await manager.commit();
+    return result;
+  } catch (error) {
+    await manager.rollback();
+    throw error;
+  }
+}

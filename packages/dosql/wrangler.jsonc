@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dosql-test",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-01-01",
+
+  // Durable Objects
+  "durable_objects": {
+    "bindings": [
+      { "name": "DOSQL_DB", "class_name": "DoSQLDatabase" },
+      { "name": "TEST_BRANCH_DO", "class_name": "TestBranchDO" },
+      { "name": "BENCHMARK_TEST_DO", "class_name": "BenchmarkTestDO" },
+      { "name": "PERFORMANCE_BENCHMARK_DO", "class_name": "PerformanceBenchmarkDO" },
+      { "name": "PERFORMANCE_REGRESSION_DO", "class_name": "PerformanceRegressionDO" }
+    ]
+  },
+
+  // Migrations
+  "migrations": [
+    { "tag": "v1", "new_classes": ["DoSQLDatabase"] },
+    { "tag": "v2", "new_classes": ["TestBranchDO"] },
+    { "tag": "v3", "new_sqlite_classes": ["BenchmarkTestDO"] },
+    { "tag": "v4", "new_sqlite_classes": ["PerformanceBenchmarkDO"] },
+    { "tag": "v5", "new_sqlite_classes": ["PerformanceRegressionDO"] }
+  ],
+
+  // D1 Databases (for benchmark adapter tests)
+  "d1_databases": [
+    {
+      "binding": "TEST_D1",
+      "database_name": "dosql-test-d1",
+      "database_id": "local-test-d1"
+    }
+  ]
+}

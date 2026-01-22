@@ -1,0 +1,49 @@
+# UPDATE tests
+
+statement ok
+CREATE TABLE update_test(id INTEGER, count INTEGER)
+
+statement ok
+INSERT INTO update_test(id, count) VALUES(1, 10)
+
+statement ok
+INSERT INTO update_test(id, count) VALUES(2, 20)
+
+statement ok
+INSERT INTO update_test(id, count) VALUES(3, 30)
+
+query II rowsort
+SELECT id, count FROM update_test
+----
+1
+10
+2
+20
+3
+30
+
+statement ok
+UPDATE update_test SET count = 15 WHERE id = 1
+
+query II rowsort
+SELECT id, count FROM update_test
+----
+1
+15
+2
+20
+3
+30
+
+statement ok
+UPDATE update_test SET count = count + 5 WHERE id > 1
+
+query II rowsort
+SELECT id, count FROM update_test
+----
+1
+15
+2
+25
+3
+35

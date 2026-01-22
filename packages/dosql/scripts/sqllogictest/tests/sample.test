@@ -1,0 +1,79 @@
+# Sample SQLLogicTest file for DoSQL
+# This tests basic SQL functionality
+
+# Create a simple table
+statement ok
+CREATE TABLE t1(a INTEGER, b TEXT, c REAL)
+
+# Insert some data
+statement ok
+INSERT INTO t1(a, b, c) VALUES(1, 'hello', 1.5)
+
+statement ok
+INSERT INTO t1(a, b, c) VALUES(2, 'world', 2.5)
+
+statement ok
+INSERT INTO t1(a, b, c) VALUES(3, 'test', 3.5)
+
+# Basic SELECT
+query ITR rowsort
+SELECT a, b, c FROM t1
+----
+1
+hello
+1.500
+2
+world
+2.500
+3
+test
+3.500
+
+# SELECT with WHERE
+query ITR rowsort
+SELECT a, b, c FROM t1 WHERE a > 1
+----
+2
+world
+2.500
+3
+test
+3.500
+
+# SELECT specific columns
+query I rowsort
+SELECT a FROM t1
+----
+1
+2
+3
+
+# SELECT with ORDER BY
+query IT nosort
+SELECT a, b FROM t1 ORDER BY a
+----
+1
+hello
+2
+world
+3
+test
+
+# Create another table
+statement ok
+CREATE TABLE t2(x INTEGER, y INTEGER)
+
+statement ok
+INSERT INTO t2(x, y) VALUES(1, 10)
+
+statement ok
+INSERT INTO t2(x, y) VALUES(2, 20)
+
+# Basic query on t2
+query II rowsort
+SELECT x, y FROM t2
+----
+1
+10
+2
+20

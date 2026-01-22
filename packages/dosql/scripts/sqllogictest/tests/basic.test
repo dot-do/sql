@@ -1,0 +1,230 @@
+# Basic SQL operations test
+# Tests CREATE TABLE, INSERT, SELECT, UPDATE, DELETE
+
+hash-threshold 20
+
+# ==============================================================================
+# CREATE TABLE
+# ==============================================================================
+
+statement ok
+CREATE TABLE users(id INTEGER, name TEXT, age INTEGER)
+
+statement ok
+CREATE TABLE products(id INTEGER, title TEXT, price REAL)
+
+# Create table that already exists should work with IF NOT EXISTS
+statement ok
+CREATE TABLE IF NOT EXISTS users(id INTEGER, name TEXT, age INTEGER)
+
+# ==============================================================================
+# INSERT
+# ==============================================================================
+
+statement ok
+INSERT INTO users(id, name, age) VALUES(1, 'Alice', 30)
+
+statement ok
+INSERT INTO users(id, name, age) VALUES(2, 'Bob', 25)
+
+statement ok
+INSERT INTO users(id, name, age) VALUES(3, 'Charlie', 35)
+
+statement ok
+INSERT INTO users(id, name, age) VALUES(4, 'Diana', 28)
+
+statement ok
+INSERT INTO users(id, name, age) VALUES(5, 'Eve', 32)
+
+statement ok
+INSERT INTO products(id, title, price) VALUES(1, 'Widget', 9.99)
+
+statement ok
+INSERT INTO products(id, title, price) VALUES(2, 'Gadget', 19.99)
+
+statement ok
+INSERT INTO products(id, title, price) VALUES(3, 'Thing', 5.00)
+
+# ==============================================================================
+# SELECT - Basic
+# ==============================================================================
+
+# Select all from users
+query ITI rowsort
+SELECT id, name, age FROM users
+----
+1
+Alice
+30
+2
+Bob
+25
+3
+Charlie
+35
+4
+Diana
+28
+5
+Eve
+32
+
+# Select with WHERE clause
+query ITI rowsort
+SELECT id, name, age FROM users WHERE age > 30
+----
+3
+Charlie
+35
+5
+Eve
+32
+
+# Select single column
+query T rowsort
+SELECT name FROM users
+----
+Alice
+Bob
+Charlie
+Diana
+Eve
+
+# Select with ORDER BY
+query IT nosort
+SELECT id, name FROM users ORDER BY name
+----
+1
+Alice
+2
+Bob
+3
+Charlie
+4
+Diana
+5
+Eve
+
+# Select with ORDER BY DESC
+query IT nosort
+SELECT id, name FROM users ORDER BY age DESC
+----
+3
+Charlie
+5
+Eve
+1
+Alice
+4
+Diana
+2
+Bob
+
+# Select with LIMIT
+query IT nosort
+SELECT id, name FROM users ORDER BY id LIMIT 3
+----
+1
+Alice
+2
+Bob
+3
+Charlie
+
+# ==============================================================================
+# SELECT - Filtering
+# ==============================================================================
+
+# WHERE with equality
+query ITI rowsort
+SELECT id, name, age FROM users WHERE name = 'Alice'
+----
+1
+Alice
+30
+
+# WHERE with comparison
+query ITI rowsort
+SELECT id, name, age FROM users WHERE age >= 30
+----
+1
+Alice
+30
+3
+Charlie
+35
+5
+Eve
+32
+
+# WHERE with AND
+query ITI rowsort
+SELECT id, name, age FROM users WHERE age > 25 AND age < 35
+----
+1
+Alice
+30
+4
+Diana
+28
+5
+Eve
+32
+
+# ==============================================================================
+# UPDATE
+# ==============================================================================
+
+statement ok
+UPDATE users SET age = 31 WHERE id = 1
+
+# Verify update
+query ITI rowsort
+SELECT id, name, age FROM users WHERE id = 1
+----
+1
+Alice
+31
+
+# ==============================================================================
+# DELETE
+# ==============================================================================
+
+statement ok
+DELETE FROM users WHERE id = 5
+
+# Verify delete
+query I rowsort
+SELECT id FROM users
+----
+1
+2
+3
+4
+
+# ==============================================================================
+# Products queries
+# ==============================================================================
+
+query ITR rowsort
+SELECT id, title, price FROM products
+----
+1
+Widget
+9.990
+2
+Gadget
+19.990
+3
+Thing
+5.000
+
+query ITR rowsort
+SELECT id, title, price FROM products WHERE price > 6
+----
+1
+Widget
+9.990
+2
+Gadget
+19.990

@@ -1,0 +1,25 @@
+{
+  "name": "@dotdo/dosql-capnweb-rpc-example",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Example: DoSQL with CapnWeb RPC server in a Durable Object",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "capnweb": "^0.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.5",
+    "@cloudflare/workers-types": "^4.0.0",
+    "@vitest/runner": "^2.1.9",
+    "@vitest/snapshot": "^2.1.9",
+    "typescript": "^5.3.0",
+    "vitest": "^2.1.9",
+    "wrangler": "^4.59.3"
+  }
+}

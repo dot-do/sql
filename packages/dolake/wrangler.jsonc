@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dolake-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+
+  // Durable Objects
+  "durable_objects": {
+    "bindings": [
+      { "name": "DOLAKE", "class_name": "DoLake" }
+    ]
+  },
+
+  // R2 Buckets
+  "r2_buckets": [
+    { "binding": "LAKEHOUSE_BUCKET", "bucket_name": "dolake-data" }
+  ],
+
+  // Migrations
+  "migrations": [
+    { "tag": "v1", "new_classes": ["DoLake"] }
+  ]
+}

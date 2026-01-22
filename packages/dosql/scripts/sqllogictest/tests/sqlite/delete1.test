@@ -1,0 +1,48 @@
+# DELETE tests
+
+statement ok
+CREATE TABLE delete_test(id INTEGER, name TEXT)
+
+statement ok
+INSERT INTO delete_test(id, name) VALUES(1, 'a')
+
+statement ok
+INSERT INTO delete_test(id, name) VALUES(2, 'b')
+
+statement ok
+INSERT INTO delete_test(id, name) VALUES(3, 'c')
+
+statement ok
+INSERT INTO delete_test(id, name) VALUES(4, 'd')
+
+statement ok
+INSERT INTO delete_test(id, name) VALUES(5, 'e')
+
+query I rowsort
+SELECT id FROM delete_test
+----
+1
+2
+3
+4
+5
+
+statement ok
+DELETE FROM delete_test WHERE id = 3
+
+query I rowsort
+SELECT id FROM delete_test
+----
+1
+2
+4
+5
+
+statement ok
+DELETE FROM delete_test WHERE id > 3
+
+query I rowsort
+SELECT id FROM delete_test
+----
+1
+2

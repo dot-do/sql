@@ -1,0 +1,56 @@
+{
+  "name": "@dotdo/dolake",
+  "version": "0.1.0-rc.1",
+  "description": "DoLake - Lakehouse worker for CDC streaming to Iceberg/Parquet on R2",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:types": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "iceberg",
+    "parquet",
+    "lakehouse",
+    "cloudflare",
+    "workers",
+    "durable-objects",
+    "cdc",
+    "r2"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "hyparquet": "^1.9.0",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.5",
+    "@cloudflare/workers-types": "^4.0.0",
+    "@vitest/runner": "^2.1.9",
+    "@vitest/snapshot": "^2.1.9",
+    "typescript": "^5.3.0",
+    "vitest": "^2.1.9",
+    "wrangler": "^4.59.3"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@cloudflare/workers-types": {
+      "optional": true
+    }
+  }
+}
