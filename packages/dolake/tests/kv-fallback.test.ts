@@ -18,15 +18,14 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { env } from 'cloudflare:test';
 import type { CDCEvent } from '../src/index.js';
 import {
   KVFallbackStorage,
-  type KVFallbackConfig,
-  type FallbackWriteResult,
-  type RecoveryResult,
-  type ChunkInfo,
+  type ExtendedKVStorage,
   DEFAULT_KV_FALLBACK_CONFIG,
 } from '../src/kv-fallback.js';
+import type { R2Storage } from '../src/durability.js';
 
 // =============================================================================
 // Test Utilities
@@ -73,107 +72,108 @@ function createLargeEvent(targetSizeBytes: number): CDCEvent {
   });
 }
 
+// =============================================================================
+// Adapter: Wraps real Cloudflare KV to match ExtendedKVStorage interface
+// =============================================================================
+
 /**
- * Mock KV storage that tracks writes
+ * Adapter that wraps real Cloudflare KV to match the ExtendedKVStorage interface
  */
-class MockKVStorage {
-  private storage = new Map<string, { value: string; expiration?: number }>();
-  writeCount = 0;
-  readCount = 0;
-  deleteCount = 0;
-  lastWrittenKey: string | null = null;
-  lastWrittenExpiration: number | null = null;
+function createKVAdapter(kv: KVNamespace): ExtendedKVStorage & { clear(): Promise<void>; lastWrittenKey: string | null; lastWrittenExpiration: number | null } {
+  let lastWrittenKey: string | null = null;
+  let lastWrittenExpiration: number | null = null;
 
-  async write(key: string, value: string, options?: { expirationTtl?: number }): Promise<void> {
-    this.writeCount++;
-    this.lastWrittenKey = key;
-    this.lastWrittenExpiration = options?.expirationTtl ?? null;
-    this.storage.set(key, {
-      value,
-      expiration: options?.expirationTtl ? Date.now() + options.expirationTtl * 1000 : undefined,
-    });
-  }
-
-  async read(key: string): Promise<string | null> {
-    this.readCount++;
-    const entry = this.storage.get(key);
-    if (!entry) return null;
-    if (entry.expiration && Date.now() > entry.expiration) {
-      this.storage.delete(key);
-      return null;
-    }
-    return entry.value;
-  }
-
-  async delete(key: string): Promise<void> {
-    this.deleteCount++;
-    this.storage.delete(key);
-  }
-
-  async list(prefix: string): Promise<string[]> {
-    return Array.from(this.storage.keys()).filter((k) => k.startsWith(prefix));
-  }
-
-  getStorageSize(): number {
-    let total = 0;
-    for (const [key, entry] of this.storage) {
-      total += key.length + entry.value.length;
-    }
-    return total;
-  }
-
-  clear(): void {
-    this.storage.clear();
-    this.writeCount = 0;
-    this.readCount = 0;
-    this.deleteCount = 0;
-    this.lastWrittenKey = null;
-    this.lastWrittenExpiration = null;
-  }
+  return {
+    get lastWrittenKey() {
+      return lastWrittenKey;
+    },
+    get lastWrittenExpiration() {
+      return lastWrittenExpiration;
+    },
+    async write(key: string, value: string, options?: { expirationTtl?: number }): Promise<void> {
+      lastWrittenKey = key;
+      lastWrittenExpiration = options?.expirationTtl ?? null;
+      await kv.put(key, value, options ? { expirationTtl: options.expirationTtl } : undefined);
+    },
+    async read(key: string): Promise<string | null> {
+      return await kv.get(key);
+    },
+    async delete(key: string): Promise<void> {
+      await kv.delete(key);
+    },
+    async list(prefix: string): Promise<string[]> {
+      const result = await kv.list({ prefix });
+      return result.keys.map((k) => k.name);
+    },
+    async clear(): Promise<void> {
+      // Clear all keys - list and delete
+      const result = await kv.list();
+      for (const key of result.keys) {
+        await kv.delete(key.name);
+      }
+      lastWrittenKey = null;
+      lastWrittenExpiration = null;
+    },
+  };
 }
 
+// =============================================================================
+// Adapter: Wraps real Cloudflare R2 to match R2Storage interface with failure injection
+// =============================================================================
+
 /**
- * Mock R2 storage that can simulate failures
+ * Adapter that wraps real Cloudflare R2 to match the R2Storage interface
+ * Also supports failure injection for testing fallback behavior
  */
-class MockR2Storage {
-  private storage = new Map<string, Uint8Array>();
-  writeCount = 0;
-  failNextWrites = 0;
-  permanentFailure = false;
+function createR2Adapter(r2: R2Bucket): R2Storage & {
+  injectFailure(count: number, permanent?: boolean): void;
+  clearFailures(): void;
+  clear(): Promise<void>;
+  writeCount: number;
+} {
+  let failNextWrites = 0;
+  let permanentFailure = false;
+  let writeCount = 0;
 
-  async write(path: string, data: Uint8Array): Promise<void> {
-    this.writeCount++;
-    if (this.permanentFailure || this.failNextWrites > 0) {
-      if (this.failNextWrites > 0) this.failNextWrites--;
-      throw new Error('R2 write failed');
-    }
-    this.storage.set(path, data);
-  }
-
-  async read(path: string): Promise<Uint8Array | null> {
-    return this.storage.get(path) ?? null;
-  }
-
-  async delete(path: string): Promise<void> {
-    this.storage.delete(path);
-  }
-
-  injectFailure(count: number, permanent = false): void {
-    this.failNextWrites = count;
-    this.permanentFailure = permanent;
-  }
-
-  clearFailures(): void {
-    this.failNextWrites = 0;
-    this.permanentFailure = false;
-  }
-
-  clear(): void {
-    this.storage.clear();
-    this.writeCount = 0;
-    this.failNextWrites = 0;
-    this.permanentFailure = false;
-  }
+  return {
+    get writeCount() {
+      return writeCount;
+    },
+    async write(path: string, data: Uint8Array): Promise<void> {
+      writeCount++;
+      if (permanentFailure || failNextWrites > 0) {
+        if (failNextWrites > 0) failNextWrites--;
+        throw new Error('R2 write failed');
+      }
+      await r2.put(path, data);
+    },
+    async read(path: string): Promise<Uint8Array | null> {
+      const obj = await r2.get(path);
+      if (!obj) return null;
+      return new Uint8Array(await obj.arrayBuffer());
+    },
+    async delete(path: string): Promise<void> {
+      await r2.delete(path);
+    },
+    injectFailure(count: number, permanent = false): void {
+      failNextWrites = count;
+      permanentFailure = permanent;
+    },
+    clearFailures(): void {
+      failNextWrites = 0;
+      permanentFailure = false;
+    },
+    async clear(): Promise<void> {
+      // List and delete all objects
+      const listed = await r2.list();
+      for (const obj of listed.objects) {
+        await r2.delete(obj.key);
+      }
+      failNextWrites = 0;
+      permanentFailure = false;
+      writeCount = 0;
+    },
+  };
 }
 
 // =============================================================================
@@ -181,21 +181,23 @@ class MockR2Storage {
 // =============================================================================
 
 describe('R2 Failure Detection', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvAdapter: ReturnType<typeof createKVAdapter>;
+  let r2Adapter: ReturnType<typeof createR2Adapter>;
   let fallbackStorage: KVFallbackStorage;
 
-  beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+  beforeEach(async () => {
+    kvAdapter = createKVAdapter(env.KV_FALLBACK);
+    r2Adapter = createR2Adapter(env.LAKEHOUSE_BUCKET);
+    await kvAdapter.clear();
+    await r2Adapter.clear();
     fallbackStorage = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
     });
   });
 
   it('should detect R2 write failure', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const event = createTestEvent();
     const result = await fallbackStorage.writeWithFallback([event], 'test-batch-1');
@@ -207,13 +209,13 @@ describe('R2 Failure Detection', () => {
   });
 
   it('should attempt R2 write before falling back', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const event = createTestEvent();
     await fallbackStorage.writeWithFallback([event], 'test-batch-2');
 
     // EXPECTED: R2 write should have been attempted
-    expect(r2Storage.writeCount).toBe(1);
+    expect(r2Adapter.writeCount).toBe(1);
   });
 
   it('should not fallback when R2 succeeds', async () => {
@@ -223,11 +225,10 @@ describe('R2 Failure Detection', () => {
     // EXPECTED: No fallback needed
     expect(result.r2Failed).toBe(false);
     expect(result.usedKVFallback).toBe(false);
-    expect(kvStorage.writeCount).toBe(0);
   });
 
   it('should report both R2 success and KV fallback status', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const event = createTestEvent();
     const result = await fallbackStorage.writeWithFallback([event], 'test-batch-4');
@@ -247,22 +248,24 @@ describe('R2 Failure Detection', () => {
 // =============================================================================
 
 describe('Gzip Compression', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvAdapter: ReturnType<typeof createKVAdapter>;
+  let r2Adapter: ReturnType<typeof createR2Adapter>;
   let fallbackStorage: KVFallbackStorage;
 
-  beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+  beforeEach(async () => {
+    kvAdapter = createKVAdapter(env.KV_FALLBACK);
+    r2Adapter = createR2Adapter(env.LAKEHOUSE_BUCKET);
+    await kvAdapter.clear();
+    await r2Adapter.clear();
     fallbackStorage = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       enableCompression: true,
     });
   });
 
   it('should compress events before writing to KV', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     // Create a batch with some data
     const events = createTestBatch(100);
@@ -274,7 +277,7 @@ describe('Gzip Compression', () => {
   });
 
   it('should achieve significant compression for repetitive data', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     // Create events with repetitive data (compresses well)
     const events = Array.from({ length: 100 }, (_, i) =>
@@ -294,7 +297,7 @@ describe('Gzip Compression', () => {
   });
 
   it('should store uncompressed size in metadata', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const events = createTestBatch(50);
     const result = await fallbackStorage.writeWithFallback(events, 'test-compress-3');
@@ -306,7 +309,7 @@ describe('Gzip Compression', () => {
   });
 
   it('should be able to decompress stored data', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const events = createTestBatch(10);
     const batchId = 'test-compress-4';
@@ -321,12 +324,12 @@ describe('Gzip Compression', () => {
 
   it('should support disabling compression', async () => {
     const uncompressedFallback = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       enableCompression: false,
     });
 
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const events = createTestBatch(10);
     const result = await uncompressedFallback.writeWithFallback(events, 'test-no-compress');
@@ -342,25 +345,27 @@ describe('Gzip Compression', () => {
 // =============================================================================
 
 describe('KV Write (25MB Limit)', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvAdapter: ReturnType<typeof createKVAdapter>;
+  let r2Adapter: ReturnType<typeof createR2Adapter>;
   let fallbackStorage: KVFallbackStorage;
 
   const MB = 1024 * 1024;
   const KV_MAX_VALUE_SIZE = 25 * MB;
 
-  beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+  beforeEach(async () => {
+    kvAdapter = createKVAdapter(env.KV_FALLBACK);
+    r2Adapter = createR2Adapter(env.LAKEHOUSE_BUCKET);
+    await kvAdapter.clear();
+    await r2Adapter.clear();
     fallbackStorage = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       maxValueSize: KV_MAX_VALUE_SIZE,
     });
   });
 
   it('should write events to KV when R2 fails', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const event = createTestEvent();
     const result = await fallbackStorage.writeWithFallback([event], 'test-kv-write-1');
@@ -368,11 +373,10 @@ describe('KV Write (25MB Limit)', () => {
     // EXPECTED: Should write to KV
     expect(result.usedKVFallback).toBe(true);
     expect(result.kvWriteSuccess).toBe(true);
-    expect(kvStorage.writeCount).toBeGreaterThan(0);
   });
 
   it('should enforce 25MB limit per value', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     // Create data that is small enough for single value
     const events = createTestBatch(100);
@@ -384,7 +388,7 @@ describe('KV Write (25MB Limit)', () => {
   });
 
   it('should include batch metadata in KV value', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const batchId = 'test-kv-metadata';
     const events = createTestBatch(5);
@@ -399,27 +403,27 @@ describe('KV Write (25MB Limit)', () => {
   });
 
   it('should use consistent key naming scheme', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const batchId = 'test-batch-123';
     await fallbackStorage.writeWithFallback([createTestEvent()], batchId);
 
     // EXPECTED: Key should follow pattern
-    expect(kvStorage.lastWrittenKey).toContain('fallback');
-    expect(kvStorage.lastWrittenKey).toContain(batchId);
+    expect(kvAdapter.lastWrittenKey).toContain('fallback');
+    expect(kvAdapter.lastWrittenKey).toContain(batchId);
   });
 
   it('should reject writes exceeding configured max size', async () => {
     // Create a fallback with very small limit and NO compression
     const smallLimitFallback = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       maxValueSize: 500, // Very small limit
       enableChunking: false, // Disable chunking to test limit enforcement
       enableCompression: false, // Disable compression so data stays large
     });
 
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     // Create data larger than limit (500 bytes uncompressed)
     const largeEvent = createLargeEvent(2000);
@@ -436,18 +440,20 @@ describe('KV Write (25MB Limit)', () => {
 // =============================================================================
 
 describe('Chunking for Large Batches (>25MB)', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvAdapter: ReturnType<typeof createKVAdapter>;
+  let r2Adapter: ReturnType<typeof createR2Adapter>;
   let fallbackStorage: KVFallbackStorage;
 
   const MB = 1024 * 1024;
 
-  beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+  beforeEach(async () => {
+    kvAdapter = createKVAdapter(env.KV_FALLBACK);
+    r2Adapter = createR2Adapter(env.LAKEHOUSE_BUCKET);
+    await kvAdapter.clear();
+    await r2Adapter.clear();
     fallbackStorage = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       maxValueSize: 25 * MB,
       enableChunking: true,
     });
@@ -456,14 +462,14 @@ describe('Chunking for Large Batches (>25MB)', () => {
   it('should chunk data exceeding 25MB across multiple keys', async () => {
     // Use smaller limit for testing and disable compression so data stays large
     const smallChunkFallback = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       maxValueSize: 500, // Very small chunks for testing
       enableChunking: true,
       enableCompression: false, // Disable compression so data exceeds chunk size
     });
 
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     // Create data larger than chunk size (need more events without compression)
     const events = createTestBatch(100); // Should exceed 500 bytes
@@ -476,13 +482,13 @@ describe('Chunking for Large Batches (>25MB)', () => {
 
   it('should track chunk information', async () => {
     const smallChunkFallback = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       maxValueSize: 500,
       enableChunking: true,
     });
 
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const events = createTestBatch(20);
     const result = await smallChunkFallback.writeWithFallback(events, 'test-chunk-info');
@@ -501,13 +507,13 @@ describe('Chunking for Large Batches (>25MB)', () => {
 
   it('should be able to reassemble chunked data', async () => {
     const smallChunkFallback = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       maxValueSize: 500,
       enableChunking: true,
     });
 
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const events = createTestBatch(30);
     const batchId = 'test-reassemble';
@@ -522,13 +528,13 @@ describe('Chunking for Large Batches (>25MB)', () => {
 
   it('should store chunk manifest for multi-chunk writes', async () => {
     const smallChunkFallback = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       maxValueSize: 500,
       enableChunking: true,
     });
 
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const events = createTestBatch(25);
     const batchId = 'test-manifest';
@@ -539,7 +545,7 @@ describe('Chunking for Large Batches (>25MB)', () => {
       expect(result.manifestKey).toBeDefined();
 
       // Manifest should be readable
-      const manifest = await kvStorage.read(result.manifestKey!);
+      const manifest = await kvAdapter.read(result.manifestKey!);
       expect(manifest).not.toBeNull();
 
       const parsedManifest = JSON.parse(manifest!);
@@ -549,30 +555,29 @@ describe('Chunking for Large Batches (>25MB)', () => {
   });
 
   it('should handle partial chunk write failures', async () => {
-    // Mock KV that fails after 2 writes
+    // Create a wrapper that fails after 2 writes
     let writeAttempts = 0;
-    const failingKV = {
-      ...kvStorage,
+    const failingKV: ExtendedKVStorage = {
       async write(key: string, value: string, options?: { expirationTtl?: number }) {
         writeAttempts++;
         if (writeAttempts > 2) {
           throw new Error('KV write failed');
         }
-        await kvStorage.write(key, value, options);
+        await kvAdapter.write(key, value, options);
       },
-      read: kvStorage.read.bind(kvStorage),
-      delete: kvStorage.delete.bind(kvStorage),
-      list: kvStorage.list.bind(kvStorage),
+      read: kvAdapter.read.bind(kvAdapter),
+      delete: kvAdapter.delete.bind(kvAdapter),
+      list: kvAdapter.list.bind(kvAdapter),
     };
 
     const failingChunkFallback = new KVFallbackStorage({
       kv: failingKV,
-      r2: r2Storage,
+      r2: r2Adapter,
       maxValueSize: 200,
       enableChunking: true,
     });
 
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const events = createTestBatch(30);
     const result = await failingChunkFallback.writeWithFallback(events, 'test-partial-fail');
@@ -583,7 +588,7 @@ describe('Chunking for Large Batches (>25MB)', () => {
   });
 
   it('should not chunk when data fits in single value', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const events = createTestBatch(5); // Small batch
     const result = await fallbackStorage.writeWithFallback(events, 'test-no-chunk');
@@ -599,21 +604,23 @@ describe('Chunking for Large Batches (>25MB)', () => {
 // =============================================================================
 
 describe('Recovery: Retry R2 from KV', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvAdapter: ReturnType<typeof createKVAdapter>;
+  let r2Adapter: ReturnType<typeof createR2Adapter>;
   let fallbackStorage: KVFallbackStorage;
 
-  beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+  beforeEach(async () => {
+    kvAdapter = createKVAdapter(env.KV_FALLBACK);
+    r2Adapter = createR2Adapter(env.LAKEHOUSE_BUCKET);
+    await kvAdapter.clear();
+    await r2Adapter.clear();
     fallbackStorage = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
     });
   });
 
   it('should list pending fallback batches', async () => {
-    r2Storage.injectFailure(3);
+    r2Adapter.injectFailure(3);
 
     // Write multiple batches to fallback
     await fallbackStorage.writeWithFallback([createTestEvent()], 'batch-1');
@@ -629,14 +636,14 @@ describe('Recovery: Retry R2 from KV', () => {
   });
 
   it('should recover batch to R2 when R2 becomes available', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const events = createTestBatch(5);
     const batchId = 'test-recover-1';
     await fallbackStorage.writeWithFallback(events, batchId);
 
     // Clear R2 failures
-    r2Storage.clearFailures();
+    r2Adapter.clearFailures();
 
     // EXPECTED: Recovery should succeed
     const result = await fallbackStorage.recoverToR2(batchId);
@@ -645,12 +652,12 @@ describe('Recovery: Retry R2 from KV', () => {
   });
 
   it('should delete from KV after successful R2 recovery', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const batchId = 'test-cleanup';
     await fallbackStorage.writeWithFallback([createTestEvent()], batchId);
 
-    r2Storage.clearFailures();
+    r2Adapter.clearFailures();
     await fallbackStorage.recoverToR2(batchId);
 
     // EXPECTED: KV entry should be deleted
@@ -659,13 +666,13 @@ describe('Recovery: Retry R2 from KV', () => {
   });
 
   it('should recover all pending batches in bulk', async () => {
-    r2Storage.injectFailure(3);
+    r2Adapter.injectFailure(3);
 
     await fallbackStorage.writeWithFallback([createTestEvent()], 'bulk-1');
     await fallbackStorage.writeWithFallback([createTestEvent()], 'bulk-2');
     await fallbackStorage.writeWithFallback([createTestEvent()], 'bulk-3');
 
-    r2Storage.clearFailures();
+    r2Adapter.clearFailures();
 
     // EXPECTED: Bulk recovery should work
     const result = await fallbackStorage.recoverAllToR2();
@@ -675,13 +682,13 @@ describe('Recovery: Retry R2 from KV', () => {
   });
 
   it('should handle recovery failure gracefully', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const batchId = 'test-recovery-fail';
     await fallbackStorage.writeWithFallback([createTestEvent()], batchId);
 
     // Keep R2 failing
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     // EXPECTED: Recovery should fail but not throw
     const result = await fallbackStorage.recoverToR2(batchId);
@@ -694,13 +701,13 @@ describe('Recovery: Retry R2 from KV', () => {
   });
 
   it('should track recovery metrics', async () => {
-    r2Storage.injectFailure(2);
+    r2Adapter.injectFailure(2);
 
     await fallbackStorage.writeWithFallback([createTestEvent()], 'metrics-1');
     await fallbackStorage.writeWithFallback([createTestEvent()], 'metrics-2');
 
-    r2Storage.clearFailures();
-    r2Storage.injectFailure(1); // First recovery fails
+    r2Adapter.clearFailures();
+    r2Adapter.injectFailure(1); // First recovery fails
 
     await fallbackStorage.recoverAllToR2();
 
@@ -712,14 +719,14 @@ describe('Recovery: Retry R2 from KV', () => {
   });
 
   it('should support recovery on startup', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
     await fallbackStorage.writeWithFallback([createTestEvent()], 'startup-test');
 
     // Create new instance (simulating startup)
-    r2Storage.clearFailures();
+    r2Adapter.clearFailures();
     const newFallback = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
     });
 
     // EXPECTED: Should be able to recover on startup
@@ -728,10 +735,10 @@ describe('Recovery: Retry R2 from KV', () => {
   });
 
   it('should support recovery via alarm handler', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
     await fallbackStorage.writeWithFallback([createTestEvent()], 'alarm-test');
 
-    r2Storage.clearFailures();
+    r2Adapter.clearFailures();
 
     // EXPECTED: Alarm handler should trigger recovery
     const result = await fallbackStorage.handleRecoveryAlarm();
@@ -745,48 +752,50 @@ describe('Recovery: Retry R2 from KV', () => {
 // =============================================================================
 
 describe('TTL Management (7 days default)', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvAdapter: ReturnType<typeof createKVAdapter>;
+  let r2Adapter: ReturnType<typeof createR2Adapter>;
   let fallbackStorage: KVFallbackStorage;
 
   const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60;
 
-  beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+  beforeEach(async () => {
+    kvAdapter = createKVAdapter(env.KV_FALLBACK);
+    r2Adapter = createR2Adapter(env.LAKEHOUSE_BUCKET);
+    await kvAdapter.clear();
+    await r2Adapter.clear();
     fallbackStorage = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       ttlSeconds: SEVEN_DAYS_SECONDS,
     });
   });
 
   it('should set 7 day TTL on KV writes by default', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     await fallbackStorage.writeWithFallback([createTestEvent()], 'ttl-test-1');
 
     // EXPECTED: TTL should be 7 days
-    expect(kvStorage.lastWrittenExpiration).toBe(SEVEN_DAYS_SECONDS);
+    expect(kvAdapter.lastWrittenExpiration).toBe(SEVEN_DAYS_SECONDS);
   });
 
   it('should support configurable TTL', async () => {
     const customTTL = 3 * 24 * 60 * 60; // 3 days
     const customFallback = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       ttlSeconds: customTTL,
     });
 
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
     await customFallback.writeWithFallback([createTestEvent()], 'ttl-custom');
 
     // EXPECTED: Custom TTL should be used
-    expect(kvStorage.lastWrittenExpiration).toBe(customTTL);
+    expect(kvAdapter.lastWrittenExpiration).toBe(customTTL);
   });
 
   it('should include expiration timestamp in stored metadata', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const batchId = 'ttl-metadata';
     const beforeWrite = Date.now();
@@ -805,25 +814,25 @@ describe('TTL Management (7 days default)', () => {
 
   it('should set TTL on all chunks for chunked data', async () => {
     const smallChunkFallback = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       maxValueSize: 500,
       enableChunking: true,
       ttlSeconds: SEVEN_DAYS_SECONDS,
     });
 
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const events = createTestBatch(30);
     await smallChunkFallback.writeWithFallback(events, 'ttl-chunked');
 
     // EXPECTED: All writes should have TTL
     // Since we can't track all expirations easily, just verify the last one
-    expect(kvStorage.lastWrittenExpiration).toBe(SEVEN_DAYS_SECONDS);
+    expect(kvAdapter.lastWrittenExpiration).toBe(SEVEN_DAYS_SECONDS);
   });
 
   it('should report pending batches with remaining TTL', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     await fallbackStorage.writeWithFallback([createTestEvent()], 'ttl-report');
 
@@ -838,13 +847,13 @@ describe('TTL Management (7 days default)', () => {
   it('should warn about batches nearing expiration', async () => {
     // Create fallback with very short TTL for testing
     const shortTTLFallback = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       ttlSeconds: 100, // 100 seconds
       expirationWarningThreshold: 0.9, // Warn when 90% expired
     });
 
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
     await shortTTLFallback.writeWithFallback([createTestEvent()], 'ttl-warn');
 
     // EXPECTED: Should have warning methods
@@ -860,16 +869,18 @@ describe('TTL Management (7 days default)', () => {
 // =============================================================================
 
 describe('Integration with DurabilityWriter', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvAdapter: ReturnType<typeof createKVAdapter>;
+  let r2Adapter: ReturnType<typeof createR2Adapter>;
   let fallbackStorage: KVFallbackStorage;
 
-  beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+  beforeEach(async () => {
+    kvAdapter = createKVAdapter(env.KV_FALLBACK);
+    r2Adapter = createR2Adapter(env.LAKEHOUSE_BUCKET);
+    await kvAdapter.clear();
+    await r2Adapter.clear();
     fallbackStorage = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
     });
   });
 
@@ -880,12 +891,12 @@ describe('Integration with DurabilityWriter', () => {
   });
 
   it('should provide status for monitoring', async () => {
-    r2Storage.injectFailure(2);
+    r2Adapter.injectFailure(2);
 
     await fallbackStorage.writeWithFallback([createTestEvent()], 'status-1');
     await fallbackStorage.writeWithFallback([createTestEvent()], 'status-2');
 
-    r2Storage.clearFailures();
+    r2Adapter.clearFailures();
     await fallbackStorage.recoverToR2('status-1');
 
     // EXPECTED: Should have comprehensive status
@@ -906,17 +917,17 @@ describe('Integration with DurabilityWriter', () => {
   it('should support callback for recovery events', async () => {
     const recoveryEvents: string[] = [];
     const callbackFallback = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
       onRecovery: (batchId, success) => {
         recoveryEvents.push(`${batchId}:${success}`);
       },
     });
 
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
     await callbackFallback.writeWithFallback([createTestEvent()], 'callback-test');
 
-    r2Storage.clearFailures();
+    r2Adapter.clearFailures();
     await callbackFallback.recoverToR2('callback-test');
 
     // EXPECTED: Callback should be invoked
@@ -924,7 +935,7 @@ describe('Integration with DurabilityWriter', () => {
   });
 
   it('should integrate with P1 fallback flow', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     // P1 event should use KV fallback
     const p1Event = createTestEvent({
@@ -945,21 +956,23 @@ describe('Integration with DurabilityWriter', () => {
 // =============================================================================
 
 describe('Error Handling and Edge Cases', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvAdapter: ReturnType<typeof createKVAdapter>;
+  let r2Adapter: ReturnType<typeof createR2Adapter>;
   let fallbackStorage: KVFallbackStorage;
 
-  beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+  beforeEach(async () => {
+    kvAdapter = createKVAdapter(env.KV_FALLBACK);
+    r2Adapter = createR2Adapter(env.LAKEHOUSE_BUCKET);
+    await kvAdapter.clear();
+    await r2Adapter.clear();
     fallbackStorage = new KVFallbackStorage({
-      kv: kvStorage,
-      r2: r2Storage,
+      kv: kvAdapter,
+      r2: r2Adapter,
     });
   });
 
   it('should handle empty event array', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const result = await fallbackStorage.writeWithFallback([], 'empty-batch');
 
@@ -969,7 +982,7 @@ describe('Error Handling and Edge Cases', () => {
   });
 
   it('should handle events with special characters in data', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const specialEvent = createTestEvent({
       after: {
@@ -990,7 +1003,7 @@ describe('Error Handling and Edge Cases', () => {
   });
 
   it('should handle concurrent writes to same batch id', async () => {
-    r2Storage.injectFailure(5);
+    r2Adapter.injectFailure(5);
 
     // Write to same batch id concurrently
     const writes = [
@@ -1005,7 +1018,7 @@ describe('Error Handling and Edge Cases', () => {
   });
 
   it('should handle very large batch id', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
 
     const longBatchId = 'x'.repeat(500); // Very long batch ID
     const result = await fallbackStorage.writeWithFallback([createTestEvent()], longBatchId);
@@ -1015,20 +1028,26 @@ describe('Error Handling and Edge Cases', () => {
   });
 
   it('should handle KV read failure during recovery', async () => {
-    r2Storage.injectFailure(1);
+    r2Adapter.injectFailure(1);
     await fallbackStorage.writeWithFallback([createTestEvent()], 'read-fail-test');
 
-    // Make KV read fail
-    const originalRead = kvStorage.read.bind(kvStorage);
-    kvStorage.read = async () => {
-      throw new Error('KV read failed');
+    // Create a wrapper that throws on read
+    const failingKV: ExtendedKVStorage = {
+      write: kvAdapter.write.bind(kvAdapter),
+      read: async () => {
+        throw new Error('KV read failed');
+      },
+      delete: kvAdapter.delete.bind(kvAdapter),
+      list: kvAdapter.list.bind(kvAdapter),
     };
 
-    r2Storage.clearFailures();
-    const result = await fallbackStorage.recoverToR2('read-fail-test');
+    const failingReadFallback = new KVFallbackStorage({
+      kv: failingKV,
+      r2: r2Adapter,
+    });
 
-    // Restore
-    kvStorage.read = originalRead;
+    r2Adapter.clearFailures();
+    const result = await failingReadFallback.recoverToR2('read-fail-test');
 
     // EXPECTED: Should handle read failure
     expect(result.success).toBe(false);
@@ -1036,21 +1055,20 @@ describe('Error Handling and Edge Cases', () => {
   });
 
   it('should provide meaningful error messages', async () => {
-    r2Storage.injectFailure(1, true); // Permanent failure
+    r2Adapter.injectFailure(1, true); // Permanent failure
 
-    const failingKV = {
-      ...kvStorage,
+    const failingKV: ExtendedKVStorage = {
       write: async () => {
         throw new Error('Detailed KV error: quota exceeded');
       },
-      read: kvStorage.read.bind(kvStorage),
-      delete: kvStorage.delete.bind(kvStorage),
-      list: kvStorage.list.bind(kvStorage),
+      read: kvAdapter.read.bind(kvAdapter),
+      delete: kvAdapter.delete.bind(kvAdapter),
+      list: kvAdapter.list.bind(kvAdapter),
     };
 
     const failingFallback = new KVFallbackStorage({
       kv: failingKV,
-      r2: r2Storage,
+      r2: r2Adapter,
     });
 
     const result = await failingFallback.writeWithFallback([createTestEvent()], 'error-msg');

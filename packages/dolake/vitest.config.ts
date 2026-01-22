@@ -13,6 +13,7 @@ export default defineWorkersConfig({
             DOLAKE: 'DoLake',
           },
           r2Buckets: ['LAKEHOUSE_BUCKET'],
+          kvNamespaces: ['KV_FALLBACK'],
         },
       },
     },

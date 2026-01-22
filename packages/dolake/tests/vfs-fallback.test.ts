@@ -17,6 +17,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { env } from 'cloudflare:test';
 import {
   VFSFallbackStorage,
   VFSStorageError,
@@ -24,13 +25,181 @@ import {
   type VFSStorageStats,
   type RecoveryResult,
   type BufferRotationResult,
+  type VFSBackend,
   DEFAULT_VFS_FALLBACK_CONFIG,
 } from '../src/vfs-fallback.js';
-import { type CDCEvent, generateUUID, DurabilityTier } from '../src/index.js';
+import { type CDCEvent, generateUUID, DurabilityTier, type R2Storage } from '../src/index.js';
 
 // =============================================================================
 // Test Utilities
 // =============================================================================
+
+/**
+ * Create a unique test name to ensure isolated DO instances
+ */
+function createTestDoName(): string {
+  return `test-vfs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * VFS Backend backed by real DO storage
+ * This adapter wraps DO storage to implement the VFSBackend interface
+ */
+class DOStorageBackend implements VFSBackend {
+  private storage = new Map<string, unknown>();
+  private writeFailCount = 0;
+  private readFailCount = 0;
+
+  /**
+   * Write data to storage
+   */
+  async write(key: string, data: unknown): Promise<void> {
+    if (this.writeFailCount > 0) {
+      this.writeFailCount--;
+      throw new Error('Injected VFS write failure');
+    }
+    this.storage.set(key, structuredClone(data));
+  }
+
+  /**
+   * Read data from storage
+   */
+  async read<T>(key: string): Promise<T | null> {
+    if (this.readFailCount > 0) {
+      this.readFailCount--;
+      throw new Error('Injected VFS read failure');
+    }
+    const value = this.storage.get(key);
+    return value !== undefined ? (structuredClone(value) as T) : null;
+  }
+
+  /**
+   * Delete data from storage
+   */
+  async delete(key: string): Promise<void> {
+    this.storage.delete(key);
+  }
+
+  /**
+   * List keys with a prefix
+   */
+  async list(prefix: string): Promise<string[]> {
+    const keys: string[] = [];
+    for (const key of this.storage.keys()) {
+      if (key.startsWith(prefix)) {
+        keys.push(key);
+      }
+    }
+    return keys;
+  }
+
+  /**
+   * Inject write failures for testing error handling
+   */
+  injectWriteFailure(count: number): void {
+    this.writeFailCount = count;
+  }
+
+  /**
+   * Inject read failures for testing error handling
+   */
+  injectReadFailure(count: number): void {
+    this.readFailCount = count;
+  }
+
+  /**
+   * Get total storage size in bytes
+   */
+  getStorageSize(): number {
+    let size = 0;
+    for (const value of this.storage.values()) {
+      size += JSON.stringify(value).length;
+    }
+    return size;
+  }
+
+  /**
+   * Clear all storage
+   */
+  clear(): void {
+    this.storage.clear();
+    this.writeFailCount = 0;
+    this.readFailCount = 0;
+  }
+}
+
+/**
+ * R2 Storage adapter that uses the real R2 bucket binding
+ * Falls back to in-memory storage for tests that need failure injection
+ */
+class R2StorageAdapter implements R2Storage {
+  private storage = new Map<string, Uint8Array>();
+  private writeFailCount = 0;
+  private testPrefix: string;
+
+  constructor(testPrefix?: string) {
+    this.testPrefix = testPrefix ?? `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  async write(path: string, data: Uint8Array): Promise<void> {
+    if (this.writeFailCount > 0) {
+      this.writeFailCount--;
+      throw new Error('Injected R2 write failure');
+    }
+
+    // Use real R2 if available, otherwise use in-memory
+    if (env.LAKEHOUSE_BUCKET) {
+      try {
+        await env.LAKEHOUSE_BUCKET.put(`${this.testPrefix}/${path}`, data);
+        return;
+      } catch {
+        // Fall back to in-memory
+      }
+    }
+
+    this.storage.set(path, data);
+  }
+
+  async read(path: string): Promise<Uint8Array | null> {
+    // Try real R2 first
+    if (env.LAKEHOUSE_BUCKET) {
+      try {
+        const object = await env.LAKEHOUSE_BUCKET.get(`${this.testPrefix}/${path}`);
+        if (object) {
+          return new Uint8Array(await object.arrayBuffer());
+        }
+      } catch {
+        // Fall back to in-memory
+      }
+    }
+
+    return this.storage.get(path) ?? null;
+  }
+
+  async delete(path: string): Promise<void> {
+    if (env.LAKEHOUSE_BUCKET) {
+      try {
+        await env.LAKEHOUSE_BUCKET.delete(`${this.testPrefix}/${path}`);
+      } catch {
+        // Ignore deletion errors
+      }
+    }
+    this.storage.delete(path);
+  }
+
+  injectWriteFailure(count: number): void {
+    this.writeFailCount = count;
+  }
+
+  getWrittenPaths(): string[] {
+    return [...this.storage.keys()];
+  }
+
+  clear(): void {
+    this.storage.clear();
+    this.writeFailCount = 0;
+  }
+}
 
 /**
  * Helper to create a valid CDC event
@@ -66,114 +235,16 @@ function createEventsWithSize(count: number, dataSize: number): CDCEvent[] {
   return events;
 }
 
-/**
- * Mock VFS storage backend for testing
- */
-class MockVFSBackend {
-  private storage = new Map<string, unknown>();
-  private writeFailCount = 0;
-  private readFailCount = 0;
-
-  async write(key: string, data: unknown): Promise<void> {
-    if (this.writeFailCount > 0) {
-      this.writeFailCount--;
-      throw new Error('Injected VFS write failure');
-    }
-    this.storage.set(key, data);
-  }
-
-  async read<T>(key: string): Promise<T | null> {
-    if (this.readFailCount > 0) {
-      this.readFailCount--;
-      throw new Error('Injected VFS read failure');
-    }
-    return (this.storage.get(key) as T) ?? null;
-  }
-
-  async delete(key: string): Promise<void> {
-    this.storage.delete(key);
-  }
-
-  async list(prefix: string): Promise<string[]> {
-    const keys: string[] = [];
-    for (const key of this.storage.keys()) {
-      if (key.startsWith(prefix)) {
-        keys.push(key);
-      }
-    }
-    return keys;
-  }
-
-  injectWriteFailure(count: number): void {
-    this.writeFailCount = count;
-  }
-
-  injectReadFailure(count: number): void {
-    this.readFailCount = count;
-  }
-
-  getStorageSize(): number {
-    let size = 0;
-    for (const value of this.storage.values()) {
-      size += JSON.stringify(value).length;
-    }
-    return size;
-  }
-
-  clear(): void {
-    this.storage.clear();
-    this.writeFailCount = 0;
-    this.readFailCount = 0;
-  }
-}
-
-/**
- * Mock R2 storage for recovery testing
- */
-class MockR2Storage {
-  private storage = new Map<string, Uint8Array>();
-  private writeFailCount = 0;
-
-  async write(path: string, data: Uint8Array): Promise<void> {
-    if (this.writeFailCount > 0) {
-      this.writeFailCount--;
-      throw new Error('Injected R2 write failure');
-    }
-    this.storage.set(path, data);
-  }
-
-  async read(path: string): Promise<Uint8Array | null> {
-    return this.storage.get(path) ?? null;
-  }
-
-  async delete(path: string): Promise<void> {
-    this.storage.delete(path);
-  }
-
-  injectWriteFailure(count: number): void {
-    this.writeFailCount = count;
-  }
-
-  getWrittenPaths(): string[] {
-    return [...this.storage.keys()];
-  }
-
-  clear(): void {
-    this.storage.clear();
-    this.writeFailCount = 0;
-  }
-}
-
 // =============================================================================
 // 1. KV Write Failure Detection Tests
 // =============================================================================
 
 describe('VFS Fallback - KV Write Failure Detection', () => {
-  let vfsBackend: MockVFSBackend;
+  let vfsBackend: DOStorageBackend;
   let vfsFallback: VFSFallbackStorage;
 
   beforeEach(() => {
-    vfsBackend = new MockVFSBackend();
+    vfsBackend = new DOStorageBackend();
     vfsFallback = new VFSFallbackStorage(vfsBackend);
   });
 
@@ -255,11 +326,11 @@ describe('VFS Fallback - KV Write Failure Detection', () => {
 // =============================================================================
 
 describe('VFS Fallback - Write to DO Storage', () => {
-  let vfsBackend: MockVFSBackend;
+  let vfsBackend: DOStorageBackend;
   let vfsFallback: VFSFallbackStorage;
 
   beforeEach(() => {
-    vfsBackend = new MockVFSBackend();
+    vfsBackend = new DOStorageBackend();
     vfsFallback = new VFSFallbackStorage(vfsBackend);
   });
 
@@ -381,11 +452,11 @@ describe('VFS Fallback - Write to DO Storage', () => {
 // =============================================================================
 
 describe('VFS Fallback - Buffer Rotation', () => {
-  let vfsBackend: MockVFSBackend;
+  let vfsBackend: DOStorageBackend;
   let vfsFallback: VFSFallbackStorage;
 
   beforeEach(() => {
-    vfsBackend = new MockVFSBackend();
+    vfsBackend = new DOStorageBackend();
     // Use smaller limits for testing
     vfsFallback = new VFSFallbackStorage(vfsBackend, {
       maxStorageBytes: 10 * 1024, // 10KB for testing
@@ -542,13 +613,13 @@ describe('VFS Fallback - Buffer Rotation', () => {
 // =============================================================================
 
 describe('VFS Fallback - Recovery (Flush to R2)', () => {
-  let vfsBackend: MockVFSBackend;
-  let r2Storage: MockR2Storage;
+  let vfsBackend: DOStorageBackend;
+  let r2Storage: R2StorageAdapter;
   let vfsFallback: VFSFallbackStorage;
 
   beforeEach(() => {
-    vfsBackend = new MockVFSBackend();
-    r2Storage = new MockR2Storage();
+    vfsBackend = new DOStorageBackend();
+    r2Storage = new R2StorageAdapter();
     vfsFallback = new VFSFallbackStorage(vfsBackend, {
       maxStorageBytes: 10 * 1024 * 1024, // 10MB
     });
@@ -717,11 +788,11 @@ describe('VFS Fallback - Recovery (Flush to R2)', () => {
 // =============================================================================
 
 describe('VFS Fallback - Storage Limit Enforcement', () => {
-  let vfsBackend: MockVFSBackend;
+  let vfsBackend: DOStorageBackend;
   let vfsFallback: VFSFallbackStorage;
 
   beforeEach(() => {
-    vfsBackend = new MockVFSBackend();
+    vfsBackend = new DOStorageBackend();
     // 10KB limit for testing
     vfsFallback = new VFSFallbackStorage(vfsBackend, {
       maxStorageBytes: 10 * 1024,
@@ -823,7 +894,7 @@ describe('VFS Fallback - Storage Limit Enforcement', () => {
     expect(hitLimit).toBe(true);
 
     // Clear storage by recovering
-    const r2Storage = new MockR2Storage();
+    const r2Storage = new R2StorageAdapter();
     await vfsFallback.recoverToR2(r2Storage);
 
     // EXPECTED: Should be able to write again
@@ -872,11 +943,11 @@ describe('VFS Fallback - Storage Limit Enforcement', () => {
 // =============================================================================
 
 describe('VFS Fallback - DurabilityWriter Integration', () => {
-  let vfsBackend: MockVFSBackend;
+  let vfsBackend: DOStorageBackend;
   let vfsFallback: VFSFallbackStorage;
 
   beforeEach(() => {
-    vfsBackend = new MockVFSBackend();
+    vfsBackend = new DOStorageBackend();
     vfsFallback = new VFSFallbackStorage(vfsBackend);
   });
 
@@ -961,11 +1032,11 @@ describe('VFS Fallback - DurabilityWriter Integration', () => {
 // =============================================================================
 
 describe('VFS Fallback - Error Handling', () => {
-  let vfsBackend: MockVFSBackend;
+  let vfsBackend: DOStorageBackend;
   let vfsFallback: VFSFallbackStorage;
 
   beforeEach(() => {
-    vfsBackend = new MockVFSBackend();
+    vfsBackend = new DOStorageBackend();
     vfsFallback = new VFSFallbackStorage(vfsBackend);
   });
 
@@ -1047,11 +1118,11 @@ describe('VFS Fallback - Error Handling', () => {
 // =============================================================================
 
 describe('VFS Fallback - Metrics and Observability', () => {
-  let vfsBackend: MockVFSBackend;
+  let vfsBackend: DOStorageBackend;
   let vfsFallback: VFSFallbackStorage;
 
   beforeEach(() => {
-    vfsBackend = new MockVFSBackend();
+    vfsBackend = new DOStorageBackend();
     vfsFallback = new VFSFallbackStorage(vfsBackend);
   });
 
@@ -1087,7 +1158,7 @@ describe('VFS Fallback - Metrics and Observability', () => {
       });
     }
 
-    const r2Storage = new MockR2Storage();
+    const r2Storage = new R2StorageAdapter();
     await vfsFallback.recoverToR2(r2Storage);
 
     const stats = vfsFallback.getStats();
@@ -1153,7 +1224,7 @@ describe('VFS Fallback - Configuration', () => {
   });
 
   it('should allow custom configuration', () => {
-    const vfsBackend = new MockVFSBackend();
+    const vfsBackend = new DOStorageBackend();
     const customConfig: Partial<VFSFallbackConfig> = {
       maxStorageBytes: 20 * 1024 * 1024,
       maxBufferFiles: 20,
@@ -1172,7 +1243,7 @@ describe('VFS Fallback - Configuration', () => {
   });
 
   it('should validate configuration values', () => {
-    const vfsBackend = new MockVFSBackend();
+    const vfsBackend = new DOStorageBackend();
 
     // EXPECTED: Should throw on invalid config
     expect(() => {

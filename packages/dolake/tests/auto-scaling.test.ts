@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { env } from 'cloudflare:test';
 import {
   AutoScalingManager,
   type AutoScalingConfig,

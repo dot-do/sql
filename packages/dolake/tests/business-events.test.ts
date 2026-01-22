@@ -15,24 +15,35 @@
  * Uses workers-vitest-pool (NO MOCKS).
  */
 
+/// <reference types="@cloudflare/workers-types" />
+/// <reference types="@cloudflare/vitest-pool-workers" />
+
 import { describe, it, expect, beforeEach } from 'vitest';
+import { env } from 'cloudflare:test';
 import type { CDCEvent } from '../src/index.js';
 import { DurabilityTier, classifyEvent } from '../src/durability.js';
 import {
   StripeWebhookHandler,
-  type StripeWebhookConfig,
-  type StripeWebhookResult,
   type StripeEvent,
+  type ExtendedKVStorage,
   verifyStripeSignature,
   normalizeStripeEventToCDC,
 } from '../src/business-events.js';
+import type { R2Storage } from '../src/durability.js';
 
 // =============================================================================
 // Test Utilities
 // =============================================================================
 
 /**
- * Create a mock Stripe event for testing
+ * Generate a unique test name to avoid collisions between tests
+ */
+function createTestId(): string {
+  return `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Create a test Stripe event for testing
  */
 function createStripeEvent(overrides: Partial<StripeEvent> = {}): StripeEvent {
   return {
@@ -107,9 +118,64 @@ function createInvalidStripeSignature(): string {
 }
 
 /**
- * Mock KV storage for testing
+ * R2 storage adapter that wraps the real R2 bucket from env.LAKEHOUSE_BUCKET
+ * Implements the R2Storage interface using the real Cloudflare R2 binding.
  */
-class MockKVStorage {
+class R2StorageAdapter implements R2Storage {
+  private bucket: R2Bucket;
+  private prefix: string;
+  writeCount = 0;
+  failNextWrites = 0;
+  permanentFailure = false;
+
+  constructor(bucket: R2Bucket, prefix: string = '') {
+    this.bucket = bucket;
+    this.prefix = prefix;
+  }
+
+  async write(path: string, data: Uint8Array): Promise<void> {
+    this.writeCount++;
+    if (this.permanentFailure || this.failNextWrites > 0) {
+      if (this.failNextWrites > 0) this.failNextWrites--;
+      throw new Error('R2 write failed (injected)');
+    }
+    await this.bucket.put(`${this.prefix}${path}`, data);
+  }
+
+  async read(path: string): Promise<Uint8Array | null> {
+    const obj = await this.bucket.get(`${this.prefix}${path}`);
+    if (!obj) return null;
+    return new Uint8Array(await obj.arrayBuffer());
+  }
+
+  async delete(path: string): Promise<void> {
+    await this.bucket.delete(`${this.prefix}${path}`);
+  }
+
+  injectFailure(count: number, permanent = false): void {
+    this.failNextWrites = count;
+    this.permanentFailure = permanent;
+  }
+
+  clearFailures(): void {
+    this.failNextWrites = 0;
+    this.permanentFailure = false;
+  }
+
+  clear(): void {
+    this.writeCount = 0;
+    this.failNextWrites = 0;
+    this.permanentFailure = false;
+  }
+}
+
+/**
+ * In-memory KV storage that implements ExtendedKVStorage interface.
+ * Using in-memory storage since there's no KV binding in the test environment.
+ * This is acceptable because KV is a secondary storage for P0 events,
+ * and we're testing the handler logic with real R2.
+ */
+class InMemoryKVStorage implements ExtendedKVStorage {
   private storage = new Map<string, string>();
   writeCount = 0;
   readCount = 0;
@@ -139,63 +205,20 @@ class MockKVStorage {
   }
 }
 
-/**
- * Mock R2 storage for testing
- */
-class MockR2Storage {
-  private storage = new Map<string, Uint8Array>();
-  writeCount = 0;
-  failNextWrites = 0;
-  permanentFailure = false;
-
-  async write(path: string, data: Uint8Array): Promise<void> {
-    this.writeCount++;
-    if (this.permanentFailure || this.failNextWrites > 0) {
-      if (this.failNextWrites > 0) this.failNextWrites--;
-      throw new Error('R2 write failed');
-    }
-    this.storage.set(path, data);
-  }
-
-  async read(path: string): Promise<Uint8Array | null> {
-    return this.storage.get(path) ?? null;
-  }
-
-  async delete(path: string): Promise<void> {
-    this.storage.delete(path);
-  }
-
-  injectFailure(count: number, permanent = false): void {
-    this.failNextWrites = count;
-    this.permanentFailure = permanent;
-  }
-
-  clearFailures(): void {
-    this.failNextWrites = 0;
-    this.permanentFailure = false;
-  }
-
-  clear(): void {
-    this.storage.clear();
-    this.writeCount = 0;
-    this.failNextWrites = 0;
-    this.permanentFailure = false;
-  }
-}
-
 // =============================================================================
 // 1. HTTP POST Endpoint Tests (/v1/webhooks/stripe)
 // =============================================================================
 
 describe('HTTP POST Endpoint /v1/webhooks/stripe', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvStorage: InMemoryKVStorage;
+  let r2Storage: R2StorageAdapter;
   let handler: StripeWebhookHandler;
   const webhookSecret = 'whsec_test_secret_12345';
 
   beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+    const testId = createTestId();
+    kvStorage = new InMemoryKVStorage();
+    r2Storage = new R2StorageAdapter(env.LAKEHOUSE_BUCKET, `tests/${testId}/`);
     handler = new StripeWebhookHandler({
       webhookSecret,
       kv: kvStorage,
@@ -534,7 +557,7 @@ describe('Event Normalization to CDC Format', () => {
     expect(cdcEvent.payload.id).toBe('pi_123');
     expect(cdcEvent.payload.amount).toBe(5000);
     expect(cdcEvent.payload.currency).toBe('eur');
-    expect(cdcEvent.payload.metadata.order_id).toBe('order_456');
+    expect((cdcEvent.payload.metadata as Record<string, unknown>).order_id).toBe('order_456');
   });
 
   it('should set sequence from event ID hash', () => {
@@ -634,14 +657,15 @@ describe('Event Normalization to CDC Format', () => {
 // =============================================================================
 
 describe('P0 Durability (Dual-Write R2+KV)', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvStorage: InMemoryKVStorage;
+  let r2Storage: R2StorageAdapter;
   let handler: StripeWebhookHandler;
   const webhookSecret = 'whsec_test_secret';
 
   beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+    const testId = createTestId();
+    kvStorage = new InMemoryKVStorage();
+    r2Storage = new R2StorageAdapter(env.LAKEHOUSE_BUCKET, `tests/${testId}/`);
     handler = new StripeWebhookHandler({
       webhookSecret,
       kv: kvStorage,
@@ -760,6 +784,7 @@ describe('P0 Durability (Dual-Write R2+KV)', () => {
 
     // Convert to CDCEvent format for classification
     const eventForClassification: CDCEvent = {
+      lsn: BigInt(cdcEvent.sequence), // Use sequence as LSN for classification
       sequence: cdcEvent.sequence,
       timestamp: cdcEvent.timestamp,
       operation: cdcEvent.operation,
@@ -812,14 +837,15 @@ describe('P0 Durability (Dual-Write R2+KV)', () => {
 // =============================================================================
 
 describe('Idempotency (Event ID Deduplication)', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvStorage: InMemoryKVStorage;
+  let r2Storage: R2StorageAdapter;
   let handler: StripeWebhookHandler;
   const webhookSecret = 'whsec_test_secret';
 
   beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+    const testId = createTestId();
+    kvStorage = new InMemoryKVStorage();
+    r2Storage = new R2StorageAdapter(env.LAKEHOUSE_BUCKET, `tests/${testId}/`);
     handler = new StripeWebhookHandler({
       webhookSecret,
       kv: kvStorage,
@@ -1042,14 +1068,15 @@ describe('Idempotency (Event ID Deduplication)', () => {
 // =============================================================================
 
 describe('Error Handling and Edge Cases', () => {
-  let kvStorage: MockKVStorage;
-  let r2Storage: MockR2Storage;
+  let kvStorage: InMemoryKVStorage;
+  let r2Storage: R2StorageAdapter;
   let handler: StripeWebhookHandler;
   const webhookSecret = 'whsec_test_secret';
 
   beforeEach(() => {
-    kvStorage = new MockKVStorage();
-    r2Storage = new MockR2Storage();
+    const testId = createTestId();
+    kvStorage = new InMemoryKVStorage();
+    r2Storage = new R2StorageAdapter(env.LAKEHOUSE_BUCKET, `tests/${testId}/`);
     handler = new StripeWebhookHandler({
       webhookSecret,
       kv: kvStorage,
@@ -1265,10 +1292,11 @@ describe('Error Handling and Edge Cases', () => {
 describe('Integration with DoLake DO', () => {
   it('should be invokable from DoLake fetch handler', async () => {
     // This test verifies the handler can be integrated into DoLake
-    // The actual integration test would use env.DOLAKE but we test the interface here
+    // Uses real R2 from env.LAKEHOUSE_BUCKET
 
-    const kvStorage = new MockKVStorage();
-    const r2Storage = new MockR2Storage();
+    const testId = createTestId();
+    const kvStorage = new InMemoryKVStorage();
+    const r2Storage = new R2StorageAdapter(env.LAKEHOUSE_BUCKET, `tests/${testId}/`);
     const webhookSecret = 'whsec_integration_test';
 
     const handler = new StripeWebhookHandler({
