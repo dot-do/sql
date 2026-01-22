@@ -537,3 +537,22 @@ export {
   type ExtendedKVStorage as BusinessKVStorage,
   DEFAULT_STRIPE_WEBHOOK_CONFIG,
 } from './business-events.js';
+
+// =============================================================================
+// Tail Worker CDC Streaming
+// =============================================================================
+
+export {
+  TailWorkerCDCStreamer,
+  createTailWorkerCDCStreamer,
+  type TraceItem,
+  type TailWorkerBatch,
+  type TraceCDCEvent,
+  type TailWorkerConfig,
+  type ShardBackpressureStatus,
+  type TransformResult,
+  type BatchSendResult,
+  type TailWorkerLoadMetrics,
+  type DurabilityTier,
+  DEFAULT_TAIL_WORKER_CONFIG,
+} from './tail-worker.js';
