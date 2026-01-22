@@ -1,392 +1,400 @@
 # Code Review: @dotdo/sql Monorepo
 
-**Review Date:** 2026-01-22
-**Repository:** /Users/nathanclevenger/projects/sql
-**Reviewer:** Claude Code
+**Date:** 2026-01-22
+**Reviewer:** Claude Opus 4.5
+**Packages Reviewed:**
+- `@dotdo/sql.do` - Client SDK for DoSQL
+- `@dotdo/lake.do` - Client SDK for DoLake
+- `@dotdo/dosql` - Server (Durable Object) SQL database engine
+- `@dotdo/dolake` - Server (Durable Object) Lakehouse
+
+---
 
 ## Executive Summary
 
-The `@dotdo/sql` monorepo is a newly initialized project intended to contain DoSQL (SQL database engine) and DoLake (lakehouse for CDC/analytics) packages for Cloudflare Workers. Currently, the repository contains only skeleton configuration files with no actual package implementations.
+The codebase demonstrates a well-architected distributed SQL database system built on Cloudflare Durable Objects. The architecture separates concerns cleanly between client SDKs and server implementations, with proper use of TypeScript for type safety. However, there are several areas requiring attention, particularly around security hardening, error handling consistency, and code duplication.
 
-**Overall Status:** Project Initialization Phase - No source code to review
-
----
-
-## Repository Structure
-
-### Current State
-
-```
-/Users/nathanclevenger/projects/sql/
-├── .beads/                    # Issue tracking (Beads)
-│   ├── metadata.json
-│   ├── README.md
-│   ├── config.yaml
-│   └── beads.db               # SQLite database
-├── .git/                      # Git repository
-├── .gitattributes             # Git LFS/merge config
-├── .gitignore                 # Ignore patterns
-├── .nvmrc                     # Node version (20)
-├── AGENTS.md                  # Agent workflow instructions
-├── CLAUDE.md                  # Detailed project instructions
-├── README.md                  # Project overview
-├── package.json               # Root package manifest
-├── packages/                  # Empty - no packages yet
-└── pnpm-workspace.yaml        # Workspace configuration
-```
-
-### Planned Structure (from CLAUDE.md)
-
-```
-packages/
-├── dosql/          # @dotdo/dosql - SQL database engine
-│   ├── src/
-│   │   ├── parser/     # SQL parser
-│   │   ├── planner/    # Query planner and optimizer
-│   │   ├── engine/     # Execution engine
-│   │   ├── sharding/   # Horizontal scaling
-│   │   ├── btree/      # B-tree index implementation
-│   │   ├── fsx/        # File system abstraction
-│   │   ├── wal/        # Write-ahead log
-│   │   ├── transaction/# Transaction management
-│   │   ├── database/   # Database operations
-│   │   └── worker/     # Durable Object entry point
-│   └── wrangler.jsonc
-│
-└── dolake/         # @dotdo/dolake - Lakehouse
-    ├── src/
-    │   ├── dolake.ts       # Main Durable Object
-    │   ├── compaction.ts   # Parquet file compaction
-    │   ├── partitioning.ts # Table partitioning
-    │   ├── query-engine.ts # Analytical queries
-    │   ├── rate-limiter.ts # WebSocket rate limiting
-    │   └── schemas.ts      # Zod validation schemas
-    └── wrangler.jsonc
-```
+**Overall Assessment:** Good foundation with opportunities for improvement in security and consistency.
 
 ---
 
-## Review of Existing Files
+## Issues by Severity
 
-### Configuration Files
+### Critical
 
-#### package.json
+#### 1. SQL Injection Risk in Mock Query Executor
+**File:** `/Users/nathanclevenger/projects/sql/packages/dosql/src/rpc/server.ts`
+**Lines:** 719-797
 
-| Aspect | Assessment |
-|--------|------------|
-| Name | Correct: `@dotdo/sql` |
-| Version | `0.1.0` - appropriate for initial development |
-| Type | `module` - correct for ESM |
-| Package Manager | `pnpm@9.15.0` - explicitly pinned, good |
-| Engines | Node >=20.0.0, pnpm >=9.0.0 - appropriate |
-| Scripts | Standard workspace scripts defined |
+The `MockQueryExecutor` class performs naive SQL parsing without proper sanitization:
 
-**Issues Found:**
-
-| Severity | Issue | Recommendation |
-|----------|-------|----------------|
-| **Low** | Missing `devDependencies` | Add TypeScript, vitest, eslint, prettier when creating packages |
-| **Low** | Missing `tsconfig.json` | Create root TypeScript configuration |
-| **Low** | Missing `vitest.config.ts` | Create root Vitest configuration |
-| **Low** | Missing `.prettierrc` | Create consistent code formatting config |
-| **Low** | Missing `eslint.config.js` | Create linting configuration |
-
-#### pnpm-workspace.yaml
-
-```yaml
-packages:
-  - 'packages/*'
+```typescript
+// Line 729-732
+if (upperSql.startsWith('SELECT')) {
+  const fromMatch = upperSql.match(/FROM\s+(\w+)/);
+  const tableName = fromMatch?.[1]?.toLowerCase();
 ```
 
-**Assessment:** Minimal but correct. No issues.
+**Risk:** While labeled as "for testing," this pattern could be copied into production code. The regex-based parsing is vulnerable to injection attacks.
 
-#### .gitignore
+**Recommendation:**
+- Add prominent warnings that this is test-only code
+- Consider using a proper SQL parser library even for mocks
+- Add integration tests that verify parameterized queries are used in production paths
 
-**Assessment:** Comprehensive and appropriate for the project:
-- Node modules
-- Build outputs
-- Cloudflare-specific files
-- IDE files
-- Environment files
-- Beads local files
+#### 2. Missing Input Validation on WebSocket Messages Before Parsing
+**File:** `/Users/nathanclevenger/projects/sql/packages/dolake/src/dolake.ts`
+**Lines:** Various WebSocket handlers
 
-**Issues Found:**
+While Zod validation exists (`schemas.ts`), there's no size limit check before attempting to parse large JSON payloads, which could lead to memory exhaustion attacks.
 
-| Severity | Issue | Recommendation |
-|----------|-------|----------------|
-| **Low** | Missing `*.d.ts.map` pattern | Add to prevent committing source maps if not wanted |
-
-#### .nvmrc
-
-Contains `20` - correct for Node.js 20 LTS.
-
-#### .gitattributes
-
-```
-.beads/issues.jsonl merge=beads
-```
-
-**Assessment:** Correct configuration for Beads merge driver.
+**Recommendation:**
+- Check message size before JSON parsing
+- Add hard limits on message payload sizes at the WebSocket level
+- Implement streaming parsing for large payloads
 
 ---
 
-### Documentation Files
+### High
 
-#### README.md
+#### 3. Type Duplication Between Client and Server Packages
+**Files:**
+- `/Users/nathanclevenger/projects/sql/packages/sql.do/src/types.ts`
+- `/Users/nathanclevenger/projects/sql/packages/dosql/src/rpc/types.ts`
+- `/Users/nathanclevenger/projects/sql/packages/lake.do/src/types.ts`
+- `/Users/nathanclevenger/projects/sql/packages/dolake/src/types.ts`
 
-**Assessment:** Well-structured with:
-- Clear project description
-- Feature list
-- Architecture diagram
-- Getting started instructions
+Multiple interface definitions are duplicated across packages (e.g., `QueryRequest`, `QueryResponse`, `CDCEvent`, `ClientCapabilities`).
 
-**Issues Found:**
+**Example duplication:**
 
-| Severity | Issue | Recommendation |
-|----------|-------|----------------|
-| **Low** | Architecture diagram references non-existent components | Update once packages are created |
-| **Low** | No contribution guidelines | Add CONTRIBUTING.md when project matures |
-| **Low** | No license file | Add LICENSE file (MIT mentioned in package.json) |
+```typescript
+// In sql.do/src/types.ts
+export interface QueryRequest {
+  sql: string;
+  params?: unknown[];
+  // ...
+}
 
-#### CLAUDE.md
+// In dosql/src/rpc/types.ts (similar but not identical)
+export interface QueryRequest {
+  sql: string;
+  params?: unknown[];
+  namedParams?: Record<string, unknown>;
+  // ...
+}
+```
 
-**Assessment:** Excellent project instructions including:
-- Project structure
-- Development commands
-- Testing philosophy (TDD with NO MOCKS)
-- Code style guidelines
-- Beads workflow documentation
+**Recommendation:**
+- Create a shared `@dotdo/sql-types` package
+- Use package references to share types between client and server
+- Consider using Protocol Buffers or similar for guaranteed type compatibility
 
-**Issues Found:** None - well-documented
+#### 4. Inconsistent Error Handling Patterns
+**Files:** Multiple across all packages
 
-#### AGENTS.md
+Some functions throw custom error classes, while others return error objects:
 
-**Assessment:** Good quick reference for agent workflows. Properly duplicates essential information from CLAUDE.md.
-
----
-
-## Critical Gaps: Missing Components
-
-### High Priority
-
-| Missing Component | Description | Recommended Action |
-|-------------------|-------------|-------------------|
-| `packages/dosql/` | Main SQL database engine | Create package skeleton |
-| `packages/dolake/` | Lakehouse for CDC/analytics | Create package skeleton |
-| `tsconfig.json` | Root TypeScript configuration | Create with strict mode |
-| `vitest.config.ts` | Root test configuration | Create with workers-vitest-pool |
-| `wrangler.jsonc` | Cloudflare Workers config | Create per package |
-
-### Medium Priority
-
-| Missing Component | Description | Recommended Action |
-|-------------------|-------------|-------------------|
-| `eslint.config.js` | Linting configuration | Create ESLint flat config |
-| `.prettierrc` | Code formatting | Create Prettier config |
-| `LICENSE` | MIT license file | Create license file |
-| `CONTRIBUTING.md` | Contribution guidelines | Create when ready for contributors |
-| `.github/` | CI/CD workflows | Create GitHub Actions |
-
-### Low Priority
-
-| Missing Component | Description | Recommended Action |
-|-------------------|-------------|-------------------|
-| `CHANGELOG.md` | Version history | Create when releasing |
-| `docs/` | Additional documentation | Expand as needed |
-
----
-
-## Recommended Initial Package Structure
-
-### packages/dosql/package.json
-
-```json
-{
-  "name": "@dotdo/dosql",
-  "version": "0.1.0",
-  "description": "SQL database engine for Cloudflare Workers",
-  "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "scripts": {
-    "build": "tsc",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src",
-    "clean": "rm -rf dist"
-  },
-  "peerDependencies": {
-    "@cloudflare/workers-types": "^4.0.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.4.0",
-    "vitest": "^2.0.0",
-    "@cloudflare/vitest-pool-workers": "^0.5.0"
+```typescript
+// Throwing pattern (database.ts:39)
+export class DatabaseError extends Error {
+  constructor(message: string, public readonly code?: string) {
+    super(message);
+    this.name = 'DatabaseError';
   }
 }
+
+// Return pattern (rpc/server.ts:322-327)
+return {
+  success: false,
+  error: error instanceof Error ? error.message : String(error),
+};
 ```
 
-### packages/dolake/package.json
+**Recommendation:**
+- Standardize on one error handling pattern across the codebase
+- Document the error handling contract in each package's public API
+- Create a shared error hierarchy in the types package
 
-```json
-{
-  "name": "@dotdo/dolake",
-  "version": "0.1.0",
-  "description": "Lakehouse for CDC streaming and analytics on Cloudflare Workers",
-  "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+#### 5. Missing Rate Limit Headers Validation
+**File:** `/Users/nathanclevenger/projects/sql/packages/dolake/src/rate-limiter.ts`
+**Lines:** 850-862
+
+The `getRateLimitHeaders` method trusts the `RateLimitResult` object without validation:
+
+```typescript
+getRateLimitHeaders(result: RateLimitResult): Record<string, string> {
+  const headers: Record<string, string> = {
+    'X-RateLimit-Limit': result.rateLimit.limit.toString(),
+    'X-RateLimit-Remaining': result.rateLimit.remaining.toString(),
+    'X-RateLimit-Reset': result.rateLimit.resetAt.toString(),
+  };
+```
+
+**Recommendation:**
+- Validate numeric values before converting to strings
+- Ensure negative values cannot appear in headers
+- Add bounds checking for all rate limit values
+
+---
+
+### Medium
+
+#### 6. Incomplete Parameter Binding in Named Parameters Conversion
+**File:** `/Users/nathanclevenger/projects/sql/packages/dosql/src/rpc/server.ts`
+**Lines:** 541-560
+
+The `#convertNamedParams` method uses a simple regex that doesn't handle edge cases:
+
+```typescript
+#convertNamedParams(request: QueryRequest): unknown[] {
+  // ...
+  const paramPattern = /[:@$](\w+)/g;
+  let match;
+  while ((match = paramPattern.exec(request.sql)) !== null) {
+    const paramName = match[1];
+    if (paramName in namedParams) {
+      params.push(namedParams[paramName]);
     }
-  },
-  "scripts": {
-    "build": "tsc",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src",
-    "clean": "rm -rf dist"
-  },
-  "peerDependencies": {
-    "@cloudflare/workers-types": "^4.0.0"
-  },
-  "dependencies": {
-    "zod": "^3.23.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.4.0",
-    "vitest": "^2.0.0",
-    "@cloudflare/vitest-pool-workers": "^0.5.0"
   }
+  return params;
 }
 ```
 
-### Root tsconfig.json
+**Issues:**
+- Doesn't handle parameters inside string literals (could extract false positives)
+- Doesn't handle escaped parameter markers
+- Silent failure when parameter not found (should throw)
 
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "verbatimModuleSyntax": true,
-    "types": ["@cloudflare/workers-types"]
-  },
-  "exclude": ["node_modules", "dist"]
+**Recommendation:**
+- Use the existing `parseParameters` function from `binding.ts`
+- Throw an error when a named parameter is referenced but not provided
+- Add comprehensive tests for edge cases
+
+#### 7. Missing Timeout on Transaction Operations
+**File:** `/Users/nathanclevenger/projects/sql/packages/dosql/src/rpc/server.ts`
+**Lines:** 288-347
+
+Transaction operations don't enforce timeouts server-side:
+
+```typescript
+async beginTransaction(request: BeginTransactionRequest): Promise<TransactionHandle> {
+  // ...
+  const expiresAt = Date.now() + (request.timeoutMs ?? 30000);
+  return {
+    txId,
+    startLSN: this.#executor.getCurrentLSN(),
+    expiresAt, // Only returned to client, not enforced server-side
+  };
 }
 ```
 
+**Recommendation:**
+- Implement server-side transaction timeout enforcement
+- Use Durable Object alarms to automatically rollback expired transactions
+- Log long-running transactions for monitoring
+
+#### 8. BigInt Serialization Concerns
+**File:** `/Users/nathanclevenger/projects/sql/packages/dolake/src/types.ts`
+**Lines:** 617-696 (IcebergSnapshot, IcebergTableMetadata)
+
+Multiple interfaces use `bigint` for IDs and sequence numbers:
+
+```typescript
+export interface IcebergSnapshot {
+  'snapshot-id': bigint;
+  'parent-snapshot-id': bigint | null;
+  'sequence-number': bigint;
+  // ...
+}
+```
+
+**Risk:** `bigint` values don't serialize to JSON by default and will throw errors.
+
+**Recommendation:**
+- Add custom serialization/deserialization for bigint fields
+- Consider using string representation for IDs in wire protocol
+- Document the serialization approach
+
+#### 9. Potential Memory Leak in Stream State Management
+**File:** `/Users/nathanclevenger/projects/sql/packages/dosql/src/rpc/server.ts`
+**Lines:** 157-158, 210-276
+
+Streams and CDC subscriptions are stored in Maps without TTL or cleanup:
+
+```typescript
+#streams: Map<string, StreamState> = new Map();
+#cdcSubscriptions: Map<string, CDCSubscription> = new Map();
+```
+
+**Recommendation:**
+- Implement automatic cleanup of abandoned streams
+- Add TTL-based expiration
+- Limit the maximum number of concurrent streams per connection
+
+#### 10. Client SDK Retries Without Idempotency Keys
+**File:** `/Users/nathanclevenger/projects/sql/packages/sql.do/src/client.ts`
+**Lines:** Various
+
+The client SDK has retry logic but doesn't use idempotency keys for mutation operations:
+
+**Recommendation:**
+- Generate idempotency keys for INSERT/UPDATE/DELETE operations
+- Pass idempotency key in request headers
+- Server should detect and deduplicate retried operations
+
 ---
 
-## Security Considerations
+### Low
 
-| Category | Current State | Recommendation |
-|----------|---------------|----------------|
-| **Environment Variables** | `.env*` properly gitignored | Maintain this pattern |
-| **Secrets** | No hardcoded secrets found | Continue to use environment bindings |
-| **Dependencies** | None yet | Review dependencies before adding |
-| **SQL Injection** | N/A (no code) | Use parameterized queries in DoSQL |
-| **Input Validation** | N/A (no code) | Use Zod schemas as documented for DoLake |
+#### 11. Missing JSDoc on Public API Methods
+**Files:** Multiple across client SDKs
+
+Many public methods lack comprehensive JSDoc documentation:
+
+```typescript
+// sql.do/src/client.ts
+async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]> {
+  // No JSDoc describing return type, errors, etc.
+}
+```
+
+**Recommendation:**
+- Add JSDoc to all public API methods
+- Include @param, @returns, @throws annotations
+- Add usage examples in documentation
+
+#### 12. Inconsistent Use of `readonly` Modifier
+**Files:** Multiple
+
+Some class properties that should be immutable lack the `readonly` modifier:
+
+```typescript
+// dolake/src/rate-limiter.ts:256
+private readonly config: RateLimitConfig;  // Good
+private readonly connections: Map<string, ConnectionState> = new Map();  // The Map itself is readonly, but its contents aren't
+
+// database.ts:97
+private engine: ExecutionEngine;  // Should be readonly
+```
+
+**Recommendation:**
+- Apply `readonly` consistently to properties that shouldn't be reassigned
+- Consider using `ReadonlyMap` and `ReadonlySet` where mutation isn't needed
+
+#### 13. Magic Numbers and Strings
+**File:** `/Users/nathanclevenger/projects/sql/packages/dolake/src/rate-limiter.ts`
+**Lines:** Various
+
+Several magic numbers appear without named constants:
+
+```typescript
+// Line 463
+while (events.length < 100) { // Max 100 events per poll
+```
+
+**Recommendation:**
+- Extract magic numbers to named constants
+- Group related constants in a configuration object
+- Make limits configurable via constructor options
+
+#### 14. Test Code Organization
+**Files:** Multiple `*.test.ts` files
+
+Some test files are located alongside source files rather than in dedicated test directories:
+
+```
+packages/dosql/src/aggregates.test.ts
+packages/dosql/src/join.test.ts
+packages/dosql/src/types.test.ts
+packages/dolake/src/dolake.test.ts
+```
+
+**Recommendation:**
+- Move all tests to `__tests__` directories for consistency
+- Update test configuration to find tests in standard locations
+
+#### 15. Unused Import Statement
+**File:** `/Users/nathanclevenger/projects/sql/packages/dosql/src/statement/binding.ts`
+**Line:** 10
+
+```typescript
+import type { SqlValue, NamedParameters, BindParameters } from './types.js';
+```
+
+Verify all imported types are used.
+
+**Recommendation:**
+- Run `eslint` with `@typescript-eslint/no-unused-vars` rule
+- Configure `import/no-unused-modules` for stricter checking
 
 ---
 
-## Testing Strategy Validation
+## Code Quality Observations
 
-The CLAUDE.md specifies an excellent testing philosophy:
+### Positive Aspects
 
-> - Tests run in actual Cloudflare Workers environment via `workers-vitest-pool`
-> - Use real Durable Objects, not mocks
-> - Use real SQLite, not mocks
-> - Integration tests over unit tests
+1. **Strong TypeScript Usage:** Comprehensive use of interfaces, generics, and type guards throughout the codebase.
 
-**Assessment:** This approach is correct for Cloudflare Workers. The `@cloudflare/vitest-pool-workers` package provides a real Workers runtime for testing.
+2. **Well-Designed Rate Limiter:** The `RateLimiter` class in dolake implements multiple protection mechanisms:
+   - Token bucket algorithm
+   - Per-IP and per-connection limits
+   - Subnet-level rate limiting
+   - Backpressure signaling
 
----
+3. **Comprehensive Zod Validation:** The `schemas.ts` file in dolake provides thorough runtime validation of WebSocket messages.
 
-## Issue Summary by Severity
+4. **Clean Separation of Concerns:** Clear boundaries between client SDKs, server implementations, and shared utilities.
 
-### Critical Issues
-None - the repository is correctly initialized but empty.
+5. **Type-Level SQL Parsing:** The parser in `dosql/src/parser.ts` attempts compile-time SQL validation, which is an innovative approach.
 
-### High Priority Issues
-| # | Issue | Location | Action Required |
-|---|-------|----------|-----------------|
-| 1 | Missing DoSQL package | `packages/dosql/` | Create package skeleton |
-| 2 | Missing DoLake package | `packages/dolake/` | Create package skeleton |
-| 3 | No TypeScript configuration | Root | Create `tsconfig.json` |
-| 4 | No test configuration | Root | Create `vitest.config.ts` |
+6. **CDC Architecture:** Well-designed Change Data Capture system with:
+   - Batching for efficiency
+   - Position tracking for resumability
+   - Backpressure handling
 
-### Medium Priority Issues
-| # | Issue | Location | Action Required |
-|---|-------|----------|-----------------|
-| 5 | No linting configuration | Root | Create `eslint.config.js` |
-| 6 | No formatting configuration | Root | Create `.prettierrc` |
-| 7 | Missing LICENSE file | Root | Create MIT license |
-| 8 | No CI/CD configuration | `.github/` | Create GitHub Actions workflows |
+### Areas for Improvement
 
-### Low Priority Issues
-| # | Issue | Location | Action Required |
-|---|-------|----------|-----------------|
-| 9 | Missing dev dependencies in root | `package.json` | Add shared dev dependencies |
-| 10 | No CHANGELOG.md | Root | Create when releasing |
-| 11 | Architecture diagram references non-existent code | `README.md` | Update after implementation |
+1. **Testing Coverage:** Several critical paths lack comprehensive test coverage, particularly:
+   - Error handling edge cases
+   - Concurrent operation handling
+   - Recovery from partial failures
+
+2. **Documentation:** While code comments are present, architecture-level documentation is sparse.
+
+3. **Monitoring and Observability:** Limited instrumentation for production monitoring.
 
 ---
 
-## Recommendations
+## Recommendations Summary
 
-### Immediate Actions
+### Immediate Actions (Critical/High)
 
-1. **Create package skeletons** - Initialize `packages/dosql` and `packages/dolake` with basic structure
-2. **Add TypeScript configuration** - Create root and per-package `tsconfig.json`
-3. **Add test configuration** - Create `vitest.config.ts` with workers pool
-4. **Create LICENSE file** - Add MIT license as specified in package.json
+1. Add message size validation before JSON parsing in WebSocket handlers
+2. Create shared types package to eliminate duplication
+3. Standardize error handling patterns across all packages
+4. Add prominent warnings to test-only code that could be misused
 
-### Short-term Actions
+### Short-Term Improvements (Medium)
 
-5. **Set up linting** - Add ESLint with TypeScript support
-6. **Set up formatting** - Add Prettier configuration
-7. **Create CI/CD** - Add GitHub Actions for build, test, lint
+1. Implement server-side transaction timeout enforcement
+2. Add cleanup mechanisms for abandoned streams and subscriptions
+3. Implement idempotency keys for mutation retries
+4. Fix named parameter conversion to use existing parser
 
-### Development Best Practices
+### Long-Term Enhancements (Low)
 
-Based on CLAUDE.md guidelines, ensure the following as code is written:
-
-- Use TypeScript strict mode
-- Use branded types for IDs (TransactionId, LSN)
-- Prefer `unknown` over `any`
-- Write integration tests using workers-vitest-pool
-- No unnecessary abstractions
+1. Comprehensive JSDoc documentation
+2. Consistent test organization
+3. Extract magic numbers to configuration
+4. Consider property immutability patterns
 
 ---
 
 ## Conclusion
 
-The `@dotdo/sql` monorepo is properly initialized with good documentation and configuration groundwork. The project structure is well-planned in CLAUDE.md, but no actual implementation exists yet.
-
-**Next Steps:**
-1. Create the DoSQL and DoLake package skeletons
-2. Add TypeScript and testing configuration
-3. Begin implementing core functionality according to the planned structure
-
-The documentation quality is high, indicating thoughtful planning. The testing philosophy (TDD with real Workers runtime, no mocks) is correct for this type of project.
+The @dotdo/sql monorepo demonstrates solid architectural decisions and good TypeScript practices. The main areas requiring attention are security hardening (input validation, injection prevention), code consistency (error handling, type sharing), and operational concerns (timeouts, cleanup, monitoring). Addressing the critical and high-priority items should be prioritized before production deployment.
 
 ---
 
-*Generated by Claude Code on 2026-01-22*
+*Generated by Claude Opus 4.5 on 2026-01-22*

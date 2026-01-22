@@ -1,484 +1,537 @@
 # Product Review: @dotdo/sql Monorepo
 
 **Review Date:** 2026-01-22
-**Product:** DoSQL + DoLake
-**Repository:** /Users/nathanclevenger/projects/sql
 **Reviewer:** Claude Opus 4.5
+**Packages:** `@dotdo/dosql`, `@dotdo/dolake`, `@dotdo/sql.do`, `@dotdo/lake.do`
+**Repository:** `/Users/nathanclevenger/projects/sql`
 
 ---
 
-## Executive Summary
+## 1. Executive Summary
 
-The @dotdo/sql monorepo represents an ambitious vision to build a distributed SQL database (DoSQL) and analytics lakehouse (DoLake) native to Cloudflare Workers and Durable Objects. The project is in its **early initialization phase** - the `packages/` directory is empty, with only configuration files and documentation in place.
+The @dotdo/sql monorepo implements DoSQL (a type-safe SQL database engine) and DoLake (a CDC-driven lakehouse), both purpose-built for Cloudflare Workers and Durable Objects. This is a technically sophisticated project with genuine innovation, positioned to fill a real gap in the edge computing database market.
 
-**Current Status:** Vision documented, zero implementation
+### Overall Assessment
 
-**Strategic Assessment:** The product vision addresses a real gap in the Cloudflare ecosystem - there is no first-class, horizontally-scalable SQL database built natively for Workers and Durable Objects. The timing is opportune given recent Cloudflare improvements to DO SQLite and the growing edge computing market.
+| Dimension | Rating | Confidence |
+|-----------|--------|------------|
+| **Vision & Strategy** | Excellent | High |
+| **Technical Foundation** | Excellent | High |
+| **Feature Completeness** | 65-70% | High |
+| **Production Readiness** | Not Ready | High |
+| **Documentation Quality** | Good | High |
+| **Competitive Differentiation** | Strong | Medium |
+| **Developer Experience** | Needs Work | High |
+| **Security Posture** | Partial | Medium |
+
+### Bottom Line
+
+DoSQL represents a compelling vision with strong technical execution but is **not yet production-ready**. The project requires 3-6 months of focused stability work before public launch. Key differentiators (7KB bundle, compile-time type safety, branching, time travel, CDC) are real and valuable, but need production validation.
 
 ---
 
-## Product Vision Analysis
+## 2. Current State Assessment
 
-### What DoSQL + DoLake Aims to Be
-
-Based on README.md and CLAUDE.md:
-
-| Component | Purpose | Storage | Query Model |
-|-----------|---------|---------|-------------|
-| **DoSQL** | Transactional OLTP database | DO SQLite | SQLite-compatible SQL |
-| **DoLake** | Analytical OLAP lakehouse | R2 Parquet | CDC streaming + analytics |
-
-### Architecture Vision
+### 2.1 Repository Structure
 
 ```
-+-------------------------------------------------------------------+
-|                     Client Application                             |
-+-------------------------------------------------------------------+
-                              |
-+-------------------------------------------------------------------+
-|                      DoSQL Gateway                                 |
-|  +-------------+  +-------------+  +---------------------+         |
-|  | SQL Parser  |  |  Planner    |  |  Query Optimizer    |         |
-+-------------------------------------------------------------------+
-                              |
-        +---------------------+---------------------+
-        |                     |                     |
-+-------v-------+     +-------v-------+     +-------v-------+
-|   Shard DO    |     |   Shard DO    |     |   Shard DO    |
-|  (SQLite)     |     |  (SQLite)     |     |  (SQLite)     |
-+-------+-------+     +-------+-------+     +-------+-------+
-        |                     |                     |
-        |             CDC Events                    |
-        |                     |                     |
-+-------v---------------------v---------------------v-------+
-|                      DoLake                                |
-|  +-------------+  +-------------+  +-----------+           |
-|  | CDC Ingest  |  |  Compaction |  |  R2 Store |           |
-+------------------------------------------------------------+
+@dotdo/sql/
+├── packages/
+│   ├── dosql/          # Core database engine (357 TypeScript files)
+│   │   ├── src/        # 40+ submodules (parser, btree, wal, sharding, etc.)
+│   │   ├── docs/       # 21+ documentation files
+│   │   └── e2e/        # End-to-end test infrastructure
+│   ├── dolake/         # Lakehouse worker (19 TypeScript files)
+│   │   ├── src/        # CDC, Parquet, Iceberg, compaction
+│   │   └── docs/       # Architecture and integration docs
+│   ├── sql.do/         # DoSQL client SDK
+│   └── lake.do/        # DoLake client SDK
+└── docs/               # Root-level documentation
 ```
 
-### Planned Feature Set
+### 2.2 DoSQL Implementation Status
 
-| Feature | DoSQL | DoLake | Differentiation |
-|---------|-------|--------|-----------------|
-| SQLite-compatible SQL | Yes | N/A | Parse/plan layer on top of DO SQLite |
-| Horizontal sharding | Yes | N/A | Automatic query routing across shards |
-| JOINs, aggregates, CTEs | Yes | N/A | Full SQL expressiveness |
-| Window functions | Yes | N/A | Advanced analytics |
-| CDC streaming | Producer | Consumer | Real-time data pipelines |
-| Parquet storage | N/A | Yes | Cost-effective cold storage |
-| Time travel | N/A | Yes | Query historical data |
-| Strong consistency | Yes | Eventual | DO transactional guarantees |
+| Module | Files | Test Count | Maturity | Notes |
+|--------|-------|------------|----------|-------|
+| **Parser** | 25+ | ~495 | Beta | Strong SQL coverage, missing RETURNING |
+| **Type System** | 8+ | ~215 | Beta | Excellent compile-time inference |
+| **Functions** | 14+ | ~230 | Beta | ~80% SQLite function coverage |
+| **B-tree Storage** | 9+ | ~70 | Alpha | Core working, needs LRU cache |
+| **FSX (Storage)** | 16+ | ~60 | Alpha | DO/R2/Memory backends |
+| **WAL** | 10+ | ~30 | Alpha | Durability implemented, retention needed |
+| **Transactions** | 7+ | ~95 | Alpha | MVCC working, deadlock handling needed |
+| **CDC** | 7+ | ~40 | Alpha | Streaming works, backpressure needed |
+| **Sharding** | 11+ | ~75 | Alpha | Vitess-inspired, cross-shard limited |
+| **RPC** | 7+ | ~25 | Alpha | WebSocket/HTTP, needs test coverage |
+| **Virtual Tables** | 8+ | ~170 | Alpha | URL sources, format detection |
+| **Vector Search** | 8+ | ~30 | Alpha | HNSW implementation |
+| **Stored Procedures** | 12+ | ~90 | Alpha | ESM procedures, functional API |
+| **ORM Adapters** | 4+ | ~80 | Alpha | Drizzle, Kysely, Knex, Prisma |
+| **Planner** | 11+ | ~50 | Alpha | Cost-based optimizer, EXPLAIN |
+| **Index** | 6+ | ~100 | Alpha | B-tree secondary indexes |
+| **Migrations** | 10+ | ~40 | Alpha | Folder-based, Drizzle compat |
 
----
+**Total:** 357 TypeScript files, 94 test files, ~1,650+ test cases
 
-## Competitive Landscape
+### 2.3 DoLake Implementation Status
 
-### Direct Competitors
+| Module | Status | Files | Notes |
+|--------|--------|-------|-------|
+| **CDC WebSocket** | Implemented | 2 | Hibernation support (95% cost reduction) |
+| **Buffer Manager** | Implemented | 1 | Partition-based, deduplication |
+| **Parquet Writer** | Implemented | 1 | Schema inference, compression |
+| **Iceberg Metadata** | Implemented | 1 | Snapshots, manifests |
+| **REST Catalog** | Implemented | 1 | v1 API for external engines |
+| **Compaction** | Implemented | 1 | Background compaction |
+| **Rate Limiting** | Implemented | 1 | Configurable limits |
+| **Query Engine** | Implemented | 1 | Parquet querying |
 
-| Product | Platform | Model | Strengths | Weaknesses |
-|---------|----------|-------|-----------|------------|
-| **Cloudflare D1** | Workers | SQLite | Native, free tier, global | Single region write, limited scale |
-| **Turso** | Edge | libSQL | Edge replicas, branching | External dependency, cost |
-| **PlanetScale** | Cloud | Vitess/MySQL | Proven sharding, serverless | Not edge-native, MySQL only |
-| **Neon** | Cloud | PostgreSQL | Branching, serverless | Not edge-native, cold starts |
-| **Supabase** | Cloud | PostgreSQL | Real-time, auth, storage | Centralized, not edge-native |
+**Test Coverage:** 5 test files, ~100+ test cases (needs expansion)
 
-### Indirect Competitors
+### 2.4 Bundle Size Analysis
 
-| Product | Platform | Model | Overlap with DoSQL/DoLake |
-|---------|----------|-------|---------------------------|
-| **ClickHouse Cloud** | Cloud | Analytics | OLAP workloads, CDC |
-| **Snowflake** | Cloud | Data warehouse | Lakehouse pattern |
-| **Databricks** | Cloud | Lakehouse | Iceberg/Parquet analytics |
-| **Firebolt** | Cloud | Analytics | Real-time analytics |
+| Bundle | Unminified | Minified | Gzipped | CF Free (1MB) |
+|--------|------------|----------|---------|---------------|
+| DoSQL Worker | 49.24 KB | 24.13 KB | **7.36 KB** | 0.7% |
+| DoSQL Database API | 39.9 KB | 17.41 KB | **5.94 KB** | 0.6% |
+| DoSQL Full Library | 230.46 KB | 111.8 KB | **34.26 KB** | 3.3% |
 
-### Competitive Positioning
-
-**DoSQL + DoLake unique value proposition:**
-
-1. **Edge-native** - Runs in Cloudflare Workers, not external cloud
-2. **Durable Object-native** - Leverages DO SQLite for strong consistency
-3. **Horizontally scalable** - Sharding built from the ground up
-4. **Unified OLTP + OLAP** - CDC pipeline connects transactional to analytical
-5. **Cost-optimized** - Uses R2 ($0.015/GB) for cold storage, DOs only for hot data
-
-### Market Gap Analysis
-
-| Capability | D1 | Turso | PlanetScale | DoSQL |
-|------------|----|----|----|----|
-| Native to CF Workers | Yes | No | No | **Yes** |
-| Horizontal sharding | No | Limited | Yes | **Yes** |
-| Cross-shard JOINs | N/A | No | Limited | **Planned** |
-| CDC to analytics | No | No | No | **Yes** |
-| Time travel | No | No | No | **Yes (DoLake)** |
-| Hibernating WebSocket | No | No | No | **Planned** |
+**Key Achievement:** 50-500x smaller than WASM alternatives.
 
 ---
 
-## Related Work in the Ecosystem
+## 3. Feature Completeness Matrix
 
-The @dotdo organization has significant prior art that should inform DoSQL/DoLake:
+### 3.1 SQL Language Support
 
-### evodb (Schema-Evolving Database)
+| Feature | Status | SQLite Compat | Priority |
+|---------|--------|---------------|----------|
+| SELECT (all forms) | Complete | 100% | - |
+| JOINs (all types) | Complete | 100% | - |
+| Subqueries (all types) | Complete | 100% | - |
+| Set Operations | Complete | 100% | - |
+| CTEs (including recursive) | Complete | 100% | - |
+| Window Functions | Complete | 100% | - |
+| INSERT/UPDATE/DELETE | Complete | 100% | - |
+| UPSERT (ON CONFLICT) | Complete | 100% | - |
+| **RETURNING clause** | **Missing** | 0% | **P0** |
+| DDL (CREATE/DROP/ALTER) | Complete | 95% | - |
+| **CREATE TRIGGER** | **Missing** | 0% | P1 |
+| Transactions/Savepoints | Complete | 100% | - |
 
-| Feature | Implementation Status | Applicable to DoSQL |
-|---------|----------------------|---------------------|
-| Columnar JSON shredding | Implemented | Yes - storage optimization |
-| Schema evolution | Implemented | Yes - flexible schemas |
-| CDC pipeline (CapnWeb RPC) | Implemented | Yes - reuse for DoLake |
-| Lakehouse on R2 | Implemented | Yes - direct reuse |
-| Edge constraints handling | Implemented | Yes - Snippets patterns |
+### 3.2 Built-in Functions
 
-**Recommendation:** DoLake should build on @evodb/lakehouse and @evodb/writer rather than starting from scratch.
+| Category | Implemented | SQLite Total | Coverage |
+|----------|-------------|--------------|----------|
+| String functions | 15+ | ~20 | 75% |
+| Math functions | 20+ | ~25 | 80% |
+| Date/time functions | 10+ | ~12 | 80% |
+| Aggregate functions | 8+ | ~10 | 80% |
+| JSON functions | 15+ | ~20 | 75% |
+| Window functions | 11 | 11 | 100% |
+| **Total** | **80+** | **~100** | **~80%** |
 
-### graphdb (Cost-Optimized Graph Database)
+### 3.3 Advanced Features (Unique to DoSQL)
 
-| Feature | Implementation Status | Applicable to DoSQL |
-|---------|----------------------|---------------------|
-| Hibernating WebSocket | Implemented | Yes - 95% cost reduction |
-| Bloom filter routing | Implemented | Yes - query routing |
-| Shard DO architecture | Implemented | Yes - sharding patterns |
-| R2 GraphCol format | Implemented | Partial - storage format |
-| Benchmark framework | Implemented | Yes - performance testing |
-
-**Recommendation:** DoSQL should adopt the hibernating WebSocket pattern and benchmark infrastructure from graphdb.
-
-### vitess-do (Distributed Sharding)
-
-| Feature | Implementation Status | Applicable to DoSQL |
-|---------|----------------------|---------------------|
-| VTGate query routing | In development | Direct alignment |
-| VTTablet shard management | In development | Direct alignment |
-| PGlite/SQLite backends | In development | SQLite only for DoSQL |
-| Cross-shard transactions | In development | Required for DoSQL |
-
-**Recommendation:** Evaluate whether DoSQL should be a rebrand/fork of vitess-do or a separate implementation.
-
-### pocs (Proof of Concepts)
-
-Extensive POC work has been done in /Users/nathanclevenger/projects/pocs:
-
-| POC Package | Relevance to DoSQL/DoLake |
-|-------------|---------------------------|
-| mergetree | LSM-tree storage for DO - applicable |
-| replacing-mergetree | Upsert semantics - applicable |
-| storage-tiering | Hot/cold tiering - core to DoLake |
-| cdc | Change data capture - core to DoLake |
-| query-engine | DO-native SQL engine - applicable |
-| edgeql | Federated SQL - applicable patterns |
-| coordinator | Multi-file Iceberg scans - applicable |
-| parquet | Parquet reading - core to DoLake |
-
-**Recommendation:** The dosql and dolake packages referenced in pocs/TYPESCRIPT_REVIEW_DOSQL_DOLAKE.md appear to already exist as POCs. These should be migrated to @dotdo/sql rather than rebuilding.
+| Feature | Implementation | Documentation | Production Ready |
+|---------|---------------|---------------|------------------|
+| Compile-time type-safe SQL | Complete | Excellent | Yes |
+| Time Travel Queries | Implemented | Good | Needs validation |
+| Branch/Merge (Git-like) | Implemented | Good | Needs validation |
+| CDC Streaming | Implemented | Good | Needs validation |
+| Virtual Tables (URL sources) | Implemented | Good | Needs validation |
+| Vector Search (HNSW) | Implemented | Basic | Needs validation |
+| Hot/Cold Tiered Storage | Implemented | Good | Needs validation |
+| CapnWeb RPC | Implemented | Basic | Needs more tests |
+| ORM Adapters | Implemented | Basic | Needs validation |
 
 ---
 
-## Cloudflare Workers Constraints
+## 4. Competitive Analysis
 
-### Current Platform Limits
+### 4.1 Market Landscape
 
-| Constraint | Workers | Snippets | Durable Objects |
-|------------|---------|----------|-----------------|
-| **CPU Time** | 50ms (free), 30s (paid) | 5ms | 30s/request |
-| **Memory** | 128MB | 32MB | 128MB |
-| **Subrequests** | 1000 | 5 | Unlimited |
-| **Request size** | 100MB | 100MB | 100MB |
-| **SQLite size** | N/A | N/A | 10GB |
-| **DO storage** | N/A | N/A | 50GB |
+| Solution | Type | Bundle | Workers Native | SQL Compat |
+|----------|------|--------|----------------|------------|
+| **DoSQL** | Native TS | **7KB** | **Yes** | ~70% |
+| Cloudflare D1 | Managed | N/A | Yes | 100% (SQLite) |
+| Turso | SQLite Edge | ~500KB | Partial | 100% (libSQL) |
+| PlanetScale | MySQL | N/A | No | MySQL |
+| SQLite-WASM | WASM | ~500KB | Partial | 100% |
+| PGLite | WASM | ~3MB | No | PostgreSQL |
+| DuckDB-WASM | WASM | ~4MB | No | DuckDB SQL |
 
-### Constraint Implications
+### 4.2 Competitive Positioning
 
-| Feature | Constraint | Mitigation |
-|---------|------------|------------|
-| Large JOINs | 50ms CPU limit in Workers | Execute in DOs (30s budget) |
-| Cross-shard queries | 1000 subrequest limit | Batch shard requests, hibernating WS |
-| Cold analytics | Memory limits | Streaming + R2 Parquet |
-| Schema metadata | DO storage limits | Store schemas in R2, cache in DO |
-| Index builds | CPU time | Incremental builds via alarms |
+**vs. Cloudflare D1:**
+- D1 Advantage: Managed service, official support, zero bundle impact
+- DoSQL Advantage: Type safety, branching, time travel, CDC, no external calls
+- Risk: D1 could add these features. DoSQL targets power users.
 
-### Edge Constraint Strategy
+**vs. Turso:**
+- Turso Advantage: Production-proven, 100% SQLite compat, edge replicas
+- DoSQL Advantage: 70x smaller bundle, compile-time types, native DO integration
+- Risk: Turso is well-funded and rapidly improving.
 
-Based on graphdb and evodb patterns:
+**vs. PlanetScale/Neon:**
+- PS/Neon Advantage: Full SQL, enterprise features, managed
+- DoSQL Advantage: Edge-native, ~5ms latency (vs 50-200ms), lower cost
+- Opportunity: Different market segments.
 
-```
-+--------------------+     +---------------------+     +-------------------+
-|   Snippets (FREE)  | --> |    Gateway Worker   | --> |   Shard DOs       |
-|   5ms, 32KB        |     |    50ms budget      |     |   30s budget      |
-+--------------------+     +---------------------+     +-------------------+
-         |                          |                          |
-    Bloom filter              Query routing              SQLite execution
-    Query parsing             Aggregation                Transactions
-    Shard selection           Caching                    CDC streaming
-```
+### 4.3 Unique Value Proposition
 
----
+DoSQL's defensible advantages:
 
-## Production Readiness Assessment
-
-### Current State: 0% Complete
-
-| Category | Status | Score |
-|----------|--------|-------|
-| Core database engine | Not started | 0/10 |
-| Query parsing | Not started | 0/10 |
-| Query planning | Not started | 0/10 |
-| Transaction management | Not started | 0/10 |
-| Sharding | Not started | 0/10 |
-| CDC pipeline | Not started | 0/10 |
-| Lakehouse storage | Not started | 0/10 |
-| Testing infrastructure | Not started | 0/10 |
-| Documentation | Skeleton only | 2/10 |
-| CI/CD | Not started | 0/10 |
-
-### Path to MVP (Minimum Viable Product)
-
-**MVP Definition:** Single-shard SQL database with CDC to R2 Parquet
-
-| Milestone | Scope | Effort |
-|-----------|-------|--------|
-| M1: Single-node DoSQL | CREATE/INSERT/SELECT/UPDATE/DELETE on single DO | 2 weeks |
-| M2: Query parser | Full SQL parser with AST | 2 weeks |
-| M3: Query planner | Cost-based optimization | 2 weeks |
-| M4: Transactions | BEGIN/COMMIT/ROLLBACK, isolation | 1 week |
-| M5: CDC export | Stream changes to DoLake | 1 week |
-| M6: DoLake ingest | Buffer CDC, write Parquet to R2 | 2 weeks |
-| M7: Time travel | Query Parquet snapshots | 1 week |
-
-**MVP Total:** ~11 weeks
-
-### Path to Production
-
-| Phase | Scope | Effort |
-|-------|-------|--------|
-| Alpha | MVP + basic sharding | +4 weeks |
-| Beta | Cross-shard queries, WebSocket API | +6 weeks |
-| RC | Performance optimization, monitoring | +4 weeks |
-| GA | Production hardening, docs | +4 weeks |
-
-**Production Total:** ~29 weeks (~7 months)
+1. **50-500x smaller bundle** - Only pure TypeScript solution
+2. **Compile-time type safety** - No runtime SQL errors
+3. **Git-like branching** - Test schema changes safely
+4. **Time travel queries** - Query historical state
+5. **Integrated CDC to lakehouse** - OLTP + OLAP in one platform
+6. **Native Cloudflare integration** - Designed for DO/R2 constraints
 
 ---
 
-## Documentation Needs
+## 5. Documentation Assessment
 
-### Current Documentation
+### 5.1 Documentation Inventory
 
-| Document | Status | Quality |
-|----------|--------|---------|
-| README.md | Exists | Good - clear vision, architecture diagram |
-| CLAUDE.md | Exists | Excellent - detailed development guide |
-| AGENTS.md | Exists | Good - agent workflow reference |
-| API docs | Missing | N/A |
-| Architecture docs | Missing | N/A |
-| User guides | Missing | N/A |
-| Migration guides | Missing | N/A |
+| Document | Location | Quality | Completeness |
+|----------|----------|---------|--------------|
+| Main README | `/README.md` | Good | 85% |
+| DoSQL README | `/packages/dosql/README.md` | Excellent | 95% |
+| Getting Started | `/packages/dosql/docs/getting-started.md` | Good | 85% |
+| API Reference | `/packages/dosql/docs/api-reference.md` | Excellent | 90% |
+| Architecture | `/packages/dosql/docs/architecture.md` | Excellent | 95% |
+| Advanced Features | `/packages/dosql/docs/advanced.md` | Good | 85% |
+| Bundle Analysis | `/packages/dosql/docs/bundle-analysis.md` | Excellent | 95% |
+| Test Coverage | `/packages/dosql/docs/test-coverage-analysis.md` | Excellent | 95% |
+| DoLake README | `/packages/dolake/README.md` | Good | 85% |
 
-### Required Documentation
+### 5.2 Missing Documentation
 
-| Category | Documents | Priority |
-|----------|-----------|----------|
-| **Architecture** | System design, sharding strategy, CDC flow | P0 |
-| **API Reference** | SQL syntax, client API, WebSocket protocol | P0 |
-| **Operations** | Deployment, monitoring, backup/restore | P1 |
-| **Migration** | From D1, from Turso, from PlanetScale | P1 |
-| **Tutorials** | Quick start, multi-tenant app, analytics | P2 |
-| **Internals** | Query optimizer, transaction manager, WAL | P2 |
-
----
-
-## Proposed Roadmap
-
-### Phase 0: Foundation (Current - 2 weeks)
-
-**Goal:** Migrate existing POC code, establish infrastructure
-
-| Task | Source | Target | Status |
-|------|--------|--------|--------|
-| Migrate dosql POC | pocs/packages/dosql | sql/packages/dosql | Not started |
-| Migrate dolake POC | pocs/packages/dolake | sql/packages/dolake | Not started |
-| Set up CI/CD | - | .github/workflows | Not started |
-| Add TypeScript config | - | tsconfig.json | Not started |
-| Add Vitest config | - | vitest.config.ts | Not started |
-| Create test fixtures | - | packages/test-utils | Not started |
-
-### Phase 1: Single-Shard DoSQL (Weeks 3-6)
-
-**Goal:** Working SQL database on single Durable Object
-
-| Milestone | Description | Deliverable |
-|-----------|-------------|-------------|
-| M1.1 | Database DO scaffold | DoSQL class with SQLite access |
-| M1.2 | DDL support | CREATE TABLE, DROP TABLE, ALTER TABLE |
-| M1.3 | DML support | INSERT, UPDATE, DELETE, SELECT |
-| M1.4 | Query parsing | Full SQL parser with error messages |
-| M1.5 | Transactions | BEGIN, COMMIT, ROLLBACK, isolation levels |
-| M1.6 | Indexes | CREATE INDEX, query optimizer integration |
-
-### Phase 2: DoLake Foundation (Weeks 7-10)
-
-**Goal:** CDC pipeline from DoSQL to R2 Parquet
-
-| Milestone | Description | Deliverable |
-|-----------|-------------|-------------|
-| M2.1 | CDC event schema | Event types, serialization |
-| M2.2 | CDC capture | Triggers on DoSQL writes |
-| M2.3 | CDC transport | WebSocket or RPC to DoLake |
-| M2.4 | Buffer manager | In-memory buffer with flush logic |
-| M2.5 | Parquet writer | Write columnar files to R2 |
-| M2.6 | Manifest manager | Track Parquet files, snapshots |
-
-### Phase 3: Horizontal Sharding (Weeks 11-16)
-
-**Goal:** Multi-shard DoSQL with query routing
-
-| Milestone | Description | Deliverable |
-|-----------|-------------|-------------|
-| M3.1 | Shard key definition | VSchema-style configuration |
-| M3.2 | Shard router | Route queries to correct shards |
-| M3.3 | Scatter-gather | Fan-out queries, aggregate results |
-| M3.4 | Cross-shard JOINs | Distributed join execution |
-| M3.5 | Shard balancing | Split/merge shards |
-| M3.6 | Global tables | Replicate lookup tables |
-
-### Phase 4: Analytics (Weeks 17-22)
-
-**Goal:** Query historical data in DoLake
-
-| Milestone | Description | Deliverable |
-|-----------|-------------|-------------|
-| M4.1 | Parquet reader | Read columnar data from R2 |
-| M4.2 | Time travel | Query at specific timestamp |
-| M4.3 | Compaction | Merge small files, remove deletes |
-| M4.4 | Partition pruning | Skip irrelevant partitions |
-| M4.5 | Aggregate pushdown | Execute aggregates on Parquet |
-| M4.6 | Hot/cold routing | Unified queries across DO + R2 |
-
-### Phase 5: Production Readiness (Weeks 23-29)
-
-**Goal:** Production-grade deployment
-
-| Milestone | Description | Deliverable |
-|-----------|-------------|-------------|
-| M5.1 | Monitoring | Metrics, logging, tracing |
-| M5.2 | Security | Auth, encryption, access control |
-| M5.3 | Performance | Benchmarks, optimization |
-| M5.4 | Documentation | API docs, guides, examples |
-| M5.5 | Client SDKs | TypeScript, Python, Go |
-| M5.6 | Release | npm publish, versioning |
+| Document | Priority | Impact |
+|----------|----------|--------|
+| Security Best Practices | **P0** | Production blocker |
+| Deployment/Operations Guide | **P0** | Production blocker |
+| Performance Tuning | P1 | DevOps needs |
+| Migration from D1 | P1 | Adoption |
+| Migration from Turso | P1 | Adoption |
+| Troubleshooting FAQ | P1 | Support |
+| Integration Guides (Remix, Next.js) | P2 | Adoption |
 
 ---
 
-## Risk Assessment
+## 6. API Stability Assessment
 
-### Technical Risks
+### 6.1 Core API Surface
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| DO SQLite limitations | High | Medium | Fall back to custom B-tree if needed |
-| Subrequest limits | High | High | Hibernating WebSocket, batching |
-| Cross-shard consistency | High | Medium | 2PC or eventual consistency |
-| Cold start latency | Medium | High | Edge caching, snippets routing |
-| Parquet parsing overhead | Medium | Low | Streaming decompression |
+| API | Stability | Breaking Changes Risk |
+|-----|-----------|----------------------|
+| `DB()` function | Stable | Low |
+| `query()`, `run()`, `exec()` | Stable | Low |
+| `prepare()` statements | Stable | Low |
+| `transaction()` | Stable | Low |
+| WAL exports | Unstable | Medium |
+| CDC exports | Unstable | High |
+| Sharding exports | Unstable | High |
+| Stored Procedures | Unstable | Medium |
+| Virtual Tables | Unstable | Medium |
 
-### Business Risks
+### 6.2 Export Structure
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| D1 feature parity | High | Medium | Differentiate on sharding, CDC |
-| Turso competition | Medium | Medium | Focus on Cloudflare-native |
-| Cloudflare platform changes | Medium | Low | Abstract storage layer |
-| Adoption barriers | Medium | Medium | Migration guides, D1 compatibility |
-
-### Operational Risks
-
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Data loss | Critical | Low | WAL + R2 backup, DO replication |
-| Performance degradation | High | Medium | Auto-scaling, monitoring |
-| Breaking changes | Medium | Medium | Semantic versioning, deprecation |
+The current `index.ts` exports are comprehensive but mix stable and experimental APIs. Recommendation: Create separate entry points (`@dotdo/dosql/experimental`).
 
 ---
 
-## Success Metrics
+## 7. Error Handling Assessment
 
-### Product Metrics
+### 7.1 Error Type Coverage
 
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| Query latency p50 | < 20ms | Benchmark suite |
-| Query latency p99 | < 100ms | Benchmark suite |
-| Write throughput | > 10K ops/sec | Benchmark suite |
-| CDC latency | < 1 second | Integration tests |
-| Time travel query | < 500ms | Benchmark suite |
+| Module | Custom Errors | Error Codes | Documentation |
+|--------|---------------|-------------|---------------|
+| Transactions | Yes | Yes | Good |
+| WAL | Yes | Yes | Good |
+| FSX | Yes | Yes | Basic |
+| Time Travel | Yes | Yes | Basic |
+| CDC | Yes | Yes | Basic |
+| Parser | Partial | Partial | Needs work |
+| Sharding | Partial | Partial | Needs work |
 
-### Adoption Metrics
+### 7.2 Error Handling Gaps
 
-| Metric | Target (6 months) | Target (12 months) |
-|--------|-------------------|-------------------|
-| npm downloads/month | 1,000 | 10,000 |
-| GitHub stars | 500 | 2,000 |
-| Production deployments | 10 | 100 |
-| Active contributors | 5 | 20 |
-
----
-
-## Recommendations
-
-### Immediate Actions (This Week)
-
-1. **Migrate POC code** - Move dosql and dolake from pocs to sql monorepo
-2. **Set up CI/CD** - GitHub Actions for build, test, lint
-3. **Create test utilities** - Shared testing infrastructure
-4. **Document architecture** - Write ARCHITECTURE.md with detailed design
-
-### Short-term Actions (Next Month)
-
-5. **Complete single-shard DoSQL** - Working database on single DO
-6. **Implement CDC pipeline** - Stream changes to DoLake
-7. **Write integration tests** - Full coverage of core paths
-8. **Benchmark baseline** - Establish performance baselines
-
-### Medium-term Actions (Next Quarter)
-
-9. **Add horizontal sharding** - Multi-shard query routing
-10. **Implement Parquet analytics** - Query historical data
-11. **Create client SDK** - TypeScript client with connection pooling
-12. **Write documentation** - User guides, API reference
-
-### Long-term Vision (Next Year)
-
-13. **Production hardening** - Security, monitoring, reliability
-14. **Ecosystem integration** - D1 migration, Turso compatibility
-15. **Enterprise features** - RBAC, audit logging, encryption
-16. **Community building** - Open source, contributors, adoption
+1. **Parser errors** lack source location information
+2. **Sharding errors** don't differentiate between routing and execution failures
+3. **RPC errors** need retry/backoff guidance
+4. No unified error hierarchy across modules
 
 ---
 
-## Conclusion
+## 8. Security Assessment
 
-DoSQL + DoLake represents a compelling vision for edge-native databases on Cloudflare. The combination of:
+### 8.1 Security Measures Implemented
 
-- **Transactional OLTP** (DoSQL) with strong consistency via Durable Objects
-- **Analytical OLAP** (DoLake) with cost-effective R2 Parquet storage
-- **Real-time CDC** pipeline connecting the two
+| Area | Status | Notes |
+|------|--------|-------|
+| SQL Injection (tokenizer) | **Implemented** | State-aware tokenization |
+| Parameterized queries | Supported | Recommended pattern |
+| Input validation | Partial | Needs schema validation |
+| Authentication | **Not implemented** | Delegated to caller |
+| Authorization | **Not implemented** | No RBAC |
+| Encryption at rest | **Not implemented** | Relies on DO/R2 |
+| Encryption in transit | Inherent | Cloudflare TLS |
+| Audit logging | **Not implemented** | - |
 
-...addresses a genuine gap in the Cloudflare ecosystem that neither D1 nor external databases like Turso fully fill.
+### 8.2 Security Gaps
 
-**Key differentiators:**
-1. Native to Cloudflare Workers and Durable Objects
-2. Horizontal sharding built from the ground up
-3. Unified transactional and analytical queries
-4. CDC-driven lakehouse with time travel
-
-**Critical path to success:**
-1. Leverage existing POC work (dosql, dolake in pocs)
-2. Reuse proven patterns from evodb and graphdb
-3. Focus on single-shard MVP before sharding
-4. Build community around Cloudflare Workers developers
-
-The project is well-positioned but needs to move from vision to implementation. The detailed architecture in CLAUDE.md and the related work across the @dotdo ecosystem provide a strong foundation. Execution is now the priority.
+1. **No security model documentation** - Critical for production
+2. **No authentication layer** - Must be implemented by caller
+3. **No authorization/RBAC** - All queries have full access
+4. **No audit logging** - Cannot track who did what
+5. **SQL injection test coverage** exists but needs expansion
 
 ---
 
-*Generated by Claude Opus 4.5 on 2026-01-22*
+## 9. Performance Characteristics
+
+### 9.1 Cloudflare Workers Constraints
+
+| Constraint | Workers | Durable Objects | Impact |
+|------------|---------|-----------------|--------|
+| CPU Time | 50ms (free), 30s (paid) | 30s/request | Large queries need DO |
+| Memory | 128MB | 128MB | Streaming required |
+| Subrequests | 1000 | Unlimited | Cross-shard batching needed |
+| Bundle Size | 1MB (free), 10MB (paid) | N/A | DoSQL fits easily |
+| SQLite Size | N/A | 10GB | Per-tenant limit |
+| DO Storage | N/A | 50GB | Total per DO |
+
+### 9.2 Expected Performance
+
+| Operation | Target Latency | Confidence | Notes |
+|-----------|---------------|------------|-------|
+| Point lookup | <5ms | High | B-tree optimized |
+| Range scan (100 rows) | <20ms | Medium | Needs validation |
+| Insert (single) | <10ms | Medium | WAL overhead |
+| CDC to DoLake | <1s | Medium | WebSocket path |
+| Time travel query | <100ms | Low | Snapshot access |
+
+### 9.3 Performance Validation Status
+
+| Test Type | Status | Notes |
+|-----------|--------|-------|
+| Unit benchmarks | Partial | In `/src/benchmarks/` |
+| Integration benchmarks | Not started | E2E infrastructure exists |
+| Production benchmarks | **Not started** | **Critical gap** |
+| Load testing | Not started | - |
+| Stress testing | Not started | - |
+
+---
+
+## 10. Production Readiness Gaps
+
+### 10.1 Critical Gaps (P0) - Must fix before any production use
+
+| Gap | Impact | Effort | Status |
+|-----|--------|--------|--------|
+| Production benchmarks | Cannot validate claims | Medium | Not started |
+| RETURNING clause | Blocks common patterns | Low | Not implemented |
+| Deadlock detection | Correctness issue | Medium | Partial |
+| Security model documentation | Production blocker | Medium | Not documented |
+| Error handling consistency | DX blocker | Medium | Partial |
+
+### 10.2 High Priority Gaps (P1) - Should fix before public launch
+
+| Gap | Impact | Effort | Status |
+|-----|--------|--------|--------|
+| CREATE TRIGGER support | SQLite compat | High | Not implemented |
+| Cross-shard transactions | Distributed correctness | Very High | Not implemented |
+| WAL retention policy | Disk management | Low | Not implemented |
+| DoLake test expansion | Quality assurance | Medium | 5 test files |
+| Operations guide | DevOps enablement | Medium | Not started |
+
+### 10.3 Medium Priority Gaps (P2) - Nice to have for launch
+
+| Gap | Impact | Effort | Status |
+|-----|--------|--------|--------|
+| CLI tool | Developer experience | Medium | Not started |
+| VS Code extension | Developer experience | Medium | Not started |
+| Web playground | Adoption | High | Not started |
+| Migration guides | Adoption | Low | Not started |
+
+---
+
+## 11. Recommended Roadmap
+
+### Phase 1: Stability (Weeks 1-8)
+
+**Goal:** Fix all P0 blockers, establish production validation
+
+| Week | Focus | Deliverables |
+|------|-------|--------------|
+| 1-2 | Benchmarking | Production benchmark infrastructure on Workers |
+| 3-4 | Critical gaps | RETURNING clause, deadlock detection |
+| 5-6 | Testing | RPC test coverage, DoLake test expansion |
+| 7-8 | Security | Security model documentation, audit |
+
+**Exit Criteria:**
+- [ ] Production benchmarks passing and documented
+- [ ] 0 P0 issues open
+- [ ] Test coverage >70% across all modules
+- [ ] Security model documented and reviewed
+
+### Phase 2: Beta (Weeks 9-16)
+
+**Goal:** Private beta with design partners, validate product-market fit
+
+| Week | Focus | Deliverables |
+|------|-------|--------------|
+| 9-10 | P1 features | Triggers, WAL retention |
+| 11-12 | DX | CLI tool MVP, error message improvements |
+| 13-14 | Documentation | Operations guide, migration guides |
+| 15-16 | Design partners | Onboard 3-5 beta users |
+
+**Exit Criteria:**
+- [ ] 3-5 design partners using in staging
+- [ ] CLI tool released
+- [ ] SQLLogicTest pass rate >85%
+- [ ] First case study drafted
+
+### Phase 3: GA Preparation (Weeks 17-24)
+
+**Goal:** Public launch readiness
+
+| Week | Focus | Deliverables |
+|------|-------|--------------|
+| 17-18 | DX polish | VS Code extension, playground |
+| 19-20 | Community | Discord, templates, example apps |
+| 21-22 | Marketing | Website, launch blog post, documentation site |
+| 23-24 | Launch | Public announcement, support process |
+
+**Exit Criteria:**
+- [ ] Marketing website live
+- [ ] Community channels active
+- [ ] 1+ production case study published
+- [ ] Support process documented and tested
+
+---
+
+## 12. Risk Assessment
+
+### 12.1 Technical Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Performance doesn't meet claims | Medium | High | Production benchmarks ASAP |
+| Memory leaks in long-running DOs | Medium | High | Load testing, monitoring |
+| Data corruption in edge cases | Low | Critical | Extensive test suite, WAL checksums |
+| Cross-shard consistency issues | Medium | High | Defer distributed transactions |
+
+### 12.2 Business Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| D1 adds competing features | Medium | High | Focus on unique differentiators |
+| Turso captures edge market | Medium | Medium | Bundle size + type safety |
+| Limited adoption | Medium | Medium | Design partner validation |
+| Cloudflare platform changes | Low | Medium | Abstract storage layer |
+
+### 12.3 Operational Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Maintenance burden | High | Medium | Narrow scope, build community |
+| Support overwhelm at launch | Medium | Medium | Documentation, FAQ, design partners |
+| Security vulnerabilities | Low | Critical | Security audit before launch |
+
+---
+
+## 13. Summary and Recommendations
+
+### 13.1 What's Working Well
+
+1. **Technical foundation is excellent** - Clean architecture, comprehensive modules
+2. **Type safety is genuine innovation** - No competitor offers compile-time SQL validation
+3. **Bundle size advantage is proven** - 50-500x smaller than alternatives
+4. **Documentation quality is good** - Architecture and API well documented
+5. **Feature breadth is impressive** - Time travel, branching, CDC, vector search
+6. **Test coverage is substantial** - 1,650+ tests, 94 test files
+
+### 13.2 What Needs Work
+
+1. **Production validation missing** - No benchmarks in actual Workers environment
+2. **Security model undocumented** - Cannot recommend for production
+3. **P0 blockers exist** - RETURNING clause, deadlock detection
+4. **Developer tooling lacking** - No CLI, VS Code extension, playground
+5. **Error handling inconsistent** - Parser errors lack location info
+6. **Go-to-market not ready** - No website, community channels, launch plan
+
+### 13.3 Top 5 Immediate Priorities
+
+| Priority | Action | Owner | Timeline |
+|----------|--------|-------|----------|
+| **1** | Create production benchmark infrastructure | Core team | 2 weeks |
+| **2** | Document security model | Core team | 2 weeks |
+| **3** | Implement RETURNING clause | Core team | 1 week |
+| **4** | Expand DoLake test coverage | Core team | 2 weeks |
+| **5** | Recruit 3-5 design partners | Product | 4 weeks |
+
+### 13.4 Recommendation
+
+**Do not launch publicly** until Phase 1 is complete. The technical foundation is strong, but production readiness requires:
+
+1. Benchmark validation of performance claims
+2. Security model documentation and review
+3. P0 bug fixes
+4. Design partner validation
+
+With 3-6 months of focused execution, DoSQL could become a compelling choice for Cloudflare developers building data-intensive edge applications. The foundation is excellent - it needs polish and validation.
+
+---
+
+## Appendix A: File Counts by Module
+
+| Module Path | TypeScript Files | Test Files |
+|-------------|------------------|------------|
+| `/packages/dosql/src/parser/` | 25 | 7 |
+| `/packages/dosql/src/functions/` | 14 | 2 |
+| `/packages/dosql/src/planner/` | 11 | 4 |
+| `/packages/dosql/src/sharding/` | 11 | 2 |
+| `/packages/dosql/src/proc/` | 12 | 2 |
+| `/packages/dosql/src/fsx/` | 16 | 1 |
+| `/packages/dosql/src/wal/` | 10 | 3 |
+| `/packages/dosql/src/btree/` | 9 | 1 |
+| `/packages/dosql/src/cdc/` | 7 | 1 |
+| `/packages/dosql/src/transaction/` | 7 | 1 |
+| `/packages/dosql/src/virtual/` | 8 | 1 |
+| `/packages/dosql/src/sources/` | 10 | 1 |
+| `/packages/dosql/src/vector/` | 8 | 1 |
+| `/packages/dosql/src/index/` | 6 | 1 |
+| `/packages/dolake/src/` | 19 | 5 |
+
+## Appendix B: External Dependencies
+
+| Package | Version | Purpose | Workers Safe |
+|---------|---------|---------|--------------|
+| `capnweb` | ^0.4.0 | RPC communication | Yes |
+| `iceberg-js` | ^0.8.1 | Iceberg REST client | Yes |
+| `drizzle-orm` | ^0.45.1 | ORM adapter | Yes |
+| `kysely` | ^0.27.6 | ORM adapter | Yes |
+| `knex` | ^3.1.0 | ORM adapter | Partial |
+| `hyparquet` | ^1.9.0 | Parquet reading | Yes |
+| `zod` | ^4.3.5 | Schema validation | Yes |
+| `@libsql/client` | ^0.14.0 | libSQL compat | Partial |
+
+## Appendix C: Related Documentation
+
+- `/packages/dosql/docs/architecture.md` - System architecture
+- `/packages/dosql/docs/api-reference.md` - Complete API docs
+- `/packages/dosql/docs/bundle-analysis.md` - Bundle size analysis
+- `/packages/dosql/docs/test-coverage-analysis.md` - Test coverage details
+- `/packages/dosql/docs/PRODUCT_REVIEW.md` - Package-level review
+- `/packages/dolake/docs/ARCHITECTURE.md` - DoLake architecture
+- `/packages/dolake/docs/INTEGRATION.md` - DoSQL-DoLake integration
+
+---
+
+*Review generated: 2026-01-22*
+*Based on analysis of @dotdo/sql monorepo*
+*Reviewer: Claude Opus 4.5*
