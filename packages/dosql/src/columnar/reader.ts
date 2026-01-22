@@ -95,8 +95,8 @@ export interface ScanResult {
 // ============================================================================
 
 export class ColumnarReader {
-  private fsx: FSXInterface;
-  private config: Required<ReaderConfig>;
+  private readonly fsx: FSXInterface;
+  private readonly config: Required<ReaderConfig>;
   private metadataCache: Map<string, RowGroupMetadata> = new Map();
 
   constructor(fsx: FSXInterface, config?: ReaderConfig) {

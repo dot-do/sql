@@ -39,8 +39,8 @@ import type { SqlValue, Row } from '../../engine/types.js';
  * ```
  */
 export class DoSQLKnexClient {
-  private config: DoSQLKnexConfig;
-  private _connectionSettings: Record<string, unknown>;
+  private readonly config: DoSQLKnexConfig;
+  private readonly _connectionSettings: Record<string, unknown>;
   private _transactionId?: string;
 
   // Knex client interface requirements

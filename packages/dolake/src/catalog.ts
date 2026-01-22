@@ -187,8 +187,8 @@ export interface RestCatalogConfig {
  * Handles Iceberg REST Catalog API requests.
  */
 export class RestCatalogHandler {
-  private storage: IcebergStorage;
-  private config: RestCatalogConfig;
+  private readonly storage: IcebergStorage;
+  private readonly config: RestCatalogConfig;
 
   constructor(storage: IcebergStorage, config: RestCatalogConfig) {
     this.storage = storage;

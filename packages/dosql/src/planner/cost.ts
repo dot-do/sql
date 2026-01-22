@@ -48,9 +48,9 @@ import {
  * Cost estimator class
  */
 export class CostEstimator {
-  private stats: StatisticsStore;
-  private config: CostModelConfig;
-  private indexDefs: Map<string, IndexDef[]>;
+  private readonly stats: StatisticsStore;
+  private readonly config: CostModelConfig;
+  private readonly indexDefs: Map<string, IndexDef[]>;
 
   constructor(
     stats: StatisticsStore,

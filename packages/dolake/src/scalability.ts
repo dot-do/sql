@@ -114,10 +114,10 @@ export interface ParallelWriteResult {
  * Manages parallel writes to multiple partitions
  */
 export class ParallelWriteManager {
-  private config: ScalingConfig;
-  private activeWriters: Map<string, Promise<PartitionWriteResult>>;
-  private failedPartitions: Set<string>;
-  private throttleState: Map<string, { lastWriteTime: number; bytesInWindow: number }>;
+  private readonly config: ScalingConfig;
+  private readonly activeWriters: Map<string, Promise<PartitionWriteResult>>;
+  private readonly failedPartitions: Set<string>;
+  private readonly throttleState: Map<string, { lastWriteTime: number; bytesInWindow: number }>;
 
   constructor(config: ScalingConfig = DEFAULT_SCALING_CONFIG) {
     this.config = config;
@@ -384,8 +384,8 @@ export interface AutoCompactionResult {
  * Partition compaction manager
  */
 export class PartitionCompactionManager {
-  private partitionMetadata: Map<string, PartitionMetadata>;
-  private compactionInProgress: Set<string>;
+  private readonly partitionMetadata: Map<string, PartitionMetadata>;
+  private readonly compactionInProgress: Set<string>;
 
   constructor() {
     this.partitionMetadata = new Map();
@@ -603,7 +603,7 @@ export interface SplitExecutionResult {
  * Partition rebalancer
  */
 export class PartitionRebalancer {
-  private partitionSizes: Map<string, { sizeBytes: bigint; recordCount: bigint }>;
+  private readonly partitionSizes: Map<string, { sizeBytes: bigint; recordCount: bigint }>;
 
   constructor() {
     this.partitionSizes = new Map();
@@ -800,7 +800,7 @@ export interface RangeReadResult {
  * Large file handler
  */
 export class LargeFileHandler {
-  private config: ScalingConfig;
+  private readonly config: ScalingConfig;
 
   constructor(config: ScalingConfig = DEFAULT_SCALING_CONFIG) {
     this.config = config;
@@ -1017,9 +1017,9 @@ export interface DORoutingResult {
  * Horizontal scaling manager
  */
 export class HorizontalScalingManager {
-  private config: ScalingConfig;
+  private readonly config: ScalingConfig;
   private instanceCount: number = 1;
-  private partitionToInstance: Map<string, number> = new Map();
+  private readonly partitionToInstance: Map<string, number> = new Map();
 
   constructor(config: ScalingConfig = DEFAULT_SCALING_CONFIG) {
     this.config = config;

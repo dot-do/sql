@@ -204,8 +204,8 @@ export const DEFAULT_QUERY_ENGINE_CONFIG: QueryEngineConfig = {
  * Query engine for DoLake
  */
 export class QueryEngine {
-  private config: QueryEngineConfig;
-  private partitionStats: Map<string, FileStats[]>;
+  private readonly config: QueryEngineConfig;
+  private readonly partitionStats: Map<string, FileStats[]>;
 
   constructor(config: QueryEngineConfig = DEFAULT_QUERY_ENGINE_CONFIG) {
     this.config = config;

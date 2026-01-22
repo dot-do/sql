@@ -40,6 +40,10 @@ export {
   type QueryResponse,
   type QueryResult,
 
+  // Idempotency Types
+  type IdempotencyConfig,
+  DEFAULT_IDEMPOTENCY_CONFIG,
+
   // CDC Types
   type CDCOperation,
   type ClientCDCOperation,

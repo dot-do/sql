@@ -590,9 +590,9 @@ export interface PartitionListResponse {
  * Partition manager for scalable partition handling
  */
 export class PartitionManager {
-  private config: PartitionManagerConfig;
-  private partitionCache: Map<string, { data: PartitionMetadata[]; timestamp: number }>;
-  private partitionIndex: Map<string, Set<string>>; // table -> partitions
+  private readonly config: PartitionManagerConfig;
+  private readonly partitionCache: Map<string, { data: PartitionMetadata[]; timestamp: number }>;
+  private readonly partitionIndex: Map<string, Set<string>>; // table -> partitions
 
   constructor(config: PartitionManagerConfig = DEFAULT_PARTITION_MANAGER_CONFIG) {
     this.config = config;

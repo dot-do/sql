@@ -184,6 +184,30 @@ export function jsToSqlType(jsType: JSColumnType): SQLColumnType {
 }
 
 // =============================================================================
+// Idempotency Types
+// =============================================================================
+
+/**
+ * Configuration for idempotency key generation and behavior
+ */
+export interface IdempotencyConfig {
+  /** Whether to automatically generate idempotency keys for mutations */
+  enabled: boolean;
+  /** Custom key prefix (default: none) */
+  keyPrefix?: string;
+  /** Time-to-live for idempotency keys in milliseconds (server-side) */
+  ttlMs?: number;
+}
+
+/**
+ * Default idempotency configuration
+ */
+export const DEFAULT_IDEMPOTENCY_CONFIG: IdempotencyConfig = {
+  enabled: true,
+  ttlMs: 24 * 60 * 60 * 1000, // 24 hours
+};
+
+// =============================================================================
 // Query Request Types
 // =============================================================================
 
@@ -215,6 +239,8 @@ export interface QueryRequest {
   limit?: number;
   /** Offset for pagination */
   offset?: number;
+  /** Idempotency key for mutation deduplication */
+  idempotencyKey?: string;
 }
 
 /**

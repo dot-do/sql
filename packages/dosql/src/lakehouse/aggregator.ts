@@ -123,9 +123,9 @@ function parseGlobalLSN(globalLSN: string): {
  * CDC Aggregator - collects and merges CDC from multiple DOs
  */
 export class Aggregator {
-  private config: Required<Omit<AggregatorConfig, 'decoder' | 'onError' | 'onEvent' | 'filter'>> &
+  private readonly config: Required<Omit<AggregatorConfig, 'decoder' | 'onError' | 'onEvent' | 'filter'>> &
     Pick<AggregatorConfig, 'decoder' | 'onError' | 'onEvent' | 'filter'>;
-  private ingestor: Ingestor;
+  private readonly ingestor: Ingestor;
   private sources: Map<string, DOSource> = new Map();
   private state: AggregatorState;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;

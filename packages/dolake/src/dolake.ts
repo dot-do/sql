@@ -159,24 +159,24 @@ export class DoLake implements DurableObject {
   private readonly rateLimitConfig: RateLimitConfig;
 
   private buffer: CDCBufferManager;
-  private storage: R2IcebergStorage;
-  private catalogHandler: RestCatalogHandler;
-  private compactionManager: CompactionManager;
-  private rateLimiter: RateLimiter;
+  private readonly storage: R2IcebergStorage;
+  private readonly catalogHandler: RestCatalogHandler;
+  private readonly compactionManager: CompactionManager;
+  private readonly rateLimiter: RateLimiter;
   private state: DoLakeState = 'idle';
   private flushPromise: Promise<FlushResult> | null = null;
-  private compactionInProgress: Map<string, Promise<CompactionResult>> = new Map();
+  private readonly compactionInProgress: Map<string, Promise<CompactionResult>> = new Map();
   private circuitBreakerState: 'closed' | 'open' | 'half-open' = 'closed';
 
   // Scalability components
-  private partitionManager: PartitionManager;
-  private queryEngine: QueryEngine;
+  private readonly partitionManager: PartitionManager;
+  private readonly queryEngine: QueryEngine;
   private parallelWriteManager: ParallelWriteManager;
-  private partitionCompactionManager: PartitionCompactionManager;
-  private partitionRebalancer: PartitionRebalancer;
+  private readonly partitionCompactionManager: PartitionCompactionManager;
+  private readonly partitionRebalancer: PartitionRebalancer;
   private largeFileHandler: LargeFileHandler;
-  private horizontalScalingManager: HorizontalScalingManager;
-  private memoryProcessor: MemoryEfficientProcessor;
+  private readonly horizontalScalingManager: HorizontalScalingManager;
+  private readonly memoryProcessor: MemoryEfficientProcessor;
   private scalingConfig: ScalingConfig;
 
   // Analytics (P2 durability)

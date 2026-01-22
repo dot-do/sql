@@ -97,14 +97,14 @@ export class DoSQLSession<
 > extends SQLiteSession<'async', DoSQLRunResult, TFullSchema, TSchema> {
   static readonly [entityKind]: string = 'DoSQLSession';
 
-  private logger: Logger;
+  private readonly logger: Logger;
   /** @internal */
   readonly _dialect: SQLiteAsyncDialect;
   /** @internal */
   readonly _schema: RelationalSchemaConfig<TSchema> | undefined;
 
   constructor(
-    private client: DoSQLBackend,
+    private readonly client: DoSQLBackend,
     dialect: SQLiteAsyncDialect,
     schema: RelationalSchemaConfig<TSchema> | undefined,
     options: DoSQLSessionOptions = {},
@@ -215,13 +215,13 @@ export class DoSQLPreparedQuery<
   joinsNotNullableMap?: Record<string, boolean>;
 
   constructor(
-    private client: DoSQLBackend,
+    private readonly client: DoSQLBackend,
     query: Query,
-    private logger: Logger,
-    private fields: SelectedFieldsOrdered | undefined,
+    private readonly logger: Logger,
+    private readonly fields: SelectedFieldsOrdered | undefined,
     executeMethod: SQLiteExecuteMethod,
-    private _isResponseInArrayMode: boolean,
-    private customResultMapper?: (
+    private readonly _isResponseInArrayMode: boolean,
+    private readonly customResultMapper?: (
       rows: unknown[][],
       mapColumnValue?: (value: unknown) => unknown,
     ) => unknown,

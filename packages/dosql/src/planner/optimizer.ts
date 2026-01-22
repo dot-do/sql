@@ -85,10 +85,10 @@ export interface OptimizerConfig {
  * Query optimizer class
  */
 export class QueryOptimizer {
-  private stats: StatisticsStore;
-  private indexDefs: Map<string, IndexDef[]>;
-  private costEstimator: CostEstimator;
-  private config: Required<OptimizerConfig>;
+  private readonly stats: StatisticsStore;
+  private readonly indexDefs: Map<string, IndexDef[]>;
+  private readonly costEstimator: CostEstimator;
+  private readonly config: Required<OptimizerConfig>;
 
   constructor(
     stats: StatisticsStore,

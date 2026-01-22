@@ -856,7 +856,7 @@ function optimizeChildren(
  * Query optimizer class
  */
 export class QueryOptimizer {
-  private options: OptimizationOptions;
+  private readonly options: OptimizationOptions;
 
   constructor(options: OptimizationOptions) {
     this.options = options;

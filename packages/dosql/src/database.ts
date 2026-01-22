@@ -89,16 +89,16 @@ export class Database implements IDatabase {
   readonly readonly: boolean;
 
   /** Execution engine */
-  private engine: ExecutionEngine;
+  private readonly engine: ExecutionEngine;
 
   /** Storage (for in-memory databases) */
-  private storage: InMemoryStorage;
+  private readonly storage: InMemoryStorage;
 
   /** Statement cache */
-  private cache: StatementCache;
+  private readonly cache: StatementCache;
 
   /** User-defined functions */
-  private functions: FunctionRegistry;
+  private readonly functions: FunctionRegistry;
 
   /** Active savepoints */
   private savepoints: string[] = [];
@@ -110,7 +110,7 @@ export class Database implements IDatabase {
   private _inTransaction = false;
 
   /** Options */
-  private options: DatabaseOptions;
+  private readonly options: DatabaseOptions;
 
   /**
    * Create a new database instance

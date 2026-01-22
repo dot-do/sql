@@ -313,7 +313,7 @@ export class DoLakeClient implements LakeClient {
 // =============================================================================
 
 class CDCStreamController implements AsyncIterable<CDCBatch> {
-  private queue: CDCBatch[] = [];
+  private readonly queue: CDCBatch[] = [];
   private resolvers: Array<(value: IteratorResult<CDCBatch>) => void> = [];
   private closed = false;
 

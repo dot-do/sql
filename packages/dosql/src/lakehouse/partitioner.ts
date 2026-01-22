@@ -197,8 +197,8 @@ export interface PartitionerOptions {
  * Partitioner manages partition assignment for rows
  */
 export class Partitioner {
-  private columns: PartitionColumn[];
-  private basePath: string;
+  private readonly columns: PartitionColumn[];
+  private readonly basePath: string;
 
   constructor(options: PartitionerOptions) {
     this.columns = options.columns;

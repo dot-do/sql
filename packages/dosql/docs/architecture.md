@@ -1,359 +1,283 @@
 # DoSQL Architecture
 
-This document covers the internal architecture of DoSQL, including storage tiers, bundle size optimization, and the FSX (File System Abstraction) layer.
+This document describes the architecture of the DoSQL ecosystem, a type-safe SQL database system built natively for Cloudflare Workers and Durable Objects.
 
 ## Table of Contents
 
-- [Overview](#overview)
+- [Package Overview](#package-overview)
+- [Architecture Diagram](#architecture-diagram)
+- [Client SDK Integration](#client-sdk-integration)
+- [Core Components](#core-components)
+- [Data Flow](#data-flow)
 - [Storage Tiers](#storage-tiers)
-- [FSX (File System Abstraction)](#fsx-file-system-abstraction)
-- [B-tree Storage](#b-tree-storage)
-- [Write-Ahead Log (WAL)](#write-ahead-log-wal)
-- [Copy-on-Write (COW) for Branching](#copy-on-write-cow-for-branching)
-- [Bundle Size Optimization](#bundle-size-optimization)
-- [Transaction System](#transaction-system)
-- [Query Execution](#query-execution)
 
 ---
 
-## Overview
+## Package Overview
 
-DoSQL is a database engine designed specifically for Cloudflare Workers and Durable Objects. Unlike traditional WASM-based SQL databases (SQLite-WASM, PGLite, DuckDB-WASM), DoSQL is built natively in TypeScript with custom data structures optimized for the Cloudflare platform.
+The DoSQL ecosystem consists of five packages that work together to provide a complete database solution:
 
-### Design Principles
+| Package | Description | Role |
+|---------|-------------|------|
+| `@dotdo/shared-types` | Canonical type definitions | Shared types for client/server compatibility |
+| `@dotdo/sql.do` | Client SDK | CapnWeb RPC client for DoSQL |
+| `@dotdo/dosql` | Server Durable Object | SQL engine, WAL, transactions, CDC |
+| `@dotdo/lake.do` | Lake Client SDK | CapnWeb client for lakehouse queries and CDC streams |
+| `@dotdo/dolake` | Lakehouse Durable Object | CDC aggregation, Parquet/Iceberg, R2 storage |
 
-1. **Edge-Native**: Built for Cloudflare's constraints (1MB bundle, DO storage limits)
-2. **Type-Safe**: Compile-time SQL validation with TypeScript
-3. **Zero Dependencies**: No WASM, no Node.js APIs
-4. **Git-Like**: Branching, time travel, and COW semantics
-5. **Lakehouse Integration**: CDC streaming to R2/Iceberg
-
-### Architecture Diagram
+### Package Dependency Graph
 
 ```
-                                    ┌──────────────────────────────────────────┐
-                                    │              DoSQL Client                 │
-                                    │  (Type-Safe SQL, Prepared Statements)    │
-                                    └────────────────────┬─────────────────────┘
-                                                         │
-                                                         ▼
-                                    ┌──────────────────────────────────────────┐
-                                    │            Query Executor                 │
-                                    │  (Parser, Planner, Operators)            │
-                                    └────────────────────┬─────────────────────┘
-                                                         │
-                         ┌───────────────────────────────┼───────────────────────────────┐
-                         │                               │                               │
-                         ▼                               ▼                               ▼
-          ┌──────────────────────────┐    ┌──────────────────────────┐    ┌──────────────────────────┐
-          │     Transaction Mgr      │    │      WAL Writer          │    │     Schema Tracker       │
-          │  (ACID, Savepoints)      │    │  (Durability, Recovery)  │    │  (Migrations)            │
-          └────────────┬─────────────┘    └────────────┬─────────────┘    └──────────────────────────┘
-                       │                               │
-                       └───────────────┬───────────────┘
-                                       │
-                                       ▼
-                       ┌──────────────────────────────────┐
-                       │           B-tree Layer           │
-                       │  (Pages, Keys, Range Scans)      │
-                       └───────────────┬──────────────────┘
-                                       │
-                                       ▼
-                       ┌──────────────────────────────────┐
-                       │        FSX (Storage Abstraction) │
-                       │  (COW, Snapshots, Tiering)       │
-                       └───────────────┬──────────────────┘
-                                       │
-                    ┌──────────────────┴──────────────────┐
-                    │                                     │
-                    ▼                                     ▼
-    ┌─────────────────────────────┐       ┌─────────────────────────────┐
-    │   DO Storage (Hot Tier)     │       │    R2 (Cold Tier)           │
-    │   - 2MB blob chunks         │       │    - Parquet files          │
-    │   - Low latency             │       │    - Archive storage        │
-    │   - Single-tenant           │       │    - Lakehouse integration  │
-    └─────────────────────────────┘       └─────────────────────────────┘
+@dotdo/shared-types          (canonical types, no deps)
+         │
+         ├────────────────────────────────────────┐
+         │                                        │
+         ▼                                        ▼
+   @dotdo/sql.do                            @dotdo/lake.do
+   (client SDK)                             (lake client SDK)
+         │                                        │
+         ▼                                        ▼
+   @dotdo/dosql ─────────────────────────► @dotdo/dolake
+   (SQL engine DO)        CDC              (lakehouse DO)
 ```
 
 ---
 
-## Storage Tiers
+## Architecture Diagram
 
-DoSQL implements a tiered storage architecture optimized for Cloudflare's infrastructure.
-
-### Hot Tier (Durable Object Storage)
-
-The hot tier uses Cloudflare's Durable Object storage for frequently accessed data.
-
-**Characteristics:**
-- Low latency (~1ms)
-- 2MB maximum value size
-- Strong consistency (single-leader)
-- 128KB entries per DO (recommended)
-
-**Usage:**
-- Active working set
-- Recent data (configurable age threshold)
-- WAL segments
-- Index pages
-
-```typescript
-// Hot tier is used automatically for recent data
-const db = await DB('tenant', {
-  storage: {
-    hot: state.storage,  // DurableObjectStorage
-  },
-});
 ```
-
-### Cold Tier (R2)
-
-The cold tier uses Cloudflare R2 for archival and large data.
-
-**Characteristics:**
-- Higher latency (~50-100ms)
-- Unlimited storage
-- Columnar format (Parquet)
-- S3-compatible API
-
-**Usage:**
-- Historical data
-- Large blobs
-- Lakehouse integration
-- Backup storage
-
-```typescript
-// Add R2 for cold storage
-const db = await DB('tenant', {
-  storage: {
-    hot: state.storage,
-    cold: env.R2_BUCKET,
-  },
-});
-```
-
-### Tiering Configuration
-
-```typescript
-interface TieredStorageConfig {
-  /** Max age before data migrates to cold (default: 1 hour) */
-  hotDataMaxAge: number;
-
-  /** Max hot storage size before migration (default: 100MB) */
-  hotStorageMaxSize: number;
-
-  /** Auto-migrate cold data to R2 (default: true) */
-  autoMigrate: boolean;
-
-  /** Read from hot first (default: true) */
-  readHotFirst: boolean;
-
-  /** Cache R2 reads in hot storage (default: false) */
-  cacheR2Reads: boolean;
-
-  /** Max file size for hot storage (default: 10MB) */
-  maxHotFileSize: number;
-}
-```
-
-### Data Migration
-
-```typescript
-import { TieredStorageBackend } from '@dotdo/dosql/fsx';
-
-const tiered = new TieredStorageBackend(hotBackend, coldBackend, config);
-
-// Manual migration
-const result = await tiered.migrateToCode({
-  olderThan: Date.now() - 86400000,  // 24 hours ago
-  maxBytes: 50 * 1024 * 1024,        // 50MB max
-});
-
-console.log(`Migrated ${result.migrated.length} files`);
-console.log(`Transferred ${result.bytesTransferred} bytes`);
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              Client Application                                  │
+│  ┌─────────────────────────────────────┐  ┌─────────────────────────────────┐   │
+│  │         @dotdo/sql.do               │  │         @dotdo/lake.do          │   │
+│  │  • Type-safe SQL queries            │  │  • Lakehouse queries            │   │
+│  │  • Prepared statements              │  │  • CDC stream subscriptions     │   │
+│  │  • Transaction context              │  │  • Time travel queries          │   │
+│  └─────────────────┬───────────────────┘  └─────────────────┬───────────────┘   │
+└────────────────────┼────────────────────────────────────────┼───────────────────┘
+                     │                                        │
+                     │ WebSocket/HTTP                         │ WebSocket/HTTP
+                     │ (CapnWeb RPC)                          │ (CapnWeb RPC)
+                     │                                        │
+┌────────────────────┼────────────────────────────────────────┼───────────────────┐
+│                    │         Cloudflare Workers             │                    │
+│                    ▼                                        ▼                    │
+│  ┌─────────────────────────────────────┐  ┌─────────────────────────────────┐   │
+│  │         @dotdo/dosql                │  │         @dotdo/dolake           │   │
+│  │     (Durable Object)                │  │     (Durable Object)            │   │
+│  │                                     │  │                                 │   │
+│  │  ┌───────────────────────────────┐  │  │  ┌───────────────────────────┐  │   │
+│  │  │ Parser (Type-level SQL)       │  │  │  │ CDC Buffer Manager        │  │   │
+│  │  │ • Compile-time validation     │  │  │  │ • Multi-shard aggregation │  │   │
+│  │  │ • Result type inference       │  │  │  │ • Deduplication           │  │   │
+│  │  └───────────────────────────────┘  │  │  └───────────────────────────┘  │   │
+│  │  ┌───────────────────────────────┐  │  │  ┌───────────────────────────┐  │   │
+│  │  │ Query Executor                │  │  │  │ Parquet Writer            │  │   │
+│  │  │ • Plan optimization           │  │  │  │ • Columnar encoding       │  │   │
+│  │  │ • Operator execution          │  │  │  │ • Compression             │  │   │
+│  │  └───────────────────────────────┘  │  │  └───────────────────────────┘  │   │
+│  │  ┌───────────────────────────────┐  │  │  ┌───────────────────────────┐  │   │
+│  │  │ Transaction Manager           │◄─┼──┼──┤ Iceberg Catalog           │  │   │
+│  │  │ • ACID guarantees             │  │  │  │ • REST API                │  │   │
+│  │  │ • Savepoints, MVCC            │  │  │  │ • Metadata management     │  │   │
+│  │  └───────────────────────────────┘  │  │  └───────────────────────────┘  │   │
+│  │  ┌───────────────────────────────┐  │  │  ┌───────────────────────────┐  │   │
+│  │  │ WAL Writer                    │──┼──┼─►│ Query Engine              │  │   │
+│  │  │ • Durability                  │CDC│  │  │ • Partition pruning       │  │   │
+│  │  │ • Recovery                    │  │  │  │ • Predicate pushdown      │  │   │
+│  │  └───────────────────────────────┘  │  │  └───────────────────────────┘  │   │
+│  │                 │                   │  │                 │               │   │
+│  └─────────────────┼───────────────────┘  └─────────────────┼───────────────┘   │
+│                    │                                        │                    │
+│                    ▼                                        ▼                    │
+│  ┌─────────────────────────────────────┐  ┌─────────────────────────────────┐   │
+│  │        DO Storage (Hot)             │  │           R2 (Cold)             │   │
+│  │  • 2MB blob chunks                  │  │  • Parquet data files           │   │
+│  │  • Low latency (~1ms)               │  │  • Iceberg metadata             │   │
+│  │  • B-tree pages, WAL segments       │  │  • Unlimited capacity           │   │
+│  └─────────────────────────────────────┘  └─────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                                              │
+                                                              ▼
+                                              ┌─────────────────────────────────┐
+                                              │   External Query Engines        │
+                                              │  Spark │ DuckDB │ Trino │ Flink │
+                                              │     (via Iceberg REST Catalog)  │
+                                              └─────────────────────────────────┘
 ```
 
 ---
 
-## FSX (File System Abstraction)
+## Client SDK Integration
 
-FSX provides a unified interface for storage backends with advanced features like COW and snapshots.
+### sql.do Client
 
-### Core Interface
+The `@dotdo/sql.do` package provides type-safe SQL access via CapnWeb RPC over WebSocket:
 
 ```typescript
-interface FSXBackend {
-  /** Read file, optionally with byte range */
-  read(path: string, range?: ByteRange): Promise<Uint8Array | null>;
+import { createSQLClient } from '@dotdo/sql.do';
 
-  /** Write file */
-  write(path: string, data: Uint8Array): Promise<void>;
+const client = createSQLClient({
+  url: 'https://sql.example.com',
+  token: 'your-token',
+});
 
-  /** Delete file */
-  delete(path: string): Promise<void>;
+// Queries with automatic reconnection
+const result = await client.query('SELECT * FROM users WHERE id = ?', [1]);
 
-  /** List files with prefix */
-  list(prefix: string): Promise<string[]>;
-
-  /** Check if file exists */
-  exists(path: string): Promise<boolean>;
-}
+// Transactions with proper isolation
+await client.transaction(async (tx) => {
+  await tx.exec('INSERT INTO users (name) VALUES (?)', ['Alice']);
+  await tx.exec('INSERT INTO logs (action) VALUES (?)', ['user_created']);
+});
 ```
 
-### Backend Implementations
+### lake.do Client
 
-#### DO Backend
+The `@dotdo/lake.do` package provides lakehouse access and CDC streaming:
 
 ```typescript
-import { createDOBackend } from '@dotdo/dosql/fsx';
+import { createLakeClient } from '@dotdo/lake.do';
 
-// In a Durable Object
-export class MyDO {
-  private fsx: DOStorageBackend;
+const lake = createLakeClient({
+  url: 'https://lake.example.com',
+});
 
-  constructor(state: DurableObjectState) {
-    this.fsx = createDOBackend(state.storage);
+// Analytical queries on cold data
+const result = await lake.query<{ date: string; total: number }>(
+  'SELECT date, SUM(amount) as total FROM orders GROUP BY date'
+);
+
+// Subscribe to real-time CDC stream
+for await (const batch of lake.subscribe({ tables: ['orders'] })) {
+  for (const event of batch.events) {
+    console.log(event.operation, event.table, event.after);
   }
 }
 ```
 
-**Features:**
-- Automatic chunking for files >2MB
-- Transactional batch writes
-- Key prefix namespacing
+### CapnWeb Protocol
 
-#### R2 Backend
+Both clients use CapnWeb RPC for efficient communication:
 
-```typescript
-import { createR2Backend } from '@dotdo/dosql/fsx';
-
-const fsx = createR2Backend(env.MY_BUCKET, {
-  prefix: 'data/',  // Optional key prefix
-});
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       CapnWeb RPC Protocol                       │
+├──────────────┬──────────────────────────────────────────────────┤
+│ Transport    │ WebSocket (primary) or HTTP batch                 │
+├──────────────┼──────────────────────────────────────────────────┤
+│ Serialization│ JSON with BigInt support (via branded types)     │
+├──────────────┼──────────────────────────────────────────────────┤
+│ Methods      │ exec, query, prepare, execute, beginTransaction, │
+│              │ commit, rollback, getSchema, ping                │
+├──────────────┼──────────────────────────────────────────────────┤
+│ Streaming    │ Async iterators for CDC and large result sets    │
+├──────────────┼──────────────────────────────────────────────────┤
+│ Pipelining   │ Multiple requests over single connection         │
+└──────────────┴──────────────────────────────────────────────────┘
 ```
 
-**Features:**
-- Multipart uploads for large files
-- Range request support
-- Metadata storage
+### Type Safety Across Boundaries
 
-#### Tiered Backend
+The `@dotdo/shared-types` package ensures type consistency:
 
 ```typescript
-import { createTieredBackend } from '@dotdo/dosql/fsx';
+// Branded types prevent mixing incompatible IDs
+type TransactionId = string & { readonly [TransactionIdBrand]: never };
+type LSN = bigint & { readonly [LSNBrand]: never };
+type StatementHash = string & { readonly [StatementHashBrand]: never };
+type ShardId = string & { readonly [ShardIdBrand]: never };
 
-const fsx = createTieredBackend(
-  createDOBackend(state.storage),  // Hot tier
-  createR2Backend(env.R2_BUCKET),  // Cold tier
-  config
-);
-```
-
-#### Memory Backend (Testing)
-
-```typescript
-import { createMemoryBackend } from '@dotdo/dosql/fsx';
-
-const fsx = createMemoryBackend();
-```
-
----
-
-## B-tree Storage
-
-DoSQL uses a B+tree for row storage, optimized for DO storage constraints.
-
-### B-tree Configuration
-
-```typescript
-interface BTreeConfig {
-  /** Maximum keys per node (default: 100) */
-  maxKeys: number;
-
-  /** Minimum keys per node (default: 50) */
-  minKeys: number;
-
-  /** Page size in bytes (default: 64KB) */
-  pageSize: number;
-
-  /** Key prefix for pages (default: '_btree/') */
-  pagePrefix: string;
-}
-```
-
-### Page Structure
-
-```typescript
-interface Page {
-  /** Unique page identifier */
-  id: number;
-
-  /** Page type: INTERNAL or LEAF */
-  type: PageType;
-
-  /** Keys stored in this page */
-  keys: Uint8Array[];
-
-  /** Values (leaf) or child page IDs (internal) */
-  values: Uint8Array[];  // Leaf only
-  children: number[];     // Internal only
-
-  /** Leaf page chain for range scans */
-  nextLeaf: number;
-  prevLeaf: number;
-}
-```
-
-### Key/Value Codecs
-
-```typescript
-interface KeyCodec<K> {
-  encode(key: K): Uint8Array;
-  decode(data: Uint8Array): K;
-  compare(a: K, b: K): number;
-}
-
-interface ValueCodec<V> {
-  encode(value: V): Uint8Array;
-  decode(data: Uint8Array): V;
-}
-```
-
-### B-tree Operations
-
-```typescript
-import { createBTree } from '@dotdo/dosql/btree';
-
-// Create B-tree
-const tree = createBTree(fsx, keyCodec, valueCodec, {
-  pagePrefix: 'users/',
-});
-
-await tree.init();
-
-// CRUD operations
-await tree.set(key, value);
-const value = await tree.get(key);
-await tree.delete(key);
-
-// Range scan
-for await (const [k, v] of tree.range(startKey, endKey)) {
-  console.log(k, v);
-}
-
-// Full iteration
-for await (const [k, v] of tree.entries()) {
-  console.log(k, v);
+// Unified CDC event type used by all packages
+interface CDCEvent<T = unknown> {
+  lsn: bigint | LSN;
+  table: string;
+  operation: CDCOperation;
+  timestamp: Date | number;
+  transactionId?: string | TransactionId;
+  before?: T;
+  after?: T;
 }
 ```
 
 ---
 
-## Write-Ahead Log (WAL)
+## Core Components
 
-The WAL provides durability and enables time travel queries.
+### Parser (Type-Level SQL)
 
-### WAL Structure
+DoSQL parses SQL at both compile-time and runtime for type safety:
+
+```typescript
+// Type-level parsing infers result types from SQL strings
+type Result = SQL<'SELECT id, name FROM users WHERE active = true', MySchema>;
+// Result = { id: number; name: string }[]
+
+// Runtime parsing validates and optimizes queries
+const db = createDatabase(schema);
+const result = db.query('SELECT id, name FROM users WHERE active = true');
+```
+
+The parser supports:
+- SELECT with JOIN, WHERE, GROUP BY, ORDER BY, LIMIT
+- INSERT, UPDATE, DELETE with RETURNING
+- Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
+- Subqueries and CTEs
+- Prepared statements with parameter binding
+
+### Executor
+
+The query executor transforms parsed SQL into execution plans:
+
+```
+┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
+│   SQL   │───►│ Parser  │───►│ Planner │───►│Executor │───►│ Result  │
+└─────────┘    └─────────┘    └─────────┘    └─────────┘    └─────────┘
+                   │              │              │
+                   ▼              ▼              ▼
+              ┌─────────┐   ┌─────────┐   ┌─────────┐
+              │   AST   │   │  Plan   │   │Operators│
+              └─────────┘   │  Tree   │   │ Scan    │
+                            └─────────┘   │ Filter  │
+                                          │ Project │
+                                          │ Sort    │
+                                          │ Join    │
+                                          └─────────┘
+```
+
+### Transaction Manager
+
+Implements SQLite-compatible transaction semantics:
+
+```typescript
+// Transaction states
+enum TransactionState {
+  NONE,
+  ACTIVE,
+  SAVEPOINT,
+}
+
+// Isolation levels
+type IsolationLevel =
+  | 'READ_UNCOMMITTED'
+  | 'READ_COMMITTED'
+  | 'REPEATABLE_READ'
+  | 'SERIALIZABLE'
+  | 'SNAPSHOT';
+
+// Lock types for concurrency control
+type LockType = 'SHARED' | 'RESERVED' | 'PENDING' | 'EXCLUSIVE';
+```
+
+Features:
+- Savepoints for nested transactions
+- MVCC for snapshot isolation
+- Lock manager for serializable isolation
+- Automatic rollback on errors
+
+### Write-Ahead Log (WAL)
+
+The WAL provides durability and enables CDC:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -365,369 +289,254 @@ The WAL provides durability and enables time travel queries.
 └──────────────┴──────────────┴──────────────┴────────────────────┘
 ```
 
-### WAL Entry Format
-
+WAL entry structure:
 ```typescript
 interface WALEntry {
-  /** Log Sequence Number (monotonically increasing) */
-  lsn: bigint;
-
-  /** Entry timestamp */
-  timestamp: number;
-
-  /** Transaction ID */
-  txnId: string;
-
-  /** Operation type */
-  op: 'INSERT' | 'UPDATE' | 'DELETE' | 'BEGIN' | 'COMMIT' | 'ROLLBACK';
-
-  /** Target table */
-  table: string;
-
-  /** Row key */
-  key?: Uint8Array;
-
-  /** Data before operation */
-  before?: Uint8Array;
-
-  /** Data after operation */
-  after?: Uint8Array;
-
-  /** CRC32 checksum */
-  checksum: number;
+  lsn: bigint;              // Log Sequence Number
+  timestamp: number;        // Unix timestamp
+  txnId: string;            // Transaction ID
+  op: WALOperation;         // INSERT, UPDATE, DELETE, BEGIN, COMMIT, ROLLBACK
+  table: string;            // Target table
+  key?: Uint8Array;         // Row key
+  before?: Uint8Array;      // Data before operation
+  after?: Uint8Array;       // Data after operation
+  checksum: number;         // CRC32 for integrity
 }
 ```
 
-### WAL Configuration
+### Change Data Capture (CDC)
+
+CDC streams database changes to the lakehouse:
 
 ```typescript
-interface WALConfig {
-  /** Maximum segment size (default: 10MB) */
-  maxSegmentSize: number;
+import { createCDC } from '@dotdo/dosql/cdc';
 
-  /** Segment prefix (default: '_wal/') */
-  segmentPrefix: string;
+const cdc = createCDC(backend);
 
-  /** Sync mode: 'async' | 'sync' | 'batch' */
-  syncMode: string;
-
-  /** Batch flush interval (default: 100ms) */
-  batchIntervalMs: number;
-
-  /** Enable CRC verification (default: true) */
-  verifyChecksums: boolean;
+// Subscribe with filters
+for await (const event of cdc.subscribeChanges(0n, {
+  tables: ['users', 'orders'],
+  operations: ['INSERT', 'UPDATE']
+})) {
+  // event.type: 'insert' | 'update' | 'delete'
+  // event.data: row data
 }
-```
 
-### WAL Operations
-
-```typescript
-import { createWALWriter, createWALReader } from '@dotdo/dosql/wal';
-
-// Writer
-const writer = createWALWriter(fsx, config);
-await writer.append({
-  timestamp: Date.now(),
-  txnId: 'txn_1',
-  op: 'INSERT',
-  table: 'users',
-  after: new TextEncoder().encode(JSON.stringify({ id: 1, name: 'Alice' })),
-});
-await writer.flush();
-
-// Reader
-const reader = createWALReader(fsx, config);
-for await (const entry of reader.iterate({ fromLSN: 0n })) {
-  console.log(entry.lsn, entry.op, entry.table);
-}
-```
-
-### Checkpointing
-
-```typescript
-import { createCheckpointManager } from '@dotdo/dosql/wal';
-
-const checkpointer = createCheckpointManager(fsx, {
-  intervalMs: 60000,       // Checkpoint every minute
-  walEntriesThreshold: 1000, // Or every 1000 entries
-});
-
-// Manual checkpoint
-await checkpointer.checkpoint();
-
-// Auto-checkpointing
-await checkpointer.start();
+// Replication slots for durable position tracking
+await cdc.slots.createSlot('lakehouse-sync', 0n);
+const subscription = await cdc.slots.subscribeFromSlot('lakehouse-sync');
+// ... process events ...
+await cdc.slots.updateSlot('lakehouse-sync', lastProcessedLSN);
 ```
 
 ---
 
-## Copy-on-Write (COW) for Branching
+## Data Flow
 
-DoSQL implements COW semantics for efficient branching and snapshots.
-
-### COW Architecture
+### Query Execution Path
 
 ```
-                         ┌──────────────────┐
-                         │     main@1       │
-                         │  (base snapshot) │
-                         └────────┬─────────┘
-                                  │
-              ┌───────────────────┼───────────────────┐
-              │                   │                   │
-              ▼                   ▼                   ▼
-       ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-       │   main@2     │   │  feature@1   │   │   test@1     │
-       │  (delta)     │   │  (delta)     │   │  (delta)     │
-       └──────┬───────┘   └──────────────┘   └──────────────┘
-              │
-              ▼
-       ┌──────────────┐
-       │   main@3     │
-       │  (delta)     │
-       └──────────────┘
+Client Request
+      │
+      ▼
+┌─────────────────┐
+│  RPC Handler    │  Parse request, authenticate
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  SQL Parser     │  Tokenize, parse, validate
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Query Planner  │  Optimize, create execution plan
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Transaction    │  Acquire locks, create snapshot
+│  Manager        │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Executor       │  Run operators against B-tree
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  FSX Backend    │  Read/write DO storage
+└────────┬────────┘
+         │
+         ▼
+   Query Result
 ```
 
-### Blob References
+### Write Path with WAL
 
-```typescript
-type BlobRefType =
-  | 'direct'     // Data stored inline
-  | 'content'    // Reference by content hash
-  | 'snapshot';  // Reference to snapshot + path
-
-interface BlobRef {
-  type: BlobRefType;
-  hash?: string;       // Content hash for deduplication
-  snapshotId?: string; // Reference snapshot
-  path?: string;       // Path within snapshot
-}
+```
+INSERT/UPDATE/DELETE
+         │
+         ▼
+┌─────────────────┐
+│  Transaction    │  Begin or use existing
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    │         │
+    ▼         ▼
+┌───────┐  ┌───────┐
+│  WAL  │  │ B-tree│  Write in parallel
+│ Write │  │ Write │
+└───┬───┘  └───┬───┘
+    │         │
+    └────┬────┘
+         │
+         ▼
+┌─────────────────┐
+│  Commit         │  Flush WAL, release locks
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  CDC Capture    │  Emit change event
+└────────┬────────┘
+         │
+         ▼
+   Lakehouse (async)
 ```
 
-### Snapshot Management
+### CDC to Lakehouse Flow
 
-```typescript
-import { COWBackend, createCOWBackend } from '@dotdo/dosql/fsx';
-
-const cow = createCOWBackend(baseFsx, {
-  defaultBranch: 'main',
-  snapshotPrefix: '_snapshots/',
-  blobPrefix: '_blobs/',
-});
-
-// Create snapshot
-const snapshot = await cow.createSnapshot('main', 'Initial state');
-
-// Create branch
-await cow.createBranch('feature-x', { from: 'main' });
-
-// Read from branch
-const data = await cow.read('feature-x', 'data.json');
-
-// Write to branch (creates COW copy)
-await cow.write('feature-x', 'data.json', newData);
 ```
-
-### Garbage Collection
-
-```typescript
-import { GarbageCollector } from '@dotdo/dosql/fsx';
-
-const gc = new GarbageCollector(cow, {
-  retainSnapshots: 10,    // Keep last 10 snapshots per branch
-  retainDays: 30,         // Keep snapshots from last 30 days
-  dryRun: false,
-});
-
-const result = await gc.collect();
-console.log(`Freed ${result.bytesFreed} bytes`);
-console.log(`Deleted ${result.blobsDeleted} blobs`);
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          DoSQL Instances (Shards)                            │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐                         │
+│  │ Shard 1 │  │ Shard 2 │  │ Shard 3 │  │ Shard N │                         │
+│  │  (WAL)  │  │  (WAL)  │  │  (WAL)  │  │  (WAL)  │                         │
+│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘                         │
+│       │            │            │            │                              │
+│       │ WebSocket  │ WebSocket  │ WebSocket  │ WebSocket                    │
+│       │ CDC Stream │ CDC Stream │ CDC Stream │ CDC Stream                   │
+│       ▼            ▼            ▼            ▼                              │
+│  ┌───────────────────────────────────────────────────────────────┐          │
+│  │                      DoLake (Aggregator)                       │          │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │          │
+│  │  │ CDC Buffer   │  │ Parquet      │  │ Iceberg      │         │          │
+│  │  │ Manager      │──│ Writer       │──│ Catalog      │         │          │
+│  │  │ (dedup,      │  │ (columnar,   │  │ (metadata,   │         │          │
+│  │  │  partition)  │  │  compress)   │  │  snapshots)  │         │          │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘         │          │
+│  └───────────────────────────────────────────────────────────────┘          │
+│                              │                                              │
+│                              ▼                                              │
+│                        ┌──────────┐                                         │
+│                        │    R2    │  Parquet files + Iceberg metadata       │
+│                        └──────────┘                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Bundle Size Optimization
+## Storage Tiers
 
-DoSQL is designed to fit within Cloudflare's 1MB bundle limit.
+### Hot Tier (Durable Object Storage)
 
-### Bundle Breakdown
+Primary storage for active data with strong consistency:
 
-| Component | Gzipped | Description |
-|-----------|---------|-------------|
-| B-tree | 2.8 KB | Core data structure |
-| FSX | 1.6 KB | Storage abstraction |
-| WAL | 1.3 KB | Write-ahead log |
-| Worker | 1.7 KB | DO entry point |
-| **Total Worker** | **7.4 KB** | Minimal bundle |
-| Sharding | 6.8 KB | Multi-DO support |
-| Procedures | 5.5 KB | Stored procedures |
-| CDC | 1.4 KB | Change data capture |
-| Virtual Tables | 4.0 KB | URL sources |
-| **Full Library** | **34.3 KB** | All features |
-
-### Tree-Shaking
-
-DoSQL is designed for optimal tree-shaking:
+| Property | Value |
+|----------|-------|
+| Latency | ~1ms |
+| Max value size | 2MB |
+| Consistency | Strong (single-leader) |
+| Use cases | Working set, WAL, indexes, recent data |
 
 ```typescript
-// Only imports what you need
-import { DB } from '@dotdo/dosql';           // Core only
-import { createCDC } from '@dotdo/dosql/cdc'; // CDC if needed
-```
-
-### Build Configuration
-
-```typescript
-// esbuild.config.js
-export default {
-  entryPoints: ['src/index.ts'],
-  bundle: true,
-  minify: true,
-  format: 'esm',
-  target: 'es2022',
-  platform: 'browser',
-  external: ['cloudflare:*'],
-  define: {
-    'process.env.NODE_ENV': '"production"',
+const db = await DB('tenant', {
+  storage: {
+    hot: state.storage,  // DurableObjectStorage
   },
-};
+});
 ```
 
-### Bundle Analysis
+### Warm Tier (R2 with Caching)
 
-```bash
-# Analyze bundle composition
-node scripts/bundle-analysis.mjs
+For less frequently accessed data with optional caching:
 
-# Check gzipped size
-gzip -c dist/worker.min.js | wc -c
-```
+| Property | Value |
+|----------|-------|
+| Latency | ~50-100ms |
+| Capacity | Unlimited |
+| Format | Binary pages |
+| Use cases | Historical data, large tables |
 
-### Comparison with Alternatives
+### Cold Tier (Parquet/Iceberg on R2)
 
-| Database | Gzipped Size | Notes |
-|----------|-------------|-------|
-| **DoSQL** | **7.4 KB** | Native TypeScript |
-| sql.js | ~500 KB | SQLite in WASM |
-| PGLite | ~3 MB | PostgreSQL in WASM |
-| DuckDB-WASM | ~4 MB | DuckDB in WASM |
+Analytical storage managed by DoLake:
 
----
-
-## Transaction System
-
-DoSQL implements SQLite-compatible transaction semantics.
-
-### Transaction States
-
-```
-                    ┌──────────┐
-           BEGIN    │   NONE   │
-          ┌─────────│          │◄────────────┐
-          │         └──────────┘              │
-          │                                   │ COMMIT/ROLLBACK
-          ▼                                   │
-     ┌──────────┐                        ┌──────────┐
-     │  ACTIVE  │────────SAVEPOINT──────►│SAVEPOINT │
-     │          │◄───────RELEASE─────────│          │
-     └──────────┘                        └──────────┘
-```
-
-### Isolation Levels
-
-| Level | Description | Use Case |
-|-------|-------------|----------|
-| `READ_UNCOMMITTED` | Dirty reads allowed | Lowest isolation |
-| `READ_COMMITTED` | Only committed data | Default for reads |
-| `REPEATABLE_READ` | Stable reads | MVCC-based |
-| `SNAPSHOT` | Point-in-time view | Time travel |
-| `SERIALIZABLE` | Full isolation | SQLite default |
-
-### Lock Types
-
-| Lock | Description |
-|------|-------------|
-| `SHARED` | Read lock (multiple allowed) |
-| `RESERVED` | Intent to write |
-| `PENDING` | Waiting for exclusive |
-| `EXCLUSIVE` | Write lock (single) |
-
-### Transaction Implementation
+| Property | Value |
+|----------|-------|
+| Latency | ~100-500ms |
+| Capacity | Unlimited |
+| Format | Parquet (columnar) |
+| Metadata | Iceberg |
+| Use cases | Analytics, data lake, external query engines |
 
 ```typescript
-interface TransactionContext {
-  txnId: string;
-  state: TransactionState;
-  mode: 'DEFERRED' | 'IMMEDIATE' | 'EXCLUSIVE';
-  isolationLevel: IsolationLevel;
-  savepoints: SavepointStack;
-  log: TransactionLog;
-  snapshot?: Snapshot;
-  locks: HeldLock[];
-  readOnly: boolean;
-}
+// DoLake handles cold tier automatically via CDC
+// External engines can query via Iceberg REST Catalog
+// Time travel queries access historical snapshots
+const historical = await lake.query(
+  'SELECT * FROM orders',
+  { asOf: new Date('2024-01-01') }
+);
+```
+
+### Storage Flow
+
+```
+Write Request
+      │
+      ▼
+┌─────────────────┐
+│   Hot (DO)      │  Immediate writes
+│   • WAL segment │
+│   • B-tree page │
+└────────┬────────┘
+         │
+         │ CDC Stream (async)
+         ▼
+┌─────────────────┐
+│  Cold (R2)      │  Batched Parquet writes
+│   • Parquet     │
+│   • Iceberg     │
+└─────────────────┘
 ```
 
 ---
 
-## Query Execution
+## Bundle Size
 
-DoSQL parses and executes SQL at runtime with type inference.
+DoSQL is designed for Cloudflare's constraints:
 
-### Query Pipeline
+| Component | Gzipped Size |
+|-----------|-------------|
+| Core (B-tree, FSX, WAL) | ~7.4 KB |
+| Sharding | ~6.8 KB |
+| Procedures | ~5.5 KB |
+| CDC | ~1.4 KB |
+| **Full library** | **~34 KB** |
 
-```
-┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
-│  SQL    │───►│ Parser  │───►│Planner  │───►│Executor │───►│ Result  │
-│ String  │    │         │    │         │    │         │    │         │
-└─────────┘    └─────────┘    └─────────┘    └─────────┘    └─────────┘
-                   │              │              │
-                   ▼              ▼              ▼
-              ┌─────────┐   ┌─────────┐   ┌─────────┐
-              │   AST   │   │  Plan   │   │Operators│
-              │         │   │  Tree   │   │         │
-              └─────────┘   └─────────┘   └─────────┘
-```
-
-### Type-Level SQL Parsing
-
-DoSQL uses TypeScript's type system for compile-time SQL validation:
-
-```typescript
-// Type-level parser infers result type from SQL string
-type Result = SQL<'SELECT id, name FROM users WHERE active = true', MySchema>;
-// Result = { id: number; name: string }[]
-```
-
-### Query Operators
-
-| Operator | Description |
-|----------|-------------|
-| `Scan` | Full table scan |
-| `IndexScan` | B-tree index lookup |
-| `Filter` | Row-level predicate |
-| `Project` | Column selection |
-| `Sort` | ORDER BY |
-| `Limit` | LIMIT/OFFSET |
-| `Join` | Table join |
-| `Aggregate` | GROUP BY |
-| `HashAggregate` | Optimized aggregation |
+Compare to WASM alternatives:
+- sql.js: ~500 KB
+- PGLite: ~3 MB
+- DuckDB-WASM: ~4 MB
 
 ---
 
-## Summary
+## Further Reading
 
-DoSQL's architecture is purpose-built for the Cloudflare Workers platform:
-
-1. **Tiered Storage**: Hot (DO) + Cold (R2) for optimal cost/performance
-2. **FSX Abstraction**: Unified interface with COW, snapshots, and tiering
-3. **B-tree Storage**: Custom implementation sized for DO constraints
-4. **WAL Durability**: Segment-based with CRC checksums
-5. **COW Branching**: Git-like semantics for databases
-6. **Minimal Bundle**: ~7KB gzipped for core functionality
-7. **Type Safety**: Compile-time SQL validation
-
-For more details, see:
 - [Getting Started](./getting-started.md)
 - [API Reference](./api-reference.md)
 - [Advanced Features](./advanced.md)

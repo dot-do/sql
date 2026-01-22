@@ -92,9 +92,9 @@ export interface FlushResult {
  * Lakehouse ingestor - buffers CDC events and writes to R2
  */
 export class Ingestor {
-  private r2: R2Bucket;
-  private manifestManager: ManifestManager;
-  private config: Required<Omit<IngestorConfig, 'schemas' | 'decoder' | 'onChunkWritten' | 'onError'>> &
+  private readonly r2: R2Bucket;
+  private readonly manifestManager: ManifestManager;
+  private readonly config: Required<Omit<IngestorConfig, 'schemas' | 'decoder' | 'onChunkWritten' | 'onError'>> &
     Pick<IngestorConfig, 'schemas' | 'decoder' | 'onChunkWritten' | 'onError'>;
 
   private partitioners: Map<string, Partitioner> = new Map();

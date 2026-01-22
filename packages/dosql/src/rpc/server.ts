@@ -166,10 +166,24 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
     activeTransactions: 0,
   };
 
-  constructor(executor: QueryExecutor, cdcManager?: CDCManager) {
+  // Stream cleanup options and tracking
+  #streamTTLMs: number;
+  #maxConcurrentStreams: number;
+  #onScheduleAlarm?: (delayMs: number) => void;
+  #alarmPending = false;
+  #streamStats: StreamStats = {
+    activeStreams: 0,
+    totalCreated: 0,
+    totalClosed: 0,
+  };
+
+  constructor(executor: QueryExecutor, cdcManager?: CDCManager, options?: DoSQLTargetOptions) {
     super();
     this.#executor = executor;
     this.#cdcManager = cdcManager;
+    this.#streamTTLMs = options?.streamTTLMs ?? 30 * 60 * 1000; // Default: 30 minutes
+    this.#maxConcurrentStreams = options?.maxConcurrentStreams ?? 100;
+    this.#onScheduleAlarm = options?.onScheduleAlarm;
   }
 
   // ===========================================================================
@@ -214,12 +228,19 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
     columns: string[];
     columnTypes: ColumnType[];
   }> {
+    // Check maximum concurrent streams limit
+    if (this.#streams.size >= this.#maxConcurrentStreams) {
+      throw new Error(`Maximum concurrent streams exceeded (limit: ${this.#maxConcurrentStreams})`);
+    }
+
     // Initialize stream state
     const result = await this.#executor.execute(
       request.sql,
       request.params,
       { branch: request.branch, limit: 1 } // Get just schema info
     );
+
+    const now = Date.now();
 
     this.#streams.set(request.streamId, {
       sql: request.sql,
@@ -231,7 +252,16 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
       totalRowsSent: 0,
       columns: result.columns,
       columnTypes: result.columnTypes,
+      createdAt: now,
+      lastActivity: now,
     });
+
+    // Update stats
+    this.#streamStats.activeStreams++;
+    this.#streamStats.totalCreated++;
+
+    // Schedule cleanup alarm if this is the first stream
+    this.#scheduleCleanupAlarm();
 
     return {
       columns: result.columns,
@@ -244,6 +274,9 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
     if (!stream) {
       throw new Error(`Stream ${streamId} not found`);
     }
+
+    // Update last activity timestamp
+    stream.lastActivity = Date.now();
 
     const result = await this.#executor.execute(
       stream.sql,
@@ -263,6 +296,8 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
 
     if (isLast) {
       this.#streams.delete(streamId);
+      this.#streamStats.activeStreams--;
+      this.#streamStats.totalClosed++;
     }
 
     return {
@@ -538,8 +573,128 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
   }
 
   // ===========================================================================
+  // Stream Management API
+  // ===========================================================================
+
+  /**
+   * Get stream statistics
+   */
+  getStreamStats(): StreamStats {
+    return {
+      activeStreams: this.#streams.size,
+      totalCreated: this.#streamStats.totalCreated,
+      totalClosed: this.#streamStats.totalClosed,
+    };
+  }
+
+  /**
+   * Get information about a specific stream
+   */
+  getStreamInfo(streamId: string): StreamInfo | undefined {
+    const stream = this.#streams.get(streamId);
+    if (!stream) return undefined;
+
+    return {
+      streamId,
+      sql: stream.sql,
+      createdAt: stream.createdAt,
+      lastActivity: stream.lastActivity,
+      chunkSize: stream.chunkSize,
+      totalRowsSent: stream.totalRowsSent,
+    };
+  }
+
+  /**
+   * Get maximum concurrent streams limit
+   */
+  getMaxConcurrentStreams(): number {
+    return this.#maxConcurrentStreams;
+  }
+
+  /**
+   * Close a specific stream
+   * @returns true if stream was closed, false if stream didn't exist
+   */
+  closeStream(streamId: string): boolean {
+    const existed = this.#streams.delete(streamId);
+    if (existed) {
+      this.#streamStats.activeStreams--;
+      this.#streamStats.totalClosed++;
+    }
+    return existed;
+  }
+
+  /**
+   * Close all streams
+   * @returns number of streams that were closed
+   */
+  closeAllStreams(): number {
+    const count = this.#streams.size;
+    this.#streams.clear();
+    this.#streamStats.activeStreams = 0;
+    this.#streamStats.totalClosed += count;
+    return count;
+  }
+
+  /**
+   * Cleanup expired streams based on TTL
+   */
+  cleanupExpiredStreams(): number {
+    const now = Date.now();
+    const expiredStreamIds: string[] = [];
+
+    for (const [streamId, stream] of this.#streams) {
+      if (now - stream.lastActivity > this.#streamTTLMs) {
+        expiredStreamIds.push(streamId);
+      }
+    }
+
+    for (const streamId of expiredStreamIds) {
+      this.#streams.delete(streamId);
+      this.#streamStats.activeStreams--;
+      this.#streamStats.totalClosed++;
+    }
+
+    // Reschedule alarm if there are still active streams
+    if (this.#streams.size > 0) {
+      this.#alarmPending = false;
+      this.#scheduleCleanupAlarm();
+    } else {
+      this.#alarmPending = false;
+    }
+
+    return expiredStreamIds.length;
+  }
+
+  /**
+   * Called when WebSocket connection closes to cleanup all resources
+   */
+  onConnectionClose(): void {
+    // Close all streams
+    this.closeAllStreams();
+
+    // Close all CDC subscriptions
+    for (const [subscriptionId, subscription] of this.#cdcSubscriptions) {
+      subscription.unsubscribe();
+    }
+    this.#cdcSubscriptions.clear();
+  }
+
+  // ===========================================================================
   // Private Helpers
   // ===========================================================================
+
+  /**
+   * Schedule cleanup alarm if not already pending
+   */
+  #scheduleCleanupAlarm(): void {
+    if (this.#alarmPending || !this.#onScheduleAlarm) return;
+    if (this.#streams.size === 0) return;
+
+    this.#alarmPending = true;
+    // Schedule alarm for TTL + 1 minute buffer
+    this.#onScheduleAlarm(this.#streamTTLMs + 60000);
+  }
 
   #convertNamedParams(request: QueryRequest): unknown[] {
     // Convert named parameters to positional based on proper SQL parsing
@@ -622,6 +777,46 @@ interface StreamState {
   totalRowsSent: number;
   columns: string[];
   columnTypes: ColumnType[];
+  /** Timestamp when stream was created */
+  createdAt: number;
+  /** Timestamp of last activity (creation or chunk retrieval) */
+  lastActivity: number;
+}
+
+/**
+ * Public stream info returned by getStreamInfo()
+ */
+export interface StreamInfo {
+  streamId: string;
+  sql: string;
+  createdAt: number;
+  lastActivity: number;
+  chunkSize: number;
+  totalRowsSent: number;
+}
+
+/**
+ * Stream statistics
+ */
+export interface StreamStats {
+  /** Number of currently active streams */
+  activeStreams: number;
+  /** Total number of streams created */
+  totalCreated: number;
+  /** Total number of streams closed */
+  totalClosed: number;
+}
+
+/**
+ * Configuration options for DoSQLTarget
+ */
+export interface DoSQLTargetOptions {
+  /** TTL for inactive streams in milliseconds (default: 30 minutes) */
+  streamTTLMs?: number;
+  /** Maximum concurrent streams per connection (default: 100) */
+  maxConcurrentStreams?: number;
+  /** Callback to schedule alarm for cleanup (for Durable Object integration) */
+  onScheduleAlarm?: (delayMs: number) => void;
 }
 
 interface ConnectionInfo {

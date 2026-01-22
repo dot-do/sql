@@ -17,8 +17,67 @@ import type {
   RPCResponse,
   RPCError,
   StatementHash,
+  IdempotencyConfig,
 } from './types.js';
-import { createTransactionId, createLSN, createStatementHash } from './types.js';
+import { createTransactionId, createLSN, createStatementHash, DEFAULT_IDEMPOTENCY_CONFIG } from './types.js';
+
+// =============================================================================
+// Idempotency Key Generation
+// =============================================================================
+
+/**
+ * Generate a random string of specified length using crypto
+ */
+function generateRandomString(length: number): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const array = new Uint8Array(length);
+  crypto.getRandomValues(array);
+  return Array.from(array, (byte) => chars[byte % chars.length]).join('');
+}
+
+/**
+ * Generate SHA-256 hash of input string and return first n characters
+ */
+async function hashString(input: string, length: number): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hashHex.slice(0, length);
+}
+
+/**
+ * Generate an idempotency key with format: {timestamp}-{random}-{hash}
+ * - timestamp: Unix milliseconds
+ * - random: 8-char random string
+ * - hash: First 8 chars of SHA-256 of SQL + params
+ */
+export async function generateIdempotencyKey(
+  sql: string,
+  params?: SQLValue[],
+  prefix?: string
+): Promise<string> {
+  const timestamp = Date.now();
+  const random = generateRandomString(8);
+  const hashInput = sql + JSON.stringify(params ?? []);
+  const hash = await hashString(hashInput, 8);
+
+  const key = `${timestamp}-${random}-${hash}`;
+  return prefix ? `${prefix}-${key}` : key;
+}
+
+/**
+ * Check if a SQL statement is a mutation (INSERT, UPDATE, DELETE)
+ */
+export function isMutationQuery(sql: string): boolean {
+  const trimmed = sql.trim().toUpperCase();
+  return (
+    trimmed.startsWith('INSERT') ||
+    trimmed.startsWith('UPDATE') ||
+    trimmed.startsWith('DELETE')
+  );
+}
 
 // =============================================================================
 // Client Configuration
@@ -35,6 +94,8 @@ export interface SQLClientConfig {
   timeout?: number;
   /** Retry configuration */
   retry?: RetryConfig;
+  /** Idempotency configuration */
+  idempotency?: IdempotencyConfig;
 }
 
 export interface RetryConfig {
@@ -64,14 +125,48 @@ export class DoSQLClient implements SQLClient {
     resolve: (value: unknown) => void;
     reject: (error: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
+    idempotencyKey?: string;
   }>();
+  /** Map of request content hash to idempotency key for retry consistency */
+  private idempotencyKeyCache = new Map<string, string>();
 
   constructor(config: SQLClientConfig) {
     this.config = {
       ...config,
       timeout: config.timeout ?? 30000,
       retry: config.retry ?? DEFAULT_RETRY,
+      idempotency: config.idempotency ?? DEFAULT_IDEMPOTENCY_CONFIG,
     };
+  }
+
+  /**
+   * Get or generate an idempotency key for a mutation request.
+   * Reuses the same key for retries of the same request.
+   */
+  async getIdempotencyKey(sql: string, params?: SQLValue[]): Promise<string | undefined> {
+    if (!this.config.idempotency.enabled || !isMutationQuery(sql)) {
+      return undefined;
+    }
+
+    // Create a cache key based on the SQL and params
+    const cacheKey = sql + JSON.stringify(params ?? []);
+
+    // Check if we already have a key for this request (retry scenario)
+    let key = this.idempotencyKeyCache.get(cacheKey);
+    if (!key) {
+      key = await generateIdempotencyKey(sql, params, this.config.idempotency.keyPrefix);
+      this.idempotencyKeyCache.set(cacheKey, key);
+    }
+
+    return key;
+  }
+
+  /**
+   * Clear the idempotency key for a request after success or final failure
+   */
+  clearIdempotencyKey(sql: string, params?: SQLValue[]): void {
+    const cacheKey = sql + JSON.stringify(params ?? []);
+    this.idempotencyKeyCache.delete(cacheKey);
   }
 
   // ===========================================================================
@@ -163,11 +258,43 @@ export class DoSQLClient implements SQLClient {
   // ===========================================================================
 
   async exec(sql: string, params?: SQLValue[], options?: QueryOptions): Promise<QueryResult> {
-    return this.rpc<QueryResult>('exec', {
-      sql,
-      params: params ?? [],
-      ...options,
-    });
+    const idempotencyKey = await this.getIdempotencyKey(sql, params);
+
+    try {
+      const result = await this.rpc<QueryResult>('exec', {
+        sql,
+        params: params ?? [],
+        idempotencyKey,
+        ...options,
+      });
+
+      // Clear idempotency key on success
+      if (idempotencyKey) {
+        this.clearIdempotencyKey(sql, params);
+      }
+
+      return result;
+    } catch (error) {
+      // For non-retryable errors, clear the idempotency key
+      if (error instanceof SQLError && !this.isRetryableError(error)) {
+        this.clearIdempotencyKey(sql, params);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Check if an error is retryable (connection issues, timeouts, etc.)
+   */
+  private isRetryableError(error: SQLError): boolean {
+    const retryableCodes = [
+      'TIMEOUT',
+      'CONNECTION_CLOSED',
+      'NETWORK_ERROR',
+      'UNAVAILABLE',
+      'RESOURCE_EXHAUSTED',
+    ];
+    return retryableCodes.includes(error.code);
   }
 
   async query<T = Record<string, SQLValue>>(

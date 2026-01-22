@@ -44,6 +44,13 @@ const users = await db.query('SELECT * FROM users WHERE active = ?', [true]);
 | [Advanced Features](./advanced.md) | Time travel, branching, CDC, vector search |
 | [Architecture](./architecture.md) | Storage tiers, bundle optimization, internals |
 
+### Framework Integrations
+
+| Framework | Description |
+|-----------|-------------|
+| [Next.js](./integrations/NEXTJS.md) | Server Components, Server Actions, Edge Runtime |
+| [Remix](./integrations/REMIX.md) | Full-stack with loaders, actions, and streaming |
+
 ## Bundle Size
 
 DoSQL is extremely compact, designed for Cloudflare's bundle limits:

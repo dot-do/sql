@@ -31,7 +31,7 @@ import {
  */
 export class UrlTableSource implements TableSource {
   readonly uri: string;
-  private options: UrlSourceOptions;
+  private readonly options: UrlSourceOptions;
   private cachedSchema: Record<string, ColumnType> | null = null;
 
   constructor(url: string, options: UrlSourceOptions = {}) {

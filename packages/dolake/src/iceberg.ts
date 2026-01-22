@@ -459,9 +459,9 @@ export type CommitRequirement =
  * R2-backed Iceberg storage implementation
  */
 export class R2IcebergStorage implements IcebergStorage {
-  private bucket: R2Bucket;
-  private basePath: string;
-  private doStorage: DurableObjectStorage;
+  private readonly bucket: R2Bucket;
+  private readonly basePath: string;
+  private readonly doStorage: DurableObjectStorage;
 
   constructor(bucket: R2Bucket, basePath: string, doStorage: DurableObjectStorage) {
     this.bucket = bucket;

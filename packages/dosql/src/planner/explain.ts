@@ -979,7 +979,7 @@ function addExecutionStats(
  * Explain generator class for repeated use
  */
 export class ExplainGenerator {
-  private options: Required<ExplainOptions>;
+  private readonly options: Required<ExplainOptions>;
 
   constructor(options: ExplainOptions = {}) {
     this.options = { ...DEFAULT_EXPLAIN_OPTIONS, ...options };

@@ -107,16 +107,16 @@ export interface BufferSnapshot {
  * Organizes events by table and partition for efficient Parquet writing.
  */
 export class CDCBufferManager {
-  private config: DoLakeConfig;
-  private batches: Map<string, BufferedBatch> = new Map();
-  private sourceStates: Map<string, SourceConnectionState> = new Map();
-  private partitionBuffers: Map<string, PartitionBuffer> = new Map();
-  private sourceWebSockets: Map<string, WebSocket> = new Map();
+  private readonly config: DoLakeConfig;
+  private readonly batches: Map<string, BufferedBatch> = new Map();
+  private readonly sourceStates: Map<string, SourceConnectionState> = new Map();
+  private readonly partitionBuffers: Map<string, PartitionBuffer> = new Map();
+  private readonly sourceWebSockets: Map<string, WebSocket> = new Map();
 
   // Deduplication
-  private dedupConfig: DedupConfig;
-  private dedupSet: Map<string, number> = new Map();
-  private dedupStats: DedupStats = {
+  private readonly dedupConfig: DedupConfig;
+  private readonly dedupSet: Map<string, number> = new Map();
+  private readonly dedupStats: DedupStats = {
     totalChecks: 0,
     duplicatesFound: 0,
     entriesTracked: 0,
@@ -126,7 +126,7 @@ export class CDCBufferManager {
   private totalEventsReceived = 0;
   private totalBatchesReceived = 0;
   private lastFlushTime = 0;
-  private bufferCreatedAt: number;
+  private readonly bufferCreatedAt: number;
 
   constructor(config: Partial<DoLakeConfig> = {}, dedupConfig: Partial<DedupConfig> = {}) {
     this.config = { ...DEFAULT_DOLAKE_CONFIG, ...config };

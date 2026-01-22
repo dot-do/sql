@@ -63,10 +63,10 @@ export interface VirtualTableRegistryOptions {
  * Registry that manages virtual table handlers by URL scheme
  */
 export class VirtualTableRegistry implements VirtualTableFactory {
-  private bindings: VirtualTableBindings;
-  private httpDefaults: URLSourceOptions;
-  private r2Defaults: R2SourceOptions;
-  private customHandlers: Map<VirtualTableScheme, SchemeHandler>;
+  private readonly bindings: VirtualTableBindings;
+  private readonly httpDefaults: URLSourceOptions;
+  private readonly r2Defaults: R2SourceOptions;
+  private readonly customHandlers: Map<VirtualTableScheme, SchemeHandler>;
 
   constructor(options: VirtualTableRegistryOptions = {}) {
     this.bindings = options.bindings || {};

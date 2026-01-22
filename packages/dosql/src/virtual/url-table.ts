@@ -223,8 +223,8 @@ export class URLVirtualTable implements VirtualTable {
   readonly uri: string;
   readonly format: VirtualTableFormat;
 
-  private options: URLSourceOptions;
-  private parsedUrl: ParsedVirtualTableUrl;
+  private readonly options: URLSourceOptions;
+  private readonly parsedUrl: ParsedVirtualTableUrl;
   private cachedSchema: VirtualTableSchema | null = null;
   private cache: VirtualTableCache | null = null;
 

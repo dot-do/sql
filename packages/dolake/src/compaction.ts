@@ -172,7 +172,7 @@ export class CompactionError extends Error {
  * improve query performance and reduce file count overhead.
  */
 export class CompactionManager {
-  private config: CompactionConfig;
+  private readonly config: CompactionConfig;
   private metrics: CompactionMetrics = {
     totalCompactions: 0,
     successfulCompactions: 0,

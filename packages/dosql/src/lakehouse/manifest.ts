@@ -154,10 +154,10 @@ export interface ManifestManagerOptions {
  * Manifest manager for lakehouse metadata
  */
 export class ManifestManager {
-  private r2: R2Bucket;
-  private prefix: string;
-  private lakehouseId: string;
-  private snapshotRetention: number;
+  private readonly r2: R2Bucket;
+  private readonly prefix: string;
+  private readonly lakehouseId: string;
+  private readonly snapshotRetention: number;
   private manifest: LakehouseManifest | null = null;
 
   constructor(options: ManifestManagerOptions) {

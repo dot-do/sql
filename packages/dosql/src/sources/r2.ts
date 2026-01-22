@@ -33,9 +33,9 @@ import {
  */
 export class R2TableSource implements TableSource {
   readonly uri: string;
-  private bucket: R2Bucket;
-  private key: string;
-  private options: R2SourceOptions;
+  private readonly bucket: R2Bucket;
+  private readonly key: string;
+  private readonly options: R2SourceOptions;
   private cachedSchema: Record<string, ColumnType> | null = null;
   private cachedObject: {
     body: ArrayBuffer;

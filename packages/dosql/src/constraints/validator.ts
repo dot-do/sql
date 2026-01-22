@@ -58,7 +58,7 @@ export class ConstraintError extends Error {
  */
 export class ConstraintValidator {
   /** Constraint registry */
-  private registry: ConstraintRegistry;
+  private readonly registry: ConstraintRegistry;
 
   /** Foreign keys pragma state */
   private foreignKeysPragma: ForeignKeysPragma;
@@ -67,7 +67,7 @@ export class ConstraintValidator {
   private deferredState: DeferredConstraintState | null = null;
 
   /** Data accessor for checking references */
-  private dataAccessor: DataAccessor;
+  private readonly dataAccessor: DataAccessor;
 
   constructor(
     registry: ConstraintRegistry,

@@ -762,7 +762,7 @@ export function addExecutionStats(
  * Explain generator class
  */
 export class ExplainGenerator {
-  private options: ExplainOptions;
+  private readonly options: ExplainOptions;
 
   constructor(options: ExplainOptions = {}) {
     this.options = {

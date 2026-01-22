@@ -76,10 +76,10 @@ interface ColumnBuffer {
 // ============================================================================
 
 export class ColumnarWriter {
-  private schema: ColumnarTableSchema;
-  private config: Required<Omit<WriterConfig, 'forceEncoding' | 'onFlush'>> &
+  private readonly schema: ColumnarTableSchema;
+  private readonly config: Required<Omit<WriterConfig, 'forceEncoding' | 'onFlush'>> &
     Pick<WriterConfig, 'forceEncoding' | 'onFlush'>;
-  private fsx?: FSXInterface;
+  private readonly fsx?: FSXInterface;
 
   private buffers: Map<string, ColumnBuffer> = new Map();
   private bufferedRowCount: number = 0;

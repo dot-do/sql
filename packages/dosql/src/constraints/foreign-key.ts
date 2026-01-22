@@ -30,7 +30,7 @@ import type { DataAccessor } from './validator.js';
  */
 export class ForeignKeyHandler {
   /** Data accessor for table operations */
-  private dataAccessor: DataAccessor;
+  private readonly dataAccessor: DataAccessor;
 
   /** Whether foreign keys are enabled (PRAGMA foreign_keys) */
   private enabled: boolean;

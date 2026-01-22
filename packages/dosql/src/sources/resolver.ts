@@ -148,9 +148,9 @@ export interface ResolverOptions {
  * Resolver that creates TableSource instances from URIs
  */
 export class TableSourceResolver {
-  private bindings: Bindings;
-  private urlDefaults: UrlSourceOptions;
-  private r2Defaults: R2SourceOptions;
+  private readonly bindings: Bindings;
+  private readonly urlDefaults: UrlSourceOptions;
+  private readonly r2Defaults: R2SourceOptions;
 
   constructor(options: ResolverOptions = {}) {
     this.bindings = options.bindings || {};
