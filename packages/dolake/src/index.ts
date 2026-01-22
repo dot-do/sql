@@ -520,3 +520,20 @@ export {
   type VFSBackend,
   DEFAULT_VFS_FALLBACK_CONFIG,
 } from './vfs-fallback.js';
+
+// =============================================================================
+// Business Events (Stripe Webhooks with P0 Durability)
+// =============================================================================
+
+export {
+  StripeWebhookHandler,
+  verifyStripeSignature,
+  normalizeStripeEventToCDC,
+  type StripeEvent,
+  type NormalizedCDCEvent,
+  type StripeWebhookConfig,
+  type StripeWebhookResult,
+  type SignatureVerificationResult,
+  type ExtendedKVStorage as BusinessKVStorage,
+  DEFAULT_STRIPE_WEBHOOK_CONFIG,
+} from './business-events.js';
