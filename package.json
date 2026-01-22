@@ -1,0 +1,34 @@
+{
+  "name": "@dotdo/sql",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SQL database for Cloudflare Workers - DoSQL and DoLake",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "clean": "pnpm -r clean"
+  },
+  "keywords": [
+    "sql",
+    "database",
+    "cloudflare",
+    "workers",
+    "durable-objects",
+    "sqlite",
+    "lakehouse"
+  ],
+  "author": "dot.do",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dot-do/sql.git"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
