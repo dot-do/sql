@@ -1,6 +1,6 @@
 {
   "name": "@dotdo/dosql",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0",
   "description": "Type-safe SQL for TypeScript with compile-time query validation",
   "type": "module",
   "main": "./dist/index.js",

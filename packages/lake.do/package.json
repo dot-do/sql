@@ -1,6 +1,6 @@
 {
   "name": "@dotdo/lake.do",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0",
   "description": "Client SDK for DoLake - Lakehouse on Cloudflare Workers",
   "type": "module",
   "main": "./dist/index.js",

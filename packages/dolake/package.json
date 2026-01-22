@@ -1,6 +1,6 @@
 {
   "name": "@dotdo/dolake",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0",
   "description": "DoLake - Lakehouse worker for CDC streaming to Iceberg/Parquet on R2",
   "type": "module",
   "main": "./dist/index.js",
