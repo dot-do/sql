@@ -7,13 +7,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   DoSQLTarget,
-  MockQueryExecutor,
   isRPCError,
   createRPCError,
   RPCErrorCode,
   type QueryRequest,
   type BatchRequest,
 } from './index.js';
+import { MockQueryExecutor } from '../__tests__/utils/index.js';
 
 describe('DoSQL RPC', () => {
   describe('MockQueryExecutor', () => {

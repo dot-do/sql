@@ -13,7 +13,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { DoSQLTarget, MockQueryExecutor } from '../index.js';
+import { DoSQLTarget } from '../index.js';
+import { MockQueryExecutor } from '../../__tests__/utils/index.js';
 
 describe('Named Parameter Conversion', () => {
   let executor: MockQueryExecutor;

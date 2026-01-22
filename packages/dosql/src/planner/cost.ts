@@ -676,7 +676,8 @@ export class CostEstimator {
       : emptyCost();
 
     // Project only adds CPU cost for expression evaluation
-    const expressionCount = (project as any).expressions?.length ?? project.outputColumns.length;
+    const projectNode = project as import('./types.js').ProjectNode;
+    const expressionCount = projectNode.expressions?.length ?? project.outputColumns.length;
     const cpuCost = childCost.estimatedRows * expressionCount * this.config.cpuComparisonCost;
 
     return {
@@ -695,7 +696,8 @@ export class CostEstimator {
       : emptyCost();
 
     const inputRows = childCost.estimatedRows;
-    const distinctStrategy = (distinct as any).strategy ?? 'hash';
+    const distinctNode = distinct as import('./types.js').DistinctNode;
+    const distinctStrategy = distinctNode.strategy ?? 'hash';
 
     // Estimate distinct output rows
     const outputRows = Math.max(1, Math.round(inputRows * 0.5)); // Rough estimate
@@ -732,7 +734,8 @@ export class CostEstimator {
     const combined = combineCosts(childCosts);
 
     const allRows = childCosts.reduce((sum, c) => sum + c.estimatedRows, 0);
-    const isUnionAll = (union as any).all ?? false;
+    const unionNode = union as import('./types.js').UnionNode;
+    const isUnionAll = unionNode.all ?? false;
 
     // UNION ALL just concatenates, UNION needs duplicate elimination
     if (isUnionAll) {

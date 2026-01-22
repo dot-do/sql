@@ -13,6 +13,7 @@ import {
   DEFAULT_DOLAKE_CONFIG,
   generateBatchId,
   BufferOverflowError,
+  getNumericTimestamp,
 } from './types.js';
 import { TIMEOUTS, THRESHOLDS, BUFFER } from './constants.js';
 
@@ -210,6 +211,7 @@ export class CDCBufferManager {
       const partitionKey = this.extractPartitionKey(event);
       const bufferKey = `${event.table}:${partitionKey ?? '__default__'}`;
 
+      const eventTime = getNumericTimestamp(event.timestamp);
       let buffer = this.partitionBuffers.get(bufferKey);
       if (!buffer) {
         buffer = {
@@ -217,15 +219,15 @@ export class CDCBufferManager {
           partitionKey,
           events: [],
           sizeBytes: 0,
-          firstEventTime: event.timestamp,
-          lastEventTime: event.timestamp,
+          firstEventTime: eventTime,
+          lastEventTime: eventTime,
         };
         this.partitionBuffers.set(bufferKey, buffer);
       }
 
       buffer.events.push(event);
       buffer.sizeBytes += this.estimateEventSize(event);
-      buffer.lastEventTime = Math.max(buffer.lastEventTime, event.timestamp);
+      buffer.lastEventTime = Math.max(buffer.lastEventTime, eventTime);
     }
   }
 

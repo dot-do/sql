@@ -295,7 +295,7 @@ export function isSqlExpression(
     typeof value === 'object' &&
     value !== null &&
     '__sql' in value &&
-    (value as any).__sql === true
+    (value as { __sql: unknown }).__sql === true
   );
 }
 

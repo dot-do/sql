@@ -18,6 +18,8 @@ export default defineWorkersConfig({
             REPLICATION_REPLICA: 'ReplicationReplicaDO',
             BENCHMARK_TEST_DO: { className: 'BenchmarkTestDO', useSQLite: true },
             PERFORMANCE_BENCHMARK_DO: { className: 'PerformanceBenchmarkDO', useSQLite: true },
+            PERFORMANCE_REGRESSION_DO: { className: 'PerformanceRegressionDO', useSQLite: true },
+            PRODUCTION_BENCHMARK_DO: { className: 'ProductionBenchmarkDO', useSQLite: true },
           },
           r2Buckets: ['TEST_R2_BUCKET'],
           d1Databases: ['TEST_D1'],

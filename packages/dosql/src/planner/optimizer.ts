@@ -271,13 +271,14 @@ export class QueryOptimizer {
   ): PhysicalPlan {
     // Try to push predicate down if input is a scan
     if (this.config.enablePredicatePushdown && filter.input.type === 'scan') {
-      const scanWithPredicate: QueryPlan = {
-        ...filter.input,
-        predicate: filter.input.predicate
-          ? this.combinPredicates(filter.input.predicate, filter.predicate)
+      const scanInput = filter.input as QueryPlan & { type: 'scan' };
+      const scanWithPredicate: QueryPlan & { type: 'scan' } = {
+        ...scanInput,
+        predicate: scanInput.predicate
+          ? this.combinPredicates(scanInput.predicate, filter.predicate)
           : filter.predicate,
       };
-      return this.optimizeScan(scanWithPredicate as any, alternatives, indexesConsidered);
+      return this.optimizeScan(scanWithPredicate, alternatives, indexesConsidered);
     }
 
     // Optimize child first
@@ -457,19 +458,18 @@ export class QueryOptimizer {
     indexesConsidered: Set<string>
   ): PhysicalPlan {
     const optimizedChild = this.optimizeNode(project.input, alternatives, indexesConsidered);
+    const outputCols = project.expressions.map(e => e.alias);
 
-    return {
+    const projectNode: import('./types.js').ProjectNode = {
       id: nextPlanNodeId(),
       nodeType: 'project',
       expressions: project.expressions,
-      outputColumns: project.expressions.map(e => e.alias),
-      cost: this.costEstimator.estimateProject({
-        ...optimizedChild,
-        nodeType: 'project',
-        outputColumns: project.expressions.map(e => e.alias),
-      } as any),
+      outputColumns: outputCols,
+      cost: emptyCost(),
       children: [optimizedChild],
-    } as any;
+    };
+    projectNode.cost = this.costEstimator.estimateProject(projectNode);
+    return projectNode;
   }
 
   /**
@@ -481,19 +481,19 @@ export class QueryOptimizer {
     indexesConsidered: Set<string>
   ): PhysicalPlan {
     const optimizedChild = this.optimizeNode(distinct.input, alternatives, indexesConsidered);
+    const cols = distinct.columns ?? optimizedChild.outputColumns;
 
-    return {
+    const distinctNode: import('./types.js').DistinctNode = {
       id: nextPlanNodeId(),
       nodeType: 'distinct',
       strategy: 'hash',
-      columns: distinct.columns ?? optimizedChild.outputColumns,
-      outputColumns: distinct.columns ?? optimizedChild.outputColumns,
-      cost: this.costEstimator.estimateDistinct({
-        ...optimizedChild,
-        nodeType: 'distinct',
-      } as any),
+      columns: cols,
+      outputColumns: cols,
+      cost: emptyCost(),
       children: [optimizedChild],
-    } as any;
+    };
+    distinctNode.cost = this.costEstimator.estimateDistinct(distinctNode);
+    return distinctNode;
   }
 
   /**
@@ -508,21 +508,16 @@ export class QueryOptimizer {
       this.optimizeNode(input, alternatives, indexesConsidered)
     );
 
-    return {
+    const unionNode: import('./types.js').UnionNode = {
       id: nextPlanNodeId(),
       nodeType: 'union',
       all: union.all,
       outputColumns: optimizedChildren[0]?.outputColumns ?? [],
-      cost: this.costEstimator.estimateUnion({
-        nodeType: 'union',
-        all: union.all,
-        children: optimizedChildren,
-        outputColumns: optimizedChildren[0]?.outputColumns ?? [],
-        cost: emptyCost(),
-        id: 0,
-      } as any),
+      cost: emptyCost(),
       children: optimizedChildren,
-    } as any;
+    };
+    unionNode.cost = this.costEstimator.estimateUnion(unionNode);
+    return unionNode;
   }
 
   /**
@@ -537,21 +532,17 @@ export class QueryOptimizer {
       this.optimizeNode(input, alternatives, indexesConsidered)
     );
 
-    return {
+    const mergeNode: import('./types.js').MergeNode = {
       id: nextPlanNodeId(),
       nodeType: 'merge',
       mergeType: 'append',
       sortKeys: merge.orderBy,
       outputColumns: optimizedChildren[0]?.outputColumns ?? [],
-      cost: this.costEstimator.estimateMerge({
-        nodeType: 'merge',
-        children: optimizedChildren,
-        outputColumns: optimizedChildren[0]?.outputColumns ?? [],
-        cost: emptyCost(),
-        id: 0,
-      } as any),
+      cost: emptyCost(),
       children: optimizedChildren,
-    } as any;
+    };
+    mergeNode.cost = this.costEstimator.estimateMerge(mergeNode);
+    return mergeNode;
   }
 
   /**

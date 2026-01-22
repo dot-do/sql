@@ -14,6 +14,7 @@ This document provides a comprehensive reference for all error codes used across
 - [Storage Errors](#storage-errors)
 - [Internal Errors](#internal-errors)
 - [Error Handling Examples](#error-handling-examples)
+- [FAQ: Common Error Scenarios](#faq-common-error-scenarios)
 
 ---
 
@@ -44,6 +45,29 @@ Syntax error near 'FORM' at position 12 - did you mean 'FROM'?
 2. Validate SQL syntax against supported dialect
 3. Use parameterized queries to avoid escaping issues
 
+**Troubleshooting Checklist:**
+- [ ] Check for common typos: `SELCT` -> `SELECT`, `FORM` -> `FROM`, `WEHRE` -> `WHERE`
+- [ ] Verify all parentheses are balanced
+- [ ] Ensure string literals use single quotes, not double quotes
+- [ ] Check for missing commas between column names
+
+**Code Example:**
+```typescript
+try {
+  await client.query('SELCT * FROM users'); // Typo in SELECT
+} catch (error) {
+  if (error.code === 'SYNTAX_ERROR') {
+    // Parse the error message for suggestions
+    const match = error.message.match(/did you mean '(\w+)'/);
+    if (match) {
+      console.log(`Suggestion: Use '${match[1]}' instead`);
+    }
+  }
+}
+```
+
+**Related Errors:** [INVALID_REQUEST](#invalid_request), [TYPE_MISMATCH](#type_mismatch)
+
 ---
 
 ### TABLE_NOT_FOUND
@@ -71,6 +95,41 @@ Table 'users' not found in database
 2. Check if the table exists: `SELECT name FROM sqlite_master WHERE type='table'`
 3. Ensure you're connected to the correct branch
 
+**Troubleshooting Checklist:**
+- [ ] Table names are case-sensitive in some configurations
+- [ ] Check schema prefix if using multiple schemas
+- [ ] Verify the migration that creates this table has run
+- [ ] Ensure you are not querying a view that was dropped
+
+**Code Example:**
+```typescript
+async function safeQuery(tableName: string, sql: string) {
+  try {
+    return await client.query(sql);
+  } catch (error) {
+    if (error.code === 'TABLE_NOT_FOUND') {
+      // List available tables to help debug
+      const tables = await client.query(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+      );
+      console.error(`Table '${tableName}' not found. Available tables:`,
+        tables.rows.map(r => r.name));
+
+      // Check for similar names (typo detection)
+      const similar = tables.rows.find(r =>
+        r.name.toLowerCase() === tableName.toLowerCase()
+      );
+      if (similar) {
+        console.log(`Did you mean '${similar.name}'? (case mismatch)`);
+      }
+    }
+    throw error;
+  }
+}
+```
+
+**Related Errors:** [COLUMN_NOT_FOUND](#column_not_found), [ICEBERG_ERROR](#iceberg_error)
+
 ---
 
 ### COLUMN_NOT_FOUND
@@ -97,6 +156,40 @@ Column 'email_address' not found in table 'users'
 1. Verify column names using `getSchema()` or `PRAGMA table_info(table_name)`
 2. Check for schema changes
 3. Verify table aliases in complex queries
+
+**Troubleshooting Checklist:**
+- [ ] Column names may have been renamed in a recent migration
+- [ ] Check if using the correct table alias in JOIN queries
+- [ ] Verify column exists in the specific table being queried (not a joined table)
+- [ ] Check for typos in column names (underscores vs camelCase)
+
+**Code Example:**
+```typescript
+async function validateColumns(tableName: string, columns: string[]) {
+  const schema = await client.query(`PRAGMA table_info(${tableName})`);
+  const validColumns = new Set(schema.rows.map(r => r.name));
+
+  const invalid = columns.filter(c => !validColumns.has(c));
+  if (invalid.length > 0) {
+    throw new Error(
+      `Invalid columns: ${invalid.join(', ')}. ` +
+      `Valid columns are: ${[...validColumns].join(', ')}`
+    );
+  }
+}
+
+// Usage
+try {
+  await client.query('SELECT email_address FROM users');
+} catch (error) {
+  if (error.code === 'COLUMN_NOT_FOUND') {
+    // The column might be named 'email' not 'email_address'
+    await validateColumns('users', ['email_address']);
+  }
+}
+```
+
+**Related Errors:** [TABLE_NOT_FOUND](#table_not_found), [SYNTAX_ERROR](#syntax_error)
 
 ---
 
@@ -127,6 +220,44 @@ UNIQUE constraint failed: users.email
 3. Provide values for NOT NULL columns
 4. Validate data against CHECK constraints
 
+**Troubleshooting Checklist:**
+- [ ] For UNIQUE violations: query existing records first with `SELECT ... WHERE`
+- [ ] For FK violations: verify the referenced record exists in the parent table
+- [ ] For NOT NULL: ensure all required fields are provided
+- [ ] For CHECK: review the constraint definition with `PRAGMA table_info`
+
+**Code Example:**
+```typescript
+async function upsertUser(email: string, name: string) {
+  try {
+    await client.query(
+      'INSERT INTO users (email, name) VALUES (?, ?)',
+      [email, name]
+    );
+  } catch (error) {
+    if (error.code === 'CONSTRAINT_VIOLATION') {
+      if (error.message.includes('UNIQUE constraint')) {
+        // Handle duplicate - update instead
+        console.log('User exists, updating instead');
+        await client.query(
+          'UPDATE users SET name = ? WHERE email = ?',
+          [name, email]
+        );
+      } else if (error.message.includes('FOREIGN KEY constraint')) {
+        // Handle missing reference
+        console.error('Referenced record does not exist');
+      } else if (error.message.includes('NOT NULL constraint')) {
+        // Handle missing required field
+        console.error('Required field is missing');
+      }
+    }
+    throw error;
+  }
+}
+```
+
+**Related Errors:** [TYPE_MISMATCH](#type_mismatch), [INVALID_REQUEST](#invalid_request)
+
 ---
 
 ### TYPE_MISMATCH
@@ -153,6 +284,49 @@ Cannot insert 'abc' into column 'age' of type INTEGER
 1. Verify the data types of your parameters
 2. Use appropriate type casting
 3. Check date/timestamp formats
+
+**Troubleshooting Checklist:**
+- [ ] Verify JavaScript types match SQL column types (number for INTEGER, string for TEXT)
+- [ ] Dates should be ISO 8601 format: `YYYY-MM-DDTHH:mm:ss.sssZ`
+- [ ] JSON columns require valid JSON strings
+- [ ] Boolean values should be 0/1 or true/false depending on dialect
+
+**Code Example:**
+```typescript
+// Type validation helper
+function validateTypes(columns: Record<string, any>, schema: ColumnDef[]) {
+  const errors: string[] = [];
+
+  for (const col of schema) {
+    const value = columns[col.name];
+    if (value === undefined || value === null) continue;
+
+    switch (col.type) {
+      case 'INTEGER':
+        if (typeof value !== 'number' || !Number.isInteger(value)) {
+          errors.push(`${col.name}: expected INTEGER, got ${typeof value}`);
+        }
+        break;
+      case 'REAL':
+        if (typeof value !== 'number') {
+          errors.push(`${col.name}: expected REAL, got ${typeof value}`);
+        }
+        break;
+      case 'TEXT':
+        if (typeof value !== 'string') {
+          errors.push(`${col.name}: expected TEXT, got ${typeof value}`);
+        }
+        break;
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Type validation failed: ${errors.join('; ')}`);
+  }
+}
+```
+
+**Related Errors:** [CONSTRAINT_VIOLATION](#constraint_violation), [SYNTAX_ERROR](#syntax_error)
 
 ---
 
@@ -183,6 +357,42 @@ Transaction 'tx_abc123' not found or already completed
 2. Increase transaction timeout if needed
 3. Implement proper transaction state tracking
 
+**Troubleshooting Checklist:**
+- [ ] Check if transaction was committed or rolled back elsewhere
+- [ ] Verify transaction ID is being stored/passed correctly
+- [ ] Review timeout settings (default is typically 30 seconds)
+- [ ] Check for network issues that may have caused disconnection
+
+**Code Example:**
+```typescript
+class TransactionManager {
+  private activeTransactions = new Map<string, { startTime: number }>();
+
+  async beginTransaction(): Promise<string> {
+    const tx = await client.beginTransaction();
+    this.activeTransactions.set(tx.id, { startTime: Date.now() });
+    return tx.id;
+  }
+
+  async commitTransaction(txId: string) {
+    if (!this.activeTransactions.has(txId)) {
+      console.warn(`Transaction ${txId} not tracked - may have already completed`);
+    }
+    try {
+      await client.commit(txId);
+    } finally {
+      this.activeTransactions.delete(txId);
+    }
+  }
+
+  isActive(txId: string): boolean {
+    return this.activeTransactions.has(txId);
+  }
+}
+```
+
+**Related Errors:** [TRANSACTION_ABORTED](#transaction_aborted), [TXN_NO_ACTIVE](#txn_no_active), [TIMEOUT](#timeout)
+
 ---
 
 ### TRANSACTION_ABORTED
@@ -209,6 +419,50 @@ Transaction aborted due to concurrent modification
 1. Retry the entire transaction
 2. Implement optimistic concurrency control
 3. Reduce transaction duration to minimize conflicts
+
+**Troubleshooting Checklist:**
+- [ ] Log the conflict details to understand which rows are contended
+- [ ] Consider using optimistic locking with version columns
+- [ ] Reduce the scope of data modified in a single transaction
+- [ ] Implement automatic retry with exponential backoff
+
+**Code Example:**
+```typescript
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  { maxRetries = 3, baseDelayMs = 100 } = {}
+): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error.code === 'TRANSACTION_ABORTED' ||
+          error.code === 'TXN_ABORTED') {
+        lastError = error;
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        console.log(`Transaction aborted, retrying in ${delay}ms (attempt ${attempt + 1})`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError;
+}
+
+// Usage
+await withRetry(async () => {
+  await client.transaction(async (tx) => {
+    await tx.query('UPDATE accounts SET balance = balance - 100 WHERE id = 1');
+    await tx.query('UPDATE accounts SET balance = balance + 100 WHERE id = 2');
+  });
+});
+```
+
+**Related Errors:** [DEADLOCK_DETECTED](#deadlock_detected), [SERIALIZATION_FAILURE](#serialization_failure), [TXN_LOCK_TIMEOUT](#txn_lock_timeout)
 
 ---
 
@@ -238,6 +492,39 @@ Deadlock detected: Transaction tx_001 waiting on tx_002, tx_002 waiting on tx_00
 3. Reduce transaction scope and duration
 4. Use appropriate isolation levels
 
+**Troubleshooting Checklist:**
+- [ ] Always acquire locks in a consistent order (e.g., by ID ascending)
+- [ ] Avoid long-running transactions that hold locks
+- [ ] Consider using `NOWAIT` option to fail fast instead of waiting
+- [ ] Review query patterns for circular dependencies
+
+**Code Example:**
+```typescript
+// Prevent deadlocks by consistent ordering
+async function transferBetweenAccounts(
+  fromId: number,
+  toId: number,
+  amount: number
+) {
+  // Always lock accounts in ascending ID order to prevent deadlocks
+  const [firstId, secondId] = fromId < toId
+    ? [fromId, toId]
+    : [toId, fromId];
+
+  await client.transaction(async (tx) => {
+    // Lock in consistent order
+    await tx.query('SELECT * FROM accounts WHERE id = ? FOR UPDATE', [firstId]);
+    await tx.query('SELECT * FROM accounts WHERE id = ? FOR UPDATE', [secondId]);
+
+    // Now perform the transfer
+    await tx.query('UPDATE accounts SET balance = balance - ? WHERE id = ?', [amount, fromId]);
+    await tx.query('UPDATE accounts SET balance = balance + ? WHERE id = ?', [amount, toId]);
+  });
+}
+```
+
+**Related Errors:** [TRANSACTION_ABORTED](#transaction_aborted), [SERIALIZATION_FAILURE](#serialization_failure), [TXN_LOCK_TIMEOUT](#txn_lock_timeout)
+
 ---
 
 ### SERIALIZATION_FAILURE
@@ -264,6 +551,49 @@ Could not serialize access due to concurrent update
 2. Consider using lower isolation level if acceptable
 3. Reduce transaction scope
 
+**Troubleshooting Checklist:**
+- [ ] This is expected under SERIALIZABLE isolation with concurrent writes
+- [ ] Consider READ COMMITTED if your application can tolerate it
+- [ ] Batch related operations into fewer transactions
+- [ ] Use SELECT FOR UPDATE to explicitly lock rows you plan to modify
+
+**Code Example:**
+```typescript
+// Retry with exponential backoff for serialization failures
+async function serializableTransaction<T>(
+  operation: (tx: Transaction) => Promise<T>,
+  maxRetries = 5
+): Promise<T> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await client.transaction(operation, {
+        isolationLevel: 'SERIALIZABLE'
+      });
+    } catch (error) {
+      if (error.code === 'SERIALIZATION_FAILURE' ||
+          error.code === 'TXN_SERIALIZATION_FAILURE') {
+        if (attempt === maxRetries - 1) {
+          throw new Error(`Transaction failed after ${maxRetries} retries: ${error.message}`);
+        }
+
+        // Exponential backoff with jitter
+        const baseDelay = 50 * Math.pow(2, attempt);
+        const jitter = Math.random() * baseDelay * 0.5;
+        const delay = baseDelay + jitter;
+
+        console.log(`Serialization failure, retry ${attempt + 1} in ${Math.round(delay)}ms`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('Unreachable');
+}
+```
+
+**Related Errors:** [DEADLOCK_DETECTED](#deadlock_detected), [TRANSACTION_ABORTED](#transaction_aborted)
+
 ---
 
 ### TXN_NO_ACTIVE
@@ -289,6 +619,53 @@ No active transaction to commit
 1. Ensure `beginTransaction()` is called before transaction operations
 2. Check transaction state before operations
 
+**Troubleshooting Checklist:**
+- [ ] Verify the transaction lifecycle: begin -> operations -> commit/rollback
+- [ ] Check for async/await issues causing race conditions
+- [ ] Ensure try/finally blocks properly clean up transactions
+
+**Code Example:**
+```typescript
+// Safe transaction wrapper that ensures proper lifecycle
+class SafeTransaction {
+  private tx: Transaction | null = null;
+
+  async begin() {
+    if (this.tx) {
+      throw new Error('Transaction already active');
+    }
+    this.tx = await client.beginTransaction();
+  }
+
+  async query(sql: string, params?: any[]) {
+    if (!this.tx) {
+      throw new Error('No active transaction - call begin() first');
+    }
+    return this.tx.query(sql, params);
+  }
+
+  async commit() {
+    if (!this.tx) {
+      throw new Error('No active transaction to commit');
+    }
+    try {
+      await this.tx.commit();
+    } finally {
+      this.tx = null;
+    }
+  }
+
+  async rollback() {
+    if (this.tx) {
+      await this.tx.rollback();
+      this.tx = null;
+    }
+  }
+}
+```
+
+**Related Errors:** [TXN_ALREADY_ACTIVE](#txn_already_active), [TRANSACTION_NOT_FOUND](#transaction_not_found)
+
 ---
 
 ### TXN_ALREADY_ACTIVE
@@ -310,6 +687,39 @@ Transaction already in progress
 1. Commit or rollback the existing transaction first
 2. Use savepoints for nested transaction-like behavior
 
+**Troubleshooting Checklist:**
+- [ ] Check if a previous transaction was not properly closed
+- [ ] Look for forgotten await statements on commit/rollback
+- [ ] Consider using connection pools with transaction isolation
+
+**Code Example:**
+```typescript
+// Using savepoints for nested transaction behavior
+async function nestedOperation() {
+  await client.transaction(async (tx) => {
+    await tx.query('INSERT INTO orders (status) VALUES (?)', ['pending']);
+
+    // Create savepoint for nested operation that might fail
+    await tx.query('SAVEPOINT before_items');
+
+    try {
+      await tx.query('INSERT INTO order_items (order_id, product_id) VALUES (?, ?)', [1, 100]);
+      // This might fail
+      await tx.query('UPDATE inventory SET quantity = quantity - 1 WHERE product_id = ?', [100]);
+    } catch (error) {
+      // Rollback to savepoint but keep outer transaction
+      console.log('Item insert failed, rolling back to savepoint');
+      await tx.query('ROLLBACK TO SAVEPOINT before_items');
+      // Continue with partial order
+    }
+
+    await tx.query('RELEASE SAVEPOINT before_items');
+  });
+}
+```
+
+**Related Errors:** [TXN_NO_ACTIVE](#txn_no_active), [TXN_SAVEPOINT_NOT_FOUND](#txn_savepoint_not_found)
+
 ---
 
 ### TXN_SAVEPOINT_NOT_FOUND
@@ -330,6 +740,14 @@ Savepoint 'sp_1' not found
 **Resolution Steps:**
 1. Verify savepoint name
 2. Check if savepoint was already released
+
+**Troubleshooting Checklist:**
+- [ ] Savepoint names are case-sensitive
+- [ ] Savepoints are automatically released on commit
+- [ ] Check for typos in savepoint names
+- [ ] Ensure savepoint was created in the current transaction
+
+**Related Errors:** [TXN_ALREADY_ACTIVE](#txn_already_active), [TXN_NO_ACTIVE](#txn_no_active)
 
 ---
 
@@ -353,6 +771,43 @@ Lock acquisition timed out after 30000ms
 2. Increase lock timeout configuration
 3. Identify and resolve blocking transactions
 
+**Troubleshooting Checklist:**
+- [ ] Identify which transaction is holding the lock
+- [ ] Check for long-running queries or forgotten transactions
+- [ ] Consider using `NOWAIT` to fail immediately instead of waiting
+- [ ] Review lock timeout configuration in connection settings
+
+**Code Example:**
+```typescript
+// Configure lock timeout and handle timeout errors
+const client = createSQLClient({
+  url: 'wss://dosql.example.com',
+  lockTimeoutMs: 10000, // 10 second lock timeout
+});
+
+async function queryWithLockTimeout(sql: string) {
+  try {
+    return await client.query(sql);
+  } catch (error) {
+    if (error.code === 'TXN_LOCK_TIMEOUT') {
+      // Log which query timed out for debugging
+      console.error(`Lock timeout on query: ${sql.substring(0, 100)}...`);
+
+      // Optionally query for blocking transactions
+      const blockers = await client.query(`
+        SELECT * FROM sys.locks WHERE status = 'WAITING'
+      `);
+      console.log('Blocking transactions:', blockers.rows);
+
+      throw error;
+    }
+    throw error;
+  }
+}
+```
+
+**Related Errors:** [DEADLOCK_DETECTED](#deadlock_detected), [TIMEOUT](#timeout)
+
 ---
 
 ### TXN_READ_ONLY_VIOLATION
@@ -373,6 +828,37 @@ Cannot execute INSERT in read-only transaction
 **Resolution Steps:**
 1. Use a read-write transaction for write operations
 2. Remove the readOnly option from transaction options
+
+**Troubleshooting Checklist:**
+- [ ] Check if transaction was explicitly opened as read-only
+- [ ] Verify the connection/session mode allows writes
+- [ ] Check for replica/read-replica connection strings
+
+**Code Example:**
+```typescript
+// Correct usage of read-only vs read-write transactions
+async function example() {
+  // Read-only transaction (for complex read queries)
+  const report = await client.transaction(
+    async (tx) => {
+      const totals = await tx.query('SELECT SUM(amount) FROM orders');
+      const counts = await tx.query('SELECT COUNT(*) FROM orders');
+      return { totals, counts };
+    },
+    { readOnly: true } // Explicitly read-only
+  );
+
+  // Read-write transaction (for modifications)
+  await client.transaction(
+    async (tx) => {
+      await tx.query('INSERT INTO logs (message) VALUES (?)', ['Report generated']);
+    }
+    // No readOnly option = read-write by default
+  );
+}
+```
+
+**Related Errors:** [FORBIDDEN](#forbidden), [UNAUTHORIZED](#unauthorized)
 
 ---
 
@@ -403,6 +889,63 @@ WebSocket connection closed unexpectedly
 2. Check network connectivity
 3. Verify server health
 
+**Troubleshooting Checklist:**
+- [ ] Check if the server is reachable (ping, curl)
+- [ ] Verify firewall rules allow WebSocket connections
+- [ ] Check for proxy/load balancer issues with WebSocket upgrades
+- [ ] Verify SSL/TLS certificate validity
+
+**Code Example:**
+```typescript
+// Robust connection handling with automatic reconnection
+class ResilientClient {
+  private client: SQLClient;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 10;
+  private baseReconnectDelay = 1000;
+
+  constructor(private url: string) {
+    this.client = createSQLClient({ url });
+    this.setupConnectionHandlers();
+  }
+
+  private setupConnectionHandlers() {
+    this.client.on('disconnect', async (reason) => {
+      console.warn('Disconnected:', reason);
+      await this.reconnect();
+    });
+
+    this.client.on('error', (error) => {
+      if (error.code === 'CONNECTION_ERROR') {
+        console.error('Connection error:', error.message);
+      }
+    });
+  }
+
+  private async reconnect() {
+    while (this.reconnectAttempts < this.maxReconnectAttempts) {
+      const delay = this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts);
+      console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1})`);
+
+      await new Promise(r => setTimeout(r, delay));
+
+      try {
+        await this.client.connect();
+        this.reconnectAttempts = 0;
+        console.log('Reconnected successfully');
+        return;
+      } catch (error) {
+        this.reconnectAttempts++;
+      }
+    }
+
+    throw new Error('Max reconnection attempts exceeded');
+  }
+}
+```
+
+**Related Errors:** [TIMEOUT](#timeout), [R2_TIMEOUT](#r2_timeout)
+
 ---
 
 ### TIMEOUT
@@ -429,6 +972,50 @@ Request timeout: query exceeded 30000ms
 1. Increase timeout configuration
 2. Optimize the query
 3. Check server health and load
+
+**Troubleshooting Checklist:**
+- [ ] Check query execution plan for slow operations
+- [ ] Add indexes for columns used in WHERE clauses
+- [ ] Break large queries into smaller batches
+- [ ] Monitor server CPU and memory usage
+- [ ] Check for table locks from other transactions
+
+**Code Example:**
+```typescript
+// Query with timeout handling and optimization hints
+async function executeWithTimeout(sql: string, timeoutMs = 30000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const result = await client.query(sql, [], {
+      signal: controller.signal,
+      timeout: timeoutMs,
+    });
+    return result;
+  } catch (error) {
+    if (error.code === 'TIMEOUT' || error.name === 'AbortError') {
+      console.error(`Query timed out after ${timeoutMs}ms`);
+
+      // Log slow query for analysis
+      console.log('Slow query:', sql.substring(0, 500));
+
+      // Suggest optimization
+      if (sql.toLowerCase().includes('select *')) {
+        console.log('Tip: Avoid SELECT * - specify only needed columns');
+      }
+      if (!sql.toLowerCase().includes('limit')) {
+        console.log('Tip: Add LIMIT clause to reduce result set size');
+      }
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+```
+
+**Related Errors:** [CONNECTION_ERROR](#connection_error), [TXN_LOCK_TIMEOUT](#txn_lock_timeout)
 
 ---
 
@@ -459,6 +1046,58 @@ Authentication required
 2. Refresh expired tokens
 3. Verify API key configuration
 
+**Troubleshooting Checklist:**
+- [ ] Verify the Authorization header is being sent
+- [ ] Check token format (Bearer token, API key, etc.)
+- [ ] Verify token has not expired
+- [ ] Ensure correct environment (production vs staging keys)
+
+**Code Example:**
+```typescript
+// Token refresh handling
+class AuthenticatedClient {
+  private accessToken: string;
+  private refreshToken: string;
+  private client: SQLClient;
+
+  async query(sql: string) {
+    try {
+      return await this.client.query(sql);
+    } catch (error) {
+      if (error.code === 'UNAUTHORIZED') {
+        // Attempt token refresh
+        try {
+          await this.refreshAccessToken();
+          // Retry with new token
+          return await this.client.query(sql);
+        } catch (refreshError) {
+          // Refresh failed, user needs to re-authenticate
+          throw new Error('Session expired. Please log in again.');
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async refreshAccessToken() {
+    const response = await fetch('/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken: this.refreshToken }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Token refresh failed');
+    }
+
+    const { accessToken } = await response.json();
+    this.accessToken = accessToken;
+    this.client.setAuthToken(accessToken);
+  }
+}
+```
+
+**Related Errors:** [FORBIDDEN](#forbidden)
+
 ---
 
 ### FORBIDDEN
@@ -485,6 +1124,43 @@ Access denied to table 'admin_logs'
 1. Request appropriate permissions
 2. Verify user roles and access policies
 3. Check IP allowlist configuration
+
+**Troubleshooting Checklist:**
+- [ ] Verify the user/role has access to the specific table/resource
+- [ ] Check row-level security policies if enabled
+- [ ] Verify IP address is in the allowlist
+- [ ] Check for tenant isolation policies
+
+**Code Example:**
+```typescript
+// Permission-aware query execution
+async function queryWithPermissionCheck(tableName: string, sql: string) {
+  try {
+    return await client.query(sql);
+  } catch (error) {
+    if (error.code === 'FORBIDDEN') {
+      // Check which permission is missing
+      const permissions = await client.query(`
+        SELECT table_name, privilege_type
+        FROM information_schema.table_privileges
+        WHERE grantee = CURRENT_USER
+          AND table_name = ?
+      `, [tableName]);
+
+      if (permissions.rows.length === 0) {
+        console.error(`No permissions on table '${tableName}'`);
+        console.log('Contact your administrator to grant access');
+      } else {
+        console.log('Current permissions:', permissions.rows);
+        console.log('You may need additional privileges for this operation');
+      }
+    }
+    throw error;
+  }
+}
+```
+
+**Related Errors:** [UNAUTHORIZED](#unauthorized), [TXN_READ_ONLY_VIOLATION](#txn_read_only_violation)
 
 ---
 
@@ -520,6 +1196,74 @@ Access denied to table 'admin_logs'
 3. Reduce request frequency
 4. Request quota increase if needed
 
+**Troubleshooting Checklist:**
+- [ ] Check the `Retry-After` header or `retryAfter` field in response
+- [ ] Review your request patterns for burst traffic
+- [ ] Consider implementing request queuing
+- [ ] Check if you need a higher rate limit tier
+
+**Code Example:**
+```typescript
+// Rate limit aware client with automatic backoff
+class RateLimitedClient {
+  private requestQueue: Array<() => Promise<any>> = [];
+  private isProcessing = false;
+  private retryAfterMs = 0;
+
+  async query(sql: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      this.requestQueue.push(async () => {
+        try {
+          const result = await this.executeQuery(sql);
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      });
+      this.processQueue();
+    });
+  }
+
+  private async executeQuery(sql: string) {
+    // Wait if we're in a rate limit backoff period
+    if (this.retryAfterMs > 0) {
+      await new Promise(r => setTimeout(r, this.retryAfterMs));
+      this.retryAfterMs = 0;
+    }
+
+    try {
+      return await client.query(sql);
+    } catch (error) {
+      if (error.code === 'rate_limited' || error.code === 'R2_RATE_LIMITED') {
+        this.retryAfterMs = error.retryAfter * 1000 || 5000;
+        console.log(`Rate limited. Waiting ${this.retryAfterMs}ms before retry`);
+
+        await new Promise(r => setTimeout(r, this.retryAfterMs));
+        this.retryAfterMs = 0;
+
+        // Retry once after backoff
+        return await client.query(sql);
+      }
+      throw error;
+    }
+  }
+
+  private async processQueue() {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+
+    while (this.requestQueue.length > 0) {
+      const request = this.requestQueue.shift()!;
+      await request();
+    }
+
+    this.isProcessing = false;
+  }
+}
+```
+
+**Related Errors:** [RESOURCE_EXHAUSTED](#resource_exhausted), [QUOTA_EXCEEDED](#quota_exceeded), [CDC_BUFFER_OVERFLOW](#cdc_buffer_overflow)
+
 ---
 
 ### RESOURCE_EXHAUSTED
@@ -542,6 +1286,14 @@ Server resources exhausted, please retry later
 2. Reduce concurrent connections
 3. Optimize query complexity
 
+**Troubleshooting Checklist:**
+- [ ] Check server metrics for memory/CPU utilization
+- [ ] Reduce parallel query execution
+- [ ] Close idle connections
+- [ ] Consider implementing connection pooling
+
+**Related Errors:** [RATE_LIMITED](#rate_limited--r2_rate_limited), [TIMEOUT](#timeout)
+
 ---
 
 ### QUOTA_EXCEEDED
@@ -563,6 +1315,44 @@ Storage quota exceeded (10GB limit)
 1. Clean up unused data
 2. Upgrade account tier
 3. Wait for quota reset period
+
+**Troubleshooting Checklist:**
+- [ ] Check current usage vs quota limits in dashboard
+- [ ] Identify large tables or files consuming quota
+- [ ] Review data retention policies
+- [ ] Consider archiving old data to cold storage
+
+**Code Example:**
+```typescript
+// Quota-aware operations
+async function insertWithQuotaCheck(records: any[]) {
+  try {
+    await client.batchInsert('events', records);
+  } catch (error) {
+    if (error.code === 'QUOTA_EXCEEDED') {
+      console.error('Storage quota exceeded');
+
+      // Check current usage
+      const usage = await client.query('SELECT * FROM sys.storage_usage');
+      console.log('Current usage:', usage.rows[0]);
+
+      // Suggest cleanup
+      const oldData = await client.query(`
+        SELECT table_name, COUNT(*) as count
+        FROM information_schema.tables
+        WHERE created_at < datetime('now', '-90 days')
+        GROUP BY table_name
+      `);
+      console.log('Tables with old data that could be archived:', oldData.rows);
+
+      throw new Error('Storage quota exceeded. Please clean up data or upgrade your plan.');
+    }
+    throw error;
+  }
+}
+```
+
+**Related Errors:** [RATE_LIMITED](#rate_limited--r2_rate_limited), [FSX_SIZE_EXCEEDED](#fsx_size_exceeded)
 
 ---
 
@@ -593,6 +1383,46 @@ Failed to subscribe to CDC stream: WAL reader not initialized
 2. Check WAL availability
 3. Retry subscription
 
+**Troubleshooting Checklist:**
+- [ ] Verify WAL is enabled on the database
+- [ ] Check subscription table names exist
+- [ ] Ensure proper permissions for CDC
+- [ ] Verify connection to CDC endpoint
+
+**Code Example:**
+```typescript
+// Robust CDC subscription with error recovery
+async function subscribeToCDC(tables: string[]) {
+  const maxRetries = 3;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const subscription = await lakeClient.subscribe({
+        tables,
+        fromLSN: await getLastProcessedLSN(),
+      });
+
+      for await (const event of subscription) {
+        await processEvent(event);
+        await saveCheckpoint(event.lsn);
+      }
+    } catch (error) {
+      if (error.code === 'CDC_SUBSCRIPTION_FAILED') {
+        console.error(`Subscription failed (attempt ${attempt + 1}):`, error.message);
+
+        if (attempt < maxRetries - 1) {
+          await new Promise(r => setTimeout(r, 5000 * (attempt + 1)));
+          continue;
+        }
+      }
+      throw error;
+    }
+  }
+}
+```
+
+**Related Errors:** [CDC_LSN_NOT_FOUND](#cdc_lsn_not_found), [CDC_SLOT_NOT_FOUND](#cdc_slot_not_found)
+
 ---
 
 ### CDC_LSN_NOT_FOUND
@@ -620,6 +1450,52 @@ LSN 1000 not found - oldest available LSN is 5000
 2. Use more frequent checkpoints
 3. Implement fallback to full sync
 
+**Troubleshooting Checklist:**
+- [ ] Your checkpoint LSN is older than WAL retention period
+- [ ] Consider increasing WAL retention if needed
+- [ ] Implement a full resync strategy as fallback
+- [ ] Checkpoint more frequently to avoid gaps
+
+**Code Example:**
+```typescript
+// Handle LSN not found with fallback to full sync
+async function syncWithFallback(tableName: string) {
+  let fromLSN = await getLastCheckpoint(tableName);
+
+  try {
+    for await (const event of lakeClient.subscribe({ tables: [tableName], fromLSN })) {
+      await processEvent(event);
+      await saveCheckpoint(tableName, event.lsn);
+    }
+  } catch (error) {
+    if (error.code === 'CDC_LSN_NOT_FOUND') {
+      console.warn(`LSN ${fromLSN} not found. Falling back to full sync.`);
+
+      // Get the oldest available LSN
+      const oldestLSN = error.oldestAvailableLSN || 0n;
+
+      // Perform full table sync first
+      await performFullTableSync(tableName);
+
+      // Then continue from oldest available LSN
+      await saveCheckpoint(tableName, oldestLSN);
+      return syncWithFallback(tableName);
+    }
+    throw error;
+  }
+}
+
+async function performFullTableSync(tableName: string) {
+  console.log(`Performing full sync for ${tableName}`);
+  const rows = await client.query(`SELECT * FROM ${tableName}`);
+  for (const row of rows.rows) {
+    await upsertToDestination(tableName, row);
+  }
+}
+```
+
+**Related Errors:** [CDC_SUBSCRIPTION_FAILED](#cdc_subscription_failed), [CDC_SLOT_NOT_FOUND](#cdc_slot_not_found)
+
 ---
 
 ### CDC_SLOT_NOT_FOUND
@@ -641,6 +1517,13 @@ Replication slot 'my_slot' not found
 1. Create the replication slot first
 2. Verify slot name
 
+**Troubleshooting Checklist:**
+- [ ] Verify slot name spelling
+- [ ] Check if slot was dropped by another process
+- [ ] Ensure proper permissions to access replication slots
+
+**Related Errors:** [CDC_SLOT_EXISTS](#cdc_slot_exists), [CDC_SUBSCRIPTION_FAILED](#cdc_subscription_failed)
+
 ---
 
 ### CDC_SLOT_EXISTS
@@ -661,6 +1544,13 @@ Replication slot 'my_slot' already exists
 **Resolution Steps:**
 1. Use a different slot name
 2. Delete existing slot if no longer needed
+
+**Troubleshooting Checklist:**
+- [ ] Choose unique slot names per consumer application
+- [ ] Clean up orphaned slots from failed processes
+- [ ] List existing slots before creating new ones
+
+**Related Errors:** [CDC_SLOT_NOT_FOUND](#cdc_slot_not_found)
 
 ---
 
@@ -689,6 +1579,51 @@ CDC buffer full (1000/1000 entries) - consumer lagging
 2. Speed up consumer processing
 3. Implement backpressure handling
 
+**Troubleshooting Checklist:**
+- [ ] Monitor consumer lag metrics
+- [ ] Increase consumer parallelism
+- [ ] Optimize event processing logic
+- [ ] Consider increasing buffer configuration
+
+**Code Example:**
+```typescript
+// Backpressure-aware CDC consumer
+class BackpressureConsumer {
+  private processing = 0;
+  private maxConcurrent = 10;
+  private paused = false;
+
+  async consume(subscription: AsyncIterable<CDCEvent>) {
+    for await (const event of subscription) {
+      // Implement backpressure
+      while (this.processing >= this.maxConcurrent) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+
+      this.processing++;
+      this.processEvent(event)
+        .catch(error => {
+          if (error.code === 'CDC_BUFFER_OVERFLOW') {
+            console.warn('Buffer overflow - slowing down');
+            this.maxConcurrent = Math.max(1, this.maxConcurrent - 1);
+          }
+        })
+        .finally(() => {
+          this.processing--;
+        });
+    }
+  }
+
+  private async processEvent(event: CDCEvent) {
+    // Simulate processing
+    await new Promise(r => setTimeout(r, 50));
+    console.log('Processed event:', event.lsn);
+  }
+}
+```
+
+**Related Errors:** [buffer_full](#buffer_full), [RATE_LIMITED](#rate_limited--r2_rate_limited)
+
 ---
 
 ### CDC_DECODE_ERROR
@@ -710,6 +1645,14 @@ Failed to decode event data: Invalid JSON
 1. Check data encoding
 2. Verify decoder function
 3. Handle schema evolution
+
+**Troubleshooting Checklist:**
+- [ ] Verify the encoding matches expected format (JSON, Avro, etc.)
+- [ ] Check for schema changes that may affect deserialization
+- [ ] Implement schema registry for versioned schemas
+- [ ] Add error handling for malformed events
+
+**Related Errors:** [INVALID_REQUEST](#invalid_request), [MessageValidationError](#messagevalidationerror)
 
 ---
 

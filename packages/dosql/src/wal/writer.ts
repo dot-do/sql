@@ -14,10 +14,20 @@ import {
   type WALEncoder,
   type AppendOptions,
   type AppendResult,
+  type HLCTimestamp,
   DEFAULT_WAL_CONFIG,
   WALError,
   WALErrorCode,
 } from './types.js';
+import {
+  createHLCClock,
+  type HLCClock,
+  type HLCConfig,
+  type HLCReceiveOptions,
+  type DriftMetrics,
+  type HLCEventType,
+  type HLCEventHandler,
+} from '../hlc.js';
 
 // =============================================================================
 // CRC32 Implementation

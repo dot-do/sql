@@ -7,10 +7,14 @@
 
 import type { FSXBackend } from '../fsx/types.js';
 import type { LSN, TransactionId } from '../engine/types.js';
+import type { HLCTimestamp } from '../hlc.js';
 
 // Re-export branded types for convenience
 export type { LSN, TransactionId } from '../engine/types.js';
 export { createLSN, createTransactionId } from '../engine/types.js';
+
+// Re-export HLC types for convenience
+export type { HLCTimestamp } from '../hlc.js';
 
 // =============================================================================
 // Core WAL Entry Types
@@ -47,6 +51,8 @@ export interface WALEntry {
   before?: Uint8Array;
   /** New value for INSERT/UPDATE operations */
   after?: Uint8Array;
+  /** HLC timestamp for causal ordering in CDC (optional for backward compatibility) */
+  hlc?: HLCTimestamp;
 }
 
 /**

@@ -1,6 +1,30 @@
 # @dotdo/lake.do
 
+> **Pre-release Software**: This is v0.1.0. APIs may change. Not recommended for production use without thorough testing.
+
 Client SDK for DoLake - Lakehouse on Cloudflare Workers.
+
+## Stability
+
+### Stable APIs
+
+- Core query execution (`query`)
+- Connection management (`createLakeClient`, `close`, `ping`)
+- Basic CDC subscription
+
+### Experimental APIs
+
+- Time travel queries (`asOf` option)
+- Partition management (`listPartitions`, `compact`)
+- Snapshot management (`listSnapshots`)
+- Compaction job tracking
+
+## Version Compatibility
+
+| Dependency | Version |
+|------------|---------|
+| Node.js | 18+ |
+| TypeScript | 5.3+ |
 
 ## Installation
 

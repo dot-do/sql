@@ -1,6 +1,29 @@
 # SQLLogicTest Runner for DoSQL
 
+> **Pre-release Software**: This is v0.1.0. APIs may change. Not recommended for production use without thorough testing.
+
 A standalone test runner that executes [SQLLogicTest](https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki) test files against the DoSQL engine.
+
+## Stability
+
+### Stable APIs
+
+- Test file parsing (SQLLogicTest format)
+- Basic test execution
+- Result comparison and reporting
+
+### Experimental APIs
+
+- Full SQLLogicTest compatibility (some edge cases may not be supported)
+- Custom DoSQL extensions (`skipif dosql`, `onlyif dosql`)
+
+## Version Compatibility
+
+| Dependency | Version |
+|------------|---------|
+| Node.js | 18+ |
+| TypeScript | 5.3+ |
+| tsx | 4.x |
 
 ## Overview
 

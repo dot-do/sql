@@ -1,8 +1,35 @@
 # DoSQL Documentation
 
+> **Pre-release Software**: This is v0.1.0. APIs may change. Not recommended for production use without thorough testing.
+
 > Type-safe SQL for TypeScript with Cloudflare Durable Objects
 
 DoSQL is a database engine purpose-built for Cloudflare Workers and Durable Objects. It provides type-safe SQL queries with compile-time validation, automatic schema migrations, and advanced features like time travel, branching, and CDC streaming to lakehouse storage.
+
+## Stability
+
+### Stable APIs
+
+- Core database operations (`DB`, `query`, `run`, `transaction`)
+- Basic SQL execution (SELECT, INSERT, UPDATE, DELETE)
+- Schema migrations
+- Transaction management
+
+### Experimental APIs
+
+- Time travel queries
+- Database branching
+- CDC streaming
+- Virtual tables
+- CapnWeb RPC
+
+## Version Compatibility
+
+| Dependency | Version |
+|------------|---------|
+| Node.js | 18+ |
+| TypeScript | 5.3+ |
+| Cloudflare Workers | 2024-01-01+ |
 
 ## Quick Start
 

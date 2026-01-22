@@ -1,6 +1,6 @@
 # DoSQL & DoLake Deployment & Operations Guide
 
-**Version**: 1.0.0
+**Version**: 2.0.0
 **Last Updated**: 2026-01-22
 **Maintainer**: Platform Team
 
@@ -8,38 +8,369 @@
 
 ## Table of Contents
 
-1. [Deployment](#deployment)
+1. [Deployment Checklist](#deployment-checklist)
+   - [Pre-Deployment Checklist](#pre-deployment-checklist)
+   - [Deployment Steps](#deployment-steps)
+   - [Post-Deployment Verification](#post-deployment-verification)
+   - [Rollback Procedures](#rollback-procedures)
+2. [Deployment](#deployment)
    - [Wrangler Configuration](#wrangler-configuration)
    - [Environment Variables](#environment-variables)
    - [Multi-Environment Setup](#multi-environment-setup)
-2. [Durable Object Configuration](#durable-object-configuration)
+3. [Durable Object Configuration](#durable-object-configuration)
    - [DO Bindings](#do-bindings)
    - [Migration Configuration](#migration-configuration)
    - [SQLite Storage Settings](#sqlite-storage-settings)
-3. [R2 Configuration](#r2-configuration)
+4. [R2 Configuration](#r2-configuration)
    - [Bucket Setup for DoLake](#bucket-setup-for-dolake)
    - [Lifecycle Policies](#lifecycle-policies)
    - [Cross-Region Considerations](#cross-region-considerations)
-4. [Monitoring](#monitoring)
+5. [Monitoring and Observability](#monitoring-and-observability)
    - [Key Metrics to Track](#key-metrics-to-track)
    - [Cloudflare Analytics Integration](#cloudflare-analytics-integration)
    - [Custom Logging Patterns](#custom-logging-patterns)
-5. [Scaling](#scaling)
+   - [Distributed Tracing](#distributed-tracing)
+6. [Alerting Recommendations](#alerting-recommendations)
+   - [Alert Tiers](#alert-tiers)
+   - [Alert Configuration](#alert-configuration)
+   - [On-Call Procedures](#on-call-procedures)
+   - [Alert Suppression and Maintenance Mode](#alert-suppression-and-maintenance-mode)
+7. [Scaling](#scaling)
    - [Sharding Configuration](#sharding-configuration)
    - [When to Add Shards](#when-to-add-shards)
    - [Load Balancing Strategies](#load-balancing-strategies)
-6. [Backup & Recovery](#backup--recovery)
+8. [Backup & Recovery](#backup--recovery)
    - [Time Travel for Point-in-Time Recovery](#time-travel-for-point-in-time-recovery)
    - [R2 Backup Strategies](#r2-backup-strategies)
    - [Disaster Recovery Procedures](#disaster-recovery-procedures)
-7. [Troubleshooting](#troubleshooting)
-   - [Common Issues and Solutions](#common-issues-and-solutions)
-   - [Debug Logging](#debug-logging)
-   - [Performance Diagnostics](#performance-diagnostics)
-8. [Maintenance](#maintenance)
-   - [WAL Compaction](#wal-compaction)
-   - [DoLake Compaction](#dolake-compaction)
-   - [Storage Cleanup](#storage-cleanup)
+9. [Maintenance Windows](#maintenance-windows)
+   - [Scheduled Maintenance](#scheduled-maintenance)
+   - [Maintenance Procedures](#maintenance-procedures)
+   - [Zero-Downtime Operations](#zero-downtime-operations)
+10. [Incident Response](#incident-response)
+    - [Incident Classification](#incident-classification)
+    - [Response Procedures](#response-procedures)
+    - [Communication Templates](#communication-templates)
+    - [Post-Incident Review](#post-incident-review)
+11. [Capacity Planning](#capacity-planning)
+    - [Resource Limits](#resource-limits)
+    - [Growth Forecasting](#growth-forecasting)
+    - [Scaling Triggers](#scaling-triggers)
+    - [Capacity Review Schedule](#capacity-review-schedule)
+12. [Cost Optimization](#cost-optimization)
+    - [Pricing Model](#pricing-model)
+    - [Cost Reduction Strategies](#cost-reduction-strategies)
+    - [Budget Monitoring](#budget-monitoring)
+    - [TCO Analysis](#tco-analysis)
+13. [Troubleshooting](#troubleshooting)
+    - [Common Issues and Solutions](#common-issues-and-solutions)
+    - [Debug Logging](#debug-logging)
+    - [Performance Diagnostics](#performance-diagnostics)
+14. [Maintenance](#maintenance)
+    - [WAL Compaction](#wal-compaction)
+    - [DoLake Compaction](#dolake-compaction)
+    - [Storage Cleanup](#storage-cleanup)
+
+---
+
+## Deployment Checklist
+
+### Pre-Deployment Checklist
+
+Complete all items before initiating deployment to production.
+
+#### Code and Build Verification
+
+- [ ] **All tests pass** - Run `pnpm test` and verify 100% pass rate
+- [ ] **TypeScript compiles** - Run `pnpm typecheck` with no errors
+- [ ] **Build succeeds** - Run `pnpm build` with no errors
+- [ ] **Bundle size checked** - Verify Worker bundle < 10MB (warn at 5MB)
+- [ ] **No security vulnerabilities** - Run `pnpm audit` with no high/critical issues
+- [ ] **Code review approved** - PR approved by at least one reviewer
+- [ ] **CHANGELOG updated** - Document all user-facing changes
+
+#### Configuration Verification
+
+- [ ] **wrangler.toml valid** - Run `wrangler check` for configuration errors
+- [ ] **Secrets configured** - All required secrets set via `wrangler secret list`
+- [ ] **Environment variables set** - Verify all required vars in wrangler.toml
+- [ ] **DO migrations defined** - All migration tags properly configured
+- [ ] **R2 buckets exist** - Verify bucket names match configuration
+- [ ] **Routes configured** - Verify route patterns are correct
+
+#### Infrastructure Verification
+
+- [ ] **R2 buckets accessible** - Test R2 read/write permissions
+- [ ] **D1 bindings (if any)** - Verify D1 database accessibility
+- [ ] **KV namespaces (if any)** - Verify KV read/write access
+- [ ] **Analytics Engine enabled** - Verify dataset configured
+
+#### Staging Verification
+
+- [ ] **Staging deployment successful** - `wrangler deploy --env staging`
+- [ ] **Smoke tests pass** - Run automated smoke test suite
+- [ ] **Manual testing complete** - Critical paths verified manually
+- [ ] **Performance baseline met** - Latency P95 within acceptable range
+- [ ] **No regressions detected** - Compare metrics against previous release
+
+### Deployment Steps
+
+#### Standard Deployment Process
+
+```bash
+#!/bin/bash
+# deployment.sh - Standard deployment script
+
+set -euo pipefail
+
+ENVIRONMENT="${1:-production}"
+VERSION=$(git describe --tags --always)
+
+echo "=== DoSQL/DoLake Deployment ==="
+echo "Environment: $ENVIRONMENT"
+echo "Version: $VERSION"
+echo ""
+
+# Step 1: Pre-flight checks
+echo "[1/7] Running pre-flight checks..."
+pnpm test
+pnpm typecheck
+pnpm build
+
+# Step 2: Backup current state
+echo "[2/7] Creating pre-deployment backup..."
+BACKUP_TIMESTAMP=$(date -u +"%Y%m%d_%H%M%S")
+wrangler r2 object put "dosql-lakehouse-${ENVIRONMENT}/_backups/pre-deploy-${BACKUP_TIMESTAMP}/marker.json" \
+  --file=<(echo "{\"version\":\"$VERSION\",\"timestamp\":\"$BACKUP_TIMESTAMP\"}")
+
+# Step 3: Deploy to Cloudflare
+echo "[3/7] Deploying to Cloudflare..."
+wrangler deploy --env "$ENVIRONMENT"
+
+# Step 4: Run migrations (if any)
+echo "[4/7] Running migrations..."
+# Migrations are handled automatically by wrangler for DO classes
+
+# Step 5: Health check
+echo "[5/7] Running health checks..."
+sleep 5  # Allow time for deployment propagation
+
+HEALTH_URL="https://$(wrangler domains get --env $ENVIRONMENT | head -1)/health"
+HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL")
+
+if [ "$HEALTH_STATUS" != "200" ]; then
+  echo "ERROR: Health check failed with status $HEALTH_STATUS"
+  echo "Initiating rollback..."
+  wrangler rollback --env "$ENVIRONMENT"
+  exit 1
+fi
+
+# Step 6: Smoke tests
+echo "[6/7] Running smoke tests..."
+npm run test:smoke -- --env "$ENVIRONMENT"
+
+# Step 7: Notify
+echo "[7/7] Sending deployment notification..."
+curl -X POST "${SLACK_WEBHOOK_URL}" \
+  -H "Content-Type: application/json" \
+  -d "{\"text\":\"DoSQL deployed to ${ENVIRONMENT}: ${VERSION}\"}"
+
+echo ""
+echo "=== Deployment Complete ==="
+echo "Version: $VERSION"
+echo "Environment: $ENVIRONMENT"
+echo "Health: $HEALTH_STATUS"
+```
+
+#### Blue-Green Deployment Pattern
+
+```typescript
+// blue-green-deploy.ts
+interface DeploymentConfig {
+  environment: 'production';
+  blueVersion: string;
+  greenVersion: string;
+  trafficSplitPercent: number;
+}
+
+async function blueGreenDeploy(config: DeploymentConfig): Promise<void> {
+  // Step 1: Deploy green version (new code)
+  console.log('Deploying green version...');
+  await deployVersion(config.greenVersion, 'green');
+
+  // Step 2: Warm up green environment
+  console.log('Warming up green environment...');
+  await warmUp('green', { requests: 100, concurrency: 10 });
+
+  // Step 3: Verify green health
+  console.log('Verifying green health...');
+  const greenHealth = await checkHealth('green');
+  if (!greenHealth.healthy) {
+    throw new Error(`Green deployment unhealthy: ${greenHealth.error}`);
+  }
+
+  // Step 4: Gradual traffic shift
+  console.log('Shifting traffic to green...');
+  for (const percent of [10, 25, 50, 75, 100]) {
+    await setTrafficSplit({ blue: 100 - percent, green: percent });
+    await sleep(60000);  // Wait 1 minute between shifts
+
+    const metrics = await getRealtimeMetrics();
+    if (metrics.errorRate > 0.01) {  // > 1% error rate
+      console.log('Error rate elevated, rolling back...');
+      await setTrafficSplit({ blue: 100, green: 0 });
+      throw new Error('Deployment rolled back due to elevated error rate');
+    }
+  }
+
+  // Step 5: Decommission blue
+  console.log('Decommissioning blue version...');
+  // Keep blue available for quick rollback for 24 hours
+  await scheduleDecommission('blue', { delayHours: 24 });
+
+  console.log('Blue-green deployment complete');
+}
+```
+
+### Post-Deployment Verification
+
+#### Verification Checklist
+
+```bash
+#!/bin/bash
+# post-deploy-verify.sh
+
+ENVIRONMENT="${1:-production}"
+BASE_URL="https://db.example.com"
+
+echo "=== Post-Deployment Verification ==="
+
+# 1. Health endpoints
+echo "[1/6] Checking health endpoints..."
+curl -sf "${BASE_URL}/health" || { echo "FAIL: /health"; exit 1; }
+curl -sf "${BASE_URL}/health/deep" || { echo "FAIL: /health/deep"; exit 1; }
+
+# 2. Query functionality
+echo "[2/6] Testing query functionality..."
+QUERY_RESULT=$(curl -sf -X POST "${BASE_URL}/sql/query" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  -d '{"sql":"SELECT 1 as test"}')
+echo "$QUERY_RESULT" | jq -e '.rows[0].test == 1' || { echo "FAIL: Query test"; exit 1; }
+
+# 3. Write functionality
+echo "[3/6] Testing write functionality..."
+WRITE_RESULT=$(curl -sf -X POST "${BASE_URL}/sql/exec" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  -d '{"sql":"INSERT INTO _health_check (id, ts) VALUES (?, ?)", "params":["deploy-check", '$(date +%s)']}')
+
+# 4. CDC connectivity
+echo "[4/6] Checking CDC connectivity..."
+WS_CHECK=$(curl -sf "${BASE_URL}/lake/status" | jq -e '.connectedSources >= 0')
+
+# 5. Metrics emission
+echo "[5/6] Verifying metrics emission..."
+# Check Analytics Engine for recent data points
+METRICS_CHECK=$(curl -sf "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/analytics_engine/sql" \
+  -H "Authorization: Bearer ${CF_API_TOKEN}" \
+  -d "SELECT COUNT(*) as c FROM dosql_metrics WHERE timestamp > NOW() - INTERVAL '5' MINUTE")
+
+# 6. Error rate check
+echo "[6/6] Checking error rates..."
+ERROR_RATE=$(curl -sf "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/workers/analytics" \
+  -H "Authorization: Bearer ${CF_API_TOKEN}" \
+  | jq '.result.totals.errorRate')
+
+if (( $(echo "$ERROR_RATE > 0.01" | bc -l) )); then
+  echo "WARNING: Error rate elevated: $ERROR_RATE"
+fi
+
+echo ""
+echo "=== Verification Complete ==="
+echo "All checks passed"
+```
+
+### Rollback Procedures
+
+#### Automatic Rollback
+
+```typescript
+// rollback-manager.ts
+interface RollbackTrigger {
+  metric: string;
+  threshold: number;
+  window: string;
+  action: 'immediate' | 'gradual';
+}
+
+const ROLLBACK_TRIGGERS: RollbackTrigger[] = [
+  { metric: 'error_rate', threshold: 0.05, window: '5m', action: 'immediate' },
+  { metric: 'latency_p99', threshold: 5000, window: '5m', action: 'gradual' },
+  { metric: 'do_failures', threshold: 10, window: '1m', action: 'immediate' },
+];
+
+class RollbackManager {
+  private previousVersion: string | null = null;
+
+  async recordDeployment(version: string): Promise<void> {
+    this.previousVersion = await this.getCurrentVersion();
+    await this.storage.put('current_version', version);
+    await this.storage.put('previous_version', this.previousVersion);
+  }
+
+  async checkRollbackNeeded(): Promise<boolean> {
+    for (const trigger of ROLLBACK_TRIGGERS) {
+      const value = await this.getMetricValue(trigger.metric, trigger.window);
+      if (value > trigger.threshold) {
+        console.error(`Rollback trigger: ${trigger.metric}=${value} > ${trigger.threshold}`);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async executeRollback(): Promise<RollbackResult> {
+    if (!this.previousVersion) {
+      throw new Error('No previous version available for rollback');
+    }
+
+    console.log(`Rolling back to version: ${this.previousVersion}`);
+
+    // Use wrangler rollback
+    const result = await execAsync(`wrangler rollback --env production`);
+
+    // Notify on-call
+    await this.notifyOnCall({
+      type: 'rollback',
+      previousVersion: this.previousVersion,
+      reason: 'Automated rollback triggered',
+    });
+
+    return {
+      success: result.exitCode === 0,
+      version: this.previousVersion,
+      timestamp: new Date().toISOString(),
+    };
+  }
+}
+```
+
+#### Manual Rollback Commands
+
+```bash
+# Immediate rollback to previous version
+wrangler rollback --env production
+
+# Rollback to specific deployment
+wrangler rollback --env production --deployment-id="abc123"
+
+# List recent deployments
+wrangler deployments list --env production
+
+# View deployment details
+wrangler deployments status --deployment-id="abc123"
+```
 
 ---
 
@@ -574,36 +905,36 @@ await bucket.put('warehouse/default/users/data/file.parquet', data, {
 #### Multi-Region Architecture
 
 ```
-                    ┌─────────────────────────────────────────────────┐
-                    │              Cloudflare Global Network           │
-                    └─────────────────────────────────────────────────┘
-                                          │
-          ┌───────────────────────────────┼───────────────────────────┐
-          │                               │                           │
-          ▼                               ▼                           ▼
-   ┌─────────────┐                 ┌─────────────┐             ┌─────────────┐
-   │  US Region  │                 │  EU Region  │             │ APAC Region │
-   │   Workers   │                 │   Workers   │             │   Workers   │
-   └──────┬──────┘                 └──────┬──────┘             └──────┬──────┘
-          │                               │                           │
-          ▼                               ▼                           ▼
-   ┌─────────────┐                 ┌─────────────┐             ┌─────────────┐
-   │ DoSQL DO    │                 │ DoSQL DO    │             │ DoSQL DO    │
-   │ (Primary)   │───── CDC ──────▶│ (Replica)   │───── CDC ──▶│ (Replica)   │
-   └──────┬──────┘                 └──────┬──────┘             └──────┬──────┘
-          │                               │                           │
-          └───────────────────────────────┼───────────────────────────┘
-                                          │
-                                          ▼
-                              ┌───────────────────────┐
-                              │      R2 Bucket        │
-                              │ (Global Replication)  │
-                              └───────────────────────┘
+                    +---------------------------------------------+
+                    |          Cloudflare Global Network          |
+                    +---------------------------------------------+
+                                          |
+          +-------------------------------+-------------------------------+
+          |                               |                               |
+          v                               v                               v
+   +-------------+                 +-------------+                 +-------------+
+   |  US Region  |                 |  EU Region  |                 | APAC Region |
+   |   Workers   |                 |   Workers   |                 |   Workers   |
+   +------+------+                 +------+------+                 +------+------+
+          |                               |                               |
+          v                               v                               v
+   +-------------+                 +-------------+                 +-------------+
+   | DoSQL DO    |                 | DoSQL DO    |                 | DoSQL DO    |
+   | (Primary)   |------ CDC ----->| (Replica)   |------ CDC ----->| (Replica)   |
+   +------+------+                 +------+------+                 +------+------+
+          |                               |                               |
+          +-------------------------------+-------------------------------+
+                                          |
+                                          v
+                              +-----------------------+
+                              |      R2 Bucket        |
+                              | (Global Replication)  |
+                              +-----------------------+
 ```
 
 ---
 
-## Monitoring
+## Monitoring and Observability
 
 ### Key Metrics to Track
 
@@ -801,35 +1132,346 @@ export class Logger {
 }
 ```
 
-#### Usage Examples
+### Distributed Tracing
+
+Implement request tracing across Workers and Durable Objects.
 
 ```typescript
-export class DoSQL implements DurableObject {
-  private logger: Logger;
+// src/tracing.ts
+interface TraceContext {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  startTime: number;
+}
 
-  constructor(state: DurableObjectState, env: Env) {
-    this.logger = new Logger(env, {
-      shardId: state.id.toString(),
-      component: 'DoSQL',
-    });
+export function extractTraceContext(request: Request): TraceContext {
+  const traceHeader = request.headers.get('X-Trace-ID');
+  const parentSpan = request.headers.get('X-Parent-Span-ID');
+
+  return {
+    traceId: traceHeader ?? crypto.randomUUID(),
+    spanId: crypto.randomUUID(),
+    parentSpanId: parentSpan ?? undefined,
+    startTime: Date.now(),
+  };
+}
+
+export function injectTraceContext(request: Request, trace: TraceContext): Request {
+  const headers = new Headers(request.headers);
+  headers.set('X-Trace-ID', trace.traceId);
+  headers.set('X-Parent-Span-ID', trace.spanId);
+
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    body: request.body,
+  });
+}
+
+export function recordSpan(
+  env: Env,
+  trace: TraceContext,
+  name: string,
+  attributes: Record<string, unknown>
+): void {
+  const duration = Date.now() - trace.startTime;
+
+  env.METRICS?.writeDataPoint({
+    blobs: ['trace', trace.traceId, trace.spanId, name],
+    doubles: [duration],
+    indexes: [trace.parentSpanId ?? 'root', attributes.status as string ?? 'ok'],
+  });
+}
+```
+
+---
+
+## Alerting Recommendations
+
+### Alert Tiers
+
+Configure alerts based on severity and response requirements.
+
+#### Tier 1 - Critical (Page Immediately)
+
+| Alert | Condition | Response Time |
+|-------|-----------|---------------|
+| Service Down | Health check fails 3x consecutively | 5 minutes |
+| Data Loss Risk | WAL flush failures | 5 minutes |
+| Storage Critical | DO storage > 95% | 15 minutes |
+| High Error Rate | Error rate > 5% for 5 minutes | 5 minutes |
+| Total Outage | All shards unreachable | Immediate |
+
+#### Tier 2 - High (Page During Hours)
+
+| Alert | Condition | Response Time |
+|-------|-----------|---------------|
+| Performance Degraded | P99 latency > 5x baseline for 15 min | 30 minutes |
+| CDC Lag High | Consumer lag > 10000 events | 30 minutes |
+| Storage Warning | DO storage > 80% | 1 hour |
+| Elevated Error Rate | Error rate > 1% for 15 minutes | 30 minutes |
+| Replication Lag | CDC replication > 5 minutes behind | 30 minutes |
+
+#### Tier 3 - Medium (Next Business Day)
+
+| Alert | Condition | Response Time |
+|-------|-----------|---------------|
+| Slow Queries | Slow query count > 100/hour | 8 hours |
+| Resource Usage | CPU consistently > 70% | 24 hours |
+| Certificate Expiry | TLS cert expiring in < 30 days | 24 hours |
+| Backup Failure | Scheduled backup failed | 24 hours |
+| Disk Space Trend | Storage growth rate unsustainable | 24 hours |
+
+### Alert Configuration
+
+#### Cloudflare Workers Alerts
+
+```typescript
+// alert-rules.ts
+interface AlertRule {
+  name: string;
+  tier: 1 | 2 | 3;
+  condition: string;
+  window: string;
+  threshold: number;
+  channels: string[];
+}
+
+const ALERT_RULES: AlertRule[] = [
+  // Tier 1 - Critical
+  {
+    name: 'service_down',
+    tier: 1,
+    condition: 'health_check_success',
+    window: '5m',
+    threshold: 0,  // Alert if 0 successful checks
+    channels: ['pagerduty', 'slack-critical'],
+  },
+  {
+    name: 'high_error_rate',
+    tier: 1,
+    condition: 'error_rate',
+    window: '5m',
+    threshold: 0.05,  // 5%
+    channels: ['pagerduty', 'slack-critical'],
+  },
+  {
+    name: 'storage_critical',
+    tier: 1,
+    condition: 'storage_utilization',
+    window: '5m',
+    threshold: 0.95,  // 95%
+    channels: ['pagerduty', 'slack-critical'],
+  },
+
+  // Tier 2 - High
+  {
+    name: 'latency_degraded',
+    tier: 2,
+    condition: 'latency_p99',
+    window: '15m',
+    threshold: 5000,  // 5 seconds
+    channels: ['pagerduty-low', 'slack-alerts'],
+  },
+  {
+    name: 'cdc_lag_high',
+    tier: 2,
+    condition: 'cdc_consumer_lag',
+    window: '10m',
+    threshold: 10000,  // events
+    channels: ['slack-alerts'],
+  },
+
+  // Tier 3 - Medium
+  {
+    name: 'slow_queries',
+    tier: 3,
+    condition: 'slow_query_count',
+    window: '1h',
+    threshold: 100,
+    channels: ['slack-ops', 'email'],
+  },
+];
+```
+
+#### External Alerting Integration
+
+```typescript
+// alert-manager.ts
+export class AlertManager {
+  private lastAlerts = new Map<string, number>();
+  private cooldownMs = 300000;  // 5 minute cooldown
+
+  async checkAndAlert(
+    metrics: Record<string, number>,
+    rules: AlertRule[]
+  ): Promise<void> {
+    for (const rule of rules) {
+      const value = metrics[rule.condition];
+      if (value === undefined) continue;
+
+      const shouldAlert = this.evaluateRule(rule, value);
+      if (shouldAlert && this.shouldSendAlert(rule.name)) {
+        await this.sendAlert(rule, value);
+      }
+    }
   }
 
-  async fetch(request: Request): Promise<Response> {
-    const requestId = crypto.randomUUID();
-    const log = this.logger.child({ requestId });
+  private evaluateRule(rule: AlertRule, value: number): boolean {
+    switch (rule.condition) {
+      case 'health_check_success':
+        return value === 0;
+      case 'error_rate':
+      case 'storage_utilization':
+        return value >= rule.threshold;
+      case 'latency_p99':
+      case 'cdc_consumer_lag':
+      case 'slow_query_count':
+        return value > rule.threshold;
+      default:
+        return false;
+    }
+  }
 
-    log.info('Request received', {
-      method: request.method,
-      url: request.url,
-    });
+  private shouldSendAlert(ruleName: string): boolean {
+    const lastAlert = this.lastAlerts.get(ruleName);
+    if (!lastAlert) return true;
 
-    try {
-      const result = await this.handleRequest(request);
-      log.info('Request completed', { status: 200 });
-      return result;
-    } catch (error) {
-      log.error('Request failed', error as Error);
-      return new Response('Internal Error', { status: 500 });
+    return Date.now() - lastAlert > this.cooldownMs;
+  }
+
+  private async sendAlert(rule: AlertRule, value: number): Promise<void> {
+    this.lastAlerts.set(rule.name, Date.now());
+
+    for (const channel of rule.channels) {
+      await this.sendToChannel(channel, {
+        rule: rule.name,
+        tier: rule.tier,
+        condition: rule.condition,
+        value,
+        threshold: rule.threshold,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  private async sendToChannel(channel: string, alert: unknown): Promise<void> {
+    switch (channel) {
+      case 'pagerduty':
+        await this.sendPagerDuty(alert, 'critical');
+        break;
+      case 'pagerduty-low':
+        await this.sendPagerDuty(alert, 'warning');
+        break;
+      case 'slack-critical':
+        await this.sendSlack(alert, '#critical-alerts');
+        break;
+      case 'slack-alerts':
+        await this.sendSlack(alert, '#alerts');
+        break;
+      case 'slack-ops':
+        await this.sendSlack(alert, '#ops');
+        break;
+      case 'email':
+        await this.sendEmail(alert);
+        break;
+    }
+  }
+}
+```
+
+### On-Call Procedures
+
+#### On-Call Runbook
+
+```markdown
+## On-Call Engineer Responsibilities
+
+### Shift Start
+1. Review open alerts and incidents
+2. Check deployment history for recent changes
+3. Verify you have access to all required systems
+4. Update on-call status in communication channels
+
+### During Shift
+1. Respond to pages within SLA (Tier 1: 5 min, Tier 2: 30 min)
+2. Follow runbooks for known issues
+3. Escalate unknown issues appropriately
+4. Document all actions taken
+
+### Alert Response Flow
+1. Acknowledge alert within SLA
+2. Assess severity and impact
+3. Communicate status to stakeholders
+4. Begin investigation/remediation
+5. Update incident timeline
+6. Resolve or escalate
+
+### Escalation Path
+1. Primary on-call engineer
+2. Secondary on-call engineer
+3. Engineering lead
+4. VP of Engineering
+5. CTO
+
+### Contact Information
+- Primary On-Call: [PagerDuty Schedule]
+- Engineering Lead: engineering-lead@example.com
+- Emergency Contact: +1-555-0123
+```
+
+### Alert Suppression and Maintenance Mode
+
+```typescript
+// maintenance-mode.ts
+interface MaintenanceWindow {
+  id: string;
+  start: Date;
+  end: Date;
+  reason: string;
+  suppressedAlerts: string[];
+  createdBy: string;
+}
+
+class MaintenanceManager {
+  private windows: MaintenanceWindow[] = [];
+
+  async createWindow(window: MaintenanceWindow): Promise<void> {
+    this.windows.push(window);
+    await this.storage.put(`maintenance:${window.id}`, window);
+
+    // Notify about maintenance
+    await this.notifyMaintenanceStart(window);
+  }
+
+  isInMaintenance(): boolean {
+    const now = new Date();
+    return this.windows.some(w =>
+      now >= w.start && now <= w.end
+    );
+  }
+
+  shouldSuppressAlert(alertName: string): boolean {
+    const now = new Date();
+    for (const window of this.windows) {
+      if (now >= window.start && now <= window.end) {
+        if (window.suppressedAlerts.includes('*') ||
+            window.suppressedAlerts.includes(alertName)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  async endWindow(windowId: string): Promise<void> {
+    const index = this.windows.findIndex(w => w.id === windowId);
+    if (index >= 0) {
+      const window = this.windows[index];
+      this.windows.splice(index, 1);
+      await this.storage.delete(`maintenance:${windowId}`);
+      await this.notifyMaintenanceEnd(window);
     }
   }
 }
@@ -936,56 +1578,6 @@ await rebalanceShards({
 });
 ```
 
-#### Rebalancing Strategy
-
-```typescript
-// src/rebalance.ts
-export async function rebalanceShards(config: RebalanceConfig): Promise<RebalanceResult> {
-  const { tables, fromShards, toShards, batchSize, throttleMs } = config;
-
-  const results: RebalanceResult = {
-    movedRows: 0,
-    duration: 0,
-    errors: [],
-  };
-
-  const start = Date.now();
-
-  for (const table of tables) {
-    console.log(`Rebalancing table: ${table}`);
-
-    // Get rows that need to move
-    for (const fromShard of fromShards) {
-      const rows = await getRowsToMove(fromShard, table, toShards, batchSize);
-
-      while (rows.length > 0) {
-        // Move batch to new shard
-        const batch = rows.splice(0, batchSize);
-
-        for (const row of batch) {
-          const targetShard = calculateTargetShard(row, toShards);
-
-          if (targetShard !== fromShard) {
-            try {
-              await moveRow(fromShard, targetShard, table, row);
-              results.movedRows++;
-            } catch (error) {
-              results.errors.push({ table, row, error: error.message });
-            }
-          }
-        }
-
-        // Throttle to avoid overwhelming the system
-        await new Promise(resolve => setTimeout(resolve, throttleMs));
-      }
-    }
-  }
-
-  results.duration = Date.now() - start;
-  return results;
-}
-```
-
 ### Load Balancing Strategies
 
 DoSQL implements intelligent query routing for optimal performance.
@@ -1012,43 +1604,6 @@ const report = await executor.query(
     timeout: 60000,               // Allow longer timeout
   }
 );
-```
-
-#### Replica Selection Algorithm
-
-```
-                    ┌─────────────────────────────────────────┐
-                    │           Query Router                   │
-                    └─────────────────────┬───────────────────┘
-                                          │
-                              ┌───────────┴───────────┐
-                              │   Read Preference?    │
-                              └───────────┬───────────┘
-                                          │
-          ┌───────────────────────────────┼───────────────────────────┐
-          │                               │                           │
-          ▼                               ▼                           ▼
-   ┌─────────────┐                 ┌─────────────┐             ┌─────────────┐
-   │   primary   │                 │   replica   │             │  analytics  │
-   │             │                 │             │             │             │
-   │ Route to    │                 │ Select from │             │ Route to    │
-   │ primary DO  │                 │ healthy     │             │ analytics   │
-   │             │                 │ replicas    │             │ replica     │
-   └─────────────┘                 └──────┬──────┘             └─────────────┘
-                                          │
-                              ┌───────────┴───────────┐
-                              │  Selection Strategy   │
-                              └───────────┬───────────┘
-                                          │
-          ┌───────────────────────────────┼───────────────────────────┐
-          │                               │                           │
-          ▼                               ▼                           ▼
-   ┌─────────────┐                 ┌─────────────┐             ┌─────────────┐
-   │   nearest   │                 │   weighted  │             │ round-robin │
-   │             │                 │             │             │             │
-   │ Lowest      │                 │ Based on    │             │ Distribute  │
-   │ latency     │                 │ capacity    │             │ evenly      │
-   └─────────────┘                 └─────────────┘             └─────────────┘
 ```
 
 ---
@@ -1159,165 +1714,6 @@ export const defaultBackupConfig: BackupConfig = {
 };
 ```
 
-#### Automated Backup Process
-
-```typescript
-// src/backup-worker.ts
-export class BackupScheduler {
-  private config: BackupConfig;
-  private bucket: R2Bucket;
-
-  constructor(bucket: R2Bucket, config: BackupConfig = defaultBackupConfig) {
-    this.bucket = bucket;
-    this.config = config;
-  }
-
-  async createBackup(db: Database, shardId: string): Promise<BackupManifest> {
-    const timestamp = new Date().toISOString();
-    const backupPath = `_backups/${timestamp}/${shardId}`;
-
-    // Export current snapshot
-    const snapshot = await db.createSnapshot();
-
-    // Backup metadata
-    const manifest: BackupManifest = {
-      timestamp,
-      shardId,
-      snapshotId: snapshot.id,
-      lsn: snapshot.lsn,
-      tables: [],
-      walSegments: [],
-      totalSizeBytes: 0,
-    };
-
-    // Backup each table
-    const tables = this.config.tables ?? await this.listTables(db);
-
-    for (const table of tables) {
-      const data = await db.query(`SELECT * FROM ${table}`);
-      const json = JSON.stringify(data);
-      const compressed = await this.compress(json);
-
-      const key = `${backupPath}/tables/${table}.json.gz`;
-      await this.bucket.put(key, compressed);
-
-      manifest.tables.push({
-        name: table,
-        rowCount: data.length,
-        sizeBytes: compressed.byteLength,
-        path: key,
-      });
-      manifest.totalSizeBytes += compressed.byteLength;
-    }
-
-    // Backup WAL segments if configured
-    if (this.config.includeWal) {
-      const walSegments = await this.backupWalSegments(db, backupPath);
-      manifest.walSegments = walSegments;
-    }
-
-    // Write manifest
-    await this.bucket.put(
-      `${backupPath}/manifest.json`,
-      JSON.stringify(manifest, null, 2)
-    );
-
-    // Cleanup old backups
-    await this.cleanupOldBackups(shardId);
-
-    return manifest;
-  }
-
-  async restoreBackup(
-    db: Database,
-    manifestPath: string,
-    options: RestoreOptions = {}
-  ): Promise<RestoreResult> {
-    // Read manifest
-    const manifestObj = await this.bucket.get(manifestPath);
-    if (!manifestObj) {
-      throw new Error(`Backup manifest not found: ${manifestPath}`);
-    }
-
-    const manifest: BackupManifest = JSON.parse(await manifestObj.text());
-
-    // Begin restore transaction
-    await db.run('BEGIN EXCLUSIVE');
-
-    try {
-      // Restore tables
-      for (const table of manifest.tables) {
-        if (options.tables && !options.tables.includes(table.name)) {
-          continue;
-        }
-
-        const dataObj = await this.bucket.get(table.path);
-        if (!dataObj) {
-          throw new Error(`Backup data not found: ${table.path}`);
-        }
-
-        const compressed = await dataObj.arrayBuffer();
-        const json = await this.decompress(new Uint8Array(compressed));
-        const rows = JSON.parse(json);
-
-        // Drop and recreate table (or truncate based on options)
-        if (options.dropExisting) {
-          await db.run(`DROP TABLE IF EXISTS ${table.name}`);
-          await db.run(`CREATE TABLE ${table.name} AS SELECT * FROM (${
-            rows.length > 0 ? `VALUES ${rows.map(() => '(?)').join(',')}` : 'SELECT 1 WHERE 0'
-          })`);
-        } else {
-          await db.run(`DELETE FROM ${table.name}`);
-        }
-
-        // Insert restored data
-        for (const row of rows) {
-          const columns = Object.keys(row);
-          const values = Object.values(row);
-          await db.run(
-            `INSERT INTO ${table.name} (${columns.join(',')}) VALUES (${values.map(() => '?').join(',')})`,
-            values
-          );
-        }
-      }
-
-      await db.run('COMMIT');
-
-      return {
-        success: true,
-        manifest,
-        tablesRestored: manifest.tables.length,
-      };
-    } catch (error) {
-      await db.run('ROLLBACK');
-      throw error;
-    }
-  }
-
-  private async cleanupOldBackups(shardId: string): Promise<void> {
-    const prefix = `_backups/`;
-    const list = await this.bucket.list({ prefix });
-
-    // Group by timestamp
-    const backups = list.objects
-      .filter(obj => obj.key.includes(`/${shardId}/manifest.json`))
-      .sort((a, b) => b.uploaded.getTime() - a.uploaded.getTime());
-
-    // Delete old backups beyond retention count
-    const toDelete = backups.slice(this.config.retentionCount);
-
-    for (const backup of toDelete) {
-      const backupPrefix = backup.key.replace('/manifest.json', '/');
-      const backupObjects = await this.bucket.list({ prefix: backupPrefix });
-
-      for (const obj of backupObjects.objects) {
-        await this.bucket.delete(obj.key);
-      }
-    }
-  }
-}
-```
-
 ### Disaster Recovery Procedures
 
 Follow these procedures for different disaster scenarios.
@@ -1336,25 +1732,21 @@ Follow these procedures for different disaster scenarios.
 
 1. **Identify affected shard**
    ```bash
-   # Check shard health via API
    curl https://db.example.com/admin/shards/health
    ```
 
 2. **Isolate the shard**
    ```typescript
-   // Mark shard as read-only in VSchema
    await markShardReadOnly(shardId);
    ```
 
 3. **Find latest backup**
    ```bash
-   # List backups for shard
    wrangler r2 object list dosql-lakehouse-prod --prefix="_backups/" | grep shard-X
    ```
 
 4. **Create new DO instance**
    ```typescript
-   // New DO will be created automatically with fresh ID
    const newDoId = env.DOSQL.newUniqueId();
    const newStub = env.DOSQL.get(newDoId);
    ```
@@ -1372,13 +1764,11 @@ Follow these procedures for different disaster scenarios.
 
 6. **Update shard mapping**
    ```typescript
-   // Update VSchema to point to new DO
    await updateShardMapping(shardId, newDoId.toString());
    ```
 
 7. **Verify data integrity**
    ```bash
-   # Run consistency checks
    curl https://db.example.com/admin/shards/shard-X/verify
    ```
 
@@ -1393,66 +1783,981 @@ Follow these procedures for different disaster scenarios.
 - Large shard (> 5GB): 30-60 minutes
 ```
 
-#### Runbook: Complete Region Failure
+---
+
+## Maintenance Windows
+
+### Scheduled Maintenance
+
+#### Maintenance Types and Windows
+
+| Type | Frequency | Duration | Window (UTC) | Notice Required |
+|------|-----------|----------|--------------|-----------------|
+| Routine Updates | Weekly | 15-30 min | Sunday 03:00-05:00 | 24 hours |
+| Schema Migrations | As needed | 30-60 min | Sunday 03:00-05:00 | 72 hours |
+| Major Upgrades | Quarterly | 1-2 hours | Sunday 02:00-06:00 | 1 week |
+| Emergency Patches | As needed | Variable | ASAP | Best effort |
+| Compaction | Daily | Background | Daily 04:00 | None |
+
+#### Maintenance Calendar Template
+
+```typescript
+// maintenance-calendar.ts
+interface ScheduledMaintenance {
+  id: string;
+  type: 'routine' | 'schema' | 'major' | 'emergency';
+  description: string;
+  scheduledStart: Date;
+  scheduledEnd: Date;
+  affectedServices: string[];
+  expectedImpact: 'none' | 'degraded' | 'outage';
+  notificationSent: boolean;
+  status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+}
+
+const MAINTENANCE_SCHEDULE: ScheduledMaintenance[] = [
+  {
+    id: 'maint-2026-01-26',
+    type: 'routine',
+    description: 'Weekly security updates and dependency refresh',
+    scheduledStart: new Date('2026-01-26T03:00:00Z'),
+    scheduledEnd: new Date('2026-01-26T03:30:00Z'),
+    affectedServices: ['dosql', 'dolake'],
+    expectedImpact: 'none',
+    notificationSent: false,
+    status: 'scheduled',
+  },
+];
+```
+
+### Maintenance Procedures
+
+#### Pre-Maintenance Checklist
+
+```bash
+#!/bin/bash
+# pre-maintenance.sh
+
+echo "=== Pre-Maintenance Checklist ==="
+
+# 1. Verify maintenance window
+echo "[1/7] Verifying maintenance window..."
+CURRENT_HOUR=$(date -u +%H)
+if [ "$CURRENT_HOUR" -lt 3 ] || [ "$CURRENT_HOUR" -gt 5 ]; then
+  echo "WARNING: Outside standard maintenance window"
+  read -p "Continue? (y/n) " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    exit 1
+  fi
+fi
+
+# 2. Create backup
+echo "[2/7] Creating pre-maintenance backup..."
+./scripts/backup.sh production
+
+# 3. Check system health
+echo "[3/7] Checking system health..."
+HEALTH=$(curl -sf https://db.example.com/health/deep)
+if [ "$(echo $HEALTH | jq -r '.status')" != "healthy" ]; then
+  echo "ERROR: System not healthy, aborting maintenance"
+  exit 1
+fi
+
+# 4. Enable maintenance mode
+echo "[4/7] Enabling maintenance mode..."
+curl -X POST https://db.example.com/admin/maintenance/enable \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{"reason":"Scheduled maintenance","duration_minutes":30}'
+
+# 5. Drain connections (gracefully)
+echo "[5/7] Draining connections..."
+curl -X POST https://db.example.com/admin/connections/drain \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+sleep 30  # Wait for connections to drain
+
+# 6. Verify no active transactions
+echo "[6/7] Verifying no active transactions..."
+ACTIVE_TXN=$(curl -sf https://db.example.com/admin/transactions/active | jq '.count')
+if [ "$ACTIVE_TXN" -gt 0 ]; then
+  echo "WARNING: $ACTIVE_TXN active transactions"
+fi
+
+# 7. Notify stakeholders
+echo "[7/7] Sending maintenance notification..."
+./scripts/notify-maintenance-start.sh
+
+echo "=== Pre-Maintenance Complete ==="
+echo "System ready for maintenance"
+```
+
+#### Post-Maintenance Checklist
+
+```bash
+#!/bin/bash
+# post-maintenance.sh
+
+echo "=== Post-Maintenance Checklist ==="
+
+# 1. Disable maintenance mode
+echo "[1/6] Disabling maintenance mode..."
+curl -X POST https://db.example.com/admin/maintenance/disable \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# 2. Run health checks
+echo "[2/6] Running health checks..."
+for i in {1..5}; do
+  HEALTH=$(curl -sf https://db.example.com/health/deep)
+  if [ "$(echo $HEALTH | jq -r '.status')" = "healthy" ]; then
+    echo "Health check passed"
+    break
+  fi
+  echo "Health check $i failed, retrying..."
+  sleep 10
+done
+
+# 3. Verify shard health
+echo "[3/6] Verifying shard health..."
+curl -sf https://db.example.com/admin/shards/health | jq '.'
+
+# 4. Run smoke tests
+echo "[4/6] Running smoke tests..."
+npm run test:smoke -- --env production
+
+# 5. Check metrics
+echo "[5/6] Checking metrics..."
+# Verify no elevated error rates
+
+# 6. Notify stakeholders
+echo "[6/6] Sending maintenance complete notification..."
+./scripts/notify-maintenance-complete.sh
+
+echo "=== Post-Maintenance Complete ==="
+```
+
+### Zero-Downtime Operations
+
+#### Rolling Deployment Strategy
+
+```typescript
+// rolling-deploy.ts
+interface RollingDeployConfig {
+  batchSize: number;          // Shards to update per batch
+  healthCheckWaitMs: number;  // Wait time between batches
+  rollbackOnFailure: boolean; // Auto-rollback on failure
+}
+
+async function rollingDeploy(
+  shards: string[],
+  config: RollingDeployConfig
+): Promise<void> {
+  const batches = chunkArray(shards, config.batchSize);
+  const deployedShards: string[] = [];
+
+  for (const batch of batches) {
+    console.log(`Deploying batch: ${batch.join(', ')}`);
+
+    try {
+      // Deploy to batch
+      for (const shard of batch) {
+        await deployShard(shard);
+        deployedShards.push(shard);
+      }
+
+      // Health check wait
+      await sleep(config.healthCheckWaitMs);
+
+      // Verify batch health
+      const healthy = await checkBatchHealth(batch);
+      if (!healthy) {
+        throw new Error(`Batch health check failed: ${batch.join(', ')}`);
+      }
+
+      console.log(`Batch healthy: ${batch.join(', ')}`);
+    } catch (error) {
+      console.error(`Deployment failed: ${error.message}`);
+
+      if (config.rollbackOnFailure) {
+        console.log('Rolling back deployed shards...');
+        for (const shard of deployedShards) {
+          await rollbackShard(shard);
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  console.log('Rolling deployment complete');
+}
+```
+
+#### Connection Draining
+
+```typescript
+// connection-drain.ts
+class ConnectionDrainer {
+  private draining = false;
+  private activeConnections = new Set<string>();
+
+  startDrain(): void {
+    this.draining = true;
+  }
+
+  canAcceptConnection(): boolean {
+    return !this.draining;
+  }
+
+  registerConnection(id: string): void {
+    this.activeConnections.add(id);
+  }
+
+  unregisterConnection(id: string): void {
+    this.activeConnections.delete(id);
+  }
+
+  async waitForDrain(timeoutMs: number): Promise<boolean> {
+    const start = Date.now();
+
+    while (this.activeConnections.size > 0) {
+      if (Date.now() - start > timeoutMs) {
+        console.warn(`Drain timeout: ${this.activeConnections.size} connections remaining`);
+        return false;
+      }
+
+      await sleep(1000);
+    }
+
+    return true;
+  }
+
+  getStatus(): { draining: boolean; activeCount: number } {
+    return {
+      draining: this.draining,
+      activeCount: this.activeConnections.size,
+    };
+  }
+}
+```
+
+---
+
+## Incident Response
+
+### Incident Classification
+
+#### Severity Levels
+
+| Severity | Impact | Examples | Response Time | Resolution Target |
+|----------|--------|----------|---------------|-------------------|
+| **SEV-1** | Complete outage or data loss | All shards down, data corruption | 5 minutes | 1 hour |
+| **SEV-2** | Major feature unavailable | CDC streaming down, queries failing | 15 minutes | 4 hours |
+| **SEV-3** | Minor feature degraded | Slow queries, elevated latency | 1 hour | 8 hours |
+| **SEV-4** | Minimal impact | Cosmetic issues, minor bugs | 24 hours | 72 hours |
+
+### Response Procedures
+
+#### SEV-1 Response Playbook
 
 ```markdown
-## Complete Region Failure Recovery
+## SEV-1 Incident Response
 
-### Prerequisites
-- Multi-region deployment configured
-- Cross-region replication enabled
-- Backup data available in R2 (globally replicated)
+### Immediate Actions (0-5 minutes)
+1. **Acknowledge** - Confirm receipt of alert
+2. **Assess** - Quick impact assessment
+3. **Communicate** - Open incident channel (#incident-YYYYMMDD)
+4. **Escalate** - Page engineering lead and stakeholders
 
-### Recovery Steps
+### Investigation (5-15 minutes)
+1. Check recent deployments: `wrangler deployments list`
+2. Check infrastructure status: Cloudflare status page
+3. Review logs: `wrangler tail --env production`
+4. Check metrics dashboard for anomalies
 
-1. **Assess impact**
-   - Identify affected shards
-   - Verify backup availability
-   - Check CDC lag to DoLake
+### Mitigation (15-60 minutes)
+1. If deployment-related: Execute rollback
+2. If traffic-related: Enable rate limiting
+3. If infrastructure: Engage Cloudflare support
+4. Document all actions in incident channel
 
-2. **Failover to healthy region**
-   ```typescript
-   // Update DNS/routing to healthy region
-   await updateRegionRouting({
-     from: 'us-west',
-     to: 'us-east',
-     shards: affectedShards,
-   });
-   ```
+### Communication Template
+"""
+**INCIDENT: [Title]**
+**Severity**: SEV-1
+**Status**: Investigating / Identified / Monitoring / Resolved
+**Impact**: [Describe user impact]
+**Started**: [Timestamp]
+**Last Update**: [Timestamp]
+**Next Update**: [Estimated time]
 
-3. **Promote replicas to primary**
-   ```typescript
-   for (const shard of affectedShards) {
-     const replica = getHealthyReplica(shard, 'us-east');
-     await promoteReplicaToPrimary(replica);
-   }
-   ```
+**Current Status**:
+[Brief description of current state]
 
-4. **Catch up from DoLake (if needed)**
-   ```typescript
-   // Replay CDC events from last checkpoint
-   await replayCDCFromLakehouse({
-     shards: affectedShards,
-     fromSnapshot: lastKnownGoodSnapshot,
-   });
-   ```
+**Actions Taken**:
+- [Action 1]
+- [Action 2]
+"""
 
-5. **Verify data consistency**
-   ```bash
-   # Compare row counts and checksums
-   curl https://db.example.com/admin/verify-consistency
-   ```
-
-6. **Update monitoring**
-   - Clear alerts for failed region
-   - Update dashboards
-   - Notify stakeholders
-
-### Post-Recovery
-- Document incident
-- Review backup/replication strategy
-- Consider adding more redundancy
+### Resolution
+1. Verify service restored
+2. Monitor for 30 minutes
+3. Post resolution update
+4. Schedule post-incident review
 ```
+
+#### Incident Timeline Template
+
+```typescript
+// incident-timeline.ts
+interface IncidentEvent {
+  timestamp: Date;
+  type: 'detection' | 'acknowledgment' | 'investigation' | 'mitigation' | 'resolution' | 'update';
+  description: string;
+  actor: string;
+}
+
+interface Incident {
+  id: string;
+  title: string;
+  severity: 1 | 2 | 3 | 4;
+  status: 'open' | 'investigating' | 'identified' | 'monitoring' | 'resolved';
+  startTime: Date;
+  resolveTime?: Date;
+  impact: string;
+  rootCause?: string;
+  timeline: IncidentEvent[];
+  affectedServices: string[];
+  customerImpact: {
+    usersAffected: number;
+    dataLoss: boolean;
+    financialImpact?: number;
+  };
+}
+```
+
+### Communication Templates
+
+#### Customer-Facing Status Updates
+
+```typescript
+// status-update-templates.ts
+const STATUS_TEMPLATES = {
+  investigating: `
+**Service Disruption - Investigating**
+
+We are currently investigating reports of [issue description].
+
+**Impact**: [Describe what customers may experience]
+**Started**: [Time]
+
+We are working to identify the cause and will provide updates every 30 minutes.
+  `,
+
+  identified: `
+**Service Disruption - Cause Identified**
+
+We have identified the cause of [issue description] as [root cause].
+
+**Impact**: [Describe what customers may experience]
+**Started**: [Time]
+**Cause**: [Brief technical explanation]
+
+Our team is working on a fix. We expect to resolve this within [ETA].
+  `,
+
+  monitoring: `
+**Service Disruption - Fix Deployed**
+
+We have deployed a fix for [issue description] and are monitoring the results.
+
+**Impact**: Service should be returning to normal
+**Started**: [Time]
+**Duration**: [Duration so far]
+
+We will continue monitoring and provide a final update once confirmed stable.
+  `,
+
+  resolved: `
+**Service Disruption - Resolved**
+
+The [issue description] has been resolved.
+
+**Total Duration**: [Duration]
+**Root Cause**: [Brief explanation]
+**Resolution**: [What was done to fix it]
+
+We apologize for any inconvenience. A full incident report will be published within 48 hours.
+  `,
+};
+```
+
+### Post-Incident Review
+
+#### Post-Incident Review Template
+
+```markdown
+# Post-Incident Review: [Incident Title]
+
+**Date**: [Date of incident]
+**Duration**: [Total duration]
+**Severity**: SEV-[N]
+**Author**: [Name]
+**Review Date**: [Date of this review]
+
+## Summary
+[2-3 sentence summary of what happened]
+
+## Timeline
+| Time (UTC) | Event |
+|------------|-------|
+| HH:MM | Initial alert triggered |
+| HH:MM | On-call engineer acknowledged |
+| HH:MM | Root cause identified |
+| HH:MM | Mitigation deployed |
+| HH:MM | Service restored |
+| HH:MM | Incident resolved |
+
+## Impact
+- **Users affected**: [Number or percentage]
+- **Data loss**: [Yes/No - describe if yes]
+- **Financial impact**: [If applicable]
+- **SLA breach**: [Yes/No]
+
+## Root Cause
+[Detailed explanation of what caused the incident]
+
+## Contributing Factors
+1. [Factor 1]
+2. [Factor 2]
+
+## What Went Well
+1. [Positive 1]
+2. [Positive 2]
+
+## What Could Be Improved
+1. [Improvement area 1]
+2. [Improvement area 2]
+
+## Action Items
+| Action | Owner | Due Date | Status |
+|--------|-------|----------|--------|
+| [Action 1] | [Name] | [Date] | Open |
+| [Action 2] | [Name] | [Date] | Open |
+
+## Lessons Learned
+[Key takeaways that should inform future operations]
+```
+
+---
+
+## Capacity Planning
+
+### Resource Limits
+
+#### Cloudflare Workers Limits
+
+| Resource | Limit | Notes |
+|----------|-------|-------|
+| CPU time per request | 30 seconds (paid) | Configurable via `limits.cpu_ms` |
+| Memory per Worker | 128 MB | Includes V8 heap |
+| Request body size | 100 MB | For uploads |
+| Subrequest limit | 1000 per request | DO fetches count |
+| Environment variables | 64 | Combined text length < 32 KB |
+| Worker size | 10 MB (compressed) | After gzip |
+
+#### Durable Object Limits
+
+| Resource | Limit | Notes |
+|----------|-------|-------|
+| Storage per DO | 10 GB | Hard limit |
+| SQLite database | 10 GB | Part of DO storage |
+| Key size | 2 KB | For KV operations |
+| Value size | 128 KB | For KV operations |
+| Concurrent requests | 1000+ | Soft limit, scales |
+| WebSocket connections | 32,000 | Per DO instance |
+| Alarm frequency | Every 12 hours (min) | For hibernating DOs |
+
+#### R2 Limits
+
+| Resource | Limit | Notes |
+|----------|-------|-------|
+| Object size | 5 TB | Per object |
+| PUT request body | 5 GB | Single-part upload |
+| Multipart upload | 10,000 parts | 5 GB per part |
+| Bucket objects | Unlimited | No object count limit |
+| Custom metadata | 2 KB | Per object |
+| List results | 1000 | Per API call |
+
+### Growth Forecasting
+
+#### Capacity Projection Model
+
+```typescript
+// capacity-forecast.ts
+interface UsageMetrics {
+  timestamp: Date;
+  storageBytes: number;
+  dailyQueries: number;
+  dailyWrites: number;
+  uniqueUsers: number;
+  shardCount: number;
+}
+
+interface CapacityForecast {
+  projectedDate: Date;
+  metric: string;
+  currentValue: number;
+  projectedValue: number;
+  limit: number;
+  daysUntilLimit: number;
+  recommendation: string;
+}
+
+function forecastCapacity(
+  metrics: UsageMetrics[],
+  forecastDays: number
+): CapacityForecast[] {
+  const forecasts: CapacityForecast[] = [];
+
+  // Storage forecast
+  const storageGrowthRate = calculateGrowthRate(metrics.map(m => m.storageBytes));
+  const currentStorage = metrics[metrics.length - 1].storageBytes;
+  const projectedStorage = currentStorage * Math.pow(1 + storageGrowthRate, forecastDays);
+  const storageLimit = 10 * 1024 * 1024 * 1024;  // 10 GB per shard
+
+  forecasts.push({
+    projectedDate: addDays(new Date(), forecastDays),
+    metric: 'storage_per_shard',
+    currentValue: currentStorage,
+    projectedValue: projectedStorage,
+    limit: storageLimit,
+    daysUntilLimit: calculateDaysUntilLimit(currentStorage, storageGrowthRate, storageLimit),
+    recommendation: projectedStorage > storageLimit * 0.8
+      ? 'Add shards within 30 days'
+      : 'No action needed',
+  });
+
+  // Query volume forecast
+  const queryGrowthRate = calculateGrowthRate(metrics.map(m => m.dailyQueries));
+  const currentQueries = metrics[metrics.length - 1].dailyQueries;
+  const projectedQueries = currentQueries * Math.pow(1 + queryGrowthRate, forecastDays);
+  const queryCapacity = 10000000;  // 10M queries/day target
+
+  forecasts.push({
+    projectedDate: addDays(new Date(), forecastDays),
+    metric: 'daily_queries',
+    currentValue: currentQueries,
+    projectedValue: projectedQueries,
+    limit: queryCapacity,
+    daysUntilLimit: calculateDaysUntilLimit(currentQueries, queryGrowthRate, queryCapacity),
+    recommendation: projectedQueries > queryCapacity * 0.8
+      ? 'Scale shards or optimize queries'
+      : 'No action needed',
+  });
+
+  return forecasts;
+}
+
+function calculateGrowthRate(values: number[]): number {
+  if (values.length < 2) return 0;
+
+  // Simple linear regression for daily growth rate
+  const n = values.length;
+  const periods = values.map((_, i) => i);
+
+  const sumX = periods.reduce((a, b) => a + b, 0);
+  const sumY = values.reduce((a, b) => a + b, 0);
+  const sumXY = periods.reduce((sum, x, i) => sum + x * values[i], 0);
+  const sumXX = periods.reduce((sum, x) => sum + x * x, 0);
+
+  const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+
+  // Convert to daily growth rate
+  return slope / intercept;
+}
+```
+
+### Scaling Triggers
+
+#### Automated Scaling Rules
+
+```typescript
+// auto-scaling.ts
+interface ScalingRule {
+  metric: string;
+  threshold: number;
+  operator: '>' | '<' | '>=' | '<=';
+  duration: string;  // e.g., '15m', '1h'
+  action: 'scale_up' | 'scale_down' | 'alert';
+  cooldownMinutes: number;
+}
+
+const SCALING_RULES: ScalingRule[] = [
+  // Scale up rules
+  {
+    metric: 'storage_utilization',
+    threshold: 0.75,
+    operator: '>=',
+    duration: '15m',
+    action: 'scale_up',
+    cooldownMinutes: 60,
+  },
+  {
+    metric: 'query_latency_p99',
+    threshold: 500,
+    operator: '>',
+    duration: '30m',
+    action: 'scale_up',
+    cooldownMinutes: 60,
+  },
+  {
+    metric: 'cpu_utilization',
+    threshold: 0.80,
+    operator: '>=',
+    duration: '15m',
+    action: 'scale_up',
+    cooldownMinutes: 60,
+  },
+
+  // Alert rules (manual scaling decision)
+  {
+    metric: 'storage_utilization',
+    threshold: 0.60,
+    operator: '>=',
+    duration: '1d',
+    action: 'alert',
+    cooldownMinutes: 1440,  // 24 hours
+  },
+];
+
+class AutoScaler {
+  private lastScaleAction = new Map<string, number>();
+
+  async evaluate(metrics: Record<string, number>): Promise<void> {
+    for (const rule of SCALING_RULES) {
+      const value = metrics[rule.metric];
+      if (value === undefined) continue;
+
+      const triggered = this.checkRule(rule, value);
+      if (triggered && this.canTakeAction(rule)) {
+        await this.executeAction(rule, value);
+      }
+    }
+  }
+
+  private checkRule(rule: ScalingRule, value: number): boolean {
+    switch (rule.operator) {
+      case '>': return value > rule.threshold;
+      case '<': return value < rule.threshold;
+      case '>=': return value >= rule.threshold;
+      case '<=': return value <= rule.threshold;
+    }
+  }
+
+  private canTakeAction(rule: ScalingRule): boolean {
+    const lastAction = this.lastScaleAction.get(rule.metric);
+    if (!lastAction) return true;
+
+    const cooldownMs = rule.cooldownMinutes * 60 * 1000;
+    return Date.now() - lastAction > cooldownMs;
+  }
+
+  private async executeAction(rule: ScalingRule, value: number): Promise<void> {
+    this.lastScaleAction.set(rule.metric, Date.now());
+
+    if (rule.action === 'alert') {
+      await this.sendAlert(rule, value);
+    } else {
+      console.log(`Auto-scaling: ${rule.action} triggered by ${rule.metric}=${value}`);
+      // In practice, scaling requires manual approval or automated shard addition
+      await this.sendAlert(rule, value);
+    }
+  }
+}
+```
+
+### Capacity Review Schedule
+
+#### Monthly Capacity Review Checklist
+
+```markdown
+## Monthly Capacity Review
+
+### Storage Analysis
+- [ ] Current storage utilization per shard
+- [ ] Storage growth rate (MB/day)
+- [ ] Projected storage at current growth
+- [ ] Days until 80% capacity per shard
+- [ ] Compaction effectiveness
+
+### Query Performance
+- [ ] Query volume trends (QPS)
+- [ ] Latency percentiles (P50, P95, P99)
+- [ ] Slow query analysis
+- [ ] Index effectiveness
+
+### CDC and Lakehouse
+- [ ] CDC throughput (events/second)
+- [ ] Consumer lag trends
+- [ ] R2 storage growth
+- [ ] Parquet file sizes
+
+### Cost Analysis
+- [ ] Current monthly spend
+- [ ] Cost per query/write
+- [ ] Projected costs at growth rate
+- [ ] Optimization opportunities
+
+### Recommendations
+- [ ] Scaling actions needed (30/60/90 day)
+- [ ] Optimization opportunities identified
+- [ ] Budget adjustments required
+```
+
+---
+
+## Cost Optimization
+
+### Pricing Model
+
+#### Cloudflare Workers Pricing
+
+| Resource | Free Tier | Paid (Bundled) | Paid (Unbound) |
+|----------|-----------|----------------|----------------|
+| Requests | 100K/day | 10M/month included | $0.15/million |
+| CPU time | 10ms/request | 50ms/request | $0.02/million ms |
+| Duration | N/A | N/A | $12.50/million GB-s |
+
+#### Durable Objects Pricing
+
+| Resource | Price | Notes |
+|----------|-------|-------|
+| Requests | $0.15/million | Each DO fetch |
+| Duration | $12.50/million GB-s | Wall-clock time |
+| Storage | $0.20/GB-month | Includes SQLite |
+| Reads | $0.20/million | KV read operations |
+| Writes | $1.00/million | KV write operations |
+| Deletes | $1.00/million | KV delete operations |
+
+#### R2 Pricing
+
+| Operation | Price | Notes |
+|-----------|-------|-------|
+| Storage | $0.015/GB-month | Standard storage |
+| Class A (write) | $4.50/million | PUT, POST, COPY, LIST |
+| Class B (read) | $0.36/million | GET, HEAD |
+| Egress | Free | No egress fees |
+
+### Cost Reduction Strategies
+
+#### 1. Query Optimization
+
+```typescript
+// Reduce requests through batching
+// Before: 1000 individual queries = 1000 requests
+const results = [];
+for (const id of ids) {
+  results.push(await db.query('SELECT * FROM users WHERE id = ?', [id]));
+}
+
+// After: 1 batched query = 1 request
+const results = await db.query(
+  `SELECT * FROM users WHERE id IN (${ids.map(() => '?').join(',')})`,
+  ids
+);
+
+// Cost savings: ~1000x fewer DO requests
+```
+
+#### 2. Hibernation for Idle DOs
+
+```typescript
+// Enable WebSocket hibernation for CDC connections
+// Cost impact: 95% reduction in DO duration charges during idle
+
+// Without hibernation:
+// - Active DO consuming duration even when idle
+// - $12.50/million GB-s * 24/7 = significant cost
+
+// With hibernation:
+// - DO sleeps between messages
+// - Only charged for actual message processing
+```
+
+#### 3. Efficient CDC Batching
+
+```typescript
+// Batch CDC events to reduce write operations
+// Before: 10,000 events/hour = 10,000 writes
+for (const event of events) {
+  await lakeBucket.put(`events/${event.id}`, JSON.stringify(event));
+}
+
+// After: 100 batched writes/hour = 100 writes
+const batches = chunkArray(events, 100);
+for (const batch of batches) {
+  await flushToParquet(batch);  // Single R2 write per batch
+}
+
+// Cost savings: 100x fewer Class A operations
+```
+
+#### 4. Compaction for Storage
+
+```typescript
+// Regular compaction reduces storage costs
+// Before compaction:
+// - 1000 small Parquet files (10MB each) = 10 GB
+// - Higher metadata overhead
+// - More LIST operations needed
+
+// After compaction:
+// - 100 optimal Parquet files (100MB each) = 10 GB
+// - Lower metadata overhead
+// - Fewer LIST operations
+
+const COMPACTION_CONFIG = {
+  minFilesThreshold: 10,
+  targetFileSizeBytes: 128 * 1024 * 1024,  // 128MB
+  schedule: 'daily',
+};
+```
+
+### Budget Monitoring
+
+#### Cost Tracking Dashboard
+
+```typescript
+// cost-monitor.ts
+interface CostBreakdown {
+  period: string;
+  total: number;
+  breakdown: {
+    workerRequests: number;
+    workerCpu: number;
+    doRequests: number;
+    doDuration: number;
+    doStorage: number;
+    doReads: number;
+    doWrites: number;
+    r2Storage: number;
+    r2ClassA: number;
+    r2ClassB: number;
+  };
+}
+
+async function getCostEstimate(
+  metrics: UsageMetrics,
+  pricingTier: 'free' | 'bundled' | 'unbound'
+): Promise<CostBreakdown> {
+  const prices = getPricing(pricingTier);
+
+  return {
+    period: 'monthly',
+    total: 0,  // Calculate below
+    breakdown: {
+      workerRequests: metrics.requests * prices.workerRequest,
+      workerCpu: metrics.cpuMs * prices.cpuMs,
+      doRequests: metrics.doRequests * prices.doRequest,
+      doDuration: metrics.doDurationGbS * prices.doDuration,
+      doStorage: metrics.doStorageGb * prices.doStorage,
+      doReads: metrics.doReads * prices.doRead,
+      doWrites: metrics.doWrites * prices.doWrite,
+      r2Storage: metrics.r2StorageGb * prices.r2Storage,
+      r2ClassA: metrics.r2ClassA * prices.r2ClassA,
+      r2ClassB: metrics.r2ClassB * prices.r2ClassB,
+    },
+  };
+}
+
+// Budget alert thresholds
+const BUDGET_ALERTS = {
+  daily: {
+    warning: 100,    // $100/day
+    critical: 200,   // $200/day
+  },
+  monthly: {
+    warning: 2500,   // $2,500/month
+    critical: 5000,  // $5,000/month
+  },
+};
+```
+
+### TCO Analysis
+
+#### Total Cost of Ownership Model
+
+```typescript
+// tco-model.ts
+interface TCOModel {
+  // Direct costs
+  infrastructure: {
+    workers: number;
+    durableObjects: number;
+    r2Storage: number;
+    analytics: number;
+  };
+
+  // Indirect costs
+  operations: {
+    engineeringHours: number;
+    oncallHours: number;
+    trainingHours: number;
+  };
+
+  // Comparison alternatives
+  alternatives: {
+    selfHosted: number;
+    d1: number;
+    planetscale: number;
+    turso: number;
+  };
+}
+
+function calculateTCO(
+  usage: UsageMetrics,
+  teamSize: number,
+  hourlyRate: number
+): TCOModel {
+  // Infrastructure costs (monthly)
+  const infrastructure = {
+    workers: calculateWorkerCost(usage),
+    durableObjects: calculateDOCost(usage),
+    r2Storage: calculateR2Cost(usage),
+    analytics: 0,  // Included in Workers
+  };
+
+  // Operations costs (monthly)
+  const operations = {
+    engineeringHours: teamSize * 10 * hourlyRate,  // 10 hrs/month maintenance
+    oncallHours: 4 * 8 * hourlyRate,               // 4 weekends, 8 hrs each
+    trainingHours: teamSize * 2 * hourlyRate,      // 2 hrs/month training
+  };
+
+  // Alternative costs for comparison
+  const alternatives = {
+    selfHosted: calculateSelfHostedCost(usage),
+    d1: calculateD1Cost(usage),
+    planetscale: calculatePlanetScaleCost(usage),
+    turso: calculateTursoCost(usage),
+  };
+
+  return { infrastructure, operations, alternatives };
+}
+```
+
+#### Cost Comparison Table
+
+| Solution | 1M Queries/month | 10M Queries/month | 100M Queries/month |
+|----------|------------------|-------------------|---------------------|
+| DoSQL | $50-100 | $200-400 | $1,500-3,000 |
+| D1 | $0 (free tier) | $5 | $50 |
+| PlanetScale | $29 (starter) | $29-99 | $99-499 |
+| Turso | $0-29 | $29-99 | Contact |
+| Self-hosted | $50-200 | $200-500 | $500-2,000 |
+
+**Note**: DoSQL includes edge compute, real-time CDC, and lakehouse features not available in other solutions. Direct cost comparison should consider feature parity.
 
 ---
 
@@ -1535,29 +2840,6 @@ curl https://lake.example.com/status
 
 ---
 
-#### Issue: Shard Imbalance
-
-**Symptoms:**
-- Some shards hot while others idle
-- Uneven storage distribution
-- Increased scatter query ratio
-
-**Diagnosis:**
-```typescript
-// Get shard statistics
-const stats = await getShardStats();
-console.log('Distribution:', stats.rowDistribution);
-console.log('Query distribution:', stats.queryDistribution);
-```
-
-**Solutions:**
-1. Review shard key selection
-2. Use consistent hash vindex for better distribution
-3. Trigger manual rebalancing
-4. Split hot shards
-
----
-
 ### Debug Logging
 
 Enable detailed logging for troubleshooting.
@@ -1575,33 +2857,6 @@ DEBUG_CDC = "true"
 TRACE_REQUESTS = "true"
 ```
 
-#### Debug Query Execution
-
-```typescript
-export class DoSQL {
-  async query(sql: string, params: unknown[]): Promise<QueryResult> {
-    const debug = this.env.DEBUG_QUERIES === 'true';
-
-    if (debug) {
-      console.log('[DEBUG] Query:', sql);
-      console.log('[DEBUG] Params:', JSON.stringify(params));
-      console.log('[DEBUG] Transaction:', this.currentTxn?.id);
-    }
-
-    const start = performance.now();
-    const result = await this.executeQuery(sql, params);
-    const duration = performance.now() - start;
-
-    if (debug) {
-      console.log('[DEBUG] Duration:', duration.toFixed(2), 'ms');
-      console.log('[DEBUG] Rows:', result.rows.length);
-    }
-
-    return result;
-  }
-}
-```
-
 ### Performance Diagnostics
 
 #### Query Analysis
@@ -1615,44 +2870,6 @@ ANALYZE users;
 
 -- Check index usage
 SELECT * FROM sqlite_stat1 WHERE tbl = 'users';
-```
-
-#### Performance Profiling Endpoint
-
-```typescript
-// GET /admin/profile
-async getPerformanceProfile(): Promise<PerformanceProfile> {
-  return {
-    // Query statistics
-    queries: {
-      total: this.stats.queryCount,
-      avgDurationMs: this.stats.totalQueryTime / this.stats.queryCount,
-      slowQueries: this.stats.slowQueries,
-    },
-
-    // Storage statistics
-    storage: {
-      totalBytes: await this.getStorageSize(),
-      walBytes: await this.getWalSize(),
-      indexBytes: await this.getIndexSize(),
-    },
-
-    // Transaction statistics
-    transactions: {
-      active: this.transactionManager.activeCount,
-      committed: this.stats.committedTxns,
-      rolledBack: this.stats.rolledBackTxns,
-      avgDurationMs: this.stats.avgTxnDuration,
-    },
-
-    // CDC statistics
-    cdc: {
-      pendingEvents: this.cdcBuffer.length,
-      lastFlushedLsn: this.lastFlushedLsn,
-      connected: this.dolakeWs !== null,
-    },
-  };
-}
 ```
 
 ---
@@ -1717,37 +2934,7 @@ export class CheckpointManager {
       freedBytes: archivedSegments.reduce((sum, s) => sum + s.sizeBytes, 0),
     };
   }
-
-  private async archiveOldSegments(wal: WalWriter): Promise<WalSegment[]> {
-    const segments = await wal.getSegments();
-    const toArchive = segments.filter(
-      s => s.lsnEnd < wal.checkpointLsn
-    );
-
-    for (const segment of toArchive) {
-      // Upload to R2
-      await this.bucket.put(
-        `_archive/${this.shardId}/wal-segment-${segment.id}.bin`,
-        segment.data
-      );
-
-      // Delete from DO storage
-      await wal.deleteSegment(segment.id);
-    }
-
-    return toArchive;
-  }
 }
-```
-
-#### Manual Checkpoint Command
-
-```bash
-# Trigger checkpoint via API
-curl -X POST https://db.example.com/admin/shards/shard-0/checkpoint
-
-# Force aggressive checkpoint
-curl -X POST https://db.example.com/admin/shards/shard-0/checkpoint?mode=full
 ```
 
 ### DoLake Compaction
@@ -1784,163 +2971,9 @@ export const defaultCompactionConfig: CompactionConfig = {
 };
 ```
 
-#### Compaction Process
-
-```typescript
-// src/compaction.ts
-export class CompactionManager {
-  async runCompaction(table: string, partition?: string): Promise<CompactionResult> {
-    // Find partitions needing compaction
-    const partitions = partition
-      ? [partition]
-      : await this.findPartitionsNeedingCompaction(table);
-
-    const results: PartitionCompactionResult[] = [];
-
-    for (const part of partitions) {
-      // Get files in partition
-      const files = await this.getPartitionFiles(table, part);
-
-      if (files.length < this.config.minFilesThreshold) {
-        continue;
-      }
-
-      // Read all data
-      const allData: Record<string, unknown>[] = [];
-      for (const file of files) {
-        const data = await this.readParquetFile(file.path);
-        allData.push(...data);
-      }
-
-      // Write compacted file
-      const compactedPath = await this.writeCompactedFile(table, part, allData);
-
-      // Update Iceberg manifest
-      await this.updateManifest(table, {
-        added: [compactedPath],
-        removed: files.map(f => f.path),
-      });
-
-      // Delete old files
-      for (const file of files) {
-        await this.bucket.delete(file.path);
-      }
-
-      results.push({
-        partition: part,
-        filesCompacted: files.length,
-        originalSizeBytes: files.reduce((sum, f) => sum + f.sizeBytes, 0),
-        compactedSizeBytes: (await this.bucket.head(compactedPath))!.size,
-      });
-    }
-
-    return {
-      table,
-      partitionsProcessed: results.length,
-      results,
-    };
-  }
-}
-```
-
-#### Schedule Compaction
-
-```typescript
-// Schedule daily compaction via Cron Trigger
-export default {
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    if (event.cron === '0 3 * * *') {  // 3 AM UTC daily
-      const dolake = env.DOLAKE.get(env.DOLAKE.idFromName('default'));
-
-      // Trigger compaction for all tables
-      await dolake.fetch('https://internal/compact', {
-        method: 'POST',
-        body: JSON.stringify({
-          tables: ['users', 'orders', 'events'],
-          mode: 'auto',
-        }),
-      });
-    }
-  },
-};
-```
-
 ### Storage Cleanup
 
 Regular cleanup of orphaned and temporary files.
-
-#### Cleanup Tasks
-
-```typescript
-// src/cleanup.ts
-export class StorageCleanup {
-  async runCleanup(): Promise<CleanupResult> {
-    const results: CleanupResult = {
-      deletedFiles: 0,
-      freedBytes: 0,
-      errors: [],
-    };
-
-    // 1. Clean orphaned data files (not in any manifest)
-    const orphanedFiles = await this.findOrphanedDataFiles();
-    for (const file of orphanedFiles) {
-      try {
-        await this.bucket.delete(file.key);
-        results.deletedFiles++;
-        results.freedBytes += file.size;
-      } catch (error) {
-        results.errors.push({ file: file.key, error: error.message });
-      }
-    }
-
-    // 2. Clean old metadata versions (keep last N)
-    const oldMetadata = await this.findOldMetadataVersions(10);
-    for (const meta of oldMetadata) {
-      await this.bucket.delete(meta.key);
-      results.deletedFiles++;
-      results.freedBytes += meta.size;
-    }
-
-    // 3. Clean incomplete multipart uploads
-    const incompleteUploads = await this.listIncompleteUploads();
-    for (const upload of incompleteUploads) {
-      if (Date.now() - upload.initiated.getTime() > 7 * 24 * 60 * 60 * 1000) {
-        await this.abortMultipartUpload(upload);
-        results.deletedFiles++;
-      }
-    }
-
-    // 4. Clean expired CDC fallback storage
-    const expiredFallback = await this.findExpiredFallbackEvents(7);
-    for (const event of expiredFallback) {
-      await this.storage.delete(event.key);
-      results.deletedFiles++;
-    }
-
-    return results;
-  }
-
-  private async findOrphanedDataFiles(): Promise<R2Object[]> {
-    // Get all data files
-    const dataFiles = await this.bucket.list({ prefix: 'warehouse/' });
-
-    // Get all files referenced in manifests
-    const referencedFiles = new Set<string>();
-    const manifests = await this.bucket.list({ prefix: 'warehouse/', suffix: '-manifest.avro' });
-
-    for (const manifest of manifests.objects) {
-      const content = await this.bucket.get(manifest.key);
-      const files = await this.parseManifestFiles(content);
-      files.forEach(f => referencedFiles.add(f));
-    }
-
-    // Return unreferenced data files
-    return dataFiles.objects.filter(
-      obj => obj.key.endsWith('.parquet') && !referencedFiles.has(obj.key)
-    );
-  }
-}
-```
 
 #### Cleanup Schedule
 
@@ -1951,33 +2984,6 @@ crons = [
   "0 4 * * *",   # Daily cleanup at 4 AM UTC
   "0 3 * * 0"    # Weekly deep cleanup on Sunday 3 AM UTC
 ]
-```
-
-```typescript
-// Handle cron triggers
-export default {
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    const dolake = env.DOLAKE.get(env.DOLAKE.idFromName('default'));
-
-    switch (event.cron) {
-      case '0 4 * * *':
-        // Daily cleanup
-        await dolake.fetch('https://internal/cleanup', {
-          method: 'POST',
-          body: JSON.stringify({ mode: 'standard' }),
-        });
-        break;
-
-      case '0 3 * * 0':
-        // Weekly deep cleanup
-        await dolake.fetch('https://internal/cleanup', {
-          method: 'POST',
-          body: JSON.stringify({ mode: 'deep', includeOrphanScan: true }),
-        });
-        break;
-    }
-  },
-};
 ```
 
 ---

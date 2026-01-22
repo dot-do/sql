@@ -31,11 +31,13 @@ import type { Schema, TableSchema, ColumnDef } from '../engine/types.js';
  */
 export function parseQualifiedTableName(name: string): QualifiedTableRef {
   const parts = name.split('.');
+  const part0 = parts[0];
+  const part1 = parts[1];
 
-  if (parts.length === 1) {
-    return { table: parts[0] };
-  } else if (parts.length === 2) {
-    return { database: parts[0], table: parts[1] };
+  if (parts.length === 1 && part0 !== undefined) {
+    return { table: part0 };
+  } else if (parts.length === 2 && part0 !== undefined && part1 !== undefined) {
+    return { database: part0, table: part1 };
   } else {
     // Too many parts - treat as invalid
     throw new Error(`Invalid qualified table name: ${name}`);
@@ -48,13 +50,16 @@ export function parseQualifiedTableName(name: string): QualifiedTableRef {
  */
 export function parseQualifiedColumnName(name: string): QualifiedColumnRef {
   const parts = name.split('.');
+  const part0 = parts[0];
+  const part1 = parts[1];
+  const part2 = parts[2];
 
-  if (parts.length === 1) {
-    return { column: parts[0] };
-  } else if (parts.length === 2) {
-    return { table: parts[0], column: parts[1] };
-  } else if (parts.length === 3) {
-    return { database: parts[0], table: parts[1], column: parts[2] };
+  if (parts.length === 1 && part0 !== undefined) {
+    return { column: part0 };
+  } else if (parts.length === 2 && part0 !== undefined && part1 !== undefined) {
+    return { table: part0, column: part1 };
+  } else if (parts.length === 3 && part0 !== undefined && part1 !== undefined && part2 !== undefined) {
+    return { database: part0, table: part1, column: part2 };
   } else {
     throw new Error(`Invalid qualified column name: ${name}`);
   }
@@ -172,7 +177,8 @@ export class AttachSchemaResolver implements SchemaResolver {
     }
 
     // Ambiguous if multiple matches (excluding temp priority)
-    if (candidates.length > 1 && candidates[0].database !== 'temp') {
+    const firstCandidate = candidates[0];
+    if (candidates.length > 1 && firstCandidate !== undefined && firstCandidate.database !== 'temp') {
       // Check if all are the same table name in different DBs
       const databases = candidates.map(c => c.database);
       return {
@@ -183,7 +189,14 @@ export class AttachSchemaResolver implements SchemaResolver {
     }
 
     // Return first (highest priority) match
-    const match = candidates[0];
+    const match = firstCandidate;
+    if (match === undefined) {
+      return {
+        code: 'TABLE_NOT_FOUND',
+        message: `No such table: ${ref.table}`,
+        details: { tables: [ref.table] },
+      };
+    }
     return {
       database: match.database,
       tableDef: match.tableDef,
@@ -214,21 +227,31 @@ export class AttachSchemaResolver implements SchemaResolver {
    * Resolve fully qualified column reference
    */
   private _resolveFullyQualifiedColumn(ref: QualifiedColumnRef): ResolvedColumnRef | AttachError {
-    const db = this._manager.get(ref.database!);
-    if (!db) {
+    const refDatabase = ref.database;
+    const refTable = ref.table;
+    if (refDatabase === undefined || refTable === undefined) {
       return {
-        code: 'DATABASE_NOT_FOUND',
-        message: `No such database: ${ref.database}`,
-        details: { alias: ref.database },
+        code: 'COLUMN_NOT_FOUND',
+        message: `Invalid column reference: ${ref.column}`,
+        details: { columns: [ref.column] },
       };
     }
 
-    const tableDef = db.schema.tables.get(ref.table!);
+    const db = this._manager.get(refDatabase);
+    if (!db) {
+      return {
+        code: 'DATABASE_NOT_FOUND',
+        message: `No such database: ${refDatabase}`,
+        details: { alias: refDatabase },
+      };
+    }
+
+    const tableDef = db.schema.tables.get(refTable);
     if (!tableDef) {
       return {
         code: 'TABLE_NOT_FOUND',
-        message: `No such table: ${ref.database}.${ref.table}`,
-        details: { tables: [ref.table!] },
+        message: `No such table: ${refDatabase}.${refTable}`,
+        details: { tables: [refTable] },
       };
     }
 
@@ -236,22 +259,25 @@ export class AttachSchemaResolver implements SchemaResolver {
     if (!columnDef) {
       return {
         code: 'COLUMN_NOT_FOUND',
-        message: `No such column: ${ref.database}.${ref.table}.${ref.column}`,
+        message: `No such column: ${refDatabase}.${refTable}.${ref.column}`,
         details: { columns: [ref.column] },
       };
     }
 
-    return {
-      database: ref.database!,
-      table: ref.table!,
+    const colResult: ResolvedColumnRef = {
+      database: refDatabase,
+      table: refTable,
       columnDef: {
         name: columnDef.name,
         type: columnDef.type,
         nullable: columnDef.nullable,
-        primaryKey: columnDef.primaryKey,
       },
-      qualifiedName: `${ref.database}.${ref.table}.${ref.column}`,
+      qualifiedName: `${refDatabase}.${refTable}.${ref.column}`,
     };
+    if (columnDef.primaryKey !== undefined) {
+      colResult.columnDef.primaryKey = columnDef.primaryKey;
+    }
+    return colResult;
   }
 
   /**
@@ -261,8 +287,17 @@ export class AttachSchemaResolver implements SchemaResolver {
     ref: QualifiedColumnRef,
     scope: QueryScope
   ): ResolvedColumnRef | AttachError {
+    const refTable = ref.table;
+    if (refTable === undefined) {
+      return {
+        code: 'COLUMN_NOT_FOUND',
+        message: `Invalid column reference: ${ref.column}`,
+        details: { columns: [ref.column] },
+      };
+    }
+
     // Look for table in scope (may be an alias)
-    const tableRef = scope.tables.get(ref.table!);
+    const tableRef = scope.tables.get(refTable);
 
     if (tableRef) {
       // Found in scope - resolve the actual table
@@ -275,26 +310,29 @@ export class AttachSchemaResolver implements SchemaResolver {
       if (!columnDef) {
         return {
           code: 'COLUMN_NOT_FOUND',
-          message: `No such column: ${ref.table}.${ref.column}`,
+          message: `No such column: ${refTable}.${ref.column}`,
           details: { columns: [ref.column] },
         };
       }
 
-      return {
+      const colResult: ResolvedColumnRef = {
         database: resolved.database,
         table: resolved.tableDef.name,
         columnDef: {
           name: columnDef.name,
           type: columnDef.type,
           nullable: columnDef.nullable,
-          primaryKey: columnDef.primaryKey,
         },
         qualifiedName: `${resolved.database}.${resolved.tableDef.name}.${ref.column}`,
       };
+      if (columnDef.primaryKey !== undefined) {
+        colResult.columnDef.primaryKey = columnDef.primaryKey;
+      }
+      return colResult;
     }
 
     // Not in scope - try as a database-less qualified name
-    const tableResolved = this.resolveTable({ table: ref.table! });
+    const tableResolved = this.resolveTable({ table: refTable });
     if ('code' in tableResolved) {
       return tableResolved as AttachError;
     }
@@ -303,22 +341,25 @@ export class AttachSchemaResolver implements SchemaResolver {
     if (!columnDef) {
       return {
         code: 'COLUMN_NOT_FOUND',
-        message: `No such column: ${ref.table}.${ref.column}`,
+        message: `No such column: ${refTable}.${ref.column}`,
         details: { columns: [ref.column] },
       };
     }
 
-    return {
+    const colResult: ResolvedColumnRef = {
       database: tableResolved.database,
       table: tableResolved.tableDef.name,
       columnDef: {
         name: columnDef.name,
         type: columnDef.type,
         nullable: columnDef.nullable,
-        primaryKey: columnDef.primaryKey,
       },
       qualifiedName: `${tableResolved.database}.${tableResolved.tableDef.name}.${ref.column}`,
     };
+    if (columnDef.primaryKey !== undefined) {
+      colResult.columnDef.primaryKey = columnDef.primaryKey;
+    }
+    return colResult;
   }
 
   /**
@@ -337,23 +378,26 @@ export class AttachSchemaResolver implements SchemaResolver {
     // Search all tables in scope
     const candidates: ResolvedColumnRef[] = [];
 
-    for (const [tableName, tableRef] of scope.tables) {
+    for (const [_tableName, tableRef] of scope.tables) {
       const resolved = this.resolveTable(tableRef);
       if ('code' in resolved) continue;
 
       const columnDef = resolved.tableDef.columns.find(c => c.name === ref.column);
       if (columnDef) {
-        candidates.push({
+        const colResult: ResolvedColumnRef = {
           database: resolved.database,
           table: resolved.tableDef.name,
           columnDef: {
             name: columnDef.name,
             type: columnDef.type,
             nullable: columnDef.nullable,
-            primaryKey: columnDef.primaryKey,
           },
           qualifiedName: `${resolved.database}.${resolved.tableDef.name}.${ref.column}`,
-        });
+        };
+        if (columnDef.primaryKey !== undefined) {
+          colResult.columnDef.primaryKey = columnDef.primaryKey;
+        }
+        candidates.push(colResult);
       }
     }
 

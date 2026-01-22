@@ -41,6 +41,21 @@ export {
 } from '@dotdo/lake.do';
 
 // =============================================================================
+// Timestamp Utilities
+// =============================================================================
+
+/**
+ * Convert a Date | number timestamp to a numeric Unix timestamp (milliseconds).
+ * Provides type narrowing for CDC event timestamps.
+ */
+export function getNumericTimestamp(timestamp: Date | number): number {
+  if (timestamp instanceof Date) {
+    return timestamp.getTime();
+  }
+  return timestamp;
+}
+
+// =============================================================================
 // CDC Operation Codes (for efficient binary encoding)
 // =============================================================================
 

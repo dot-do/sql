@@ -111,9 +111,6 @@ export {
   type CDCManager,
   type CDCSubscribeOptions,
   type CDCSubscription,
-
-  // Mock for testing
-  MockQueryExecutor,
 } from './server.js';
 
 // =============================================================================

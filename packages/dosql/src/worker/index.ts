@@ -22,6 +22,9 @@ export { PerformanceBenchmarkDO } from '../benchmarks/__tests__/performance.test
 // Export PerformanceRegressionDO for TDD RED phase performance regression tests
 export { PerformanceRegressionDO } from '../__tests__/performance.test.js';
 
+// Export ProductionBenchmarkDO for production benchmarks TDD RED phase tests
+export { ProductionBenchmarkDO } from '../__tests__/production-benchmarks.test.js';
+
 // =============================================================================
 // Worker Fetch Handler
 // =============================================================================

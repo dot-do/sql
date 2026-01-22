@@ -1,6 +1,31 @@
 # DoSQL CapnWeb RPC Example
 
+> **Pre-release Software**: This is v0.1.0. APIs may change. Not recommended for production use without thorough testing.
+
 This example demonstrates DoSQL with a CapnWeb RPC server running inside a Durable Object.
+
+## Stability
+
+### Stable APIs
+
+- Basic SQL execution via RPC (`exec`, `prepare`, `run`)
+- Transaction support
+- Health checks (`ping`, `status`)
+
+### Experimental APIs
+
+- CapnWeb RPC protocol (API may change)
+- WebSocket pipelining with `.map()` chaining
+- Prepared statement management
+
+## Version Compatibility
+
+| Dependency | Version |
+|------------|---------|
+| Node.js | 18+ |
+| TypeScript | 5.3+ |
+| Cloudflare Workers | 2024-01-01+ |
+| capnweb | 0.4.x |
 
 ## Features
 

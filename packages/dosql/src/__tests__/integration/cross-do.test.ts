@@ -112,7 +112,6 @@ import {
 import {
   // Server
   DoSQLTarget,
-  MockQueryExecutor,
   handleDoSQLRequest,
   type QueryExecutor,
   type ExecuteResult,
@@ -122,6 +121,7 @@ import {
   createWebSocketClient,
   type DoSQLClient,
 } from '../../rpc/index.js';
+import { MockQueryExecutor } from '../utils/index.js';
 
 // =============================================================================
 // IMPORTS - Infrastructure

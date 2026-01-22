@@ -4,12 +4,232 @@ This guide covers installation, basic usage, CRUD operations, migrations, and de
 
 ## Table of Contents
 
+- [Quickstart](#quickstart)
+- [Hello World](#hello-world)
 - [Installation](#installation)
 - [Basic Usage with DB()](#basic-usage-with-db)
 - [Creating Tables](#creating-tables)
 - [CRUD Operations](#crud-operations)
+- [Working with Transactions](#working-with-transactions)
+- [CDC Streaming](#cdc-streaming)
 - [Migrations](#migrations)
 - [Deploying to Cloudflare Workers](#deploying-to-cloudflare-workers)
+- [Troubleshooting](#troubleshooting)
+- [Next Steps](#next-steps)
+
+---
+
+## Quickstart
+
+Get up and running with DoSQL in under 5 minutes.
+
+### Step 1: Create a New Project
+
+```bash
+# Create project directory
+mkdir my-dosql-app && cd my-dosql-app
+
+# Initialize npm project
+npm init -y
+
+# Install dependencies
+npm install @dotdo/dosql
+npm install wrangler @cloudflare/workers-types --save-dev
+```
+
+### Step 2: Configure TypeScript
+
+Create `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "types": ["@cloudflare/workers-types"],
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"]
+}
+```
+
+### Step 3: Create Your First Migration
+
+```bash
+# Create migrations directory
+mkdir -p .do/migrations
+```
+
+Create `.do/migrations/001_init.sql`:
+
+```sql
+CREATE TABLE tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  completed BOOLEAN DEFAULT false,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Step 4: Create the Durable Object
+
+Create `src/index.ts`:
+
+```typescript
+import { DB } from '@dotdo/dosql';
+
+export interface Env {
+  TASKS_DB: DurableObjectNamespace;
+}
+
+export class TasksDatabase implements DurableObject {
+  private db: Awaited<ReturnType<typeof DB>> | null = null;
+  private state: DurableObjectState;
+
+  constructor(state: DurableObjectState) {
+    this.state = state;
+  }
+
+  private async getDB() {
+    if (!this.db) {
+      this.db = await DB('tasks', {
+        migrations: { folder: '.do/migrations' },
+        storage: { hot: this.state.storage },
+      });
+    }
+    return this.db;
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const db = await this.getDB();
+    const url = new URL(request.url);
+
+    // GET /tasks - List all tasks
+    if (url.pathname === '/tasks' && request.method === 'GET') {
+      const tasks = await db.query('SELECT * FROM tasks ORDER BY created_at DESC');
+      return Response.json(tasks);
+    }
+
+    // POST /tasks - Create a task
+    if (url.pathname === '/tasks' && request.method === 'POST') {
+      const { title } = await request.json() as { title: string };
+      const result = await db.run(
+        'INSERT INTO tasks (title) VALUES (?)',
+        [title]
+      );
+      return Response.json({ id: result.lastInsertRowId, title }, { status: 201 });
+    }
+
+    return new Response('Not Found', { status: 404 });
+  }
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const id = env.TASKS_DB.idFromName('default');
+    const stub = env.TASKS_DB.get(id);
+    return stub.fetch(request);
+  },
+};
+```
+
+### Step 5: Configure Wrangler
+
+Create `wrangler.jsonc`:
+
+```jsonc
+{
+  "name": "my-dosql-app",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-01-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "TASKS_DB", "class_name": "TasksDatabase" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_classes": ["TasksDatabase"] }
+  ]
+}
+```
+
+### Step 6: Run Locally
+
+```bash
+npx wrangler dev
+```
+
+### Step 7: Test Your API
+
+```bash
+# Create a task
+curl -X POST http://localhost:8787/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Learn DoSQL"}'
+
+# List tasks
+curl http://localhost:8787/tasks
+```
+
+You should see:
+
+```json
+[{"id": 1, "title": "Learn DoSQL", "completed": 0, "created_at": "2024-01-15T10:30:00.000Z"}]
+```
+
+---
+
+## Hello World
+
+The simplest possible DoSQL application:
+
+```typescript
+import { DB } from '@dotdo/dosql';
+
+// Create an in-memory database
+const db = await DB('hello-world');
+
+// Execute a simple query
+const result = await db.query('SELECT "Hello, DoSQL!" as message');
+console.log(result[0].message); // "Hello, DoSQL!"
+
+// Create a table and insert data
+await db.run('CREATE TABLE greetings (id INTEGER PRIMARY KEY, message TEXT)');
+await db.run('INSERT INTO greetings (message) VALUES (?)', ['Hello from DoSQL!']);
+
+// Query the data
+const greetings = await db.query('SELECT * FROM greetings');
+console.log(greetings);
+// [{ id: 1, message: "Hello from DoSQL!" }]
+```
+
+### Hello World with Migrations
+
+```typescript
+import { DB } from '@dotdo/dosql';
+
+const db = await DB('hello-world', {
+  migrations: [
+    {
+      id: '001_init',
+      sql: `
+        CREATE TABLE messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          content TEXT NOT NULL,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO messages (content) VALUES ('Welcome to DoSQL!');
+      `,
+    },
+  ],
+});
+
+const messages = await db.query('SELECT * FROM messages');
+console.log(messages);
+// [{ id: 1, content: "Welcome to DoSQL!", created_at: "2024-01-15T10:30:00.000Z" }]
+```
 
 ---
 
@@ -179,6 +399,201 @@ CREATE TABLE products (
 
 ## CRUD Operations
 
+### Complete CRUD Example
+
+Here is a full example demonstrating all CRUD operations with a `products` table:
+
+```typescript
+import { DB } from '@dotdo/dosql';
+
+// Initialize database with schema
+const db = await DB('shop', {
+  migrations: [
+    {
+      id: '001_products',
+      sql: `
+        CREATE TABLE products (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          description TEXT,
+          price REAL NOT NULL CHECK (price >= 0),
+          stock INTEGER DEFAULT 0,
+          category TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX idx_products_category ON products(category);
+        CREATE INDEX idx_products_price ON products(price);
+      `,
+    },
+  ],
+});
+
+// ============================================
+// CREATE - Insert new products
+// ============================================
+
+// Single insert
+const result = await db.run(
+  'INSERT INTO products (name, description, price, stock, category) VALUES (?, ?, ?, ?, ?)',
+  ['Laptop', 'High-performance laptop', 999.99, 50, 'Electronics']
+);
+console.log('Created product ID:', result.lastInsertRowId); // 1
+
+// Insert with named parameters
+await db.run(
+  'INSERT INTO products (name, price, stock, category) VALUES (:name, :price, :stock, :category)',
+  { name: 'Mouse', price: 29.99, stock: 200, category: 'Electronics' }
+);
+
+// Insert multiple products in a transaction
+await db.transaction(async (tx) => {
+  const products = [
+    { name: 'Keyboard', price: 79.99, stock: 100, category: 'Electronics' },
+    { name: 'Monitor', price: 399.99, stock: 30, category: 'Electronics' },
+    { name: 'Desk Chair', price: 249.99, stock: 25, category: 'Furniture' },
+  ];
+
+  for (const product of products) {
+    await tx.run(
+      'INSERT INTO products (name, price, stock, category) VALUES (?, ?, ?, ?)',
+      [product.name, product.price, product.stock, product.category]
+    );
+  }
+});
+
+// ============================================
+// READ - Query products
+// ============================================
+
+// Get all products
+const allProducts = await db.query('SELECT * FROM products');
+console.log('All products:', allProducts);
+
+// Get single product by ID
+const laptop = await db.queryOne('SELECT * FROM products WHERE id = ?', [1]);
+console.log('Laptop:', laptop);
+
+// Get products by category
+const electronics = await db.query(
+  'SELECT * FROM products WHERE category = ? ORDER BY price DESC',
+  ['Electronics']
+);
+console.log('Electronics:', electronics);
+
+// Get products within price range
+const affordable = await db.query(
+  'SELECT name, price FROM products WHERE price BETWEEN ? AND ? ORDER BY price',
+  [20, 100]
+);
+console.log('Affordable products:', affordable);
+
+// Search products by name (case-insensitive)
+const searchTerm = '%lap%';
+const searchResults = await db.query(
+  'SELECT * FROM products WHERE LOWER(name) LIKE LOWER(?)',
+  [searchTerm]
+);
+console.log('Search results:', searchResults);
+
+// Aggregate queries
+const stats = await db.queryOne(`
+  SELECT
+    COUNT(*) as total_products,
+    SUM(stock) as total_stock,
+    AVG(price) as avg_price,
+    MIN(price) as min_price,
+    MAX(price) as max_price
+  FROM products
+`);
+console.log('Product stats:', stats);
+
+// Group by category
+const byCategory = await db.query(`
+  SELECT
+    category,
+    COUNT(*) as count,
+    AVG(price) as avg_price,
+    SUM(stock) as total_stock
+  FROM products
+  GROUP BY category
+  ORDER BY count DESC
+`);
+console.log('Products by category:', byCategory);
+
+// Pagination
+const page = 1;
+const pageSize = 10;
+const paginatedProducts = await db.query(
+  'SELECT * FROM products ORDER BY created_at DESC LIMIT ? OFFSET ?',
+  [pageSize, (page - 1) * pageSize]
+);
+
+// ============================================
+// UPDATE - Modify products
+// ============================================
+
+// Update single field
+await db.run('UPDATE products SET price = ? WHERE id = ?', [949.99, 1]);
+
+// Update multiple fields
+await db.run(
+  'UPDATE products SET price = ?, stock = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+  [899.99, 45, 1]
+);
+
+// Update with conditions
+const updateResult = await db.run(
+  'UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?',
+  [5, 1, 5]
+);
+console.log('Rows affected:', updateResult.rowsAffected);
+
+// Bulk update by category
+await db.run(
+  'UPDATE products SET price = price * 0.9 WHERE category = ?', // 10% discount
+  ['Electronics']
+);
+
+// Conditional update
+await db.run(`
+  UPDATE products
+  SET category = 'Low Stock'
+  WHERE stock < 10 AND category != 'Low Stock'
+`);
+
+// ============================================
+// DELETE - Remove products
+// ============================================
+
+// Delete by ID
+await db.run('DELETE FROM products WHERE id = ?', [5]);
+
+// Delete with conditions
+const deleteResult = await db.run(
+  'DELETE FROM products WHERE stock = 0 AND created_at < ?',
+  ['2024-01-01']
+);
+console.log('Deleted products:', deleteResult.rowsAffected);
+
+// Delete all products in a category
+await db.run('DELETE FROM products WHERE category = ?', ['Discontinued']);
+
+// Soft delete pattern (recommended)
+await db.run(`
+  ALTER TABLE products ADD COLUMN deleted_at TEXT DEFAULT NULL
+`);
+// Then "delete" by setting deleted_at
+await db.run(
+  'UPDATE products SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?',
+  [3]
+);
+// Query only active products
+const activeProducts = await db.query(
+  'SELECT * FROM products WHERE deleted_at IS NULL'
+);
+```
+
 ### Create (INSERT)
 
 ```typescript
@@ -302,6 +717,419 @@ const firstActive = await stmt.get([true]);
 const insertStmt = db.prepare('INSERT INTO users (name) VALUES (?)');
 await insertStmt.run(['Alice']);
 await insertStmt.run(['Bob']);
+```
+
+---
+
+## Working with Transactions
+
+Transactions ensure data consistency by grouping multiple operations into an atomic unit.
+
+### Basic Transaction
+
+```typescript
+import { DB } from '@dotdo/dosql';
+
+const db = await DB('bank', {
+  migrations: [
+    {
+      id: '001_accounts',
+      sql: `
+        CREATE TABLE accounts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          balance REAL NOT NULL DEFAULT 0 CHECK (balance >= 0)
+        );
+
+        CREATE TABLE transfers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          from_account_id INTEGER NOT NULL,
+          to_account_id INTEGER NOT NULL,
+          amount REAL NOT NULL CHECK (amount > 0),
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (from_account_id) REFERENCES accounts(id),
+          FOREIGN KEY (to_account_id) REFERENCES accounts(id)
+        );
+      `,
+    },
+  ],
+});
+
+// Create accounts
+await db.run('INSERT INTO accounts (name, balance) VALUES (?, ?)', ['Alice', 1000]);
+await db.run('INSERT INTO accounts (name, balance) VALUES (?, ?)', ['Bob', 500]);
+
+// Transfer money atomically
+async function transfer(fromId: number, toId: number, amount: number) {
+  await db.transaction(async (tx) => {
+    // Check balance
+    const from = await tx.queryOne(
+      'SELECT balance FROM accounts WHERE id = ?',
+      [fromId]
+    );
+
+    if (!from || from.balance < amount) {
+      throw new Error('Insufficient funds');
+    }
+
+    // Deduct from sender
+    await tx.run(
+      'UPDATE accounts SET balance = balance - ? WHERE id = ?',
+      [amount, fromId]
+    );
+
+    // Add to receiver
+    await tx.run(
+      'UPDATE accounts SET balance = balance + ? WHERE id = ?',
+      [amount, toId]
+    );
+
+    // Record transfer
+    await tx.run(
+      'INSERT INTO transfers (from_account_id, to_account_id, amount) VALUES (?, ?, ?)',
+      [fromId, toId, amount]
+    );
+  });
+}
+
+// Execute transfer - either all operations succeed or none do
+await transfer(1, 2, 200);
+
+// Check balances
+const accounts = await db.query('SELECT * FROM accounts');
+console.log(accounts);
+// [{ id: 1, name: 'Alice', balance: 800 }, { id: 2, name: 'Bob', balance: 700 }]
+```
+
+### Transaction with Rollback
+
+```typescript
+try {
+  await db.transaction(async (tx) => {
+    await tx.run('INSERT INTO orders (user_id, total) VALUES (?, ?)', [1, 99.99]);
+
+    // This will fail if user doesn't have enough credit
+    const user = await tx.queryOne('SELECT credits FROM users WHERE id = ?', [1]);
+    if (user.credits < 99.99) {
+      throw new Error('Insufficient credits');
+    }
+
+    await tx.run('UPDATE users SET credits = credits - ? WHERE id = ?', [99.99, 1]);
+  });
+} catch (error) {
+  console.log('Transaction rolled back:', error.message);
+  // The INSERT is also rolled back
+}
+```
+
+### Nested Operations in Transactions
+
+```typescript
+async function processOrder(orderId: number) {
+  await db.transaction(async (tx) => {
+    // Get order details
+    const order = await tx.queryOne('SELECT * FROM orders WHERE id = ?', [orderId]);
+
+    // Get all order items
+    const items = await tx.query(
+      'SELECT * FROM order_items WHERE order_id = ?',
+      [orderId]
+    );
+
+    // Update inventory for each item
+    for (const item of items) {
+      const result = await tx.run(
+        'UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?',
+        [item.quantity, item.product_id, item.quantity]
+      );
+
+      if (result.rowsAffected === 0) {
+        throw new Error(`Insufficient stock for product ${item.product_id}`);
+      }
+    }
+
+    // Mark order as processed
+    await tx.run(
+      'UPDATE orders SET status = ?, processed_at = CURRENT_TIMESTAMP WHERE id = ?',
+      ['processed', orderId]
+    );
+  });
+}
+```
+
+### Savepoints (Nested Transactions)
+
+```typescript
+await db.transaction(async (tx) => {
+  await tx.run('INSERT INTO logs (message) VALUES (?)', ['Starting batch']);
+
+  // Try to process each item, but continue on individual failures
+  for (const item of items) {
+    try {
+      await tx.savepoint(async (sp) => {
+        await sp.run('INSERT INTO processed (item_id) VALUES (?)', [item.id]);
+
+        if (item.invalid) {
+          throw new Error('Invalid item');
+        }
+      });
+    } catch (error) {
+      // Savepoint rolled back, but outer transaction continues
+      console.log(`Skipping item ${item.id}: ${error.message}`);
+    }
+  }
+
+  await tx.run('INSERT INTO logs (message) VALUES (?)', ['Batch complete']);
+});
+```
+
+### Transaction Options
+
+```typescript
+// Read-only transaction (optimized for queries)
+const results = await db.transaction(async (tx) => {
+  const users = await tx.query('SELECT * FROM users');
+  const orders = await tx.query('SELECT * FROM orders');
+  return { users, orders };
+}, { readOnly: true });
+
+// Transaction with timeout
+await db.transaction(async (tx) => {
+  // Long-running operations...
+}, { timeout: 5000 }); // 5 second timeout
+
+// Immediate transaction (acquire write lock immediately)
+await db.transaction(async (tx) => {
+  // Operations that need write lock from the start
+}, { immediate: true });
+```
+
+---
+
+## CDC Streaming
+
+Change Data Capture (CDC) allows you to stream database changes in real-time.
+
+### Basic CDC Setup
+
+```typescript
+import { DB, createCDCStream } from '@dotdo/dosql';
+
+const db = await DB('app', {
+  migrations: [
+    {
+      id: '001_init',
+      sql: `
+        CREATE TABLE users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          email TEXT UNIQUE,
+          updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+      `,
+    },
+  ],
+  // Enable WAL for CDC support
+  wal: true,
+});
+
+// Create a CDC stream
+const stream = createCDCStream(db, {
+  tables: ['users'],        // Tables to watch
+  operations: ['INSERT', 'UPDATE', 'DELETE'], // Operations to capture
+});
+
+// Subscribe to changes
+stream.subscribe((change) => {
+  console.log('Change detected:', {
+    table: change.table,
+    operation: change.operation,
+    data: change.data,
+    oldData: change.oldData,     // For UPDATE/DELETE
+    timestamp: change.timestamp,
+    transactionId: change.txId,
+  });
+});
+
+// Make some changes
+await db.run('INSERT INTO users (name, email) VALUES (?, ?)', ['Alice', 'alice@example.com']);
+// Output: Change detected: { table: 'users', operation: 'INSERT', data: { id: 1, name: 'Alice', ... } }
+
+await db.run('UPDATE users SET name = ? WHERE id = ?', ['Alicia', 1]);
+// Output: Change detected: { table: 'users', operation: 'UPDATE', data: { name: 'Alicia' }, oldData: { name: 'Alice' } }
+```
+
+### CDC with Webhooks
+
+```typescript
+import { DB, createCDCStream } from '@dotdo/dosql';
+
+const db = await DB('orders', { wal: true });
+
+const stream = createCDCStream(db, {
+  tables: ['orders', 'order_items'],
+});
+
+// Forward changes to a webhook
+stream.subscribe(async (change) => {
+  if (change.table === 'orders' && change.operation === 'INSERT') {
+    await fetch('https://api.example.com/webhooks/new-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId: change.data.id,
+        customerId: change.data.customer_id,
+        total: change.data.total,
+        timestamp: change.timestamp,
+      }),
+    });
+  }
+});
+```
+
+### CDC for Real-time Sync
+
+```typescript
+import { DB, createCDCStream } from '@dotdo/dosql';
+
+export class SyncDatabase implements DurableObject {
+  private db: Awaited<ReturnType<typeof DB>> | null = null;
+  private connections = new Set<WebSocket>();
+
+  async getDB() {
+    if (!this.db) {
+      this.db = await DB('sync', {
+        migrations: { folder: '.do/migrations' },
+        wal: true,
+      });
+
+      // Set up CDC to broadcast to all connected clients
+      const stream = createCDCStream(this.db, {
+        tables: ['*'], // Watch all tables
+      });
+
+      stream.subscribe((change) => {
+        const message = JSON.stringify({
+          type: 'change',
+          ...change,
+        });
+
+        for (const ws of this.connections) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(message);
+          }
+        }
+      });
+    }
+    return this.db;
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    // WebSocket connection for real-time updates
+    if (url.pathname === '/sync' && request.headers.get('Upgrade') === 'websocket') {
+      const pair = new WebSocketPair();
+      const [client, server] = Object.values(pair);
+
+      server.accept();
+      this.connections.add(server);
+
+      server.addEventListener('close', () => {
+        this.connections.delete(server);
+      });
+
+      // Send initial data
+      const db = await this.getDB();
+      const initialData = await db.query('SELECT * FROM items');
+      server.send(JSON.stringify({ type: 'initial', data: initialData }));
+
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
+    // REST API...
+    return new Response('Not Found', { status: 404 });
+  }
+}
+```
+
+### CDC with Filtering
+
+```typescript
+const stream = createCDCStream(db, {
+  tables: ['orders'],
+  operations: ['INSERT', 'UPDATE'],
+  filter: (change) => {
+    // Only capture high-value orders
+    if (change.table === 'orders') {
+      return change.data.total > 1000;
+    }
+    return true;
+  },
+});
+```
+
+### CDC Replay from Checkpoint
+
+```typescript
+// Save checkpoint
+const checkpoint = await stream.getCheckpoint();
+console.log('Checkpoint:', checkpoint); // { lsn: 12345, timestamp: '2024-01-15T10:30:00Z' }
+
+// Later, replay from checkpoint
+const replayStream = createCDCStream(db, {
+  tables: ['orders'],
+  fromCheckpoint: checkpoint,
+});
+
+replayStream.subscribe((change) => {
+  console.log('Replayed change:', change);
+});
+```
+
+### CDC to External Systems
+
+```typescript
+import { DB, createCDCStream } from '@dotdo/dosql';
+
+const db = await DB('app', { wal: true });
+
+const stream = createCDCStream(db, {
+  tables: ['products'],
+});
+
+// Sync to Elasticsearch
+stream.subscribe(async (change) => {
+  const esClient = getElasticsearchClient();
+
+  switch (change.operation) {
+    case 'INSERT':
+    case 'UPDATE':
+      await esClient.index({
+        index: 'products',
+        id: change.data.id.toString(),
+        body: change.data,
+      });
+      break;
+    case 'DELETE':
+      await esClient.delete({
+        index: 'products',
+        id: change.oldData.id.toString(),
+      });
+      break;
+  }
+});
+
+// Sync to Redis cache
+stream.subscribe(async (change) => {
+  const redis = getRedisClient();
+
+  if (change.operation === 'DELETE') {
+    await redis.del(`product:${change.oldData.id}`);
+  } else {
+    await redis.set(`product:${change.data.id}`, JSON.stringify(change.data));
+  }
+});
 ```
 
 ---
@@ -557,8 +1385,273 @@ npx wrangler durable-objects list
 
 ---
 
+## Troubleshooting
+
+### Common Issues
+
+#### "Database not found" or "No such table"
+
+**Cause:** Migrations have not been applied or the database name is incorrect.
+
+**Solution:**
+
+```typescript
+// Ensure autoMigrate is enabled (default: true)
+const db = await DB('my-database', {
+  migrations: { folder: '.do/migrations' },
+  autoMigrate: true, // Make sure this is true
+});
+
+// Or manually check migration status
+const status = await db.getMigrationStatus();
+console.log('Pending migrations:', status.pending);
+```
+
+#### "SQLITE_CONSTRAINT: UNIQUE constraint failed"
+
+**Cause:** Attempting to insert a duplicate value in a UNIQUE column.
+
+**Solution:**
+
+```typescript
+// Use INSERT OR REPLACE
+await db.run(
+  'INSERT OR REPLACE INTO users (email, name) VALUES (?, ?)',
+  ['alice@example.com', 'Alice']
+);
+
+// Or use INSERT OR IGNORE
+await db.run(
+  'INSERT OR IGNORE INTO users (email, name) VALUES (?, ?)',
+  ['alice@example.com', 'Alice']
+);
+
+// Or check before inserting
+const existing = await db.queryOne('SELECT id FROM users WHERE email = ?', [email]);
+if (!existing) {
+  await db.run('INSERT INTO users (email, name) VALUES (?, ?)', [email, name]);
+}
+```
+
+#### "SQLITE_BUSY: database is locked"
+
+**Cause:** Another operation is holding a write lock on the database.
+
+**Solution:**
+
+```typescript
+// Use transactions to group operations
+await db.transaction(async (tx) => {
+  // All operations in the same transaction
+  await tx.run('INSERT INTO table1 ...');
+  await tx.run('UPDATE table2 ...');
+});
+
+// Or increase timeout
+const db = await DB('my-database', {
+  busyTimeout: 5000, // 5 seconds
+});
+```
+
+#### "Migration checksum mismatch"
+
+**Cause:** A migration file was modified after being applied.
+
+**Solution:**
+
+```typescript
+// Option 1: Revert to original migration content
+// (Check your version control)
+
+// Option 2: Force re-apply (development only!)
+const db = await DB('my-database', {
+  migrations: { folder: '.do/migrations' },
+  validateChecksums: false, // Disable checksum validation
+});
+
+// Option 3: Reset the database (development only!)
+await db.run('DROP TABLE __dosql_migrations');
+// Then restart your application
+```
+
+#### "Cannot read properties of undefined"
+
+**Cause:** Query returned no results and you're accessing properties on `undefined`.
+
+**Solution:**
+
+```typescript
+// Always check if result exists
+const user = await db.queryOne('SELECT * FROM users WHERE id = ?', [id]);
+if (!user) {
+  throw new Error('User not found');
+}
+console.log(user.name);
+
+// Or use optional chaining
+const userName = user?.name ?? 'Unknown';
+```
+
+#### Durable Object Errors
+
+**"Durable Object storage is not available"**
+
+```typescript
+// Ensure you're using storage from the state object
+export class MyDatabase implements DurableObject {
+  constructor(state: DurableObjectState, env: Env) {
+    // Correct: use state.storage
+    this.db = await DB('app', {
+      storage: { hot: state.storage },
+    });
+  }
+}
+```
+
+**"Durable Object has been deleted"**
+
+```typescript
+// The DO was deleted or reset. Create a new instance
+const id = env.MY_DO.idFromName('new-unique-name');
+const stub = env.MY_DO.get(id);
+```
+
+### Performance Issues
+
+#### Slow Queries
+
+```typescript
+// Add indexes for frequently queried columns
+await db.run('CREATE INDEX idx_users_email ON users(email)');
+await db.run('CREATE INDEX idx_orders_user_date ON orders(user_id, created_at)');
+
+// Use EXPLAIN to analyze queries
+const plan = await db.query('EXPLAIN QUERY PLAN SELECT * FROM users WHERE email = ?', ['test@example.com']);
+console.log(plan);
+
+// Avoid SELECT * when you only need specific columns
+// Instead of:
+const users = await db.query('SELECT * FROM users');
+// Use:
+const users = await db.query('SELECT id, name FROM users');
+```
+
+#### High Memory Usage
+
+```typescript
+// Use pagination for large result sets
+const pageSize = 100;
+let offset = 0;
+let hasMore = true;
+
+while (hasMore) {
+  const batch = await db.query(
+    'SELECT * FROM large_table LIMIT ? OFFSET ?',
+    [pageSize, offset]
+  );
+
+  // Process batch
+  processBatch(batch);
+
+  offset += pageSize;
+  hasMore = batch.length === pageSize;
+}
+
+// Or use streaming for very large datasets
+for await (const row of db.stream('SELECT * FROM large_table')) {
+  processRow(row);
+}
+```
+
+### Debugging Tips
+
+```typescript
+// Enable debug logging
+const db = await DB('my-database', {
+  logger: {
+    debug: console.debug,
+    info: console.info,
+    warn: console.warn,
+    error: console.error,
+  },
+});
+
+// Log all queries
+const db = await DB('my-database', {
+  onQuery: (sql, params, duration) => {
+    console.log(`Query: ${sql}`);
+    console.log(`Params: ${JSON.stringify(params)}`);
+    console.log(`Duration: ${duration}ms`);
+  },
+});
+
+// Check database schema
+const tables = await db.query(`
+  SELECT name, sql FROM sqlite_master
+  WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+`);
+console.log('Tables:', tables);
+
+// Check indexes
+const indexes = await db.query(`
+  SELECT name, tbl_name, sql FROM sqlite_master
+  WHERE type = 'index'
+`);
+console.log('Indexes:', indexes);
+```
+
+### Getting Help
+
+If you're still experiencing issues:
+
+1. Check the [GitHub Issues](https://github.com/dotdo/dosql/issues) for similar problems
+2. Search the [Discussions](https://github.com/dotdo/dosql/discussions) for solutions
+3. Join our [Discord community](https://discord.gg/dosql) for real-time help
+4. Create a new issue with:
+   - DoSQL version
+   - Node.js/Wrangler version
+   - Minimal reproduction code
+   - Full error message and stack trace
+
+---
+
 ## Next Steps
 
-- [API Reference](./api-reference.md) - Complete API documentation
-- [Advanced Features](./advanced.md) - Time travel, branching, CDC
-- [Architecture](./architecture.md) - Understanding DoSQL internals
+Now that you have DoSQL running, explore these guides to learn more:
+
+### Core Concepts
+
+- [API Reference](./api-reference.md) - Complete API documentation for all DoSQL functions and types
+- [Architecture](./architecture.md) - Understanding DoSQL internals, storage tiers, and design decisions
+- [Migrations Guide](./migrations.md) - Advanced migration patterns, rollbacks, and schema versioning
+
+### Advanced Features
+
+- [Advanced Features](./advanced.md) - Time travel queries, branching, and database snapshots
+- [Transactions Deep Dive](./transactions.md) - Isolation levels, deadlock prevention, and performance tuning
+- [CDC Streaming Guide](./cdc.md) - Building real-time applications with Change Data Capture
+
+### Patterns and Best Practices
+
+- [Multi-tenancy](./multi-tenancy.md) - Patterns for building multi-tenant SaaS applications
+- [Performance Optimization](./performance.md) - Indexing strategies, query optimization, and caching
+- [Testing Guide](./testing.md) - Unit testing, integration testing, and mocking DoSQL
+
+### Integrations
+
+- [Drizzle ORM Integration](./drizzle.md) - Using DoSQL with Drizzle for type-safe queries
+- [Hono Integration](./hono.md) - Building APIs with Hono and DoSQL
+- [React/Next.js Integration](./react.md) - Full-stack patterns with React and DoSQL
+
+### Deployment
+
+- [Production Checklist](./production.md) - Security, monitoring, and reliability best practices
+- [Scaling Guide](./scaling.md) - Horizontal scaling, sharding, and read replicas
+- [Backup and Recovery](./backup.md) - Backup strategies, point-in-time recovery, and disaster recovery
+
+### Examples
+
+- [Example: Todo App](./examples/todo-app.md) - Simple CRUD application
+- [Example: E-commerce](./examples/ecommerce.md) - Complex multi-table application with transactions
+- [Example: Real-time Chat](./examples/chat.md) - WebSockets and CDC for live updates
+- [Example: Analytics Dashboard](./examples/analytics.md) - Aggregations and time-series data

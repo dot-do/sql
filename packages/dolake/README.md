@@ -1,6 +1,36 @@
 # @dotdo/dolake
 
+> **Pre-release Software**: This is v0.1.0. APIs may change. Not recommended for production use without thorough testing.
+
 DoLake is a high-performance Lakehouse Durable Object that receives CDC (Change Data Capture) events from DoSQL instances via WebSocket, batches them intelligently, and writes them as Parquet files to R2 with full Iceberg metadata support.
+
+## Stability
+
+### Stable APIs
+
+- Core CDC event ingestion via WebSocket
+- Parquet file writing to R2
+- Basic Iceberg metadata support
+- Rate limiting and backpressure signaling
+- Health check and status endpoints
+
+### Experimental APIs
+
+- REST Catalog API (Iceberg spec - API may change)
+- Automatic compaction
+- Partition management and pruning
+- Query routing and execution
+- Zod schema validation (internal types may change)
+- Binary protocol support
+
+## Version Compatibility
+
+| Dependency | Version |
+|------------|---------|
+| Node.js | 18+ |
+| TypeScript | 5.3+ |
+| Cloudflare Workers | 2024-01-01+ |
+| @cloudflare/workers-types | 4.x |
 
 ## Features
 

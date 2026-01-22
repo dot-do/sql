@@ -944,10 +944,86 @@ export class QueryRouter {
     return { column: shardKeyColumn, values: [], method: 'none' };
   }
 
-  private selectNearestShard(): string {
-    // TODO: Implement actual nearest shard selection based on latency
-    // For now, return first shard
-    return this.vschema.shards[0].id;
+  /**
+   * Select the nearest shard based on available information.
+   *
+   * Selection strategy (in order of preference):
+   * 1. If request region is known and a shard has a matching region, use it
+   * 2. If shards have weights defined, use weighted random selection for load balancing
+   * 3. Fall back to random selection across all shards for even distribution
+   *
+   * @param requestRegion - Optional region hint from the incoming request (e.g., from cf.colo)
+   * @returns The selected shard ID
+   */
+  private selectNearestShard(requestRegion?: string): string {
+    const shards = this.vschema.shards;
+
+    if (shards.length === 0) {
+      throw new Error('No shards configured in VSchema');
+    }
+
+    if (shards.length === 1) {
+      return shards[0].id;
+    }
+
+    // Strategy 1: Match by region if request region is available
+    if (requestRegion) {
+      const regionLower = requestRegion.toLowerCase();
+
+      // Check for exact region match in shard metadata or replicas
+      for (const shard of shards) {
+        // Check shard metadata for region
+        if (shard.metadata?.['region'] && String(shard.metadata['region']).toLowerCase() === regionLower) {
+          return shard.id;
+        }
+
+        // Check replicas for region match
+        if (shard.replicas) {
+          for (const replica of shard.replicas) {
+            if (replica.region && replica.region.toLowerCase() === regionLower) {
+              return shard.id;
+            }
+          }
+        }
+      }
+
+      // Check for partial region match (e.g., 'us' matches 'us-west', 'us-east')
+      for (const shard of shards) {
+        if (shard.metadata?.['region'] && String(shard.metadata['region']).toLowerCase().startsWith(regionLower.slice(0, 2))) {
+          return shard.id;
+        }
+
+        if (shard.replicas) {
+          for (const replica of shard.replicas) {
+            if (replica.region && replica.region.toLowerCase().startsWith(regionLower.slice(0, 2))) {
+              return shard.id;
+            }
+          }
+        }
+      }
+    }
+
+    // Strategy 2: Weighted random selection if weights are defined
+    const shardsWithWeights = shards.filter(s => s.replicas?.some(r => r.weight !== undefined && r.weight > 0));
+    if (shardsWithWeights.length > 0) {
+      const totalWeight = shardsWithWeights.reduce(
+        (sum, s) => sum + (s.replicas?.reduce((w, r) => w + (r.weight ?? 1), 0) ?? 1),
+        0
+      );
+      let random = Math.random() * totalWeight;
+
+      for (const shard of shardsWithWeights) {
+        const shardWeight = shard.replicas?.reduce((w, r) => w + (r.weight ?? 1), 0) ?? 1;
+        random -= shardWeight;
+        if (random <= 0) {
+          return shard.id;
+        }
+      }
+    }
+
+    // Strategy 3: Random selection for even distribution
+    const randomIndex = Math.floor(Math.random() * shards.length);
+    return shards[randomIndex].id;
   }
 
   /**

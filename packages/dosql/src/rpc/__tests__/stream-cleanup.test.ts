@@ -26,8 +26,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { DoSQLTarget, MockQueryExecutor } from '../server.js';
+import { DoSQLTarget } from '../server.js';
 import type { CDCManager, CDCSubscription, CDCSubscribeOptions } from '../server.js';
+import { MockQueryExecutor } from '../../__tests__/utils/index.js';
 
 // =============================================================================
 // Test Utilities

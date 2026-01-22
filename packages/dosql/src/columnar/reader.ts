@@ -73,6 +73,9 @@ export interface ReadResult {
 
   /** Row groups skipped by predicate pushdown */
   rowGroupsSkipped: number;
+
+  /** Total bytes read from storage */
+  totalBytesRead: number;
 }
 
 export interface ScanResult {
@@ -140,6 +143,7 @@ export class ColumnarReader {
     const columns = new Map<string, unknown[]>();
     const columnNames = projection?.columns ?? [];
     let totalRows = 0;
+    let totalBytesRead = 0;
     let currentOffset = offset ?? 0;
     let remaining = limit ?? Infinity;
 
@@ -155,6 +159,8 @@ export class ColumnarReader {
       // Read the row group
       const data = await this.fsx.get(key);
       if (!data) continue;
+
+      totalBytesRead += data.byteLength;
 
       const rowGroup = deserializeRowGroup(data);
 
@@ -194,6 +200,7 @@ export class ColumnarReader {
       rowCount: totalRows,
       rowGroupsScanned: eligibleGroups.length,
       rowGroupsSkipped: skippedCount,
+      totalBytesRead,
     };
   }
 
@@ -221,7 +228,7 @@ export class ColumnarReader {
       stats: {
         rowGroupsScanned: result.rowGroupsScanned,
         rowGroupsSkipped: result.rowGroupsSkipped,
-        totalBytes: 0, // TODO: track bytes read
+        totalBytes: result.totalBytesRead,
       },
     };
   }

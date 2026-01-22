@@ -1,14 +1,45 @@
 # DoSQL
 
 [![npm version](https://img.shields.io/npm/v/@dotdo/dosql.svg)](https://www.npmjs.com/package/@dotdo/dosql)
-[![Bundle Size](https://img.shields.io/badge/bundle-7.4KB_gzip-brightgreen)](./docs/architecture.md#bundle-size-optimization)
+[![Bundle Size](https://img.shields.io/badge/bundle-7.4KB_gzip-brightgreen)](./docs/architecture.md#bundle-size)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-orange.svg)](https://workers.cloudflare.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+> **Pre-release Software**: This is v0.1.0. APIs may change. Not recommended for production use without thorough testing.
 
 > Type-safe SQL for TypeScript with Cloudflare Durable Objects
 
 DoSQL is a database engine purpose-built for Cloudflare Workers and Durable Objects. It provides type-safe SQL queries with compile-time validation, automatic schema migrations, and advanced features like time travel, branching, and CDC streaming.
+
+## Stability
+
+### Stable APIs
+
+- Core database operations (`DB`, `query`, `run`, `transaction`)
+- Basic SQL execution (SELECT, INSERT, UPDATE, DELETE)
+- Schema migrations (`.do/migrations/*.sql` convention)
+- Transaction management
+- Error handling
+
+### Experimental APIs
+
+- Time travel queries (`FOR SYSTEM_TIME AS OF`)
+- Database branching (`branch`, `checkout`, `merge`)
+- CDC streaming to lakehouse
+- Virtual tables (URL, R2, external APIs)
+- CapnWeb RPC protocol
+- Sharding and query routing
+- Stored procedures
+
+## Version Compatibility
+
+| Dependency | Version |
+|------------|---------|
+| Node.js | 18+ |
+| TypeScript | 5.3+ |
+| Cloudflare Workers | 2024-01-01+ |
+| @cloudflare/workers-types | 4.x |
 
 ## Features
 
@@ -225,4 +256,4 @@ MIT
 - [GitHub](https://github.com/dotdo/dosql)
 - [npm](https://www.npmjs.com/package/@dotdo/dosql)
 - [Documentation](./docs/README.md)
-- [Changelog](./CHANGELOG.md)
+- [Changelog](../../CHANGELOG.md)

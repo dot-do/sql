@@ -558,6 +558,29 @@ export {
 } from './tail-worker.js';
 
 // =============================================================================
+// Circuit Breaker
+// =============================================================================
+
+export {
+  // Classes
+  R2CircuitBreaker,
+  CircuitBreakerManager,
+
+  // Factory functions
+  createCircuitBreaker,
+  createCircuitBreakerManager,
+
+  // Types
+  CircuitState,
+  type CircuitBreakerConfig,
+  type CircuitMetrics,
+  type CircuitProtectedResult,
+
+  // Constants
+  DEFAULT_CIRCUIT_BREAKER_CONFIG,
+} from './circuit-breaker.js';
+
+// =============================================================================
 // Serialization (BigInt Support)
 // =============================================================================
 

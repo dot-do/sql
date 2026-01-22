@@ -17,6 +17,7 @@ import {
   DOSqliteAdapter,
   createDOSqliteAdapter,
   type DOStorage,
+  type ExecManyResult,
 } from '../do-sqlite.js';
 
 import {
@@ -209,6 +210,40 @@ export class BenchmarkTestDO extends DurableObject {
   async getRemainingCapacity(): Promise<number> {
     const adapter = this.getAdapter();
     return adapter.getRemainingCapacity();
+  }
+
+  // ===========================================================================
+  // execMany Batch Operations
+  // ===========================================================================
+
+  /**
+   * Execute multiple SQL statements in a single batch
+   *
+   * All statements are executed within a single transaction for atomicity.
+   * If any statement fails, all changes are rolled back.
+   *
+   * @param statements - Array of SQL statements to execute
+   * @returns Array of results matching input order
+   */
+  execMany(statements: string[]): ExecManyResult[] {
+    const adapter = this.getAdapter();
+    return adapter.execMany(statements);
+  }
+
+  /**
+   * Execute multiple SQL statements with parameters in a single batch
+   *
+   * All statements are executed within a single transaction for atomicity.
+   * If any statement fails, all changes are rolled back.
+   *
+   * @param statements - Array of {sql, params} objects
+   * @returns Array of results matching input order
+   */
+  execManyWithParams(
+    statements: Array<{ sql: string; params?: Record<string, unknown> }>
+  ): ExecManyResult[] {
+    const adapter = this.getAdapter();
+    return adapter.execManyWithParams(statements);
   }
 
   // ===========================================================================

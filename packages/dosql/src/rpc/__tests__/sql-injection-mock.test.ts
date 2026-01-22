@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MockQueryExecutor } from '../index.js';
+import { MockQueryExecutor } from '../../__tests__/utils/index.js';
 
 describe('MockQueryExecutor SQL Injection Vulnerabilities', () => {
   let executor: MockQueryExecutor;
