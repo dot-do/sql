@@ -1,6 +1,6 @@
 {
   "name": "@dotdo/shared-types",
-  "version": "0.1.0",
+  "version": "0.1.0-rc.1",
   "description": "Shared types for DoSQL client/server ecosystem",
   "type": "module",
   "main": "./dist/index.js",

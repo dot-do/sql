@@ -1481,6 +1481,6 @@ Migrating from D1 to DoSQL provides access to advanced features like CDC, time t
 5. **Have a rollback plan** - Keep D1 available during the transition period
 
 For questions or issues, refer to:
-- [DoSQL Getting Started](./getting-started.md)
-- [DoSQL API Reference](./api-reference.md)
-- [DoSQL Architecture](./architecture.md)
+- [DoSQL Getting Started](../packages/dosql/docs/getting-started.md)
+- [DoSQL API Reference](../packages/dosql/docs/api-reference.md)
+- [DoSQL Architecture](../packages/dosql/docs/architecture.md)

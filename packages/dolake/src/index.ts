@@ -553,7 +553,7 @@ export {
   type TransformResult,
   type BatchSendResult,
   type TailWorkerLoadMetrics,
-  type DurabilityTier,
+  type DurabilityTier as TailWorkerDurabilityTier,
   DEFAULT_TAIL_WORKER_CONFIG,
 } from './tail-worker.js';
 

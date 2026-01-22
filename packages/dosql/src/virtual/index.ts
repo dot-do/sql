@@ -95,7 +95,7 @@ export {
 
   // URL function parsing
   isUrlFunction,
-  parseUrlFunction,
+  parseUrlFunction as parseVirtualTableUrlFunction,
 
   // WITH clause parsing
   extractWithClause,

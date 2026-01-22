@@ -1471,5 +1471,3 @@ function handleDoLakeResponse(message: AckMessage | NackMessage) {
 
 - [DoSQL Client API](/packages/sql.do/README.md)
 - [DoLake Client API](/packages/lake.do/README.md)
-- [CDC Streaming Guide](/docs/CDC_STREAMING.md)
-- [Transaction Isolation Levels](/docs/TRANSACTIONS.md)

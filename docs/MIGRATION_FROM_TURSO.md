@@ -1885,7 +1885,6 @@ Migrating from Turso to DoSQL provides access to advanced features like compile-
 8. **Have a rollback plan** - Keep Turso available during the transition period
 
 For questions or issues, refer to:
-- [DoSQL Getting Started](./getting-started.md)
-- [DoSQL API Reference](./api-reference.md)
-- [DoSQL Architecture](./architecture.md)
-- [DoSQL Vector Search](../packages/dosql/docs/vector-search.md)
+- [DoSQL Getting Started](../packages/dosql/docs/getting-started.md)
+- [DoSQL API Reference](../packages/dosql/docs/api-reference.md)
+- [DoSQL Architecture](../packages/dosql/docs/architecture.md)
