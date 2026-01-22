@@ -556,3 +556,53 @@ export {
   type DurabilityTier,
   DEFAULT_TAIL_WORKER_CONFIG,
 } from './tail-worker.js';
+
+// =============================================================================
+// Serialization (BigInt Support)
+// =============================================================================
+
+export {
+  // Core serialization functions
+  serialize,
+  deserialize,
+  serializeMessage,
+  deserializeMessage,
+
+  // Replacer/reviver functions
+  bigintReplacer,
+  bigintReviver,
+  createReplacer,
+  createReviver,
+
+  // Iceberg-specific serialization
+  serializeIcebergMetadata,
+  deserializeIcebergMetadata,
+
+  // Branded types
+  type SnapshotId,
+  type SequenceNumber,
+  type TimestampMs,
+  snapshotId,
+  sequenceNumber,
+  timestampMs,
+
+  // Type guards and validators
+  isBigInt,
+  isSerializedBigInt,
+  isNumericBigIntString,
+  isIcebergBigIntField,
+  isValidSnapshotId,
+  isValidSequenceNumber,
+  isValidTimestamp,
+
+  // Parsers
+  parseSnapshotId,
+  parseSequenceNumber,
+
+  // Constants
+  BIGINT_MARKER,
+  ICEBERG_BIGINT_FIELDS,
+
+  // Options type
+  type IcebergSerializationOptions,
+} from './serialization.js';

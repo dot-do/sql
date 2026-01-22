@@ -493,6 +493,62 @@ export interface DropViewStatement {
   ifExists?: boolean;
 }
 
+// =============================================================================
+// TRIGGER TYPES
+// =============================================================================
+
+/**
+ * Trigger timing (when the trigger fires)
+ */
+export type TriggerTiming = 'BEFORE' | 'AFTER' | 'INSTEAD OF';
+
+/**
+ * Trigger event (what triggers the trigger)
+ */
+export type TriggerEvent = 'INSERT' | 'UPDATE' | 'DELETE';
+
+/**
+ * CREATE TRIGGER statement
+ */
+export interface CreateTriggerStatement {
+  type: 'CREATE TRIGGER';
+  /** Trigger name */
+  name: string;
+  /** Schema/database name (optional) */
+  schema?: string;
+  /** IF NOT EXISTS clause */
+  ifNotExists?: boolean;
+  /** TEMPORARY or TEMP keyword */
+  temporary?: boolean;
+  /** Trigger timing: BEFORE, AFTER, or INSTEAD OF */
+  timing: TriggerTiming;
+  /** Trigger event: INSERT, UPDATE, or DELETE */
+  event: TriggerEvent;
+  /** Columns for UPDATE OF clause (optional) */
+  columns?: string[];
+  /** Table name the trigger is on */
+  table: string;
+  /** FOR EACH ROW clause (defaults to true in SQLite) */
+  forEachRow?: boolean;
+  /** WHEN condition expression (optional) */
+  when?: string;
+  /** Trigger body statements */
+  body: string[];
+}
+
+/**
+ * DROP TRIGGER statement
+ */
+export interface DropTriggerStatement {
+  type: 'DROP TRIGGER';
+  /** Trigger name */
+  name: string;
+  /** Schema/database name (optional) */
+  schema?: string;
+  /** IF EXISTS clause */
+  ifExists?: boolean;
+}
+
 /**
  * Union of all DDL statements
  */
@@ -503,7 +559,9 @@ export type DDLStatement =
   | DropTableStatement
   | DropIndexStatement
   | CreateViewStatement
-  | DropViewStatement;
+  | DropViewStatement
+  | CreateTriggerStatement
+  | DropTriggerStatement;
 
 // =============================================================================
 // PARSE RESULT
@@ -616,4 +674,22 @@ export function isParseSuccess<T extends DDLStatement>(
  */
 export function isParseError(result: ParseResult): result is ParseError {
   return result.success === false;
+}
+
+/**
+ * Check if a statement is CREATE TRIGGER
+ */
+export function isCreateTriggerStatement(
+  stmt: DDLStatement
+): stmt is CreateTriggerStatement {
+  return stmt.type === 'CREATE TRIGGER';
+}
+
+/**
+ * Check if a statement is DROP TRIGGER
+ */
+export function isDropTriggerStatement(
+  stmt: DDLStatement
+): stmt is DropTriggerStatement {
+  return stmt.type === 'DROP TRIGGER';
 }

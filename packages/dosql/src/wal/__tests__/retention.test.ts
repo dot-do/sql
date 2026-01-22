@@ -176,11 +176,32 @@ describe('WAL Retention Policy - Time-Based Retention [RED]', () => {
     expect(manager168h.getPolicy().maxSegmentAge).toBe(168 * 60 * 60 * 1000);
   });
 
-  it.fails('should provide entry-level age tracking (not just segment-level)', async () => {
-    // GAP: Current implementation tracks segment age, not individual entry age
-    // For fine-grained time-based retention, we need entry-level timestamps
+  it('should provide entry-level age tracking (not just segment-level)', async () => {
+    // Entry-level timestamps are now implemented
     const { createWALRetentionManager } = await import('../retention.js');
-    const { createWALReader } = await import('../reader.js');
+    const { createWALReader, createWALWriter, DefaultWALEncoder } = await import('../index.js');
+
+    const encoder = new DefaultWALEncoder();
+
+    // Create a segment with old entries
+    const oldTimestamp = Date.now() - (2 * 60 * 60 * 1000); // 2 hours ago
+    const segment = {
+      id: 'seg_00000000000000000001',
+      startLSN: 1n,
+      endLSN: 10n,
+      entries: [{
+        lsn: 1n,
+        timestamp: oldTimestamp,
+        txnId: 'txn_old',
+        op: 'INSERT' as const,
+        table: 'test',
+      }],
+      checksum: 0,
+      createdAt: oldTimestamp,
+    };
+    const data = encoder.encodeSegment(segment);
+    segment.checksum = encoder.calculateChecksum(data);
+    await backend.write('_wal/segments/seg_00000000000000000001', encoder.encodeSegment(segment));
 
     const reader = createWALReader(backend);
     const manager = createWALRetentionManager(backend, reader, null, {
@@ -191,6 +212,7 @@ describe('WAL Retention Policy - Time-Based Retention [RED]', () => {
     const expiredEntries = await (manager as any).getExpiredEntries();
 
     // Each entry should have its own timestamp for age calculation
+    expect(expiredEntries.length).toBeGreaterThan(0);
     expect(expiredEntries[0]).toHaveProperty('entryTimestamp');
     expect(expiredEntries[0]).toHaveProperty('age');
   });
@@ -299,8 +321,8 @@ describe('WAL Retention Policy - Size-Based Retention [RED]', () => {
     expect(eligible.has('seg_00000000000000000001') || eligible.has('seg_00000000000000000002')).toBe(true);
   });
 
-  it.fails('should provide real-time size monitoring with callbacks', async () => {
-    // GAP: No real-time monitoring/alerting when approaching size limits
+  it('should provide real-time size monitoring with callbacks', async () => {
+    // Size monitoring callback is now implemented
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader } = await import('../reader.js');
 
@@ -313,9 +335,9 @@ describe('WAL Retention Policy - Size-Based Retention [RED]', () => {
         sizeAlerts.push({ current, max, percentage: (current / max) * 100 });
       },
       sizeWarningThreshold: 0.8, // Alert at 80%
-    } as any);
+    });
 
-    // This callback mechanism doesn't exist yet
+    // This callback mechanism is now available
     expect(typeof (manager as any).onSizeWarning).toBe('function');
   });
 });
@@ -435,10 +457,31 @@ describe('WAL Retention Policy - Checkpoint-Based Cleanup [RED]', () => {
     expect(policy.keepCheckpointCount).toBe(3);
   });
 
-  it.fails('should auto-cleanup immediately after checkpoint when configured', async () => {
-    // GAP: Need synchronous cleanup trigger after checkpoint completes
+  it('should auto-cleanup immediately after checkpoint when configured', async () => {
+    // Checkpoint listener is now implemented
     const { createWALRetentionManager } = await import('../retention.js');
-    const { createWALReader, createCheckpointManager } = await import('../index.js');
+    const { createWALReader, createCheckpointManager, DefaultWALEncoder } = await import('../index.js');
+
+    const encoder = new DefaultWALEncoder();
+
+    // Create a segment so checkpoint has something to reference
+    const segment = {
+      id: 'seg_00000000000000000001',
+      startLSN: 1n,
+      endLSN: 100n,
+      entries: [{
+        lsn: 100n,
+        timestamp: Date.now(),
+        txnId: 'txn_1',
+        op: 'INSERT' as const,
+        table: 'test',
+      }],
+      checksum: 0,
+      createdAt: Date.now(),
+    };
+    const data = encoder.encodeSegment(segment);
+    segment.checksum = encoder.calculateChecksum(data);
+    await backend.write('_wal/segments/seg_00000000000000000001', encoder.encodeSegment(segment));
 
     const reader = createWALReader(backend);
     const checkpointMgr = createCheckpointManager(backend, reader);
@@ -472,8 +515,8 @@ describe('WAL Retention Policy - Manual Cleanup API [RED]', () => {
     backend = createTestBackend();
   });
 
-  it.fails('should support truncateWAL(beforeLSN) to remove entries before a given LSN', async () => {
-    // GAP: No direct API to truncate WAL at a specific LSN
+  it('should support truncateWAL(beforeLSN) to remove entries before a given LSN', async () => {
+    // truncateWAL is now implemented
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader, createWALWriter, DefaultWALEncoder } = await import('../index.js');
 
@@ -503,7 +546,7 @@ describe('WAL Retention Policy - Manual Cleanup API [RED]', () => {
     const reader = createWALReader(backend);
     const manager = createWALRetentionManager(backend, reader, null);
 
-    // This method should exist but doesn't
+    // This method now exists
     const result = await (manager as any).truncateWAL(25n); // Truncate before LSN 25
 
     expect(result).toHaveProperty('truncatedSegments');
@@ -515,8 +558,8 @@ describe('WAL Retention Policy - Manual Cleanup API [RED]', () => {
     expect(remaining.length).toBe(3);
   });
 
-  it.fails('should support compactWAL() to remove dead entries within segments', async () => {
-    // GAP: No compaction API to remove rolled-back entries within segments
+  it('should support compactWAL() to remove dead entries within segments', async () => {
+    // compactWAL is now implemented
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader, DefaultWALEncoder } = await import('../index.js');
 
@@ -545,7 +588,7 @@ describe('WAL Retention Policy - Manual Cleanup API [RED]', () => {
     const reader = createWALReader(backend);
     const manager = createWALRetentionManager(backend, reader, null);
 
-    // This method should exist but doesn't
+    // This method now exists
     const result = await (manager as any).compactWAL();
 
     expect(result).toHaveProperty('segmentsCompacted');
@@ -556,8 +599,8 @@ describe('WAL Retention Policy - Manual Cleanup API [RED]', () => {
     expect(result.entriesRemoved).toBeGreaterThan(0);
   });
 
-  it.fails('should support forceCleanup() that ignores safety checks', async () => {
-    // GAP: No force cleanup option for emergency situations
+  it('should support forceCleanup() that ignores safety checks', async () => {
+    // forceCleanup is now implemented
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader, DefaultWALEncoder } = await import('../index.js');
 
@@ -587,7 +630,7 @@ describe('WAL Retention Policy - Manual Cleanup API [RED]', () => {
       minSegmentCount: 10, // Would normally protect this segment
     });
 
-    // This method should exist but doesn't
+    // This method now exists
     const result = await (manager as any).forceCleanup({
       ignoreMinCount: true,
       ignoreSlots: true,
@@ -597,15 +640,15 @@ describe('WAL Retention Policy - Manual Cleanup API [RED]', () => {
     expect(result.deleted.length).toBeGreaterThan(0);
   });
 
-  it.fails('should support getWALStats() for detailed WAL statistics', async () => {
-    // GAP: Need comprehensive WAL statistics API
+  it('should support getWALStats() for detailed WAL statistics', async () => {
+    // getWALStats is now implemented
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader } = await import('../reader.js');
 
     const reader = createWALReader(backend);
     const manager = createWALRetentionManager(backend, reader, null);
 
-    // This should return detailed stats
+    // This now returns detailed stats
     const stats = await (manager as any).getWALStats();
 
     expect(stats).toHaveProperty('totalSegments');
@@ -856,8 +899,8 @@ describe('WAL Retention Policy - Metrics [RED]', () => {
     expect(metricsEvents[0]).toHaveProperty('data');
   });
 
-  it.fails('should provide histogram metrics for cleanup operation latencies', async () => {
-    // GAP: No histogram/percentile metrics support
+  it('should provide histogram metrics for cleanup operation latencies', async () => {
+    // getCleanupLatencyHistogram is now implemented
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader } = await import('../reader.js');
 
@@ -869,7 +912,7 @@ describe('WAL Retention Policy - Metrics [RED]', () => {
       await manager.cleanup(true); // Dry run
     }
 
-    // This method should exist but doesn't
+    // This method now exists
     const histogram = await (manager as any).getCleanupLatencyHistogram();
 
     expect(histogram).toHaveProperty('p50');
@@ -881,15 +924,15 @@ describe('WAL Retention Policy - Metrics [RED]', () => {
     expect(histogram).toHaveProperty('count');
   });
 
-  it.fails('should track WAL growth rate metrics', async () => {
-    // GAP: No growth rate tracking for capacity planning
+  it('should track WAL growth rate metrics', async () => {
+    // getGrowthStats is now implemented
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader } = await import('../reader.js');
 
     const reader = createWALReader(backend);
     const manager = createWALRetentionManager(backend, reader, null);
 
-    // This method should exist but doesn't
+    // This method now exists
     const growthStats = await (manager as any).getGrowthStats();
 
     expect(growthStats).toHaveProperty('bytesPerHour');

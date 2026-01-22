@@ -40,6 +40,9 @@ import type {
   TableSchema,
 } from './types.js';
 
+import { parseParameters } from '../statement/binding.js';
+import { createMissingNamedParamError } from '../errors/index.js';
+
 // =============================================================================
 // Server Types
 // =============================================================================
@@ -539,20 +542,35 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
   // ===========================================================================
 
   #convertNamedParams(request: QueryRequest): unknown[] {
-    // Convert named parameters to positional based on SQL parsing
-    // This is a simplified implementation - real implementation would parse SQL
+    // Convert named parameters to positional based on proper SQL parsing
+    // Uses parseParameters from binding.ts which respects string literals and comments
     if (!request.namedParams) return request.params ?? [];
 
-    const params: unknown[] = [];
     const namedParams = request.namedParams;
 
-    // Extract parameter names from SQL (e.g., :name, @name, $name)
-    const paramPattern = /[:@$](\w+)/g;
-    let match;
-    while ((match = paramPattern.exec(request.sql)) !== null) {
-      const paramName = match[1];
-      if (paramName in namedParams) {
+    // Parse the SQL to extract parameter tokens (respects string boundaries and comments)
+    const parsed = parseParameters(request.sql);
+
+    // If no named parameters in SQL, return positional params if provided
+    if (!parsed.hasNamedParameters) {
+      return request.params ?? [];
+    }
+
+    // Build positional params array from named params based on parsed tokens
+    const params: unknown[] = [];
+    for (const token of parsed.tokens) {
+      if (token.type === 'named') {
+        const paramName = token.key as string;
+        if (!(paramName in namedParams)) {
+          throw createMissingNamedParamError(paramName);
+        }
         params.push(namedParams[paramName]);
+      } else {
+        // For positional/numbered params, use from request.params if available
+        const index = (token.key as number) - 1;
+        if (request.params && index < request.params.length) {
+          params.push(request.params[index]);
+        }
       }
     }
 

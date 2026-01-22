@@ -23,6 +23,9 @@ import {
   type SavepointStack,
   type ApplyFunction,
   type HeldLock,
+  type TransactionTimeoutConfig,
+  type DurableObjectState,
+  type LongRunningTransactionLog,
   TransactionState,
   TransactionMode,
   IsolationLevel,
@@ -31,7 +34,14 @@ import {
   TransactionErrorCode,
   createTransactionLog,
   createSavepointStack,
+  DEFAULT_TIMEOUT_CONFIG,
 } from './types.js';
+import {
+  createTimeoutEnforcer,
+  checkTransactionTimeout,
+  type TransactionTimeoutEnforcer,
+} from './timeout.js';
+import type { LockManager } from './isolation.js';
 
 // =============================================================================
 // Transaction Manager Implementation
@@ -49,6 +59,24 @@ export interface TransactionManagerOptions {
   defaultLockTimeout?: number;
   /** Enable MVCC for snapshot isolation */
   enableMVCC?: boolean;
+  /** Durable Object state for alarm-based timeout enforcement */
+  doState?: DurableObjectState;
+  /** Timeout configuration */
+  timeoutConfig?: Partial<TransactionTimeoutConfig>;
+  /** Maximum number of timeout extensions allowed */
+  maxExtensions?: number;
+  /** Callback for timeout warnings */
+  onTimeoutWarning?: (txnId: TransactionId, remainingMs: number) => void;
+  /** Callback for transaction timeout */
+  onTimeout?: (txnId: TransactionId) => void;
+  /** Callback for long-running transaction logs */
+  onLongRunningTransaction?: (log: LongRunningTransactionLog) => void;
+  /** Whether to track queries for logging */
+  trackQueries?: boolean;
+  /** I/O operation timeout in milliseconds */
+  ioTimeoutMs?: number;
+  /** Lock manager for isolation */
+  lockManager?: LockManager;
 }
 
 /**
@@ -71,14 +99,43 @@ export interface TransactionManagerOptions {
  * await manager.commit();
  * ```
  */
+/**
+ * Extended transaction manager interface with timeout support
+ */
+export interface ExtendedTransactionManager extends TransactionManager {
+  /** Handle DO alarm for timeout enforcement */
+  handleAlarm(): Promise<void>;
+  /** Check if DO alarm support is enabled */
+  hasAlarmSupport(): boolean;
+  /** Get timeout configuration */
+  getTimeoutConfig(): TransactionTimeoutConfig;
+  /** Request timeout extension for current transaction */
+  requestExtension(txnId: TransactionId, additionalMs: number): boolean;
+  /** Get remaining time for current transaction */
+  getRemainingTime(txnId: TransactionId): number;
+  /** Get I/O timeout in milliseconds */
+  getIoTimeoutMs(): number;
+  /** Execute operation with I/O timeout */
+  executeWithIoTimeout<T>(operation: () => Promise<T>): Promise<T>;
+}
+
 export function createTransactionManager(
   options: TransactionManagerOptions = {}
-): TransactionManager {
+): ExtendedTransactionManager {
   const {
     walWriter,
     defaultIsolationLevel = IsolationLevel.SERIALIZABLE,
     defaultLockTimeout = 5000,
     enableMVCC = false,
+    doState,
+    timeoutConfig,
+    maxExtensions,
+    onTimeoutWarning,
+    onTimeout,
+    onLongRunningTransaction,
+    trackQueries,
+    ioTimeoutMs,
+    lockManager,
   } = options;
 
   // Current transaction state
@@ -87,6 +144,70 @@ export function createTransactionManager(
 
   // Active transactions tracking (for MVCC)
   const activeTransactions = new Set<TransactionId>();
+
+  // Merge timeout config with defaults
+  const effectiveTimeoutConfig: TransactionTimeoutConfig = {
+    ...DEFAULT_TIMEOUT_CONFIG,
+    ...timeoutConfig,
+  };
+
+  // Create timeout enforcer
+  const timeoutEnforcer = createTimeoutEnforcer({
+    config: effectiveTimeoutConfig,
+    doState,
+    maxExtensions,
+    onTimeoutWarning,
+    onTimeout,
+    onLongRunningTransaction,
+    trackQueries,
+    ioTimeoutMs,
+  });
+
+  // Set rollback function for timeout enforcer
+  timeoutEnforcer.setRollbackFn(async (txnId: TransactionId) => {
+    if (currentContext && currentContext.txnId === txnId) {
+      await performRollback(currentContext);
+    }
+  });
+
+  /**
+   * Perform rollback for a context (internal helper)
+   */
+  async function performRollback(context: TransactionContext): Promise<void> {
+    // Apply rollback for all logged operations that need undo
+    const undoableEntries = context.log.entries.filter(
+      (e) => e.op === 'INSERT' || e.op === 'UPDATE' || e.op === 'DELETE'
+    );
+
+    if (undoableEntries.length > 0 && applyFn) {
+      try {
+        await applyRollback(context.log, 0, context.log.entries.length);
+      } catch (error) {
+        // Log but continue with cleanup
+        console.error('Failed to apply rollback operations:', error);
+      }
+    }
+
+    // Write ROLLBACK to WAL
+    try {
+      await writeToWAL('ROLLBACK', context.txnId);
+    } catch (error) {
+      // Log but don't fail - rollback already applied in memory
+      console.error('Failed to write ROLLBACK to WAL:', error);
+    }
+
+    // Release locks if lock manager is available
+    if (lockManager) {
+      lockManager.releaseAll(context.txnId);
+    }
+
+    // Clear state
+    activeTransactions.delete(context.txnId);
+    timeoutEnforcer.unregisterTransaction(context.txnId);
+    if (currentContext === context) {
+      currentContext = null;
+    }
+  }
 
   /**
    * Create a new transaction context
@@ -204,7 +325,7 @@ export function createTransactionManager(
   }
 
   // Public interface
-  const manager: TransactionManager = {
+  const manager: ExtendedTransactionManager = {
     async begin(options: TransactionOptions = {}): Promise<TransactionContext> {
       if (currentContext !== null) {
         throw new TransactionError(
@@ -232,6 +353,17 @@ export function createTransactionManager(
         );
       }
 
+      // Register with timeout enforcer
+      const timeoutMs = options.timeoutMs ?? effectiveTimeoutConfig.defaultTimeoutMs;
+      timeoutEnforcer.registerTransaction(context.txnId, timeoutMs, context);
+
+      // Set held locks getter for logging
+      if (lockManager) {
+        timeoutEnforcer.setHeldLocksGetter(context.txnId, () =>
+          lockManager.getHeldLocks(context.txnId)
+        );
+      }
+
       return context;
     },
 
@@ -245,6 +377,9 @@ export function createTransactionManager(
 
       const context = currentContext;
 
+      // Check for timeout before commit
+      checkTransactionTimeout(context, timeoutEnforcer);
+
       // Write COMMIT to WAL
       let commitLsn: LSN;
       try {
@@ -257,6 +392,14 @@ export function createTransactionManager(
           error instanceof Error ? error : undefined
         );
       }
+
+      // Release locks if lock manager is available
+      if (lockManager) {
+        lockManager.releaseAll(context.txnId);
+      }
+
+      // Unregister from timeout enforcer
+      timeoutEnforcer.unregisterTransaction(context.txnId);
 
       // Clear state
       activeTransactions.delete(context.txnId);
@@ -308,6 +451,14 @@ export function createTransactionManager(
         // Log but don't fail - rollback already applied in memory
         console.error('Failed to write ROLLBACK to WAL:', error);
       }
+
+      // Release locks if lock manager is available
+      if (lockManager) {
+        lockManager.releaseAll(context.txnId);
+      }
+
+      // Unregister from timeout enforcer
+      timeoutEnforcer.unregisterTransaction(context.txnId);
 
       // Clear state
       activeTransactions.delete(context.txnId);
@@ -481,6 +632,9 @@ export function createTransactionManager(
         );
       }
 
+      // Check for timeout before operation
+      checkTransactionTimeout(currentContext, timeoutEnforcer);
+
       if (
         currentContext.readOnly &&
         (entry.op === 'INSERT' || entry.op === 'UPDATE' || entry.op === 'DELETE')
@@ -499,10 +653,42 @@ export function createTransactionManager(
       };
 
       currentContext.log.entries.push(logEntry);
+
+      // Track operation for long-running transaction logging
+      timeoutEnforcer.trackOperation(currentContext.txnId, logEntry);
     },
 
     setApplyFunction(fn: ApplyFunction): void {
       applyFn = fn;
+    },
+
+    // Extended methods for timeout support
+    async handleAlarm(): Promise<void> {
+      await timeoutEnforcer.handleAlarm();
+    },
+
+    hasAlarmSupport(): boolean {
+      return timeoutEnforcer.hasAlarmSupport();
+    },
+
+    getTimeoutConfig(): TransactionTimeoutConfig {
+      return timeoutEnforcer.getTimeoutConfig();
+    },
+
+    requestExtension(txnId: TransactionId, additionalMs: number): boolean {
+      return timeoutEnforcer.requestExtension(txnId, additionalMs);
+    },
+
+    getRemainingTime(txnId: TransactionId): number {
+      return timeoutEnforcer.getRemainingTime(txnId);
+    },
+
+    getIoTimeoutMs(): number {
+      return timeoutEnforcer.getIoTimeoutMs();
+    },
+
+    executeWithIoTimeout<T>(operation: () => Promise<T>): Promise<T> {
+      return timeoutEnforcer.executeWithIoTimeout(operation);
     },
   };
 

@@ -133,4 +133,13 @@ export {
   type RetentionWarning,
   type CleanupProgressEvent,
   type PolicyDecision,
+  // New types for WAL retention features
+  type ExpiredEntry,
+  type WALStats,
+  type TruncateResult,
+  type CompactWALResult,
+  type ForceCleanupOptions,
+  type ForceCleanupResult,
+  type CleanupLatencyHistogram,
+  type GrowthStats,
 } from './retention.js';

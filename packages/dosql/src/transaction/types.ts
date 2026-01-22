@@ -303,6 +303,10 @@ export interface TransactionContext {
   readOnly: boolean;
   /** Auto-commit flag (transaction ends after each statement) */
   autoCommit: boolean;
+  /** Timestamp when transaction expires (for timeout enforcement) */
+  expiresAt?: number;
+  /** Number of timeout extensions granted */
+  extensionCount?: number;
 }
 
 /**
@@ -319,6 +323,8 @@ export interface TransactionOptions {
   lockTimeout?: number;
   /** Custom transaction ID (auto-generated if not provided, branded type) */
   txnId?: TransactionId;
+  /** Transaction timeout in milliseconds */
+  timeoutMs?: number;
 }
 
 // =============================================================================
@@ -355,6 +361,10 @@ export enum TransactionErrorCode {
   WAL_FAILURE = 'TXN_WAL_FAILURE',
   /** Rollback failed */
   ROLLBACK_FAILED = 'TXN_ROLLBACK_FAILED',
+  /** Transaction timeout */
+  TIMEOUT = 'TXN_TIMEOUT',
+  /** I/O operation timeout */
+  IO_TIMEOUT = 'IO_TIMEOUT',
 }
 
 /**
@@ -478,4 +488,85 @@ export interface TransactionStats {
   avgDurationMs: number;
   /** Currently active transactions */
   activeCount: number;
+}
+
+// =============================================================================
+// Transaction Timeout Configuration
+// =============================================================================
+
+/**
+ * Configuration for transaction timeout enforcement
+ */
+export interface TransactionTimeoutConfig {
+  /** Default timeout for transactions in milliseconds */
+  defaultTimeoutMs: number;
+  /** Maximum allowed timeout in milliseconds */
+  maxTimeoutMs: number;
+  /** Grace period before hard timeout in milliseconds */
+  gracePeriodMs: number;
+  /** Threshold for warning logs in milliseconds */
+  warningThresholdMs: number;
+}
+
+/**
+ * Default timeout configuration
+ */
+export const DEFAULT_TIMEOUT_CONFIG: TransactionTimeoutConfig = {
+  defaultTimeoutMs: 30000,
+  maxTimeoutMs: 120000,
+  gracePeriodMs: 5000,
+  warningThresholdMs: 25000,
+};
+
+/**
+ * Warning level for long-running transaction logs
+ */
+export type WarningLevel = 'warning' | 'critical';
+
+/**
+ * Structured log entry for long-running transactions
+ */
+export interface LongRunningTransactionLog {
+  /** Transaction ID */
+  txnId: TransactionId;
+  /** Duration in milliseconds */
+  durationMs: number;
+  /** Transaction start timestamp */
+  startedAt: number;
+  /** Whether transaction is read-only */
+  readOnly: boolean;
+  /** Transaction isolation level */
+  isolationLevel: string;
+  /** Number of operations logged */
+  operationCount: number;
+  /** Warning severity level */
+  warningLevel: WarningLevel;
+  /** Operations in the transaction (if tracked) */
+  operations?: Array<{
+    op: TransactionLogOperation;
+    table: string;
+    timestamp: number;
+  }>;
+  /** Locks held by the transaction */
+  heldLocks?: HeldLock[];
+}
+
+/**
+ * Durable Object storage interface for alarm scheduling
+ */
+export interface DurableObjectStorage {
+  /** Set an alarm for a specific time */
+  setAlarm(scheduledTime: number | Date): Promise<void>;
+  /** Delete the current alarm */
+  deleteAlarm(): Promise<void>;
+  /** Get current alarm time */
+  getAlarm(): Promise<number | null>;
+}
+
+/**
+ * Durable Object state with storage
+ */
+export interface DurableObjectState {
+  /** Storage interface for alarms */
+  storage: DurableObjectStorage;
 }

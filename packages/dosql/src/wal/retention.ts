@@ -107,8 +107,12 @@ export interface RetentionPolicy {
   maxTotalSize?: string;
   /** Warning threshold (0-1), e.g., 0.8 means warn at 80% */
   warningThreshold?: number;
+  /** Size warning threshold (0-1) - alias for warningThreshold */
+  sizeWarningThreshold?: number;
   /** Callback for warnings */
   onWarning?: (warning: RetentionWarning) => void;
+  /** Callback for size warnings (current bytes, max bytes) */
+  onSizeWarning?: (current: number, max: number) => void;
 
   // ========== Entry count-based retention ==========
   /** Maximum total entry count */
@@ -503,6 +507,92 @@ export interface CheckpointInfo {
 }
 
 /**
+ * Expired entry information
+ */
+export interface ExpiredEntry {
+  lsn: bigint;
+  segmentId: string;
+  entryTimestamp: number;
+  age: number;
+  txnId: string;
+  table: string;
+  op: string;
+}
+
+/**
+ * WAL statistics
+ */
+export interface WALStats {
+  totalSegments: number;
+  totalEntries: number;
+  totalBytes: number;
+  oldestEntryTimestamp: number | null;
+  newestEntryTimestamp: number | null;
+  averageSegmentSize: number;
+  fragmentationRatio: number;
+  deadEntriesCount: number;
+  activeTransactionCount: number;
+}
+
+/**
+ * Truncate result
+ */
+export interface TruncateResult {
+  truncatedSegments: string[];
+  bytesFreed: number;
+  truncatedLSN: bigint;
+}
+
+/**
+ * Compact result extended
+ */
+export interface CompactWALResult {
+  segmentsCompacted: number;
+  entriesRemoved: number;
+  bytesReclaimed: number;
+}
+
+/**
+ * Force cleanup options
+ */
+export interface ForceCleanupOptions {
+  ignoreMinCount?: boolean;
+  ignoreSlots?: boolean;
+  ignoreReaders?: boolean;
+}
+
+/**
+ * Force cleanup result
+ */
+export interface ForceCleanupResult {
+  deleted: string[];
+  bytesFreed: number;
+}
+
+/**
+ * Cleanup latency histogram
+ */
+export interface CleanupLatencyHistogram {
+  p50: number;
+  p90: number;
+  p99: number;
+  min: number;
+  max: number;
+  avg: number;
+  count: number;
+}
+
+/**
+ * Growth statistics
+ */
+export interface GrowthStats {
+  bytesPerHour: number;
+  segmentsPerHour: number;
+  entriesPerHour: number;
+  estimatedTimeToLimit: number | null;
+}
+
+/**
  * WAL Retention Manager interface
  */
 export interface WALRetentionManager {
@@ -706,7 +796,7 @@ export function createWALRetentionManager(
   config: Partial<WALConfig> = {}
 ): WALRetentionManager & {
   // Extended methods for testing and advanced usage
-  getExpiredEntries(): Promise<any[]>;
+  getExpiredEntries(): Promise<ExpiredEntry[]>;
   getStorageStats(): Promise<StorageStats>;
   getEntryStats(): Promise<EntryStats>;
   getSegmentEntryStats(): Promise<SegmentEntryStats[]>;
@@ -734,6 +824,15 @@ export function createWALRetentionManager(
   registerActiveWriter(writer: WALWriter): void;
   parseSegmentLSN(segmentId: string): bigint;
   onWarning?: (warning: RetentionWarning) => void;
+  // New methods for WAL retention features
+  truncateWAL(beforeLSN: bigint): Promise<TruncateResult>;
+  compactWAL(): Promise<CompactWALResult>;
+  forceCleanup(options?: ForceCleanupOptions): Promise<ForceCleanupResult>;
+  getWALStats(): Promise<WALStats>;
+  getCleanupLatencyHistogram(): Promise<CleanupLatencyHistogram>;
+  getGrowthStats(): Promise<GrowthStats>;
+  registerCheckpointListener(checkpointMgr: any): void;
+  onSizeWarning?: (current: number, max: number) => void;
 } {
   // Validate policy
   validatePolicy(policy);
@@ -1347,8 +1446,8 @@ export function createWALRetentionManager(
 
     // ========== Extended methods ==========
 
-    async getExpiredEntries(): Promise<any[]> {
-      const entries: any[] = [];
+    async getExpiredEntries(): Promise<ExpiredEntry[]> {
+      const entries: ExpiredEntry[] = [];
       const now = Date.now();
       const maxAge = fullPolicy.retentionHours
         ? fullPolicy.retentionHours * 60 * 60 * 1000
@@ -1360,8 +1459,17 @@ export function createWALRetentionManager(
         if (!segment) continue;
 
         for (const entry of segment.entries) {
-          if (now - entry.timestamp > maxAge) {
-            entries.push(entry);
+          const age = now - entry.timestamp;
+          if (age > maxAge) {
+            entries.push({
+              lsn: entry.lsn,
+              segmentId,
+              entryTimestamp: entry.timestamp,
+              age,
+              txnId: entry.txnId,
+              table: entry.table,
+              op: entry.op,
+            });
           }
         }
       }
@@ -1811,6 +1919,339 @@ export function createWALRetentionManager(
     parseSegmentLSN,
 
     onWarning: fullPolicy.onWarning,
+
+    // ========== New methods for WAL retention features ==========
+
+    /**
+     * Truncate WAL before a given LSN
+     */
+    async truncateWAL(beforeLSN: bigint): Promise<TruncateResult> {
+      const result: TruncateResult = {
+        truncatedSegments: [],
+        bytesFreed: 0,
+        truncatedLSN: beforeLSN,
+      };
+
+      const segments = await reader.listSegments(false);
+
+      for (const segmentId of segments) {
+        const segment = await reader.readSegment(segmentId);
+        if (!segment) continue;
+
+        // Only delete segments whose endLSN is less than beforeLSN
+        if (segment.endLSN < beforeLSN) {
+          const path = `${fullConfig.segmentPrefix}${segmentId}`;
+          const data = await backend.read(path);
+          if (data) {
+            result.bytesFreed += data.length;
+          }
+          await backend.delete(path);
+          result.truncatedSegments.push(segmentId);
+        }
+      }
+
+      return result;
+    },
+
+    /**
+     * Compact WAL by removing rolled-back transaction entries
+     */
+    async compactWAL(): Promise<CompactWALResult> {
+      const result: CompactWALResult = {
+        segmentsCompacted: 0,
+        entriesRemoved: 0,
+        bytesReclaimed: 0,
+      };
+
+      const segments = await reader.listSegments(false);
+
+      // First pass: identify all rolled-back transaction IDs across all segments
+      const rolledBackTxns = new Set<string>();
+      for (const segmentId of segments) {
+        const segment = await reader.readSegment(segmentId);
+        if (!segment) continue;
+
+        for (const entry of segment.entries) {
+          if (entry.op === 'ROLLBACK') {
+            rolledBackTxns.add(entry.txnId);
+          }
+        }
+      }
+
+      // Second pass: compact each segment by removing rolled-back entries
+      for (const segmentId of segments) {
+        const segment = await reader.readSegment(segmentId);
+        if (!segment) continue;
+
+        const path = `${fullConfig.segmentPrefix}${segmentId}`;
+        const originalData = await backend.read(path);
+        if (!originalData) continue;
+
+        // Filter out entries belonging to rolled-back transactions
+        const keptEntries = segment.entries.filter(
+          (e) => !rolledBackTxns.has(e.txnId)
+        );
+
+        const removedCount = segment.entries.length - keptEntries.length;
+        if (removedCount === 0) continue;
+
+        // If all entries are removed, delete the segment
+        if (keptEntries.length === 0) {
+          await backend.delete(path);
+          result.segmentsCompacted++;
+          result.entriesRemoved += removedCount;
+          result.bytesReclaimed += originalData.length;
+          continue;
+        }
+
+        // Create compacted segment
+        const compactedSegment: WALSegment = {
+          ...segment,
+          entries: keptEntries,
+          endLSN: keptEntries[keptEntries.length - 1].lsn,
+        };
+
+        // Re-encode and write
+        const encoder = new (await import('./writer.js')).DefaultWALEncoder();
+        const newData = encoder.encodeSegment(compactedSegment);
+        compactedSegment.checksum = encoder.calculateChecksum(newData);
+        const finalData = encoder.encodeSegment(compactedSegment);
+
+        await backend.write(path, finalData);
+
+        result.segmentsCompacted++;
+        result.entriesRemoved += removedCount;
+        result.bytesReclaimed += originalData.length - finalData.length;
+      }
+
+      return result;
+    },
+
+    /**
+     * Force cleanup ignoring safety checks
+     */
+    async forceCleanup(options: ForceCleanupOptions = {}): Promise<ForceCleanupResult> {
+      const result: ForceCleanupResult = {
+        deleted: [],
+        bytesFreed: 0,
+      };
+
+      const segments = await reader.listSegments(false);
+
+      for (const segmentId of segments) {
+        const path = `${fullConfig.segmentPrefix}${segmentId}`;
+        const data = await backend.read(path);
+
+        if (data) {
+          result.bytesFreed += data.length;
+          await backend.delete(path);
+          result.deleted.push(segmentId);
+        }
+      }
+
+      return result;
+    },
+
+    /**
+     * Get comprehensive WAL statistics
+     */
+    async getWALStats(): Promise<WALStats> {
+      const segments = await reader.listSegments(false);
+      let totalBytes = 0;
+      let totalEntries = 0;
+      let oldestEntryTimestamp: number | null = null;
+      let newestEntryTimestamp: number | null = null;
+      let deadEntriesCount = 0;
+      const activeTransactions = new Set<string>();
+      const rolledBackTxns = new Set<string>();
+      const committedTxns = new Set<string>();
+
+      // First pass: identify transaction states and collect stats
+      for (const segmentId of segments) {
+        const segment = await reader.readSegment(segmentId);
+        if (!segment) continue;
+
+        const path = `${fullConfig.segmentPrefix}${segmentId}`;
+        const data = await backend.read(path);
+        if (data) {
+          totalBytes += data.length;
+        }
+
+        for (const entry of segment.entries) {
+          totalEntries++;
+
+          // Track timestamps
+          if (oldestEntryTimestamp === null || entry.timestamp < oldestEntryTimestamp) {
+            oldestEntryTimestamp = entry.timestamp;
+          }
+          if (newestEntryTimestamp === null || entry.timestamp > newestEntryTimestamp) {
+            newestEntryTimestamp = entry.timestamp;
+          }
+
+          // Track transaction states
+          if (entry.op === 'BEGIN') {
+            activeTransactions.add(entry.txnId);
+          } else if (entry.op === 'COMMIT') {
+            activeTransactions.delete(entry.txnId);
+            committedTxns.add(entry.txnId);
+          } else if (entry.op === 'ROLLBACK') {
+            activeTransactions.delete(entry.txnId);
+            rolledBackTxns.add(entry.txnId);
+          }
+        }
+      }
+
+      // Second pass: count dead entries (from rolled-back transactions)
+      for (const segmentId of segments) {
+        const segment = await reader.readSegment(segmentId);
+        if (!segment) continue;
+
+        for (const entry of segment.entries) {
+          if (rolledBackTxns.has(entry.txnId)) {
+            deadEntriesCount++;
+          }
+        }
+      }
+
+      const fragmentationRatio = totalEntries > 0 ? deadEntriesCount / totalEntries : 0;
+      const averageSegmentSize = segments.length > 0 ? totalBytes / segments.length : 0;
+
+      return {
+        totalSegments: segments.length,
+        totalEntries,
+        totalBytes,
+        oldestEntryTimestamp,
+        newestEntryTimestamp,
+        averageSegmentSize,
+        fragmentationRatio,
+        deadEntriesCount,
+        activeTransactionCount: activeTransactions.size,
+      };
+    },
+
+    /**
+     * Get cleanup latency histogram
+     */
+    async getCleanupLatencyHistogram(): Promise<CleanupLatencyHistogram> {
+      // Record cleanup duration for histogram
+      const latencies = cleanupHistory.map((r) => r.durationMs);
+
+      if (latencies.length === 0) {
+        return {
+          p50: 0,
+          p90: 0,
+          p99: 0,
+          min: 0,
+          max: 0,
+          avg: 0,
+          count: 0,
+        };
+      }
+
+      const sorted = [...latencies].sort((a, b) => a - b);
+      const count = sorted.length;
+
+      function percentile(p: number): number {
+        const index = Math.ceil((p / 100) * count) - 1;
+        return sorted[Math.max(0, Math.min(index, count - 1))];
+      }
+
+      return {
+        p50: percentile(50),
+        p90: percentile(90),
+        p99: percentile(99),
+        min: sorted[0],
+        max: sorted[count - 1],
+        avg: latencies.reduce((a, b) => a + b, 0) / count,
+        count,
+      };
+    },
+
+    /**
+     * Get WAL growth rate statistics
+     */
+    async getGrowthStats(): Promise<GrowthStats> {
+      // Calculate growth based on cleanup history and current stats
+      const stats = await manager.getStorageStats();
+      const history = cleanupHistory;
+
+      // If not enough history, return zeros
+      if (history.length < 2) {
+        return {
+          bytesPerHour: 0,
+          segmentsPerHour: 0,
+          entriesPerHour: 0,
+          estimatedTimeToLimit: null,
+        };
+      }
+
+      // Calculate time span and deltas from history
+      const oldestRecord = history[0];
+      const newestRecord = history[history.length - 1];
+      const timeSpanHours = (newestRecord.timestamp - oldestRecord.timestamp) / (1000 * 60 * 60);
+
+      if (timeSpanHours <= 0) {
+        return {
+          bytesPerHour: 0,
+          segmentsPerHour: 0,
+          entriesPerHour: 0,
+          estimatedTimeToLimit: null,
+        };
+      }
+
+      // Sum bytes freed as proxy for growth rate
+      const totalBytesFreed = history.reduce((sum, r) => sum + r.bytesFreed, 0);
+      const bytesPerHour = totalBytesFreed / timeSpanHours;
+
+      // Calculate entry stats
+      const entryStats = await manager.getEntryStats();
+
+      // Estimate time to limit
+      let estimatedTimeToLimit: number | null = null;
+      if (fullPolicy.maxTotalBytes && bytesPerHour > 0) {
+        const remainingBytes = fullPolicy.maxTotalBytes - stats.totalBytes;
+        if (remainingBytes > 0) {
+          estimatedTimeToLimit = remainingBytes / bytesPerHour;
+        } else {
+          estimatedTimeToLimit = 0;
+        }
+      }
+
+      return {
+        bytesPerHour,
+        segmentsPerHour: stats.segmentCount / Math.max(timeSpanHours, 1),
+        entriesPerHour: entryStats.totalEntries / Math.max(timeSpanHours, 1),
+        estimatedTimeToLimit,
+      };
+    },
+
+    /**
+     * Register checkpoint listener for auto-cleanup
+     */
+    registerCheckpointListener(checkpointMgr: any): void {
+      // Store original createCheckpoint method
+      const originalCreateCheckpoint = checkpointMgr.createCheckpoint.bind(checkpointMgr);
+
+      // Wrap createCheckpoint to trigger cleanup
+      checkpointMgr.createCheckpoint = async (lsn: bigint, activeTransactions: string[]) => {
+        const checkpoint = await originalCreateCheckpoint(lsn, activeTransactions);
+
+        // Trigger cleanup callback and cleanup if configured
+        if (fullPolicy.cleanupOnCheckpoint) {
+          if (fullPolicy.onCleanupTriggered) {
+            fullPolicy.onCleanupTriggered();
+          }
+          await manager.cleanup(false);
+        }
+
+        return checkpoint;
+      };
+    },
+
+    /**
+     * Size warning callback
+     */
+    onSizeWarning: fullPolicy.onSizeWarning,
   };
 
   return manager;

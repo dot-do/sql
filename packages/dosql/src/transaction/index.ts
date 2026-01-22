@@ -68,6 +68,14 @@ export {
   // Stats
   type TransactionStats,
 
+  // Timeout types
+  type TransactionTimeoutConfig,
+  type DurableObjectState,
+  type DurableObjectStorage,
+  type LongRunningTransactionLog,
+  type WarningLevel,
+  DEFAULT_TIMEOUT_CONFIG,
+
   // Factory functions
   createTransactionLog,
   createSavepointStack,
@@ -82,6 +90,7 @@ export {
   createAutoCommitManager,
   type TransactionManagerOptions,
   type TransactionResult,
+  type ExtendedTransactionManager,
 } from './manager.js';
 
 // Isolation
@@ -97,3 +106,11 @@ export {
   type IsolationEnforcer,
   type IsolationEnforcerOptions,
 } from './isolation.js';
+
+// Timeout enforcement
+export {
+  createTimeoutEnforcer,
+  checkTransactionTimeout,
+  type TransactionTimeoutEnforcer,
+  type TimeoutEnforcerOptions,
+} from './timeout.js';

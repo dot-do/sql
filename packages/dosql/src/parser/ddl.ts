@@ -19,6 +19,10 @@ import type {
   DropIndexStatement,
   CreateViewStatement,
   DropViewStatement,
+  CreateTriggerStatement,
+  DropTriggerStatement,
+  TriggerTiming,
+  TriggerEvent,
   ColumnDefinition,
   ColumnDataType,
   ColumnConstraint,
@@ -64,6 +68,7 @@ const KEYWORDS = new Set([
   'TABLE',
   'INDEX',
   'VIEW',
+  'TRIGGER',
   'DROP',
   'ALTER',
   'ADD',
@@ -83,6 +88,7 @@ const KEYWORDS = new Set([
   'ON',
   'DELETE',
   'UPDATE',
+  'INSERT',
   'CASCADE',
   'RESTRICT',
   'SET',
@@ -125,6 +131,20 @@ const KEYWORDS = new Set([
   'FAIL',
   'IGNORE',
   'ROLLBACK',
+  // Trigger keywords
+  'BEFORE',
+  'AFTER',
+  'INSTEAD',
+  'OF',
+  'FOR',
+  'EACH',
+  'ROW',
+  'WHEN',
+  'BEGIN',
+  'END',
+  'NEW',
+  'OLD',
+  'RAISE',
   // Data types
   'INTEGER',
   'INT',
@@ -1242,24 +1262,219 @@ class Parser {
   }
 
   /**
+   * Parse CREATE TRIGGER statement
+   *
+   * SQLite syntax:
+   * CREATE [TEMPORARY | TEMP] TRIGGER [IF NOT EXISTS] [schema.]trigger_name
+   * [BEFORE | AFTER | INSTEAD OF]
+   * [DELETE | INSERT | UPDATE [OF column_list]]
+   * ON table_name
+   * [FOR EACH ROW]
+   * [WHEN expr]
+   * BEGIN
+   *   trigger_body;
+   * END;
+   */
+  parseCreateTrigger(): CreateTriggerStatement {
+    let temporary = false;
+    let ifNotExists = false;
+
+    // TEMP/TEMPORARY (already consumed if present before reaching here)
+    // Need to check if we came from parseCreateTrigger via TEMPORARY TRIGGER path
+    if (this.consumeKeyword('TEMPORARY') || this.consumeKeyword('TEMP')) {
+      temporary = true;
+    }
+
+    this.expect('KEYWORD', 'TRIGGER');
+
+    // IF NOT EXISTS
+    if (this.consumeKeyword('IF')) {
+      this.expect('KEYWORD', 'NOT');
+      this.expect('KEYWORD', 'EXISTS');
+      ifNotExists = true;
+    }
+
+    const { schema, name } = this.parseQualifiedName();
+
+    // Parse timing: BEFORE | AFTER | INSTEAD OF
+    let timing: TriggerTiming;
+    if (this.consumeKeyword('BEFORE')) {
+      timing = 'BEFORE';
+    } else if (this.consumeKeyword('AFTER')) {
+      timing = 'AFTER';
+    } else if (this.consumeKeyword('INSTEAD')) {
+      this.expect('KEYWORD', 'OF');
+      timing = 'INSTEAD OF';
+    } else {
+      throw new Error('Expected BEFORE, AFTER, or INSTEAD OF in trigger definition');
+    }
+
+    // Parse event: DELETE | INSERT | UPDATE [OF column_list]
+    let event: TriggerEvent;
+    let columns: string[] | undefined;
+
+    if (this.consumeKeyword('DELETE')) {
+      event = 'DELETE';
+    } else if (this.consumeKeyword('INSERT')) {
+      event = 'INSERT';
+    } else if (this.consumeKeyword('UPDATE')) {
+      event = 'UPDATE';
+      // Optional OF column_list
+      if (this.consumeKeyword('OF')) {
+        columns = [];
+        do {
+          if (this.match('PUNCTUATION', ',')) this.advance();
+          columns.push(this.parseIdentifier());
+        } while (this.match('PUNCTUATION', ','));
+      }
+    } else {
+      throw new Error('Expected DELETE, INSERT, or UPDATE in trigger definition');
+    }
+
+    // ON table_name
+    this.expect('KEYWORD', 'ON');
+    const table = this.parseIdentifier();
+
+    // Optional FOR EACH ROW (defaults to true in SQLite)
+    let forEachRow = true;
+    if (this.consumeKeyword('FOR')) {
+      this.expect('KEYWORD', 'EACH');
+      this.expect('KEYWORD', 'ROW');
+      forEachRow = true;
+    }
+
+    // Optional WHEN condition
+    let when: string | undefined;
+    if (this.consumeKeyword('WHEN')) {
+      // Capture the WHEN expression until BEGIN
+      const whenParts: string[] = [];
+      while (this.current().type !== 'EOF' &&
+             !(this.match('KEYWORD', 'BEGIN'))) {
+        whenParts.push(this.advance().value);
+      }
+      when = whenParts.join(' ').trim();
+    }
+
+    // BEGIN ... END block
+    this.expect('KEYWORD', 'BEGIN');
+
+    // Parse trigger body statements
+    // Need to handle nested BEGIN/END and CASE/END pairs
+    const body: string[] = [];
+    let currentStatement: string[] = [];
+    let nestedLevel = 0; // Track nested BEGIN or CASE blocks
+
+    while (this.current().type !== 'EOF') {
+      const token = this.current();
+      const upperValue = token.value.toUpperCase();
+
+      // Track nested constructs that use END
+      if (upperValue === 'BEGIN' || upperValue === 'CASE') {
+        nestedLevel++;
+        currentStatement.push(token.value);
+        this.advance();
+        continue;
+      }
+
+      // Check for END - could be nested or the trigger's END
+      if (this.match('KEYWORD', 'END')) {
+        if (nestedLevel > 0) {
+          // This END belongs to a nested construct
+          nestedLevel--;
+          currentStatement.push(token.value);
+          this.advance();
+          continue;
+        } else {
+          // This is the trigger's END - stop parsing body
+          break;
+        }
+      }
+
+      if (token.value === ';') {
+        // End of statement
+        if (currentStatement.length > 0) {
+          body.push(currentStatement.join(' ').trim());
+          currentStatement = [];
+        }
+        this.advance();
+      } else {
+        currentStatement.push(token.value);
+        this.advance();
+      }
+    }
+
+    // Handle any remaining statement
+    if (currentStatement.length > 0) {
+      body.push(currentStatement.join(' ').trim());
+    }
+
+    this.expect('KEYWORD', 'END');
+
+    // Optional trailing semicolon
+    if (this.match('PUNCTUATION', ';')) {
+      this.advance();
+    }
+
+    return {
+      type: 'CREATE TRIGGER',
+      name,
+      schema,
+      temporary,
+      ifNotExists,
+      timing,
+      event,
+      columns,
+      table,
+      forEachRow,
+      when,
+      body,
+    };
+  }
+
+  /**
+   * Parse DROP TRIGGER statement
+   */
+  parseDropTrigger(): DropTriggerStatement {
+    this.expect('KEYWORD', 'TRIGGER');
+
+    let ifExists = false;
+    if (this.consumeKeyword('IF')) {
+      this.expect('KEYWORD', 'EXISTS');
+      ifExists = true;
+    }
+
+    const { schema, name } = this.parseQualifiedName();
+
+    return {
+      type: 'DROP TRIGGER',
+      name,
+      schema,
+      ifExists,
+    };
+  }
+
+  /**
    * Parse any DDL statement
    */
   parse(): DDLStatement {
     const token = this.current();
 
     if (this.consumeKeyword('CREATE')) {
-      // Could be CREATE TABLE, CREATE INDEX, CREATE VIEW
+      // Could be CREATE TABLE, CREATE INDEX, CREATE VIEW, CREATE TRIGGER
       const nextToken = this.current();
       const nextUpper = nextToken.value.toUpperCase();
 
-      // Handle TEMPORARY/TEMP - need to look ahead to determine if it's TABLE or VIEW
+      // Handle TEMPORARY/TEMP - need to look ahead to determine if it's TABLE, VIEW, or TRIGGER
       if (nextUpper === 'TEMPORARY' || nextUpper === 'TEMP') {
         const afterTemp = this.peek();
         const afterTempUpper = afterTemp.value.toUpperCase();
         if (afterTempUpper === 'VIEW') {
           return this.parseCreateView();
         }
-        // Default to TABLE for TEMPORARY without VIEW
+        if (afterTempUpper === 'TRIGGER') {
+          return this.parseCreateTrigger();
+        }
+        // Default to TABLE for TEMPORARY without VIEW/TRIGGER
         return this.parseCreateTable();
       }
 
@@ -1273,6 +1488,10 @@ class Parser {
 
       if (nextUpper === 'VIEW') {
         return this.parseCreateView();
+      }
+
+      if (nextUpper === 'TRIGGER') {
+        return this.parseCreateTrigger();
       }
 
       throw new Error(`Unexpected token after CREATE: ${nextToken.value}`);
@@ -1291,6 +1510,10 @@ class Parser {
 
       if (nextToken.value.toUpperCase() === 'VIEW') {
         return this.parseDropView();
+      }
+
+      if (nextToken.value.toUpperCase() === 'TRIGGER') {
+        return this.parseDropTrigger();
       }
 
       throw new Error(`Unexpected token after DROP: ${nextToken.value}`);

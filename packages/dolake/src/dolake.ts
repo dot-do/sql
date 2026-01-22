@@ -61,6 +61,11 @@ import {
 } from './iceberg.js';
 import { RestCatalogHandler } from './catalog.js';
 import {
+  serialize,
+  bigintReviver,
+  serializeMessage,
+} from './serialization.js';
+import {
   CompactionManager,
   type CompactionConfig,
   type CompactionResult,
@@ -759,7 +764,7 @@ export class DoLake implements DurableObject {
     attachment.lastAckSequence = message.lastAckSequence;
     ws.serializeAttachment(attachment);
 
-    ws.send(JSON.stringify({
+    ws.send(serialize({
       type: 'pong',
       timestamp: message.timestamp,
       serverTime: Date.now(),
@@ -777,7 +782,7 @@ export class DoLake implements DurableObject {
     const trigger = message.reason === 'manual' ? 'manual' : 'threshold_events';
     const result = await this.flush(trigger);
 
-    ws.send(JSON.stringify({
+    ws.send(serialize({
       type: 'flush_response',
       timestamp: Date.now(),
       correlationId: message.correlationId,
@@ -804,7 +809,7 @@ export class DoLake implements DurableObject {
       status,
       details,
     };
-    ws.send(JSON.stringify(message));
+    ws.send(serialize(message));
   }
 
   private sendAckWithRateLimit(
@@ -824,7 +829,7 @@ export class DoLake implements DurableObject {
       details,
       rateLimit,
     };
-    ws.send(JSON.stringify(message));
+    ws.send(serialize(message));
   }
 
   private sendNack(
@@ -844,7 +849,7 @@ export class DoLake implements DurableObject {
       shouldRetry,
       retryDelayMs,
     };
-    ws.send(JSON.stringify(message));
+    ws.send(serialize(message));
   }
 
   private sendNackWithRateLimit(
@@ -870,7 +875,7 @@ export class DoLake implements DurableObject {
     if (rateLimit) {
       (message as any).rateLimit = rateLimit;
     }
-    ws.send(JSON.stringify(message));
+    ws.send(serialize(message));
   }
 
   /**
@@ -899,7 +904,7 @@ export class DoLake implements DurableObject {
       actualSize,
       receivedSize: actualSize,
     };
-    ws.send(JSON.stringify(message));
+    ws.send(serialize(message));
   }
 
   private sendStatus(ws: WebSocket): void {
@@ -915,7 +920,7 @@ export class DoLake implements DurableObject {
       lastFlushTime: undefined,
       nextFlushTime: Date.now() + this.buffer.getTimeUntilFlush(),
     };
-    ws.send(JSON.stringify(message));
+    ws.send(serialize(message));
   }
 
   // ===========================================================================
@@ -1298,13 +1303,13 @@ export class DoLake implements DurableObject {
    * Throws MessageValidationError for invalid messages.
    */
   private decodeMessage(message: ArrayBuffer | string): ValidatedClientRpcMessage {
-    // Parse JSON
+    // Parse JSON with bigint support
     let raw: unknown;
     try {
       if (typeof message === 'string') {
-        raw = JSON.parse(message);
+        raw = JSON.parse(message, bigintReviver);
       } else {
-        raw = JSON.parse(new TextDecoder().decode(message));
+        raw = JSON.parse(new TextDecoder().decode(message), bigintReviver);
       }
     } catch (error) {
       throw new MessageValidationError(
