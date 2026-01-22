@@ -24,6 +24,23 @@ export {
   createStatementHash,
   createShardId,
 
+  // LSN utilities
+  compareLSN,
+  incrementLSN,
+  lsnValue,
+
+  // Type guards for validation
+  isValidLSN,
+  isValidTransactionId,
+  isValidShardId,
+  isValidStatementHash,
+
+  // Dev mode configuration
+  setDevMode,
+  isDevMode,
+  setStrictMode,
+  isStrictMode,
+
   // SQL Value Types
   type SQLValue,
 
@@ -99,6 +116,12 @@ export {
   clientToServerCDCEvent,
   responseToResult,
   resultToResponse,
+
+  // Retry Types
+  type RetryConfig,
+  DEFAULT_RETRY_CONFIG,
+  isRetryConfig,
+  createRetryConfig,
 } from '@dotdo/shared-types';
 
 // =============================================================================

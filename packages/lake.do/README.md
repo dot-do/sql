@@ -1,8 +1,16 @@
+> **Developer Preview** - This package is under active development. APIs may change. Not recommended for production use.
+
 # @dotdo/lake.do
 
-> **Pre-release Software**: This is v0.1.0. APIs may change. Not recommended for production use without thorough testing.
-
 Client SDK for DoLake - Lakehouse on Cloudflare Workers.
+
+## Status
+
+| Property | Value |
+|----------|-------|
+| Current version | 0.1.0-alpha |
+| Stability | Experimental |
+| Breaking changes | Expected before 1.0 |
 
 ## Stability
 

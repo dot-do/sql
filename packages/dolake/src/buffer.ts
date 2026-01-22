@@ -14,6 +14,11 @@ import {
   generateBatchId,
   BufferOverflowError,
   getNumericTimestamp,
+  CURRENT_SCHEMA_VERSION,
+  MIN_SUPPORTED_VERSION,
+  SCHEMA_VERSION_HISTORY,
+  BREAKING_CHANGES,
+  VersionMismatchError,
 } from './types.js';
 import { TIMEOUTS, THRESHOLDS, BUFFER } from './constants.js';
 
@@ -26,7 +31,7 @@ import { TIMEOUTS, THRESHOLDS, BUFFER } from './constants.js';
  */
 export interface SourceConnectionState {
   sourceDoId: string;
-  sourceShardName?: string;
+  sourceShardName?: string | undefined;
   lastReceivedSequence: number;
   lastAckedSequence: number;
   connectedAt: number;
@@ -84,9 +89,11 @@ export interface DedupStats {
 // =============================================================================
 
 /**
- * Serializable buffer snapshot
+ * Serializable buffer snapshot with schema versioning
  */
 export interface BufferSnapshot {
+  /** Schema version for forward/backward compatibility */
+  version: number;
   batches: BufferedBatch[];
   sourceStates: Array<[string, SourceConnectionState]>;
   partitionBuffers: Array<[string, PartitionBuffer]>;
@@ -446,7 +453,7 @@ export class CDCBufferManager {
         events.push(...batch.events);
       }
     }
-    return events.sort((a, b) => a.timestamp - b.timestamp);
+    return events.sort((a, b) => getNumericTimestamp(a.timestamp) - getNumericTimestamp(b.timestamp));
   }
 
   /**
@@ -589,7 +596,7 @@ export class CDCBufferManager {
     // Rough estimate: JSON serialization + overhead
     let size = BUFFER.EVENT_SIZE_BASE_OVERHEAD;
     size += event.table.length;
-    size += event.rowId.length;
+    if (event.rowId) size += event.rowId.length;
     if (event.before) size += JSON.stringify(event.before).length;
     if (event.after) size += JSON.stringify(event.after).length;
     if (event.metadata) size += JSON.stringify(event.metadata).length;
@@ -605,6 +612,7 @@ export class CDCBufferManager {
    */
   serialize(): BufferSnapshot {
     return {
+      version: CURRENT_SCHEMA_VERSION,
       batches: Array.from(this.batches.values()),
       sourceStates: Array.from(this.sourceStates.entries()),
       partitionBuffers: Array.from(this.partitionBuffers.entries()),
@@ -618,41 +626,161 @@ export class CDCBufferManager {
   }
 
   /**
-   * Restore buffer from snapshot
+   * Restore buffer from snapshot with version validation
    */
   static restore(
-    snapshot: BufferSnapshot,
+    snapshot: BufferSnapshot | Omit<BufferSnapshot, 'version'>,
     config: Partial<DoLakeConfig> = {}
   ): CDCBufferManager {
+    // Validate and migrate version
+    const validatedSnapshot = CDCBufferManager.validateAndMigrateSnapshot(snapshot);
+
     const manager = new CDCBufferManager(config);
 
     // Restore batches
-    for (const batch of snapshot.batches) {
+    for (const batch of validatedSnapshot.batches) {
       manager.batches.set(batch.batchId, batch);
     }
 
     // Restore source states
-    for (const [id, state] of snapshot.sourceStates) {
+    for (const [id, state] of validatedSnapshot.sourceStates) {
       manager.sourceStates.set(id, state);
     }
 
     // Restore partition buffers
-    for (const [key, buffer] of snapshot.partitionBuffers) {
+    for (const [key, buffer] of validatedSnapshot.partitionBuffers) {
       manager.partitionBuffers.set(key, buffer);
     }
 
     // Restore dedup entries
-    for (const [key, timestamp] of snapshot.dedupEntries) {
+    for (const [key, timestamp] of validatedSnapshot.dedupEntries) {
       manager.dedupSet.set(key, timestamp);
     }
 
     // Restore stats
-    manager.totalEventsReceived = snapshot.stats.totalEventsReceived;
-    manager.totalBatchesReceived = snapshot.stats.totalBatchesReceived;
-    manager.lastFlushTime = snapshot.stats.lastFlushTime;
+    manager.totalEventsReceived = validatedSnapshot.stats.totalEventsReceived;
+    manager.totalBatchesReceived = validatedSnapshot.stats.totalBatchesReceived;
+    manager.lastFlushTime = validatedSnapshot.stats.lastFlushTime;
 
     return manager;
   }
+
+  /**
+   * Validate snapshot version and migrate if necessary
+   */
+  private static validateAndMigrateSnapshot(
+    snapshot: BufferSnapshot | Omit<BufferSnapshot, 'version'>
+  ): BufferSnapshot {
+    // Get version from snapshot, treating missing as v0 (unversioned)
+    const snapshotVersion = 'version' in snapshot ? snapshot.version : 0;
+
+    // Validate version is a positive integer
+    if (
+      snapshotVersion === null ||
+      snapshotVersion === undefined ||
+      typeof snapshotVersion !== 'number' ||
+      !Number.isInteger(snapshotVersion) ||
+      snapshotVersion < 0
+    ) {
+      throw new VersionMismatchError(
+        `Invalid version: expected a non-negative integer, got ${JSON.stringify(snapshotVersion)}`,
+        typeof snapshotVersion === 'number' ? snapshotVersion : -1,
+        CURRENT_SCHEMA_VERSION,
+        MIN_SUPPORTED_VERSION
+      );
+    }
+
+    // Check for future versions we don't support
+    if (snapshotVersion > CURRENT_SCHEMA_VERSION) {
+      throw new VersionMismatchError(
+        `Unsupported snapshot version ${snapshotVersion}. Current version is ${CURRENT_SCHEMA_VERSION}. ` +
+        `Please upgrade to a newer version that supports schema version ${snapshotVersion}.`,
+        snapshotVersion,
+        CURRENT_SCHEMA_VERSION,
+        MIN_SUPPORTED_VERSION
+      );
+    }
+
+    // Check for versions below minimum supported
+    if (snapshotVersion < MIN_SUPPORTED_VERSION) {
+      throw new VersionMismatchError(
+        `Snapshot version ${snapshotVersion} is too old. Minimum supported version is ${MIN_SUPPORTED_VERSION}.`,
+        snapshotVersion,
+        CURRENT_SCHEMA_VERSION,
+        MIN_SUPPORTED_VERSION
+      );
+    }
+
+    // Migrate snapshot if needed
+    return CDCBufferManager.migrateSnapshot(snapshot as BufferSnapshot, snapshotVersion);
+  }
+
+  /**
+   * Migrate snapshot from one version to current
+   */
+  static migrateSnapshot(
+    snapshot: BufferSnapshot | Omit<BufferSnapshot, 'version'>,
+    targetVersion: number = CURRENT_SCHEMA_VERSION
+  ): BufferSnapshot {
+    let currentVersion = 'version' in snapshot ? snapshot.version : 0;
+    let result = { ...snapshot } as BufferSnapshot;
+
+    // Apply migrations sequentially
+    while (currentVersion < targetVersion) {
+      switch (currentVersion) {
+        case 0:
+          // Migrate from v0 (unversioned) to v1
+          result = {
+            ...result,
+            version: 1,
+          };
+          currentVersion = 1;
+          break;
+        default:
+          // No migration needed for this version step
+          currentVersion++;
+          break;
+      }
+    }
+
+    // Ensure version is set to target
+    result.version = targetVersion;
+    return result;
+  }
+
+  /**
+   * Check if a version is compatible with the current reader
+   */
+  static isVersionCompatible(version: number): boolean {
+    return version >= MIN_SUPPORTED_VERSION && version <= CURRENT_SCHEMA_VERSION;
+  }
+
+  /**
+   * Get the current schema version
+   */
+  getSchemaVersion(): number {
+    return CURRENT_SCHEMA_VERSION;
+  }
+
+  /**
+   * Static schema version constant
+   */
+  static readonly SCHEMA_VERSION = CURRENT_SCHEMA_VERSION;
+
+  /**
+   * Static minimum supported version constant
+   */
+  static readonly MIN_SUPPORTED_VERSION = MIN_SUPPORTED_VERSION;
+
+  /**
+   * Static schema version history
+   */
+  static readonly SCHEMA_VERSION_HISTORY = SCHEMA_VERSION_HISTORY;
+
+  /**
+   * Static breaking changes documentation
+   */
+  static readonly BREAKING_CHANGES = BREAKING_CHANGES;
 
   /**
    * Clear all buffer data

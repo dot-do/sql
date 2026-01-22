@@ -285,11 +285,37 @@ export function defineProcedure<DB extends DatabaseSchema>() {
     handler: (...args: [...Args, FunctionalContext<DB>]) => R | Promise<R>,
     options: DefineProceduresOptions<DB>
   ): (...args: Args) => Promise<Awaited<R>> {
-    const procedures = defineProcedures<DB, { [K in typeof name]: typeof handler }>(
-      { [name]: handler } as any,
-      options
-    );
-    return procedures[name] as any;
+    const { db, registry, env = {} } = options;
+
+    // Create the context that will be passed to the procedure
+    const createContext = (): FunctionalContext<DB> => ({
+      db,
+      env,
+      requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    });
+
+    // Create the callable procedure function
+    const procedure = async (...args: Args): Promise<Awaited<R>> => {
+      const ctx = createContext();
+      // Call the handler with args followed by context
+      return handler(...args, ctx) as Promise<Awaited<R>>;
+    };
+
+    // Optionally register with the procedure registry
+    if (registry) {
+      const code = generateProcedureCode(name, handler);
+      registry.register({
+        name,
+        code,
+        metadata: {
+          description: `Functional procedure: ${name}`,
+        },
+      }).catch(err => {
+        console.warn(`Failed to register procedure '${name}':`, err);
+      });
+    }
+
+    return procedure;
   };
 }
 
@@ -376,22 +402,22 @@ export type StreamingProc<
  */
 export function defineStreamingProcedure<DB extends DatabaseSchema>() {
   return function <Args extends unknown[], T>(
-    name: string,
+    _name: string,
     handler: (...args: [...Args, FunctionalContext<DB>]) => AsyncIterable<T>,
     options: DefineProceduresOptions<DB>
   ): (...args: Args) => AsyncIterable<T> {
     const { db, env = {} } = options;
 
-    return function* (...args: Args): any {
+    return (...args: Args): AsyncIterable<T> => {
       const ctx: FunctionalContext<DB> = {
         db,
         env,
         requestId: `req_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
       };
 
-      // Return the async generator from the handler
+      // Return the async iterable from the handler directly
       return handler(...args, ctx);
-    } as any;
+    };
   };
 }
 
@@ -600,7 +626,8 @@ export function withRetry<
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        return await (handler as any)(...args);
+        // handler expects [...Args, FunctionalContext<DB>] which matches args
+        return await handler(...args);
       } catch (error) {
         lastError = error;
 

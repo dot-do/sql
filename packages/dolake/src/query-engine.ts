@@ -265,8 +265,9 @@ export class QueryEngine {
 
     // Check if GROUP BY uses partition key (for parallel execution)
     const groupByMatch = sql.match(/GROUP\s+BY\s+(\w+)/i);
-    const canPartitionParallel = groupByMatch ? partitionFields.has(groupByMatch[1]) : false;
-    const shuffleRequired = groupByMatch && !canPartitionParallel;
+    const groupByField = groupByMatch ? groupByMatch[1] : undefined;
+    const canPartitionParallel = groupByField ? partitionFields.has(groupByField) : false;
+    const shuffleRequired = groupByMatch !== null && !canPartitionParallel;
 
     const pruningRatio = allPartitions.length > 0
       ? pruned.length / allPartitions.length
@@ -280,7 +281,7 @@ export class QueryEngine {
       filesSkippedByStats,
       totalFilesConsidered,
       canPartitionParallel,
-      shuffleRequired: shuffleRequired ?? undefined,
+      shuffleRequired,
     };
   }
 
@@ -319,7 +320,7 @@ export class QueryEngine {
     if (joinMatch) {
       // Check if join is on partition key
       const onMatch = sql.match(/ON\s+(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)/i);
-      if (onMatch) {
+      if (onMatch && onMatch[2] && onMatch[4]) {
         const leftField = onMatch[2];
         const rightField = onMatch[4];
 
@@ -499,6 +500,7 @@ export class QueryEngine {
         }
 
         const row = iter.rows[iter.index];
+        if (!row) continue;
         const value = row[orderByField];
 
         if (minValue === null || (minValue != null && value != null && value < minValue)) {
@@ -511,7 +513,10 @@ export class QueryEngine {
         break; // All iterators exhausted
       }
 
-      result.push(minIterator.rows[minIterator.index]);
+      const nextRow = minIterator.rows[minIterator.index];
+      if (nextRow) {
+        result.push(nextRow);
+      }
       minIterator.index++;
     }
 
@@ -621,7 +626,7 @@ export function parseDateRange(
 ): { start: string | null; end: string | null } {
   // Match BETWEEN
   const betweenMatch = sql.match(/day\s+BETWEEN\s+'([^']+)'\s+AND\s+'([^']+)'/i);
-  if (betweenMatch) {
+  if (betweenMatch && betweenMatch[1] && betweenMatch[2]) {
     return { start: betweenMatch[1], end: betweenMatch[2] };
   }
 

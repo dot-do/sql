@@ -117,7 +117,24 @@
  * @public
  * @stability stable
  */
-export { DoLakeClient, LakeError, createLakeClient } from './client.js';
+export {
+  DoLakeClient,
+  LakeError,
+  ConnectionError,
+  QueryError,
+  createLakeClient,
+} from './client.js';
+
+/**
+ * Event types for client connection lifecycle.
+ *
+ * @see {@link LakeClientEventType} - Union of event type strings
+ * @see {@link LakeClientEventHandler} - Event handler function type
+ *
+ * @public
+ * @stability stable
+ */
+export type { LakeClientEventType, LakeClientEventHandler } from './client.js';
 
 /**
  * Configuration types for client initialization.
@@ -128,7 +145,9 @@ export { DoLakeClient, LakeError, createLakeClient } from './client.js';
  * @public
  * @stability stable
  */
-export type { LakeClientConfig, RetryConfig } from './client.js';
+export type { LakeClientConfig } from './client.js';
+export type { RetryConfig } from './types.js';
+export { DEFAULT_RETRY_CONFIG, isRetryConfig, createRetryConfig } from './types.js';
 
 // =============================================================================
 // Stable Type Exports

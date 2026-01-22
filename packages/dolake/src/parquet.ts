@@ -656,6 +656,9 @@ function encodeRowGroup(
     const column = columns[i];
     const field = schema.fields[i];
 
+    // Skip if field or column is undefined
+    if (!field || !column) continue;
+
     // Encode column data
     const encodedColumn = encodeColumn(column, field);
     columnChunks.push(encodedColumn);
@@ -739,6 +742,7 @@ export function createDataFile(
 
   for (let i = 0; i < result.schema.fields.length; i++) {
     const field = result.schema.fields[i];
+    if (!field) continue;
     const stats = result.columnStats.get(field.name);
 
     if (stats) {

@@ -350,7 +350,7 @@ export interface WALCapturer {
   /** Get current capture state */
   getState(): CaptureState;
   /** Set capture position (for resuming) */
-  setPosition(lsn: bigint): void;
+  setPosition(lsn: LSN): void;
   /** Stop capturing */
   stop(): void;
 }

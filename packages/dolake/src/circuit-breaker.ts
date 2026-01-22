@@ -119,7 +119,7 @@ export const DEFAULT_CIRCUIT_BREAKER_CONFIG: CircuitBreakerConfig = {
  */
 export class R2CircuitBreaker {
   private readonly config: CircuitBreakerConfig;
-  private readonly storage?: DurableObjectStorage;
+  private readonly storage?: DurableObjectStorage | undefined;
   private readonly storageKey: string;
 
   // State
@@ -455,7 +455,7 @@ export class R2CircuitBreaker {
 export class CircuitBreakerManager {
   private readonly circuits: Map<string, R2CircuitBreaker> = new Map();
   private readonly config: CircuitBreakerConfig;
-  private readonly storage?: DurableObjectStorage;
+  private readonly storage?: DurableObjectStorage | undefined;
 
   constructor(
     config: Partial<CircuitBreakerConfig> = {},

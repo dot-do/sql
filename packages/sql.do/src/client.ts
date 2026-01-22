@@ -20,8 +20,9 @@ import type {
   RPCError,
   StatementHash,
   IdempotencyConfig,
+  RetryConfig,
 } from './types.js';
-import { createTransactionId, createLSN, createStatementHash, DEFAULT_IDEMPOTENCY_CONFIG } from './types.js';
+import { createTransactionId, createLSN, createStatementHash, DEFAULT_IDEMPOTENCY_CONFIG, DEFAULT_RETRY_CONFIG } from './types.js';
 
 // =============================================================================
 // Idempotency Key Generation
@@ -133,6 +134,200 @@ export function isMutationQuery(sql: string): boolean {
 }
 
 // =============================================================================
+// LRU Cache with TTL Support
+// =============================================================================
+
+/**
+ * Entry in the LRU cache with timestamp metadata
+ * @internal
+ */
+interface LRUCacheEntry<T> {
+  value: T;
+  createdAt: number;
+  lastAccessedAt: number;
+}
+
+/**
+ * Statistics for the idempotency cache
+ * @public
+ */
+export interface IdempotencyCacheStats {
+  /** Current number of entries in the cache */
+  size: number;
+  /** Number of cache hits */
+  hits: number;
+  /** Number of cache misses */
+  misses: number;
+  /** Number of evictions due to LRU or TTL */
+  evictions: number;
+  /** Maximum configured cache size */
+  maxSize: number;
+  /** TTL in milliseconds */
+  ttlMs: number;
+}
+
+/**
+ * LRU Cache with TTL support for idempotency keys.
+ *
+ * Uses a Map to maintain insertion order (for LRU tracking) and
+ * adds TTL-based expiration for entries.
+ *
+ * @internal
+ */
+class LRUCache<K, V> {
+  private cache = new Map<K, LRUCacheEntry<V>>();
+  private hits = 0;
+  private misses = 0;
+  private evictions = 0;
+
+  constructor(
+    private maxSize: number,
+    private ttlMs: number
+  ) {}
+
+  /**
+   * Get a value from the cache, updating its access time if found
+   */
+  get(key: K): V | undefined {
+    const entry = this.cache.get(key);
+    if (!entry) {
+      this.misses++;
+      return undefined;
+    }
+
+    // Check if entry has expired
+    const now = Date.now();
+    if (now - entry.createdAt > this.ttlMs) {
+      this.cache.delete(key);
+      this.evictions++;
+      this.misses++;
+      return undefined;
+    }
+
+    // Update last accessed time and move to end (most recently used)
+    entry.lastAccessedAt = now;
+    this.cache.delete(key);
+    this.cache.set(key, entry);
+    this.hits++;
+    return entry.value;
+  }
+
+  /**
+   * Set a value in the cache
+   */
+  set(key: K, value: V): void {
+    const now = Date.now();
+
+    // If key exists, delete it first to update position
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    }
+
+    // Evict oldest entries if at capacity
+    while (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.cache.delete(oldestKey);
+        this.evictions++;
+      }
+    }
+
+    this.cache.set(key, {
+      value,
+      createdAt: now,
+      lastAccessedAt: now,
+    });
+  }
+
+  /**
+   * Check if a key exists (without updating access time)
+   */
+  has(key: K): boolean {
+    const entry = this.cache.get(key);
+    if (!entry) return false;
+
+    // Check if entry has expired
+    if (Date.now() - entry.createdAt > this.ttlMs) {
+      this.cache.delete(key);
+      this.evictions++;
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Delete a key from the cache
+   */
+  delete(key: K): boolean {
+    return this.cache.delete(key);
+  }
+
+  /**
+   * Get current cache size
+   */
+  get size(): number {
+    return this.cache.size;
+  }
+
+  /**
+   * Clear all entries from the cache
+   */
+  clear(): void {
+    this.cache.clear();
+  }
+
+  /**
+   * Cleanup expired entries and return count of removed entries
+   */
+  cleanup(): number {
+    const now = Date.now();
+    let removed = 0;
+
+    for (const [key, entry] of this.cache) {
+      if (now - entry.createdAt > this.ttlMs) {
+        this.cache.delete(key);
+        this.evictions++;
+        removed++;
+      }
+    }
+
+    return removed;
+  }
+
+  /**
+   * Get cache statistics
+   */
+  getStats(): { hits: number; misses: number; evictions: number; size: number; maxSize: number; ttlMs: number } {
+    return {
+      hits: this.hits,
+      misses: this.misses,
+      evictions: this.evictions,
+      size: this.cache.size,
+      maxSize: this.maxSize,
+      ttlMs: this.ttlMs,
+    };
+  }
+
+  /**
+   * Update configuration
+   */
+  updateConfig(maxSize: number, ttlMs: number): void {
+    this.maxSize = maxSize;
+    this.ttlMs = ttlMs;
+
+    // Evict if over new max size
+    while (this.cache.size > this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.cache.delete(oldestKey);
+        this.evictions++;
+      }
+    }
+  }
+}
+
+// =============================================================================
 // Client Configuration
 // =============================================================================
 
@@ -208,57 +403,45 @@ export interface SQLClientConfig {
   idempotency?: IdempotencyConfig;
 }
 
+// RetryConfig is imported from @dotdo/shared-types via ./types.js
+
+// =============================================================================
+// Event Emitter for Connection Events
+// =============================================================================
+
 /**
- * Configuration for automatic retry behavior on transient failures.
- *
- * Uses exponential backoff with jitter to retry failed requests.
- * Only retryable errors (timeouts, connection failures, etc.) trigger retries;
- * application-level errors (syntax errors, constraint violations) fail immediately.
- *
- * @example
- * ```typescript
- * const retryConfig: RetryConfig = {
- *   maxRetries: 3,      // Retry up to 3 times
- *   baseDelayMs: 100,   // Start with 100ms delay
- *   maxDelayMs: 5000,   // Cap delay at 5 seconds
- * };
- * ```
- *
+ * Connection event data for 'connected' event.
  * @public
- * @since 0.1.0
  */
-export interface RetryConfig {
-  /**
-   * Maximum number of retry attempts before giving up.
-   *
-   * @example 3 means the request will be attempted up to 4 times total (1 initial + 3 retries)
-   */
-  maxRetries: number;
-
-  /**
-   * Base delay in milliseconds for exponential backoff.
-   *
-   * The actual delay increases exponentially: baseDelayMs * 2^attempt
-   */
-  baseDelayMs: number;
-
-  /**
-   * Maximum delay in milliseconds between retry attempts.
-   *
-   * Caps the exponential backoff to prevent excessively long waits.
-   */
-  maxDelayMs: number;
+export interface ConnectedEvent {
+  url: string;
+  timestamp: Date;
 }
 
 /**
- * Default retry configuration.
- * @internal
+ * Disconnection event data for 'disconnected' event.
+ * @public
  */
-const DEFAULT_RETRY: RetryConfig = {
-  maxRetries: 3,
-  baseDelayMs: 100,
-  maxDelayMs: 5000,
-};
+export interface DisconnectedEvent {
+  url: string;
+  timestamp: Date;
+  reason?: string;
+}
+
+/**
+ * Event types for DoSQLClient.
+ * @public
+ */
+export interface ClientEventMap {
+  connected: ConnectedEvent;
+  disconnected: DisconnectedEvent;
+}
+
+/**
+ * Event listener callback type.
+ * @public
+ */
+export type ClientEventListener<K extends keyof ClientEventMap> = (event: ClientEventMap[K]) => void;
 
 // =============================================================================
 // CapnWeb RPC Client
@@ -325,8 +508,16 @@ export class DoSQLClient implements SQLClient {
     timeout: ReturnType<typeof setTimeout>;
     idempotencyKey?: string;
   }>();
-  /** @internal Map of request content hash to idempotency key for retry consistency */
-  private idempotencyKeyCache = new Map<string, string>();
+  /** @internal LRU cache of request content hash to idempotency key for retry consistency */
+  private idempotencyKeyCache!: LRUCache<string, string>;
+  /** @internal Cleanup timer for periodic cache cleanup */
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  /** @internal Event listeners for connection events */
+  private eventListeners: Map<keyof ClientEventMap, Set<ClientEventListener<any>>> = new Map();
+  /** @internal Flag to track if connection is being established */
+  private connecting: boolean = false;
+  /** @internal Promise that resolves when connection is established (for concurrent connect() calls) */
+  private connectPromise: Promise<void> | null = null;
 
   /**
    * Creates a new DoSQLClient instance.
@@ -347,9 +538,206 @@ export class DoSQLClient implements SQLClient {
     this.config = {
       ...config,
       timeout: config.timeout ?? 30000,
-      retry: config.retry ?? DEFAULT_RETRY,
+      retry: config.retry ?? DEFAULT_RETRY_CONFIG,
       idempotency: config.idempotency ?? DEFAULT_IDEMPOTENCY_CONFIG,
     };
+
+    // Initialize LRU cache with configured limits
+    const maxCacheSize = this.config.idempotency.maxCacheSize ?? 1000;
+    const cacheTtlMs = this.config.idempotency.cacheTtlMs ?? 5 * 60 * 1000;
+    this.idempotencyKeyCache = new LRUCache<string, string>(maxCacheSize, cacheTtlMs);
+
+    // Start cleanup timer if enabled
+    const cleanupIntervalMs = this.config.idempotency.cleanupIntervalMs ?? 60 * 1000;
+    if (cleanupIntervalMs > 0) {
+      this.cleanupTimer = setInterval(() => {
+        this.idempotencyKeyCache.cleanup();
+      }, cleanupIntervalMs);
+    }
+
+    // Initialize event listeners map
+    this.eventListeners.set('connected', new Set());
+    this.eventListeners.set('disconnected', new Set());
+  }
+
+  // ===========================================================================
+  // Connection State and Events
+  // ===========================================================================
+
+  /**
+   * Checks if the client is currently connected to the database.
+   *
+   * Returns true if a WebSocket connection is established and in the OPEN state.
+   * Note that this is a point-in-time check; the connection could change state
+   * immediately after this method returns.
+   *
+   * @returns `true` if connected, `false` otherwise
+   *
+   * @example
+   * ```typescript
+   * const client = createSQLClient({ url: 'wss://sql.example.com' });
+   *
+   * console.log(client.isConnected()); // false (not connected yet)
+   *
+   * await client.connect();
+   * console.log(client.isConnected()); // true
+   *
+   * await client.close();
+   * console.log(client.isConnected()); // false
+   * ```
+   *
+   * @public
+   * @since 0.2.0
+   */
+  isConnected(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.READY_STATE_OPEN;
+  }
+
+  /**
+   * Explicitly establishes a WebSocket connection to the database.
+   *
+   * This method is optional - the client will automatically connect on first query
+   * if not already connected. However, calling connect() explicitly allows you to:
+   * - Pre-establish the connection before queries are needed
+   * - Handle connection errors separately from query errors
+   * - Wait for the connection to be ready
+   *
+   * If already connected, this method returns immediately without reconnecting.
+   * Multiple concurrent calls to connect() will share the same connection attempt.
+   *
+   * @returns Promise that resolves when the connection is established
+   * @throws {ConnectionError} When connection fails (network error, auth failure, etc.)
+   *
+   * @example
+   * ```typescript
+   * const client = createSQLClient({ url: 'wss://sql.example.com' });
+   *
+   * // Pre-connect before queries
+   * try {
+   *   await client.connect();
+   *   console.log('Connected successfully');
+   * } catch (error) {
+   *   console.error('Failed to connect:', error);
+   * }
+   *
+   * // Now queries won't have connection latency
+   * const result = await client.query('SELECT 1');
+   * ```
+   *
+   * @public
+   * @since 0.2.0
+   */
+  async connect(): Promise<void> {
+    // Already connected
+    if (this.isConnected()) {
+      return;
+    }
+
+    // If already connecting, wait for that to complete
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
+
+    this.connectPromise = this.performConnect();
+    try {
+      await this.connectPromise;
+    } finally {
+      this.connectPromise = null;
+    }
+  }
+
+  /**
+   * Internal method to perform the actual connection.
+   * @internal
+   */
+  private async performConnect(): Promise<void> {
+    this.connecting = true;
+    try {
+      await this.ensureConnection();
+    } finally {
+      this.connecting = false;
+    }
+  }
+
+  /**
+   * Registers an event listener for client events.
+   *
+   * Supported events:
+   * - `'connected'`: Emitted when WebSocket connection is established
+   * - `'disconnected'`: Emitted when WebSocket connection is closed
+   *
+   * @param event - The event name to listen for
+   * @param listener - The callback function to invoke when the event occurs
+   * @returns The client instance (for chaining)
+   *
+   * @example
+   * ```typescript
+   * const client = createSQLClient({ url: 'wss://sql.example.com' });
+   *
+   * client.on('connected', (event) => {
+   *   console.log(`Connected to ${event.url} at ${event.timestamp}`);
+   * });
+   *
+   * client.on('disconnected', (event) => {
+   *   console.log(`Disconnected from ${event.url}: ${event.reason}`);
+   * });
+   *
+   * await client.connect();
+   * ```
+   *
+   * @public
+   * @since 0.2.0
+   */
+  on<K extends keyof ClientEventMap>(event: K, listener: ClientEventListener<K>): this {
+    const listeners = this.eventListeners.get(event);
+    if (listeners) {
+      listeners.add(listener);
+    }
+    return this;
+  }
+
+  /**
+   * Removes an event listener.
+   *
+   * @param event - The event name to stop listening for
+   * @param listener - The callback function to remove
+   * @returns The client instance (for chaining)
+   *
+   * @example
+   * ```typescript
+   * const onConnected = (event) => console.log('Connected');
+   * client.on('connected', onConnected);
+   *
+   * // Later, remove the listener
+   * client.off('connected', onConnected);
+   * ```
+   *
+   * @public
+   * @since 0.2.0
+   */
+  off<K extends keyof ClientEventMap>(event: K, listener: ClientEventListener<K>): this {
+    const listeners = this.eventListeners.get(event);
+    if (listeners) {
+      listeners.delete(listener);
+    }
+    return this;
+  }
+
+  /**
+   * Emits an event to all registered listeners.
+   * @internal
+   */
+  private emit<K extends keyof ClientEventMap>(event: K, data: ClientEventMap[K]): void {
+    const listeners = this.eventListeners.get(event);
+    if (listeners) {
+      for (const listener of listeners) {
+        try {
+          listener(data);
+        } catch (error) {
+          console.error(`Error in ${event} listener:`, error);
+        }
+      }
+    }
   }
 
   /**
@@ -411,6 +799,82 @@ export class DoSQLClient implements SQLClient {
     this.idempotencyKeyCache.delete(cacheKey);
   }
 
+  /**
+   * Gets the current size of the idempotency key cache.
+   *
+   * @returns The number of entries currently in the cache
+   *
+   * @example
+   * ```typescript
+   * console.log(`Cache has ${client.getCacheSize()} entries`);
+   * ```
+   */
+  getCacheSize(): number {
+    return this.idempotencyKeyCache.size;
+  }
+
+  /**
+   * Clears all entries from the idempotency key cache.
+   *
+   * This forces new idempotency keys to be generated for all future requests.
+   * Use with caution as this may affect retry semantics for in-flight requests.
+   *
+   * @example
+   * ```typescript
+   * // Clear all cached idempotency keys
+   * client.clearIdempotencyCache();
+   * ```
+   */
+  clearIdempotencyCache(): void {
+    this.idempotencyKeyCache.clear();
+  }
+
+  /**
+   * Gets statistics about the idempotency key cache.
+   *
+   * Useful for monitoring cache effectiveness and tuning configuration.
+   *
+   * @returns Cache statistics including size, hits, misses, and evictions
+   *
+   * @example
+   * ```typescript
+   * const stats = client.getIdempotencyCacheStats();
+   * console.log(`Cache hit rate: ${stats.hits / (stats.hits + stats.misses) * 100}%`);
+   * console.log(`Evictions: ${stats.evictions}`);
+   * ```
+   */
+  getIdempotencyCacheStats(): IdempotencyCacheStats {
+    return this.idempotencyKeyCache.getStats();
+  }
+
+  /**
+   * Triggers manual cleanup of expired entries from the idempotency cache.
+   *
+   * This is normally done automatically on a timer, but can be called manually
+   * to force immediate cleanup.
+   *
+   * @returns The number of expired entries that were removed
+   *
+   * @example
+   * ```typescript
+   * const removed = client.cleanupIdempotencyCache();
+   * console.log(`Removed ${removed} expired entries`);
+   * ```
+   */
+  cleanupIdempotencyCache(): number {
+    return this.idempotencyKeyCache.cleanup();
+  }
+
+  /**
+   * Checks if the cleanup timer is currently active.
+   *
+   * @returns `true` if the cleanup timer is running
+   * @internal
+   */
+  isCleanupTimerActive(): boolean {
+    return this.cleanupTimer !== null;
+  }
+
   // ===========================================================================
   // Connection Management
   // ===========================================================================
@@ -425,19 +889,33 @@ export class DoSQLClient implements SQLClient {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.addEventListener('open', () => {
+        // Emit connected event
+        this.emit('connected', {
+          url: wsUrl,
+          timestamp: new Date(),
+        });
         resolve(this.ws!);
       });
 
       this.ws.addEventListener('error', (event: Event) => {
-        reject(new Error(`WebSocket error: ${event}`));
+        reject(new ConnectionError(`WebSocket error: ${event}`));
       });
 
       this.ws.addEventListener('close', () => {
+        const closedWs = this.ws;
         this.ws = null;
+
+        // Emit disconnected event
+        this.emit('disconnected', {
+          url: wsUrl,
+          timestamp: new Date(),
+          reason: 'Connection closed',
+        });
+
         // Reject all pending requests
         for (const [id, pending] of this.pendingRequests) {
           clearTimeout(pending.timeout);
-          pending.reject(new Error('Connection closed'));
+          pending.reject(new ConnectionError('Connection closed'));
           this.pendingRequests.delete(id);
         }
       });
@@ -482,7 +960,7 @@ export class DoSQLClient implements SQLClient {
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
-        reject(new Error(`Request timeout: ${method}`));
+        reject(new TimeoutError(`Request timeout: ${method}`, this.config.timeout));
       }, this.config.timeout);
 
       this.pendingRequests.set(id, {
@@ -844,6 +1322,12 @@ export class DoSQLClient implements SQLClient {
    * ```
    */
   async close(): Promise<void> {
+    // Stop cleanup timer
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -1132,6 +1616,101 @@ export class SQLError extends Error {
     this.name = 'SQLError';
     this.code = error.code;
     this.details = error.details;
+  }
+}
+
+/**
+ * Error thrown when a connection to the database fails.
+ *
+ * This error is typically retryable as it indicates a network or infrastructure
+ * issue rather than a problem with the SQL statement itself.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await client.connect();
+ * } catch (error) {
+ *   if (error instanceof ConnectionError) {
+ *     console.log(`Connection failed: ${error.message}`);
+ *     console.log(`Retryable: ${error.retryable}`);
+ *   }
+ * }
+ * ```
+ *
+ * @public
+ * @since 0.2.0
+ */
+export class ConnectionError extends Error {
+  /**
+   * Error code indicating this is a connection-related error.
+   */
+  readonly code = 'CONNECTION_FAILED' as const;
+
+  /**
+   * Indicates whether this error is safe to retry.
+   * Connection errors are typically retryable.
+   */
+  readonly retryable = true;
+
+  /**
+   * Creates a new ConnectionError.
+   *
+   * @param message - Description of the connection failure
+   */
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConnectionError';
+  }
+}
+
+/**
+ * Error thrown when an operation times out.
+ *
+ * This error is typically retryable as the timeout may have been due to
+ * transient network issues or server load.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await client.query('SELECT * FROM large_table');
+ * } catch (error) {
+ *   if (error instanceof TimeoutError) {
+ *     console.log(`Query timed out after ${error.timeoutMs}ms`);
+ *     console.log(`Retryable: ${error.retryable}`);
+ *   }
+ * }
+ * ```
+ *
+ * @public
+ * @since 0.2.0
+ */
+export class TimeoutError extends Error {
+  /**
+   * Error code indicating this is a timeout error.
+   */
+  readonly code = 'TIMEOUT' as const;
+
+  /**
+   * Indicates whether this error is safe to retry.
+   * Timeout errors are typically retryable.
+   */
+  readonly retryable = true;
+
+  /**
+   * The timeout duration in milliseconds that was exceeded.
+   */
+  readonly timeoutMs: number;
+
+  /**
+   * Creates a new TimeoutError.
+   *
+   * @param message - Description of the timeout
+   * @param timeoutMs - The timeout duration in milliseconds
+   */
+  constructor(message: string, timeoutMs: number) {
+    super(message);
+    this.name = 'TimeoutError';
+    this.timeoutMs = timeoutMs;
   }
 }
 

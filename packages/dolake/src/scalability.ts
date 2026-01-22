@@ -441,10 +441,13 @@ export class PartitionCompactionManager {
             });
           }
         } else {
-          outputFiles.push({
-            path: group[0]['file-path'],
-            sizeBytes: Number(group[0]['file-size-in-bytes']),
-          });
+          const firstFile = group[0];
+          if (firstFile) {
+            outputFiles.push({
+              path: firstFile['file-path'],
+              sizeBytes: Number(firstFile['file-size-in-bytes']),
+            });
+          }
         }
       }
 

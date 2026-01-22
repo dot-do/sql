@@ -39,19 +39,19 @@ export interface KVFallbackConfig {
   /** R2 storage backend */
   r2: R2Storage;
   /** Maximum value size in bytes (default: 25MB) */
-  maxValueSize?: number;
+  maxValueSize?: number | undefined;
   /** TTL for KV entries in seconds (default: 7 days) */
-  ttlSeconds?: number;
+  ttlSeconds?: number | undefined;
   /** Enable gzip compression (default: true) */
-  enableCompression?: boolean;
+  enableCompression?: boolean | undefined;
   /** Enable chunking for large batches (default: true) */
-  enableChunking?: boolean;
+  enableChunking?: boolean | undefined;
   /** Expiration warning threshold (0-1, default: 0.9) */
-  expirationWarningThreshold?: number;
+  expirationWarningThreshold?: number | undefined;
   /** Callback for recovery events */
-  onRecovery?: (batchId: string, success: boolean) => void;
+  onRecovery?: ((batchId: string, success: boolean) => void) | undefined;
   /** Key prefix for fallback storage */
-  keyPrefix?: string;
+  keyPrefix?: string | undefined;
 }
 
 /**
@@ -139,7 +139,7 @@ export interface BulkRecoveryResult {
   /** Number of failed recoveries */
   failedRecoveries: number;
   /** Details of each recovery */
-  details: Array<{ batchId: string; success: boolean; error?: string }>;
+  details: Array<{ batchId: string; success: boolean; error?: string | undefined }>;
 }
 
 /**
@@ -253,7 +253,7 @@ export class KVFallbackStorage {
   private enableCompression: boolean;
   private enableChunking: boolean;
   private expirationWarningThreshold: number;
-  private onRecovery?: (batchId: string, success: boolean) => void;
+  private onRecovery?: ((batchId: string, success: boolean) => void) | undefined;
   private keyPrefix: string;
 
   // Metrics
@@ -722,7 +722,7 @@ export class KVFallbackStorage {
 
     // Skip chunk and manifest keys
     if (rest.includes(':chunk:') || rest.includes(':manifest')) {
-      return rest.split(':')[0];
+      return rest.split(':')[0] ?? null;
     }
 
     return rest;
@@ -806,7 +806,10 @@ export class KVFallbackStorage {
   private uint8ArrayToBase64(bytes: Uint8Array): string {
     let binary = '';
     for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
+      const byte = bytes[i];
+      if (byte !== undefined) {
+        binary += String.fromCharCode(byte);
+      }
     }
     return btoa(binary);
   }

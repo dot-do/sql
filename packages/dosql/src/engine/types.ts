@@ -10,53 +10,35 @@ import type { ColumnarReader, Predicate as ColumnarPredicate } from '../columnar
 import { PlanningContext, getDefaultPlanningContext, resetDefaultPlanningContext } from '../planner/planning-context.js';
 
 // =============================================================================
-// BRANDED TYPES
+// BRANDED TYPES - Imported from @dotdo/shared-types (via @dotdo/sql.do)
 // =============================================================================
 
 /**
- * Branded types for critical identifiers to prevent accidental mixing.
+ * Re-export branded types from shared-types for backward compatibility.
  * These types use TypeScript's structural typing to create nominal types
  * that cannot be accidentally assigned from raw primitives.
  */
+export type { LSN, TransactionId, ShardId } from '@dotdo/sql.do';
+export {
+  createLSN,
+  createTransactionId,
+  createShardId,
+  // LSN utilities
+  compareLSN,
+  incrementLSN,
+  lsnValue,
+  // Validation guards
+  isValidLSN,
+  isValidTransactionId,
+  isValidShardId,
+} from '@dotdo/sql.do';
 
-/** Brand symbol for Log Sequence Number */
-declare const LSNBrand: unique symbol;
+// Import for local use
+import type { LSN, TransactionId, ShardId } from '@dotdo/sql.do';
 
-/**
- * Log Sequence Number (LSN) - A branded bigint type for WAL positions.
- * LSNs are monotonically increasing identifiers for WAL entries.
- *
- * @example
- * const lsn = createLSN(100n);
- * // lsn is LSN, not assignable from plain bigint
- */
-export type LSN = bigint & { readonly [LSNBrand]: never };
-
-/** Brand symbol for Transaction ID */
-declare const TxnIdBrand: unique symbol;
-
-/**
- * Transaction ID - A branded string type for transaction identifiers.
- * Transaction IDs uniquely identify a transaction across the system.
- *
- * @example
- * const txnId = createTransactionId('txn_abc123');
- * // txnId is TransactionId, not assignable from plain string
- */
-export type TransactionId = string & { readonly [TxnIdBrand]: never };
-
-/** Brand symbol for Shard ID */
-declare const ShardIdBrand: unique symbol;
-
-/**
- * Shard ID - A branded string type for shard identifiers.
- * Shard IDs identify a specific shard in a distributed setup.
- *
- * @example
- * const shardId = createShardId('shard_001');
- * // shardId is ShardId, not assignable from plain string
- */
-export type ShardId = string & { readonly [ShardIdBrand]: never };
+// =============================================================================
+// PAGE ID - Engine-specific branded type
+// =============================================================================
 
 /** Brand symbol for Page ID */
 declare const PageIdBrand: unique symbol;
@@ -70,55 +52,6 @@ declare const PageIdBrand: unique symbol;
  * // pageId is PageId, not assignable from plain number
  */
 export type PageId = number & { readonly [PageIdBrand]: never };
-
-// =============================================================================
-// BRANDED TYPE FACTORY FUNCTIONS
-// =============================================================================
-
-/**
- * Create a branded LSN from a bigint value.
- * This is the only safe way to create an LSN.
- *
- * @param value - The bigint value for the LSN
- * @returns A branded LSN value
- * @throws {Error} If value is negative
- */
-export function createLSN(value: bigint): LSN {
-  if (value < 0n) {
-    throw new Error(`LSN cannot be negative: ${value}`);
-  }
-  return value as LSN;
-}
-
-/**
- * Create a branded TransactionId from a string value.
- * This is the only safe way to create a TransactionId.
- *
- * @param value - The string value for the transaction ID
- * @returns A branded TransactionId value
- * @throws {Error} If value is empty
- */
-export function createTransactionId(value: string): TransactionId {
-  if (!value || value.length === 0) {
-    throw new Error('TransactionId cannot be empty');
-  }
-  return value as TransactionId;
-}
-
-/**
- * Create a branded ShardId from a string value.
- * This is the only safe way to create a ShardId.
- *
- * @param value - The string value for the shard ID
- * @returns A branded ShardId value
- * @throws {Error} If value is empty
- */
-export function createShardId(value: string): ShardId {
-  if (!value || value.length === 0) {
-    throw new Error('ShardId cannot be empty');
-  }
-  return value as ShardId;
-}
 
 /**
  * Create a branded PageId from a number value.
@@ -139,65 +72,14 @@ export function createPageId(value: number): PageId {
 }
 
 // =============================================================================
-// BRANDED TYPE UTILITIES
+// PAGE ID UTILITIES
 // =============================================================================
-
-/**
- * Type guard to check if a value is a valid LSN candidate.
- * Note: Due to branded type erasure at runtime, this checks if the value
- * could be cast to LSN (i.e., is a non-negative bigint).
- */
-export function isValidLSN(value: unknown): value is bigint {
-  return typeof value === 'bigint' && value >= 0n;
-}
-
-/**
- * Type guard to check if a value is a valid TransactionId candidate.
- */
-export function isValidTransactionId(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
-
-/**
- * Type guard to check if a value is a valid ShardId candidate.
- */
-export function isValidShardId(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
-}
 
 /**
  * Type guard to check if a value is a valid PageId candidate.
  */
 export function isValidPageId(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
-}
-
-/**
- * Compare two LSN values.
- * @returns negative if a < b, positive if a > b, 0 if equal
- */
-export function compareLSN(a: LSN, b: LSN): number {
-  if (a < b) return -1;
-  if (a > b) return 1;
-  return 0;
-}
-
-/**
- * Get the raw bigint value from an LSN.
- * Useful for serialization or arithmetic operations.
- */
-export function lsnValue(lsn: LSN): bigint {
-  return lsn as bigint;
-}
-
-/**
- * Increment an LSN by a given amount.
- * @param lsn - The LSN to increment
- * @param amount - The amount to add (default: 1n)
- * @returns A new LSN with the incremented value
- */
-export function incrementLSN(lsn: LSN, amount: bigint = 1n): LSN {
-  return createLSN((lsn as bigint) + amount);
 }
 
 // =============================================================================

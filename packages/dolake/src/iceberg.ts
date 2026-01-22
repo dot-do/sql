@@ -509,7 +509,9 @@ export class R2IcebergStorage implements IcebergStorage {
     const namespaces: NamespaceIdentifier[] = [];
 
     for (const key of entries.keys()) {
-      const parts = key.replace('namespace:', '').split(':')[0].split('.');
+      const firstPart = key.replace('namespace:', '').split(':')[0];
+      if (!firstPart) continue;
+      const parts = firstPart.split('.');
       if (!parent || (parts.length === parent.length + 1 &&
           parts.slice(0, parent.length).join('.') === parent.join('.'))) {
         namespaces.push(parts);
@@ -758,7 +760,7 @@ export class R2IcebergStorage implements IcebergStorage {
 
   private extractVersion(metadataPath: string): number {
     const match = metadataPath.match(/v(\d+)\.metadata\.json$/);
-    return match ? parseInt(match[1], 10) : 0;
+    return match && match[1] ? parseInt(match[1], 10) : 0;
   }
 
   private validateRequirement(

@@ -11,6 +11,30 @@
  */
 
 // =============================================================================
+// Runtime Configuration (re-exported from config.ts for backwards compatibility)
+// =============================================================================
+
+export {
+  // Wrapper cache configuration
+  DEFAULT_MAX_WRAPPER_CACHE_SIZE,
+  type WrapperCacheConfig,
+  setWrapperCacheConfig,
+  getWrapperCacheConfig,
+  // Runtime mode configuration
+  setDevMode,
+  isDevMode,
+  setStrictMode,
+  isStrictMode,
+} from './config.js';
+
+// Internal imports for use in this module
+import {
+  _getWrapperCacheConfigInternal,
+  _isDevModeInternal,
+  _isStrictModeInternal,
+} from './config.js';
+
+// =============================================================================
 // Branded Types
 // =============================================================================
 
@@ -39,40 +63,6 @@ export type StatementHash = string & { readonly [StatementHashBrand]: never };
  */
 export type ShardId = string & { readonly [ShardIdBrand]: never };
 
-// =============================================================================
-// Runtime Mode Configuration
-// =============================================================================
-
-let _devMode = true; // Default to dev mode for safety
-let _strictMode = false; // Strict mode for additional format validation
-
-/**
- * Set development mode for enabling runtime validation
- */
-export function setDevMode(enabled: boolean): void {
-  _devMode = enabled;
-}
-
-/**
- * Check if development mode is enabled
- */
-export function isDevMode(): boolean {
-  return _devMode;
-}
-
-/**
- * Set strict mode for additional format validation
- */
-export function setStrictMode(enabled: boolean): void {
-  _strictMode = enabled;
-}
-
-/**
- * Check if strict mode is enabled
- */
-export function isStrictMode(): boolean {
-  return _strictMode;
-}
 
 // =============================================================================
 // Validated Tracking (WeakSet for runtime-created branded types)
@@ -83,16 +73,113 @@ const validatedTransactionIds = new WeakSet<object>();
 const validatedShardIds = new WeakSet<object>();
 const validatedStatementHashes = new WeakSet<object>();
 
-// Wrapper objects for primitive tracking
+// Wrapper objects for primitive tracking with LRU support
+// Using Map to maintain insertion order for FIFO, and manual tracking for LRU
 const lsnWrappers = new Map<bigint, { value: bigint }>();
 const stringWrappers = new Map<string, { value: string; type: 'txn' | 'shard' | 'hash' }>();
+
+// LRU tracking: stores keys in order of last access (most recent at end)
+const lsnLruOrder: bigint[] = [];
+const stringLruOrder: string[] = [];
+
+/**
+ * Stats about wrapper Maps for monitoring
+ */
+export interface WrapperMapStats {
+  stringWrappersSize: number;
+  lsnWrappersSize: number;
+}
+
+/**
+ * Get current wrapper Map sizes for monitoring
+ */
+export function getWrapperMapStats(): WrapperMapStats {
+  return {
+    stringWrappersSize: stringWrappers.size,
+    lsnWrappersSize: lsnWrappers.size,
+  };
+}
+
+/**
+ * Clear all wrapper Maps (useful for tests and memory management)
+ */
+export function clearWrapperMaps(): void {
+  stringWrappers.clear();
+  lsnWrappers.clear();
+  stringLruOrder.length = 0;
+  lsnLruOrder.length = 0;
+}
+
+/**
+ * Run cache cleanup (for TTL mode)
+ * Currently a no-op since TTL mode is not fully implemented in this version
+ */
+export function runWrapperCacheCleanup(): void {
+  // TTL mode cleanup would go here
+  // For now, this is a placeholder that can be extended
+}
+
+// Helper function to perform LRU eviction on string wrappers
+function evictStringWrappersIfNeeded(): void {
+  if (!_getWrapperCacheConfigInternal().enabled) return;
+
+  const maxSize = _getWrapperCacheConfigInternal().maxSize;
+  while (stringWrappers.size >= maxSize && stringLruOrder.length > 0) {
+    // Remove the least recently used (first in the array)
+    const lruKey = stringLruOrder.shift();
+    if (lruKey !== undefined) {
+      stringWrappers.delete(lruKey);
+    }
+  }
+}
+
+// Helper function to perform LRU eviction on LSN wrappers
+function evictLsnWrappersIfNeeded(): void {
+  if (!_getWrapperCacheConfigInternal().enabled) return;
+
+  const maxSize = _getWrapperCacheConfigInternal().maxSize;
+  while (lsnWrappers.size >= maxSize && lsnLruOrder.length > 0) {
+    // Remove the least recently used (first in the array)
+    const lruKey = lsnLruOrder.shift();
+    if (lruKey !== undefined) {
+      lsnWrappers.delete(lruKey);
+    }
+  }
+}
+
+// Helper function to update LRU order for string keys
+function touchStringLru(key: string): void {
+  const index = stringLruOrder.indexOf(key);
+  if (index !== -1) {
+    // Remove from current position
+    stringLruOrder.splice(index, 1);
+  }
+  // Add to end (most recently used)
+  stringLruOrder.push(key);
+}
+
+// Helper function to update LRU order for LSN keys
+function touchLsnLru(key: bigint): void {
+  const index = lsnLruOrder.indexOf(key);
+  if (index !== -1) {
+    // Remove from current position
+    lsnLruOrder.splice(index, 1);
+  }
+  // Add to end (most recently used)
+  lsnLruOrder.push(key);
+}
 
 /**
  * Check if an LSN was created through the factory function (validated)
  */
 export function isValidatedLSN(lsn: LSN): boolean {
   const wrapper = lsnWrappers.get(lsn as bigint);
-  return wrapper !== undefined && validatedLSNs.has(wrapper);
+  if (wrapper !== undefined && validatedLSNs.has(wrapper)) {
+    // Touch LRU on access
+    touchLsnLru(lsn as bigint);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -100,7 +187,12 @@ export function isValidatedLSN(lsn: LSN): boolean {
  */
 export function isValidatedTransactionId(txnId: TransactionId): boolean {
   const wrapper = stringWrappers.get(txnId as string);
-  return wrapper !== undefined && wrapper.type === 'txn' && validatedTransactionIds.has(wrapper);
+  if (wrapper !== undefined && wrapper.type === 'txn' && validatedTransactionIds.has(wrapper)) {
+    // Touch LRU on access
+    touchStringLru(txnId as string);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -108,7 +200,12 @@ export function isValidatedTransactionId(txnId: TransactionId): boolean {
  */
 export function isValidatedShardId(shardId: ShardId): boolean {
   const wrapper = stringWrappers.get(shardId as string);
-  return wrapper !== undefined && wrapper.type === 'shard' && validatedShardIds.has(wrapper);
+  if (wrapper !== undefined && wrapper.type === 'shard' && validatedShardIds.has(wrapper)) {
+    // Touch LRU on access
+    touchStringLru(shardId as string);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -116,7 +213,12 @@ export function isValidatedShardId(shardId: ShardId): boolean {
  */
 export function isValidatedStatementHash(hash: StatementHash): boolean {
   const wrapper = stringWrappers.get(hash as string);
-  return wrapper !== undefined && wrapper.type === 'hash' && validatedStatementHashes.has(wrapper);
+  if (wrapper !== undefined && wrapper.type === 'hash' && validatedStatementHashes.has(wrapper)) {
+    // Touch LRU on access
+    touchStringLru(hash as string);
+    return true;
+  }
+  return false;
 }
 
 // =============================================================================
@@ -160,7 +262,7 @@ export function isValidStatementHash(value: unknown): value is StatementHash {
  * @throws Error if id is empty or whitespace-only (in dev mode)
  */
 export function createTransactionId(id: string): TransactionId {
-  if (_devMode || _strictMode) {
+  if (_isDevModeInternal() || _isStrictModeInternal()) {
     if (typeof id !== 'string') {
       throw new Error('TransactionId must be a string');
     }
@@ -169,10 +271,23 @@ export function createTransactionId(id: string): TransactionId {
     }
   }
 
-  // Track as validated
-  const wrapper = { value: id, type: 'txn' as const };
-  stringWrappers.set(id, wrapper);
-  validatedTransactionIds.add(wrapper);
+  // Track as validated (if caching is enabled)
+  if (_getWrapperCacheConfigInternal().enabled) {
+    // Check if already exists (reuse)
+    const existing = stringWrappers.get(id);
+    if (existing && existing.type === 'txn') {
+      touchStringLru(id);
+      return id as TransactionId;
+    }
+
+    // Evict if needed before adding
+    evictStringWrappersIfNeeded();
+
+    const wrapper = { value: id, type: 'txn' as const };
+    stringWrappers.set(id, wrapper);
+    validatedTransactionIds.add(wrapper);
+    touchStringLru(id);
+  }
 
   return id as TransactionId;
 }
@@ -182,7 +297,7 @@ export function createTransactionId(id: string): TransactionId {
  * @throws Error if lsn is negative or not a bigint (in dev mode)
  */
 export function createLSN(lsn: bigint): LSN {
-  if (_devMode || _strictMode) {
+  if (_isDevModeInternal() || _isStrictModeInternal()) {
     if (typeof lsn !== 'bigint') {
       throw new Error('LSN must be a bigint');
     }
@@ -191,10 +306,23 @@ export function createLSN(lsn: bigint): LSN {
     }
   }
 
-  // Track as validated
-  const wrapper = { value: lsn };
-  lsnWrappers.set(lsn, wrapper);
-  validatedLSNs.add(wrapper);
+  // Track as validated (if caching is enabled)
+  if (_getWrapperCacheConfigInternal().enabled) {
+    // Check if already exists (reuse)
+    const existing = lsnWrappers.get(lsn);
+    if (existing) {
+      touchLsnLru(lsn);
+      return lsn as LSN;
+    }
+
+    // Evict if needed before adding
+    evictLsnWrappersIfNeeded();
+
+    const wrapper = { value: lsn };
+    lsnWrappers.set(lsn, wrapper);
+    validatedLSNs.add(wrapper);
+    touchLsnLru(lsn);
+  }
 
   return lsn as LSN;
 }
@@ -204,22 +332,35 @@ export function createLSN(lsn: bigint): LSN {
  * @throws Error if hash is empty (in dev mode)
  */
 export function createStatementHash(hash: string): StatementHash {
-  if (_devMode || _strictMode) {
+  if (_isDevModeInternal() || _isStrictModeInternal()) {
     if (typeof hash !== 'string') {
       throw new Error('StatementHash must be a string');
     }
     if (hash.length === 0) {
       throw new Error('StatementHash cannot be empty');
     }
-    if (_strictMode && !/^[a-f0-9]+$/i.test(hash)) {
+    if (_isStrictModeInternal() && !/^[a-f0-9]+$/i.test(hash)) {
       throw new Error('Invalid StatementHash format');
     }
   }
 
-  // Track as validated
-  const wrapper = { value: hash, type: 'hash' as const };
-  stringWrappers.set(hash, wrapper);
-  validatedStatementHashes.add(wrapper);
+  // Track as validated (if caching is enabled)
+  if (_getWrapperCacheConfigInternal().enabled) {
+    // Check if already exists (reuse)
+    const existing = stringWrappers.get(hash);
+    if (existing && existing.type === 'hash') {
+      touchStringLru(hash);
+      return hash as StatementHash;
+    }
+
+    // Evict if needed before adding
+    evictStringWrappersIfNeeded();
+
+    const wrapper = { value: hash, type: 'hash' as const };
+    stringWrappers.set(hash, wrapper);
+    validatedStatementHashes.add(wrapper);
+    touchStringLru(hash);
+  }
 
   return hash as StatementHash;
 }
@@ -229,7 +370,7 @@ export function createStatementHash(hash: string): StatementHash {
  * @throws Error if id is empty, whitespace-only, or exceeds max length (in dev mode)
  */
 export function createShardId(id: string): ShardId {
-  if (_devMode || _strictMode) {
+  if (_isDevModeInternal() || _isStrictModeInternal()) {
     if (typeof id !== 'string') {
       throw new Error('ShardId must be a string');
     }
@@ -241,10 +382,23 @@ export function createShardId(id: string): ShardId {
     }
   }
 
-  // Track as validated
-  const wrapper = { value: id, type: 'shard' as const };
-  stringWrappers.set(id, wrapper);
-  validatedShardIds.add(wrapper);
+  // Track as validated (if caching is enabled)
+  if (_getWrapperCacheConfigInternal().enabled) {
+    // Check if already exists (reuse)
+    const existing = stringWrappers.get(id);
+    if (existing && existing.type === 'shard') {
+      touchStringLru(id);
+      return id as ShardId;
+    }
+
+    // Evict if needed before adding
+    evictStringWrappersIfNeeded();
+
+    const wrapper = { value: id, type: 'shard' as const };
+    stringWrappers.set(id, wrapper);
+    validatedShardIds.add(wrapper);
+    touchStringLru(id);
+  }
 
   return id as ShardId;
 }
@@ -465,6 +619,12 @@ export interface IdempotencyConfig {
   keyPrefix?: string;
   /** Time-to-live for idempotency keys in milliseconds (server-side) */
   ttlMs?: number;
+  /** Maximum number of entries in the client-side idempotency key cache (default: 1000) */
+  maxCacheSize?: number;
+  /** Time-to-live for cached idempotency keys in milliseconds (client-side, default: 5 minutes) */
+  cacheTtlMs?: number;
+  /** Interval in milliseconds for periodic cache cleanup (default: 60000 = 1 minute) */
+  cleanupIntervalMs?: number;
 }
 
 /**
@@ -472,7 +632,10 @@ export interface IdempotencyConfig {
  */
 export const DEFAULT_IDEMPOTENCY_CONFIG: IdempotencyConfig = {
   enabled: true,
-  ttlMs: 24 * 60 * 60 * 1000, // 24 hours
+  ttlMs: 24 * 60 * 60 * 1000, // 24 hours (server-side)
+  maxCacheSize: 1000,
+  cacheTtlMs: 5 * 60 * 1000, // 5 minutes (client-side cache)
+  cleanupIntervalMs: 60 * 1000, // 1 minute
 };
 
 // =============================================================================
@@ -1449,4 +1612,138 @@ export function fromLegacyResult<T>(
     return success(legacy[dataKey] as T);
   }
   return failure('LEGACY_ERROR', legacy.error ?? 'Unknown error');
+}
+
+// =============================================================================
+// Retry Configuration
+// =============================================================================
+
+/**
+ * Configuration for automatic retry behavior on transient failures.
+ *
+ * Uses exponential backoff with jitter to retry failed requests.
+ * Only retryable errors (timeouts, connection failures, etc.) trigger retries;
+ * application-level errors (syntax errors, constraint violations) fail immediately.
+ *
+ * @example
+ * ```typescript
+ * const retryConfig: RetryConfig = {
+ *   maxRetries: 3,      // Retry up to 3 times
+ *   baseDelayMs: 100,   // Start with 100ms delay
+ *   maxDelayMs: 5000,   // Cap delay at 5 seconds
+ * };
+ * ```
+ *
+ * @public
+ * @since 0.1.0
+ */
+export interface RetryConfig {
+  /**
+   * Maximum number of retry attempts before giving up.
+   *
+   * @example 3 means the request will be attempted up to 4 times total (1 initial + 3 retries)
+   */
+  maxRetries: number;
+
+  /**
+   * Base delay in milliseconds for exponential backoff.
+   *
+   * The actual delay increases exponentially: baseDelayMs * 2^attempt
+   */
+  baseDelayMs: number;
+
+  /**
+   * Maximum delay in milliseconds between retry attempts.
+   *
+   * Caps the exponential backoff to prevent excessively long waits.
+   */
+  maxDelayMs: number;
+}
+
+/**
+ * Default retry configuration.
+ *
+ * Provides sensible defaults for retry behavior:
+ * - maxRetries: 3 (4 total attempts)
+ * - baseDelayMs: 100ms
+ * - maxDelayMs: 5000ms (5 seconds)
+ *
+ * @public
+ * @since 0.1.0
+ */
+export const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  maxRetries: 3,
+  baseDelayMs: 100,
+  maxDelayMs: 5000,
+};
+
+/**
+ * Type guard to check if a value is a valid RetryConfig.
+ *
+ * @param value - The value to check
+ * @returns `true` if the value is a valid RetryConfig object
+ *
+ * @example
+ * ```typescript
+ * const config = { maxRetries: 3, baseDelayMs: 100, maxDelayMs: 5000 };
+ * if (isRetryConfig(config)) {
+ *   // TypeScript knows config is RetryConfig
+ *   console.log(`Will retry ${config.maxRetries} times`);
+ * }
+ * ```
+ *
+ * @public
+ * @since 0.1.0
+ */
+export function isRetryConfig(value: unknown): value is RetryConfig {
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
+
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.maxRetries === 'number' &&
+    typeof obj.baseDelayMs === 'number' &&
+    typeof obj.maxDelayMs === 'number'
+  );
+}
+
+/**
+ * Creates a validated RetryConfig with constraint checking.
+ *
+ * @param config - The retry configuration to validate and create
+ * @returns A validated RetryConfig object
+ * @throws Error if the configuration values are invalid
+ *
+ * @example
+ * ```typescript
+ * const config = createRetryConfig({
+ *   maxRetries: 5,
+ *   baseDelayMs: 200,
+ *   maxDelayMs: 10000,
+ * });
+ * ```
+ *
+ * @public
+ * @since 0.1.0
+ */
+export function createRetryConfig(config: RetryConfig): RetryConfig {
+  if (config.maxRetries < 0) {
+    throw new Error('maxRetries cannot be negative');
+  }
+  if (config.baseDelayMs < 0) {
+    throw new Error('baseDelayMs cannot be negative');
+  }
+  if (config.maxDelayMs < 0) {
+    throw new Error('maxDelayMs cannot be negative');
+  }
+  if (config.maxDelayMs < config.baseDelayMs) {
+    throw new Error('maxDelayMs cannot be less than baseDelayMs');
+  }
+
+  return {
+    maxRetries: config.maxRetries,
+    baseDelayMs: config.baseDelayMs,
+    maxDelayMs: config.maxDelayMs,
+  };
 }

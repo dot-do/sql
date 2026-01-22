@@ -1,0 +1,29 @@
+# DoLake E2E Test Worker
+#
+# This worker is deployed for end-to-end testing of the lake.do client package.
+# It proxies requests to the DoLake Durable Object and provides test-specific endpoints.
+
+name = "dolake-e2e-test"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+# Durable Objects
+[durable_objects]
+bindings = [
+  { name = "DOLAKE", class_name = "DoLake" }
+]
+
+# R2 Buckets
+[[r2_buckets]]
+binding = "LAKEHOUSE_BUCKET"
+bucket_name = "dolake-e2e-test-bucket"
+
+# Migrations for Durable Object
+[[migrations]]
+tag = "v1"
+new_classes = ["DoLake"]
+
+# Environment variables
+[vars]
+ENVIRONMENT = "e2e-test"
+LOG_LEVEL = "debug"

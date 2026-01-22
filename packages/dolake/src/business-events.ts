@@ -143,9 +143,9 @@ export interface StripeWebhookResult {
   /** Whether event was received successfully */
   received: boolean;
   /** Event ID if available */
-  eventId?: string;
+  eventId?: string | undefined;
   /** Event type if available */
-  eventType?: string;
+  eventType?: string | undefined;
   /** Whether this was a duplicate event */
   duplicate: boolean;
   /** Whether written to R2 */
@@ -153,17 +153,17 @@ export interface StripeWebhookResult {
   /** Whether written to KV */
   writtenToKV: boolean;
   /** Error message if any */
-  error?: string;
+  error?: string | undefined;
   /** KV error if KV write failed */
-  kvError?: string;
+  kvError?: string | undefined;
   /** Number of R2 retries */
   retryCount: number;
   /** Retry delays in ms */
-  retryDelays?: number[];
+  retryDelays?: number[] | undefined;
   /** Whether sent to DLQ */
   sentToDLQ: boolean;
   /** DLQ path if sent */
-  dlqPath?: string;
+  dlqPath?: string | undefined;
   /** Processing time in ms */
   processingTimeMs: number;
 }
@@ -175,9 +175,9 @@ export interface SignatureVerificationResult {
   /** Whether signature is valid */
   valid: boolean;
   /** Error message if invalid */
-  error?: string;
+  error?: string | undefined;
   /** Timestamp from signature */
-  timestamp?: number;
+  timestamp?: number | undefined;
 }
 
 // =============================================================================
@@ -208,6 +208,7 @@ export async function verifyStripeSignature(
 
   for (const part of parts) {
     const [key, value] = part.split('=');
+    if (!key || !value) continue;
     if (key === 't') {
       const parsedTimestamp = parseInt(value, 10);
       if (isNaN(parsedTimestamp)) {
@@ -558,8 +559,8 @@ export class StripeWebhookHandler {
     retryCount: number;
     retryDelays: number[];
     sentToDLQ: boolean;
-    dlqPath?: string;
-    kvError?: string;
+    dlqPath?: string | undefined;
+    kvError?: string | undefined;
   }> {
     const eventData = new TextEncoder().encode(JSON.stringify(cdcEvent));
     const eventPath = `p0/stripe_webhooks/${eventId}.json`;

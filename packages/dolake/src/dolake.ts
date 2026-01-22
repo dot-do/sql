@@ -147,7 +147,7 @@ export interface DoLakeEnv {
  */
 interface ExtendedWebSocketAttachment extends WebSocketAttachment {
   /** Client IP address */
-  clientIp?: string;
+  clientIp?: string | undefined;
   /** Connection ID for rate limiting */
   connectionId: string;
 }
@@ -344,13 +344,13 @@ export class DoLake implements DurableObject {
 
     // Partitions list with pagination
     const partitionsMatch = url.pathname.match(/^\/v1\/namespaces\/([^/]+)\/tables\/([^/]+)\/partitions$/);
-    if (partitionsMatch) {
+    if (partitionsMatch && partitionsMatch[1] && partitionsMatch[2]) {
       return this.handlePartitionsList(partitionsMatch[1], partitionsMatch[2], url.searchParams);
     }
 
     // Partition stats
     const partitionStatsMatch = url.pathname.match(/^\/v1\/namespaces\/([^/]+)\/tables\/([^/]+)\/partition-stats$/);
-    if (partitionStatsMatch) {
+    if (partitionStatsMatch && partitionStatsMatch[1] && partitionStatsMatch[2]) {
       return this.handlePartitionStats(partitionStatsMatch[1], partitionStatsMatch[2]);
     }
 
@@ -423,7 +423,8 @@ export class DoLake implements DurableObject {
     }
 
     const webSocketPair = new WebSocketPair();
-    const [client, server] = Object.values(webSocketPair);
+    const client = webSocketPair[0];
+    const server = webSocketPair[1];
 
     const connectionId = generateUUID();
     const shardName = request.headers.get('X-Shard-Name') ?? undefined;
@@ -1943,7 +1944,7 @@ dolake_peak_connections ${rateLimitMetrics.peakConnections}
 
     // Table creation with partition spec
     const tablesMatch = url.pathname.match(/^\/v1\/namespaces\/([^/]+)\/tables$/);
-    if (tablesMatch && method === 'POST') {
+    if (tablesMatch && tablesMatch[1] && method === 'POST') {
       return this.handleCreateTableWithPartition(tablesMatch[1], request);
     }
 
@@ -2090,7 +2091,7 @@ dolake_peak_connections ${rateLimitMetrics.peakConnections}
 
         // Extract LIMIT
         const limitMatch = body.sql.match(/LIMIT\s+(\d+)/i);
-        const limit = limitMatch ? parseInt(limitMatch[1], 10) : 100;
+        const limit = limitMatch && limitMatch[1] ? parseInt(limitMatch[1], 10) : 100;
 
         const merged = this.queryEngine.mergeSortedResults(partitionResults, orderByField, limit);
 

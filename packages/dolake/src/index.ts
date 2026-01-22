@@ -141,6 +141,12 @@ export {
   type NamespaceProperties,
   type TableIdentifier,
 
+  // Schema Versioning
+  CURRENT_SCHEMA_VERSION,
+  MIN_SUPPORTED_VERSION,
+  SCHEMA_VERSION_HISTORY,
+  BREAKING_CHANGES,
+
   // Errors
   DoLakeError,
   ConnectionError,
@@ -148,6 +154,7 @@ export {
   FlushError,
   ParquetWriteError,
   IcebergError,
+  VersionMismatchError,
 
   // Type guards
   isCDCBatchMessage,

@@ -148,28 +148,29 @@ export interface RateLimitResult {
     | 'connection_limit'
     | 'ip_limit'
     | 'buffer_full'
-    | 'load_shedding';
+    | 'load_shedding'
+    | undefined;
 
   /** Suggested retry delay in ms */
-  retryDelayMs?: number;
+  retryDelayMs?: number | undefined;
 
   /** Remaining tokens in bucket */
-  remainingTokens?: number;
+  remainingTokens?: number | undefined;
 
   /** Bucket capacity */
-  bucketCapacity?: number;
+  bucketCapacity?: number | undefined;
 
   /** Buffer utilization (0-1) */
-  bufferUtilization?: number;
+  bufferUtilization?: number | undefined;
 
   /** Suggested delay for backpressure */
-  suggestedDelayMs?: number;
+  suggestedDelayMs?: number | undefined;
 
   /** Max allowed size (for size violations) */
-  maxSize?: number;
+  maxSize?: number | undefined;
 
   /** Masked client IP (for logging) */
-  clientIp?: string;
+  clientIp?: string | undefined;
 }
 
 /**
@@ -708,18 +709,21 @@ export class RateLimiter {
   }
 
   private isInCidr(ip: string, cidr: string): boolean {
-    const [network, maskBits] = cidr.split('/');
-    const mask = parseInt(maskBits, 10);
+    const parts = cidr.split('/');
+    const network = parts[0];
+    const maskBits = parts[1];
+    if (!network || !maskBits) return false;
+    const _mask = parseInt(maskBits, 10);
 
     // Simple check for private ranges
     if (cidr === '10.0.0.0/8' && ip.startsWith('10.')) return true;
-    if (
-      cidr === '172.16.0.0/12' &&
-      ip.startsWith('172.') &&
-      parseInt(ip.split('.')[1]) >= 16 &&
-      parseInt(ip.split('.')[1]) <= 31
-    )
-      return true;
+    if (cidr === '172.16.0.0/12' && ip.startsWith('172.')) {
+      const secondOctet = ip.split('.')[1];
+      if (secondOctet) {
+        const octetValue = parseInt(secondOctet, 10);
+        if (octetValue >= 16 && octetValue <= 31) return true;
+      }
+    }
     if (cidr === '192.168.0.0/16' && ip.startsWith('192.168.')) return true;
 
     return false;

@@ -224,7 +224,7 @@ export class RestCatalogHandler {
 
       // Namespace by ID
       const nsMatch = path.match(/^\/v1\/namespaces\/([^/]+)$/);
-      if (nsMatch) {
+      if (nsMatch && nsMatch[1]) {
         const namespace = this.decodeNamespace(nsMatch[1]);
         if (method === 'GET') {
           return this.jsonResponse(await this.getNamespace(namespace));
@@ -241,7 +241,7 @@ export class RestCatalogHandler {
 
       // Tables list
       const tablesMatch = path.match(/^\/v1\/namespaces\/([^/]+)\/tables$/);
-      if (tablesMatch) {
+      if (tablesMatch && tablesMatch[1]) {
         const namespace = this.decodeNamespace(tablesMatch[1]);
         if (method === 'GET') {
           return this.jsonResponse(await this.listTables(namespace));
@@ -254,7 +254,7 @@ export class RestCatalogHandler {
 
       // Table by ID
       const tableMatch = path.match(/^\/v1\/namespaces\/([^/]+)\/tables\/([^/]+)$/);
-      if (tableMatch) {
+      if (tableMatch && tableMatch[1] && tableMatch[2]) {
         const namespace = this.decodeNamespace(tableMatch[1]);
         const tableName = decodeURIComponent(tableMatch[2]);
         const identifier = { namespace, name: tableName };
@@ -274,7 +274,7 @@ export class RestCatalogHandler {
       }
 
       // Table exists (HEAD)
-      if (tableMatch && method === 'HEAD') {
+      if (tableMatch && tableMatch[1] && tableMatch[2] && method === 'HEAD') {
         const namespace = this.decodeNamespace(tableMatch[1]);
         const tableName = decodeURIComponent(tableMatch[2]);
         const identifier = { namespace, name: tableName };
@@ -283,7 +283,7 @@ export class RestCatalogHandler {
       }
 
       // Namespace exists (HEAD)
-      if (nsMatch && method === 'HEAD') {
+      if (nsMatch && nsMatch[1] && method === 'HEAD') {
         const namespace = this.decodeNamespace(nsMatch[1]);
         const exists = await this.storage.namespaceExists(namespace);
         return new Response(null, { status: exists ? 204 : 404 });

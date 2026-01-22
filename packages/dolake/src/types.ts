@@ -87,7 +87,7 @@ export type RpcMessageType =
 export interface RpcMessage {
   type: RpcMessageType;
   timestamp: number;
-  correlationId?: string;
+  correlationId?: string | undefined;
 }
 
 /**
@@ -100,7 +100,7 @@ export interface CDCBatchMessage extends RpcMessage {
   sourceDoId: string;
 
   /** Human-readable name of the source shard */
-  sourceShardName?: string;
+  sourceShardName?: string | undefined;
 
   /** CDC events in this batch */
   events: CDCEvent[];
@@ -134,7 +134,7 @@ export interface ConnectMessage extends RpcMessage {
   sourceDoId: string;
 
   /** Shard name */
-  sourceShardName?: string;
+  sourceShardName?: string | undefined;
 
   /** Last acknowledged sequence number (for resumption) */
   lastAckSequence: number;
@@ -206,13 +206,13 @@ export interface AckMessage extends RpcMessage {
   status: AckStatus;
 
   /** Batch ID */
-  batchId?: string;
+  batchId?: string | undefined;
 
   /** Additional details */
-  details?: AckDetails;
+  details?: AckDetails | undefined;
 
   /** Rate limit info */
-  rateLimit?: RateLimitInfo;
+  rateLimit?: RateLimitInfo | undefined;
 }
 
 /**
@@ -231,16 +231,16 @@ export type AckStatus =
 export interface AckDetails {
   eventsProcessed: number;
   bufferUtilization: number;
-  timeUntilFlush?: number;
-  persistedPath?: string;
+  timeUntilFlush?: number | undefined;
+  persistedPath?: string | undefined;
   /** Remaining tokens in rate limit bucket */
-  remainingTokens?: number;
+  remainingTokens?: number | undefined;
   /** Token bucket capacity */
-  bucketCapacity?: number;
+  bucketCapacity?: number | undefined;
   /** Suggested delay for backpressure (ms) */
-  suggestedDelayMs?: number;
+  suggestedDelayMs?: number | undefined;
   /** Circuit breaker state */
-  circuitBreakerState?: 'closed' | 'open' | 'half-open';
+  circuitBreakerState?: 'closed' | 'open' | 'half-open' | undefined;
 }
 
 /**
@@ -262,10 +262,10 @@ export interface NackMessage extends RpcMessage {
   shouldRetry: boolean;
 
   /** Suggested retry delay in ms */
-  retryDelayMs?: number;
+  retryDelayMs?: number | undefined;
 
   /** Maximum allowed size (for size violations) */
-  maxSize?: number;
+  maxSize?: number | undefined;
 }
 
 /**
@@ -300,10 +300,10 @@ export interface StatusMessage extends RpcMessage {
   connectedSources: number;
 
   /** Last flush time */
-  lastFlushTime?: number;
+  lastFlushTime?: number | undefined;
 
   /** Next scheduled flush */
-  nextFlushTime?: number;
+  nextFlushTime?: number | undefined;
 }
 
 // =============================================================================
@@ -321,7 +321,7 @@ export interface BufferedBatch {
   sourceDoId: string;
 
   /** Source shard name */
-  sourceShardName?: string;
+  sourceShardName?: string | undefined;
 
   /** CDC events in this batch */
   events: CDCEvent[];
@@ -350,8 +350,8 @@ export interface BufferStats {
   eventCount: number;
   totalSizeBytes: number;
   utilization: number;
-  oldestBatchTime?: number;
-  newestBatchTime?: number;
+  oldestBatchTime?: number | undefined;
+  newestBatchTime?: number | undefined;
 }
 
 /**
@@ -378,7 +378,7 @@ export interface FlushResult {
   bytesWritten: number;
   paths: string[];
   durationMs: number;
-  error?: string;
+  error?: string | undefined;
   usedFallback: boolean;
 }
 
@@ -472,7 +472,7 @@ export interface WebSocketAttachment {
   sourceDoId: string;
 
   /** Name of the source shard */
-  sourceShardName?: string;
+  sourceShardName?: string | undefined;
 
   /** Last acknowledged sequence number */
   lastAckSequence: number;
@@ -530,7 +530,7 @@ export interface IcebergField {
   name: string;
   type: string;
   required: boolean;
-  doc?: string;
+  doc?: string | undefined;
 }
 
 /**
@@ -540,7 +540,7 @@ export interface IcebergSchema {
   type: 'struct';
   'schema-id': number;
   fields: IcebergField[];
-  'identifier-field-ids'?: number[];
+  'identifier-field-ids'?: number[] | undefined;
 }
 
 /**
@@ -584,14 +584,14 @@ export interface IcebergSortOrder {
  */
 export interface SnapshotSummary {
   operation: 'append' | 'replace' | 'overwrite' | 'delete';
-  'added-data-files'?: string;
-  'added-records'?: string;
-  'added-files-size'?: string;
-  'deleted-data-files'?: string;
-  'deleted-records'?: string;
-  'total-records'?: string;
-  'total-files-size'?: string;
-  'total-data-files'?: string;
+  'added-data-files'?: string | undefined;
+  'added-records'?: string | undefined;
+  'added-files-size'?: string | undefined;
+  'deleted-data-files'?: string | undefined;
+  'deleted-records'?: string | undefined;
+  'total-records'?: string | undefined;
+  'total-files-size'?: string | undefined;
+  'total-data-files'?: string | undefined;
   [key: string]: string | undefined;
 }
 
@@ -605,7 +605,7 @@ export interface IcebergSnapshot {
   'timestamp-ms': bigint;
   'manifest-list': string;
   summary: SnapshotSummary;
-  'schema-id'?: number;
+  'schema-id'?: number | undefined;
 }
 
 /**
@@ -637,12 +637,12 @@ export interface DataFile {
   partition: Record<string, unknown>;
   'record-count': bigint;
   'file-size-in-bytes': bigint;
-  'column-sizes'?: Map<number, bigint>;
-  'value-counts'?: Map<number, bigint>;
-  'null-value-counts'?: Map<number, bigint>;
-  'lower-bounds'?: Map<number, Uint8Array>;
-  'upper-bounds'?: Map<number, Uint8Array>;
-  'sort-order-id'?: number;
+  'column-sizes'?: Map<number, bigint> | undefined;
+  'value-counts'?: Map<number, bigint> | undefined;
+  'null-value-counts'?: Map<number, bigint> | undefined;
+  'lower-bounds'?: Map<number, Uint8Array> | undefined;
+  'upper-bounds'?: Map<number, Uint8Array> | undefined;
+  'sort-order-id'?: number | undefined;
 }
 
 /**
@@ -655,14 +655,14 @@ export interface IcebergTableMetadata {
   'last-sequence-number': bigint;
   'last-updated-ms': bigint;
   'last-column-id': number;
-  'last-partition-id'?: number;
+  'last-partition-id'?: number | undefined;
   'current-schema-id': number;
   schemas: IcebergSchema[];
   'default-spec-id': number;
   'partition-specs': IcebergPartitionSpec[];
   'default-sort-order-id': number;
   'sort-orders': IcebergSortOrder[];
-  properties?: Record<string, string>;
+  properties?: Record<string, string> | undefined;
   'current-snapshot-id': bigint | null;
   snapshots: IcebergSnapshot[];
   'snapshot-log': Array<{
@@ -672,11 +672,11 @@ export interface IcebergTableMetadata {
   'metadata-log'?: Array<{
     'metadata-file': string;
     'timestamp-ms': bigint;
-  }>;
+  }> | undefined;
   refs?: Record<string, {
     'snapshot-id': bigint;
     type: 'branch' | 'tag';
-  }>;
+  }> | undefined;
 }
 
 // =============================================================================
@@ -704,6 +704,35 @@ export interface TableIdentifier {
 }
 
 // =============================================================================
+// Schema Versioning Constants
+// =============================================================================
+
+/**
+ * Current schema version for BufferSnapshot serialization
+ */
+export const CURRENT_SCHEMA_VERSION = 1;
+
+/**
+ * Minimum supported schema version for backward compatibility
+ */
+export const MIN_SUPPORTED_VERSION = 0;
+
+/**
+ * Schema version history for documentation
+ */
+export const SCHEMA_VERSION_HISTORY = [
+  { version: 0, description: 'Initial unversioned format', date: '2024-01-01' },
+  { version: 1, description: 'Added version field for schema evolution', date: '2024-01-22' },
+] as const;
+
+/**
+ * Breaking changes between versions
+ */
+export const BREAKING_CHANGES: Record<number, string[]> = {
+  1: ['Added version field to BufferSnapshot'],
+};
+
+// =============================================================================
 // Error Types
 // =============================================================================
 
@@ -718,6 +747,21 @@ export class DoLakeError extends Error {
   ) {
     super(message);
     this.name = 'DoLakeError';
+  }
+}
+
+/**
+ * Version mismatch error for incompatible schema versions
+ */
+export class VersionMismatchError extends DoLakeError {
+  constructor(
+    message: string,
+    public readonly snapshotVersion: number,
+    public readonly currentVersion: number,
+    public readonly minSupportedVersion: number
+  ) {
+    super(message, 'VERSION_MISMATCH', false);
+    this.name = 'VersionMismatchError';
   }
 }
 

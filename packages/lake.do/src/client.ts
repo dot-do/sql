@@ -20,8 +20,31 @@ import type {
   LakeRPCRequest,
   LakeRPCResponse,
   LakeRPCError,
+  RetryConfig,
 } from './types.js';
-import { createPartitionKey, createCompactionJobId, createSnapshotId } from './types.js';
+import { createPartitionKey, createCompactionJobId, createSnapshotId, DEFAULT_RETRY_CONFIG } from './types.js';
+
+// =============================================================================
+// Event Types
+// =============================================================================
+
+/**
+ * Event types emitted by the DoLakeClient.
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
+export type LakeClientEventType = 'connected' | 'disconnected' | 'reconnecting' | 'reconnected' | 'error';
+
+/**
+ * Event handler function type for client events.
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
+export type LakeClientEventHandler = (event?: unknown) => void;
 
 // =============================================================================
 // Client Configuration
@@ -64,43 +87,7 @@ export interface LakeClientConfig {
   retry?: RetryConfig;
 }
 
-/**
- * Configuration for automatic request retry behavior.
- *
- * @description Controls how the client handles transient failures by
- * automatically retrying failed requests with exponential backoff.
- *
- * @example
- * ```typescript
- * const retryConfig: RetryConfig = {
- *   maxRetries: 5,      // Retry up to 5 times
- *   baseDelayMs: 200,   // Start with 200ms delay
- *   maxDelayMs: 10000,  // Cap delay at 10 seconds
- * };
- * ```
- *
- * @public
- * @stability stable
- * @since 0.1.0
- */
-export interface RetryConfig {
-  /** Maximum number of retry attempts before failing */
-  maxRetries: number;
-  /** Initial delay between retries in milliseconds (doubles on each retry) */
-  baseDelayMs: number;
-  /** Maximum delay between retries in milliseconds (cap for exponential backoff) */
-  maxDelayMs: number;
-}
-
-/**
- * Default retry configuration.
- * @internal
- */
-const DEFAULT_RETRY: RetryConfig = {
-  maxRetries: 3,
-  baseDelayMs: 100,
-  maxDelayMs: 5000,
-};
+// RetryConfig is imported from @dotdo/shared-types via ./types.js
 
 // =============================================================================
 // CapnWeb RPC Client
@@ -152,6 +139,8 @@ export class DoLakeClient implements LakeClient {
     reject: (error: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
   }>();
+  private readonly eventListeners = new Map<LakeClientEventType, Set<LakeClientEventHandler>>();
+  private _isConnected = false;
 
   /**
    * Creates a new DoLakeClient instance.
@@ -160,6 +149,7 @@ export class DoLakeClient implements LakeClient {
    * The WebSocket connection is established lazily on the first operation.
    *
    * @param config - Client configuration options
+   * @throws {Error} When the URL is empty or invalid
    *
    * @example
    * ```typescript
@@ -171,11 +161,225 @@ export class DoLakeClient implements LakeClient {
    * ```
    */
   constructor(config: LakeClientConfig) {
+    // Validate URL
+    if (!config.url || config.url.trim() === '') {
+      throw new Error('URL is required and cannot be empty');
+    }
+
+    // Validate URL format
+    try {
+      const url = new URL(config.url);
+      if (!url.protocol.match(/^https?:$/)) {
+        throw new Error('URL must use http or https protocol');
+      }
+    } catch (e) {
+      if (e instanceof TypeError) {
+        throw new Error(`Invalid URL format: ${config.url}`);
+      }
+      throw e;
+    }
+
     this.config = {
       ...config,
       timeout: config.timeout ?? 30000,
-      retry: config.retry ?? DEFAULT_RETRY,
+      retry: config.retry ?? DEFAULT_RETRY_CONFIG,
     };
+  }
+
+  // ===========================================================================
+  // Public Properties
+  // ===========================================================================
+
+  /**
+   * Indicates whether the client is currently connected to the server.
+   *
+   * @description Returns true if the WebSocket connection is open and ready
+   * to send/receive messages. Returns false otherwise.
+   *
+   * @example
+   * ```typescript
+   * const client = createLakeClient({ url: 'https://lake.example.com' });
+   * console.log(client.isConnected); // false
+   * await client.connect();
+   * console.log(client.isConnected); // true
+   * ```
+   *
+   * @public
+   * @readonly
+   */
+  get isConnected(): boolean {
+    return this._isConnected && this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  /**
+   * Returns the configured URL for this client.
+   *
+   * @example
+   * ```typescript
+   * const client = createLakeClient({ url: 'https://lake.example.com' });
+   * console.log(client.url); // 'https://lake.example.com'
+   * ```
+   *
+   * @public
+   * @readonly
+   */
+  get url(): string {
+    return this.config.url;
+  }
+
+  // ===========================================================================
+  // Event Emitter Methods
+  // ===========================================================================
+
+  /**
+   * Registers an event listener for the specified event type.
+   *
+   * @description Adds a callback function that will be called when the
+   * specified event is emitted. Multiple listeners can be registered for
+   * the same event.
+   *
+   * @param event - The event type to listen for
+   * @param handler - The callback function to invoke when the event occurs
+   *
+   * @example
+   * ```typescript
+   * client.on('connected', () => console.log('Connected!'));
+   * client.on('disconnected', () => console.log('Disconnected!'));
+   * client.on('error', (error) => console.error('Error:', error));
+   * ```
+   *
+   * @public
+   */
+  on(event: LakeClientEventType, handler: LakeClientEventHandler): void {
+    if (!this.eventListeners.has(event)) {
+      this.eventListeners.set(event, new Set());
+    }
+    this.eventListeners.get(event)!.add(handler);
+  }
+
+  /**
+   * Removes an event listener for the specified event type.
+   *
+   * @description Removes a previously registered callback function.
+   * If the handler was not registered, this method does nothing.
+   *
+   * @param event - The event type to remove the listener from
+   * @param handler - The callback function to remove
+   *
+   * @example
+   * ```typescript
+   * const handler = () => console.log('Connected!');
+   * client.on('connected', handler);
+   * // Later...
+   * client.off('connected', handler);
+   * ```
+   *
+   * @public
+   */
+  off(event: LakeClientEventType, handler: LakeClientEventHandler): void {
+    const handlers = this.eventListeners.get(event);
+    if (handlers) {
+      handlers.delete(handler);
+    }
+  }
+
+  /**
+   * Registers a one-time event listener for the specified event type.
+   *
+   * @description Adds a callback function that will be called only once
+   * when the specified event is emitted, then automatically removed.
+   *
+   * @param event - The event type to listen for
+   * @param handler - The callback function to invoke when the event occurs
+   *
+   * @example
+   * ```typescript
+   * client.once('connected', () => {
+   *   console.log('First connection established!');
+   * });
+   * ```
+   *
+   * @public
+   */
+  once(event: LakeClientEventType, handler: LakeClientEventHandler): void {
+    const onceHandler: LakeClientEventHandler = (data) => {
+      this.off(event, onceHandler);
+      handler(data);
+    };
+    this.on(event, onceHandler);
+  }
+
+  /**
+   * Emits an event to all registered listeners.
+   *
+   * @param event - The event type to emit
+   * @param data - Optional data to pass to the listeners
+   *
+   * @internal
+   */
+  private emit(event: LakeClientEventType, data?: unknown): void {
+    const handlers = this.eventListeners.get(event);
+    if (handlers) {
+      for (const handler of handlers) {
+        try {
+          handler(data);
+        } catch (error) {
+          console.error(`Error in ${event} event handler:`, error);
+        }
+      }
+    }
+  }
+
+  // ===========================================================================
+  // Connection Management (Public)
+  // ===========================================================================
+
+  /**
+   * Explicitly establishes a WebSocket connection to the server.
+   *
+   * @description Connects to the DoLake server. This method is optional as
+   * the client will automatically connect on the first operation. However,
+   * calling connect() explicitly allows you to handle connection errors
+   * before attempting operations.
+   *
+   * @returns Resolves when the connection is established
+   * @throws {ConnectionError} When the connection fails
+   *
+   * @example
+   * ```typescript
+   * const client = createLakeClient({ url: 'https://lake.example.com' });
+   * try {
+   *   await client.connect();
+   *   console.log('Connected successfully!');
+   * } catch (error) {
+   *   console.error('Failed to connect:', error);
+   * }
+   * ```
+   *
+   * @public
+   */
+  async connect(): Promise<void> {
+    await this.ensureConnection();
+  }
+
+  /**
+   * Closes the client connection.
+   *
+   * @description Alias for {@link close}. Closes the WebSocket connection,
+   * cancels any pending requests, and stops any active CDC subscriptions.
+   *
+   * @returns Resolves when the connection is fully closed
+   *
+   * @example
+   * ```typescript
+   * await client.disconnect();
+   * console.log(client.isConnected); // false
+   * ```
+   *
+   * @public
+   */
+  async disconnect(): Promise<void> {
+    return this.close();
   }
 
   // ===========================================================================
@@ -183,7 +387,7 @@ export class DoLakeClient implements LakeClient {
   // ===========================================================================
 
   private async ensureConnection(): Promise<WebSocket> {
-    if (this.ws && this.ws.readyState === WebSocket.READY_STATE_OPEN) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       return this.ws;
     }
 
@@ -192,19 +396,38 @@ export class DoLakeClient implements LakeClient {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.addEventListener('open', () => {
+        this._isConnected = true;
+        this.emit('connected');
         resolve(this.ws!);
       });
 
       this.ws.addEventListener('error', (event: Event) => {
-        reject(new Error(`WebSocket error: ${event}`));
+        this._isConnected = false;
+        const error = new ConnectionError({
+          code: 'CONNECTION_ERROR',
+          message: `WebSocket error: ${event}`,
+        });
+        this.emit('error', error);
+        reject(error);
       });
 
       this.ws.addEventListener('close', () => {
+        const wasConnected = this._isConnected;
+        this._isConnected = false;
         this.ws = null;
+
+        // Emit disconnected event if we were previously connected
+        if (wasConnected) {
+          this.emit('disconnected');
+        }
+
         // Reject all pending requests
         for (const [id, pending] of this.pendingRequests) {
           clearTimeout(pending.timeout);
-          pending.reject(new Error('Connection closed'));
+          pending.reject(new ConnectionError({
+            code: 'CONNECTION_CLOSED',
+            message: 'Connection closed',
+          }));
           this.pendingRequests.delete(id);
         }
         // Close CDC stream
@@ -662,13 +885,21 @@ export class DoLakeClient implements LakeClient {
    * ```
    */
   async close(): Promise<void> {
+    const wasConnected = this._isConnected;
+
     if (this.cdcStream) {
       this.cdcStream.close();
       this.cdcStream = null;
     }
     if (this.ws) {
+      this._isConnected = false;
       this.ws.close();
       this.ws = null;
+    }
+
+    // Emit disconnected event if we were previously connected
+    if (wasConnected) {
+      this.emit('disconnected');
     }
   }
 }
@@ -678,22 +909,351 @@ export class DoLakeClient implements LakeClient {
 // =============================================================================
 
 /**
- * Internal controller for CDC stream iteration.
- * @internal
+ * Backpressure strategy for handling queue overflow.
+ *
+ * @description Controls how the controller handles new events when the queue is full.
+ * - `block`: push() returns false, pushAsync() waits for space
+ * - `drop-oldest`: Removes oldest batch to make room for new one
+ * - `drop-newest`: Rejects new batch without modifying queue
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
  */
-class CDCStreamController implements AsyncIterable<CDCBatch> {
+export type BackpressureStrategy = 'block' | 'drop-oldest' | 'drop-newest';
+
+/**
+ * Metrics about queue depth and throughput.
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
+export interface CDCStreamMetrics {
+  /** Current number of batches in the queue */
+  currentDepth: number;
+  /** Maximum configured queue size */
+  maxDepth: number;
+  /** Highest queue depth seen since creation or last reset */
+  peakDepth: number;
+  /** Number of batches dropped due to backpressure */
+  droppedCount: number;
+  /** Total number of batches pushed */
+  totalPushed: number;
+  /** Total number of batches consumed */
+  totalConsumed: number;
+  /** Queue utilization as a percentage (0-100) */
+  utilizationPercent: number;
+}
+
+/**
+ * Water mark event payload.
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
+export interface WaterMarkEvent {
+  currentDepth: number;
+  maxDepth: number;
+  utilizationPercent: number;
+}
+
+/**
+ * Configuration options for CDCStreamController.
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
+export interface CDCStreamControllerOptions {
+  /** Maximum number of batches to buffer (default: 1000, minimum: 1) */
+  maxQueueSize?: number;
+  /** Strategy when queue is full (default: 'block') */
+  backpressureStrategy?: BackpressureStrategy;
+  /** High water mark threshold percentage (0-100) for emitting event */
+  highWaterMark?: number;
+  /** Low water mark threshold percentage (0-100) for emitting event */
+  lowWaterMark?: number;
+  /** Callback when queue reaches high water mark */
+  onHighWaterMark?: (event: WaterMarkEvent) => void;
+  /** Callback when queue falls below low water mark */
+  onLowWaterMark?: (event: WaterMarkEvent) => void;
+}
+
+/**
+ * Controller for CDC stream iteration with bounded queue and backpressure support.
+ *
+ * @description Manages CDC event batches with configurable queue bounds,
+ * backpressure strategies, and metrics for monitoring. The queue prevents
+ * unbounded memory growth under high throughput scenarios.
+ *
+ * @example
+ * ```typescript
+ * const controller = new CDCStreamController({
+ *   maxQueueSize: 100,
+ *   backpressureStrategy: 'drop-oldest',
+ *   highWaterMark: 80,
+ *   onHighWaterMark: (event) => console.warn('Queue filling up:', event),
+ * });
+ *
+ * // Check if push succeeded
+ * if (!controller.push(batch)) {
+ *   console.warn('Queue full, batch rejected');
+ * }
+ *
+ * // Or wait for space
+ * await controller.pushAsync(batch);
+ *
+ * // Monitor metrics
+ * const metrics = controller.getMetrics();
+ * console.log(`Queue utilization: ${metrics.utilizationPercent}%`);
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
+export class CDCStreamController implements AsyncIterable<CDCBatch> {
   private readonly queue: CDCBatch[] = [];
   private resolvers: Array<(value: IteratorResult<CDCBatch>) => void> = [];
+  private asyncPushResolvers: Array<() => void> = [];
   private closed = false;
 
-  push(batch: CDCBatch): void {
-    if (this.closed) return;
+  private _maxQueueSize: number;
+  private readonly _backpressureStrategy: BackpressureStrategy;
+  private readonly _highWaterMark: number | undefined;
+  private readonly _lowWaterMark: number | undefined;
+  private readonly _onHighWaterMark: ((event: WaterMarkEvent) => void) | undefined;
+  private readonly _onLowWaterMark: ((event: WaterMarkEvent) => void) | undefined;
 
+  private _droppedCount = 0;
+  private _peakDepth = 0;
+  private _totalPushed = 0;
+  private _totalConsumed = 0;
+  private _wasAboveHighWaterMark = false;
+
+  /**
+   * Creates a new CDCStreamController instance.
+   *
+   * @param options - Configuration options
+   * @throws {Error} When maxQueueSize is less than 1
+   */
+  constructor(options: CDCStreamControllerOptions = {}) {
+    const maxQueueSize = options.maxQueueSize ?? 1000;
+    if (maxQueueSize < 1) {
+      throw new Error('maxQueueSize must be at least 1');
+    }
+    this._maxQueueSize = maxQueueSize;
+    this._backpressureStrategy = options.backpressureStrategy ?? 'block';
+    this._highWaterMark = options.highWaterMark;
+    this._lowWaterMark = options.lowWaterMark;
+    this._onHighWaterMark = options.onHighWaterMark;
+    this._onLowWaterMark = options.onLowWaterMark;
+  }
+
+  /**
+   * Maximum number of batches that can be buffered.
+   */
+  get maxQueueSize(): number {
+    return this._maxQueueSize;
+  }
+
+  /**
+   * Current number of batches in the queue.
+   */
+  get queueSize(): number {
+    return this.queue.length;
+  }
+
+  /**
+   * Number of batches dropped due to backpressure.
+   */
+  get droppedCount(): number {
+    return this._droppedCount;
+  }
+
+  /**
+   * Current backpressure strategy.
+   */
+  get backpressureStrategy(): BackpressureStrategy {
+    return this._backpressureStrategy;
+  }
+
+  /**
+   * Sets a new maximum queue size.
+   *
+   * @description If the new size is smaller than the current queue size,
+   * excess batches are dropped according to the backpressure strategy.
+   *
+   * @param size - New maximum queue size (must be at least 1)
+   * @throws {Error} When size is less than 1
+   */
+  setMaxQueueSize(size: number): void {
+    if (size < 1) {
+      throw new Error('maxQueueSize must be at least 1');
+    }
+    this._maxQueueSize = size;
+
+    // Drop excess batches if needed
+    while (this.queue.length > this._maxQueueSize) {
+      if (this._backpressureStrategy === 'drop-oldest') {
+        this.queue.shift();
+      } else {
+        this.queue.pop();
+      }
+      this._droppedCount++;
+    }
+
+    this.checkWaterMarks();
+  }
+
+  /**
+   * Pushes a batch to the queue.
+   *
+   * @description Behavior depends on the backpressure strategy:
+   * - `block`: Returns false when queue is full
+   * - `drop-oldest`: Drops oldest batch, always returns true
+   * - `drop-newest`: Returns false when full without modifying queue
+   *
+   * @param batch - The CDC batch to push
+   * @returns true if the batch was accepted, false if rejected
+   */
+  push(batch: CDCBatch): boolean {
+    if (this.closed) return false;
+
+    this._totalPushed++;
+
+    // If there's a waiting consumer, deliver directly
     const resolver = this.resolvers.shift();
     if (resolver) {
       resolver({ value: batch, done: false });
-    } else {
-      this.queue.push(batch);
+      this.updatePeakDepth();
+      this.checkWaterMarks();
+      return true;
+    }
+
+    // Check if queue is full
+    if (this.queue.length >= this._maxQueueSize) {
+      switch (this._backpressureStrategy) {
+        case 'block':
+        case 'drop-newest':
+          this._droppedCount++;
+          this._totalPushed--; // Don't count dropped batches
+          return false;
+
+        case 'drop-oldest':
+          this.queue.shift();
+          this._droppedCount++;
+          break;
+      }
+    }
+
+    this.queue.push(batch);
+    this.updatePeakDepth();
+    this.checkWaterMarks();
+    return true;
+  }
+
+  /**
+   * Pushes a batch to the queue, waiting for space if necessary.
+   *
+   * @description When the queue is full, this method waits until a batch
+   * is consumed before adding the new batch. Only applies to 'block' strategy;
+   * other strategies behave the same as push().
+   *
+   * @param batch - The CDC batch to push
+   * @returns Promise that resolves to true when the batch is accepted
+   */
+  async pushAsync(batch: CDCBatch): Promise<boolean> {
+    if (this.closed) return false;
+
+    // If queue has space, push immediately
+    if (this.queue.length < this._maxQueueSize || this._backpressureStrategy !== 'block') {
+      return this.push(batch);
+    }
+
+    // Wait for space to become available
+    await new Promise<void>((resolve) => {
+      this.asyncPushResolvers.push(resolve);
+    });
+
+    // Now push the batch
+    return this.push(batch);
+  }
+
+  /**
+   * Returns current queue metrics.
+   *
+   * @returns Object containing queue depth statistics
+   */
+  getMetrics(): CDCStreamMetrics {
+    return {
+      currentDepth: this.queue.length,
+      maxDepth: this._maxQueueSize,
+      peakDepth: this._peakDepth,
+      droppedCount: this._droppedCount,
+      totalPushed: this._totalPushed,
+      totalConsumed: this._totalConsumed,
+      utilizationPercent: Math.round((this.queue.length / this._maxQueueSize) * 100),
+    };
+  }
+
+  /**
+   * Resets metrics counters while preserving the queue contents.
+   *
+   * @description Resets peakDepth, totalPushed, totalConsumed, and droppedCount.
+   * The current queue depth becomes the new peak.
+   */
+  resetMetrics(): void {
+    this._peakDepth = this.queue.length;
+    this._totalPushed = 0;
+    this._totalConsumed = 0;
+    this._droppedCount = 0;
+  }
+
+  private updatePeakDepth(): void {
+    if (this.queue.length > this._peakDepth) {
+      this._peakDepth = this.queue.length;
+    }
+  }
+
+  private checkWaterMarks(): void {
+    const utilizationPercent = Math.round((this.queue.length / this._maxQueueSize) * 100);
+
+    // Check high water mark
+    if (this._highWaterMark !== undefined) {
+      if (utilizationPercent >= this._highWaterMark && !this._wasAboveHighWaterMark) {
+        this._wasAboveHighWaterMark = true;
+        if (this._onHighWaterMark) {
+          this._onHighWaterMark({
+            currentDepth: this.queue.length,
+            maxDepth: this._maxQueueSize,
+            utilizationPercent,
+          });
+        }
+      }
+    }
+
+    // Check low water mark
+    if (this._lowWaterMark !== undefined) {
+      if (utilizationPercent <= this._lowWaterMark && this._wasAboveHighWaterMark) {
+        this._wasAboveHighWaterMark = false;
+        if (this._onLowWaterMark) {
+          this._onLowWaterMark({
+            currentDepth: this.queue.length,
+            maxDepth: this._maxQueueSize,
+            utilizationPercent,
+          });
+        }
+      }
+    }
+  }
+
+  private notifyAsyncPushWaiters(): void {
+    const waiter = this.asyncPushResolvers.shift();
+    if (waiter) {
+      waiter();
     }
   }
 
@@ -703,6 +1263,12 @@ class CDCStreamController implements AsyncIterable<CDCBatch> {
       resolver({ value: undefined as unknown as CDCBatch, done: true });
     }
     this.resolvers = [];
+
+    // Also resolve any waiting async pushers
+    for (const waiter of this.asyncPushResolvers) {
+      waiter();
+    }
+    this.asyncPushResolvers = [];
   }
 
   [Symbol.asyncIterator](): AsyncIterator<CDCBatch> {
@@ -714,11 +1280,21 @@ class CDCStreamController implements AsyncIterable<CDCBatch> {
 
         const batch = this.queue.shift();
         if (batch) {
+          this._totalConsumed++;
+          this.checkWaterMarks();
+          this.notifyAsyncPushWaiters();
           return Promise.resolve({ value: batch, done: false });
         }
 
         return new Promise((resolve) => {
-          this.resolvers.push(resolve);
+          this.resolvers.push((result) => {
+            if (!result.done) {
+              this._totalConsumed++;
+              this.checkWaterMarks();
+              this.notifyAsyncPushWaiters();
+            }
+            resolve(result);
+          });
         });
       },
     };
@@ -783,6 +1359,82 @@ export class LakeError extends Error {
     this.name = 'LakeError';
     this.code = error.code;
     this.details = error.details;
+  }
+}
+
+/**
+ * Error thrown when a connection operation fails.
+ *
+ * @description Represents connection-related errors such as connection failures,
+ * timeouts, or disconnections. Extends LakeError for consistent error handling.
+ *
+ * Common error codes:
+ * - `CONNECTION_ERROR`: General connection failure
+ * - `CONNECTION_CLOSED`: WebSocket connection was closed unexpectedly
+ * - `CONNECTION_TIMEOUT`: Connection attempt timed out
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await client.connect();
+ * } catch (error) {
+ *   if (error instanceof ConnectionError) {
+ *     console.error(`Connection failed [${error.code}]: ${error.message}`);
+ *   }
+ * }
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
+export class ConnectionError extends LakeError {
+  /**
+   * Creates a new ConnectionError instance.
+   *
+   * @param error - The error details
+   */
+  constructor(error: LakeRPCError) {
+    super(error);
+    this.name = 'ConnectionError';
+  }
+}
+
+/**
+ * Error thrown when a query operation fails.
+ *
+ * @description Represents query-related errors such as SQL syntax errors,
+ * table not found, or query timeouts. Extends LakeError for consistent error handling.
+ *
+ * Common error codes:
+ * - `INVALID_SQL`: SQL syntax error or invalid query
+ * - `TABLE_NOT_FOUND`: The requested table does not exist
+ * - `QUERY_TIMEOUT`: Query execution timed out
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await client.query('INVALID SQL');
+ * } catch (error) {
+ *   if (error instanceof QueryError) {
+ *     console.error(`Query failed [${error.code}]: ${error.message}`);
+ *   }
+ * }
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
+export class QueryError extends LakeError {
+  /**
+   * Creates a new QueryError instance.
+   *
+   * @param error - The error details
+   */
+  constructor(error: LakeRPCError) {
+    super(error);
+    this.name = 'QueryError';
   }
 }
 

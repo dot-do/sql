@@ -6,9 +6,12 @@
  * - Result streaming (not buffering)
  * - Two-phase aggregation for SUM/COUNT/AVG
  * - ORDER BY + LIMIT post-processing
+ * - Per-shard circuit breaker
  *
  * @packageDocumentation
  */
+
+import { EventEmitter } from 'events';
 
 import type {
   ExecutionPlan,
@@ -25,6 +28,50 @@ import type {
 } from './types.js';
 
 import type { ReplicaSelector } from './replica.js';
+
+// =============================================================================
+// CIRCUIT BREAKER TYPES
+// =============================================================================
+
+/**
+ * Circuit breaker state
+ * - CLOSED: Normal operation, requests pass through
+ * - OPEN: After N consecutive failures, rejects requests immediately
+ * - HALF_OPEN: After timeout, allows a single test request
+ */
+export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+
+/**
+ * Circuit breaker configuration
+ */
+export interface CircuitBreakerConfig {
+  /** Number of consecutive failures before opening the circuit */
+  failureThreshold: number;
+  /** Time in ms before transitioning from OPEN to HALF_OPEN */
+  resetTimeoutMs: number;
+  /** Number of successful requests to close the circuit from HALF_OPEN (default: 1) */
+  successThreshold?: number;
+}
+
+/**
+ * Circuit breaker state for a single shard
+ */
+export interface CircuitBreakerState {
+  state: CircuitState;
+  failureCount: number;
+  successCount: number;
+  lastFailureTime?: number;
+  lastSuccessTime?: number;
+}
+
+/**
+ * Event emitted when circuit state changes
+ */
+export interface CircuitStateChangeEvent {
+  shardId: string;
+  oldState: CircuitState;
+  newState: CircuitState;
+}
 
 // =============================================================================
 // RPC INTERFACE
@@ -90,22 +137,39 @@ export interface ExecutorConfig {
     backoffMs: number;
     maxBackoffMs: number;
   };
+  /** Circuit breaker configuration */
+  circuitBreaker?: CircuitBreakerConfig;
+}
+
+/**
+ * Error thrown when circuit breaker is open
+ */
+export class CircuitOpenError extends Error {
+  readonly shardId: string;
+
+  constructor(shardId: string) {
+    super(`Circuit is open for shard ${shardId}`);
+    this.name = 'CircuitOpenError';
+    this.shardId = shardId;
+  }
 }
 
 /**
  * Distributed query executor
  * Handles parallel execution across shards and result aggregation
  */
-export class DistributedExecutor {
+export class DistributedExecutor extends EventEmitter {
   private readonly rpc: ShardRPC;
   private readonly replicaSelector: ReplicaSelector;
-  private readonly config: Required<ExecutorConfig>;
+  private readonly config: Required<Omit<ExecutorConfig, 'circuitBreaker'>> & { circuitBreaker?: CircuitBreakerConfig };
+  private readonly circuitStates: Map<string, CircuitBreakerState>;
 
   constructor(
     rpc: ShardRPC,
     replicaSelector: ReplicaSelector,
     config?: ExecutorConfig
   ) {
+    super();
     this.rpc = rpc;
     this.replicaSelector = replicaSelector;
     this.config = {
@@ -117,7 +181,179 @@ export class DistributedExecutor {
         backoffMs: 100,
         maxBackoffMs: 5000,
       },
+      circuitBreaker: config?.circuitBreaker,
     };
+    this.circuitStates = new Map();
+  }
+
+  // -------------------------------------------------------------------------
+  // Circuit Breaker Methods
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get the circuit breaker state for a specific shard
+   */
+  getCircuitState(shardId: string): CircuitBreakerState {
+    const state = this.circuitStates.get(shardId);
+    if (state) {
+      // Check if we should transition from OPEN to HALF_OPEN
+      if (state.state === 'OPEN' && this.config.circuitBreaker) {
+        const now = Date.now();
+        if (state.lastFailureTime && now - state.lastFailureTime >= this.config.circuitBreaker.resetTimeoutMs) {
+          this.transitionCircuitState(shardId, 'HALF_OPEN');
+          return this.circuitStates.get(shardId)!;
+        }
+      }
+      return state;
+    }
+
+    // Initialize default state
+    const defaultState: CircuitBreakerState = {
+      state: 'CLOSED',
+      failureCount: 0,
+      successCount: 0,
+    };
+    this.circuitStates.set(shardId, defaultState);
+    return defaultState;
+  }
+
+  /**
+   * Get all circuit breaker states
+   */
+  getCircuitStates(): Map<string, CircuitBreakerState> {
+    // Ensure all shards have their states checked for HALF_OPEN transition
+    for (const shardId of this.circuitStates.keys()) {
+      this.getCircuitState(shardId); // This triggers the OPEN -> HALF_OPEN check
+    }
+    return new Map(this.circuitStates);
+  }
+
+  /**
+   * Initialize circuit states for a list of shard IDs
+   * This is useful when you want to pre-initialize all shard states upfront
+   */
+  initializeCircuitStates(shardIds: string[]): void {
+    for (const shardId of shardIds) {
+      if (!this.circuitStates.has(shardId)) {
+        this.circuitStates.set(shardId, {
+          state: 'CLOSED',
+          failureCount: 0,
+          successCount: 0,
+        });
+      }
+    }
+  }
+
+  /**
+   * Forcefully open a circuit for a shard (admin/testing)
+   */
+  forceCircuitOpen(shardId: string): void {
+    const currentState = this.getCircuitState(shardId);
+    if (currentState.state !== 'OPEN') {
+      this.transitionCircuitState(shardId, 'OPEN');
+    }
+  }
+
+  /**
+   * Forcefully close a circuit for a shard (admin/testing)
+   */
+  forceCircuitClose(shardId: string): void {
+    const currentState = this.getCircuitState(shardId);
+    if (currentState.state !== 'CLOSED') {
+      this.transitionCircuitState(shardId, 'CLOSED');
+      // Reset counters
+      const state = this.circuitStates.get(shardId)!;
+      state.failureCount = 0;
+      state.successCount = 0;
+    }
+  }
+
+  private transitionCircuitState(shardId: string, newState: CircuitState): void {
+    const current = this.circuitStates.get(shardId);
+    const oldState = current?.state ?? 'CLOSED';
+
+    if (oldState === newState) return;
+
+    const updatedState: CircuitBreakerState = {
+      state: newState,
+      failureCount: current?.failureCount ?? 0,
+      successCount: newState === 'HALF_OPEN' ? 0 : (current?.successCount ?? 0),
+      lastFailureTime: current?.lastFailureTime,
+      lastSuccessTime: current?.lastSuccessTime,
+    };
+
+    // Reset failure count when closing
+    if (newState === 'CLOSED') {
+      updatedState.failureCount = 0;
+      updatedState.successCount = 0;
+    }
+
+    this.circuitStates.set(shardId, updatedState);
+
+    // Emit state change event
+    const event: CircuitStateChangeEvent = {
+      shardId,
+      oldState,
+      newState,
+    };
+    this.emit('circuitStateChange', event);
+  }
+
+  private recordCircuitFailure(shardId: string): void {
+    if (!this.config.circuitBreaker) return;
+
+    const state = this.getCircuitState(shardId);
+    const now = Date.now();
+
+    state.failureCount++;
+    state.lastFailureTime = now;
+    state.successCount = 0; // Reset success count on failure
+
+    this.circuitStates.set(shardId, state);
+
+    // Check if we should open the circuit
+    if (state.state === 'CLOSED' && state.failureCount >= this.config.circuitBreaker.failureThreshold) {
+      this.transitionCircuitState(shardId, 'OPEN');
+    } else if (state.state === 'HALF_OPEN') {
+      // Any failure in HALF_OPEN state opens the circuit again
+      this.transitionCircuitState(shardId, 'OPEN');
+    }
+  }
+
+  private recordCircuitSuccess(shardId: string): void {
+    if (!this.config.circuitBreaker) return;
+
+    const state = this.getCircuitState(shardId);
+    const now = Date.now();
+
+    state.lastSuccessTime = now;
+
+    if (state.state === 'HALF_OPEN') {
+      state.successCount++;
+      const successThreshold = this.config.circuitBreaker.successThreshold ?? 1;
+
+      if (state.successCount >= successThreshold) {
+        this.transitionCircuitState(shardId, 'CLOSED');
+      } else {
+        this.circuitStates.set(shardId, state);
+      }
+    } else if (state.state === 'CLOSED') {
+      // Reset failure count on success in CLOSED state
+      state.failureCount = 0;
+      this.circuitStates.set(shardId, state);
+    }
+  }
+
+  private checkCircuitBreaker(shardId: string): void {
+    if (!this.config.circuitBreaker) return;
+
+    const state = this.getCircuitState(shardId);
+
+    if (state.state === 'OPEN') {
+      throw new CircuitOpenError(shardId);
+    }
+    // HALF_OPEN allows the request through for testing
+    // CLOSED allows the request through normally
   }
 
   /**
@@ -205,6 +441,27 @@ export class DistributedExecutor {
     plan: ShardExecutionPlan,
     readPreference: ReadPreference
   ): Promise<ShardResult> {
+    // Check circuit breaker before attempting execution
+    try {
+      this.checkCircuitBreaker(plan.shardId);
+    } catch (err) {
+      if (err instanceof CircuitOpenError) {
+        return {
+          shardId: plan.shardId,
+          rows: [],
+          columns: [],
+          rowCount: 0,
+          executionTimeMs: 0,
+          error: {
+            code: 'CIRCUIT_OPEN',
+            message: `Circuit is open for shard ${plan.shardId}`,
+            isRetryable: false,
+          },
+        };
+      }
+      throw err;
+    }
+
     let lastError: ShardError | undefined;
     let backoff = this.config.retry.backoffMs;
 
@@ -225,6 +482,9 @@ export class DistributedExecutor {
           this.replicaSelector.recordSuccess(plan.shardId, replicaId);
         }
 
+        // Record circuit breaker success
+        this.recordCircuitSuccess(plan.shardId);
+
         return result;
       } catch (err) {
         lastError = {
@@ -238,6 +498,9 @@ export class DistributedExecutor {
         if (replicaId) {
           this.replicaSelector.recordFailure(plan.shardId, replicaId);
         }
+
+        // Record circuit breaker failure
+        this.recordCircuitFailure(plan.shardId);
 
         if (!lastError.isRetryable) {
           break;

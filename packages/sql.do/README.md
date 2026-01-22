@@ -1,3 +1,5 @@
+> **Developer Preview** - This package is under active development. APIs may change. Not recommended for production use.
+
 # @dotdo/sql.do
 
 [![npm version](https://img.shields.io/npm/v/@dotdo/sql.do.svg)](https://www.npmjs.com/package/@dotdo/sql.do)
@@ -5,9 +7,15 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Pre-release Software**: This is v0.1.0. APIs may change. Not recommended for production use without thorough testing.
-
 Client SDK for DoSQL - SQL database on Cloudflare Workers with CapnWeb RPC.
+
+## Status
+
+| Property | Value |
+|----------|-------|
+| Current version | 0.1.0-alpha |
+| Stability | Experimental |
+| Breaking changes | Expected before 1.0 |
 
 ## Table of Contents
 

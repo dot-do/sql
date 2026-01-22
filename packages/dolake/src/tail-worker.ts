@@ -198,9 +198,9 @@ export interface BatchSendResult {
   eventsCount: number;
   bytesSize: number;
   durationMs: number;
-  error?: string;
-  wasDropped?: boolean;
-  dropReason?: 'backpressure' | 'connection_failed' | 'timeout';
+  error?: string | undefined;
+  wasDropped?: boolean | undefined;
+  dropReason?: 'backpressure' | 'connection_failed' | 'timeout' | undefined;
 }
 
 /**
@@ -368,6 +368,7 @@ export class TailWorkerCDCStreamer {
 
     // Create CDC event
     const event: TraceCDCEvent = {
+      lsn: BigInt(0), // Will be set when sending
       sequence: 0, // Will be set when sending
       timestamp,
       operation: 'INSERT',

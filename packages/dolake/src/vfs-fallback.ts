@@ -131,17 +131,17 @@ export interface VFSWriteResult {
   /** Whether written to VFS */
   writtenToVFS: boolean;
   /** Event ID */
-  eventId?: string;
+  eventId?: string | undefined;
   /** Path where event was stored */
-  path?: string;
+  path?: string | undefined;
   /** Whether KV was skipped */
-  skippedKV?: boolean;
+  skippedKV?: boolean | undefined;
   /** Whether storage limit was exceeded */
-  storageLimitExceeded?: boolean;
+  storageLimitExceeded?: boolean | undefined;
   /** Error message if failed */
-  error?: string;
+  error?: string | undefined;
   /** Error code */
-  errorCode?: string;
+  errorCode?: string | undefined;
 }
 
 /**
@@ -187,15 +187,15 @@ export interface RecoveryResult {
   /** Number of batches written */
   batchCount: number;
   /** Whether there was nothing to recover */
-  nothingToRecover?: boolean;
+  nothingToRecover?: boolean | undefined;
   /** Order of events written */
-  writeOrder?: number[];
+  writeOrder?: number[] | undefined;
   /** Whether next alarm was scheduled */
-  nextAlarmScheduled?: boolean;
+  nextAlarmScheduled?: boolean | undefined;
   /** Time of next alarm */
-  nextAlarmTime?: number;
+  nextAlarmTime?: number | undefined;
   /** Error message if failed */
-  error?: string;
+  error?: string | undefined;
 }
 
 /**
@@ -569,7 +569,11 @@ export class VFSFallbackStorage {
     }
 
     // Sort by timestamp
-    events.sort((a, b) => a.event.timestamp - b.event.timestamp);
+    events.sort((a, b) => {
+      const aTime = typeof a.event.timestamp === 'number' ? a.event.timestamp : a.event.timestamp.getTime();
+      const bTime = typeof b.event.timestamp === 'number' ? b.event.timestamp : b.event.timestamp.getTime();
+      return aTime - bTime;
+    });
 
     return events.map((se) => se.event);
   }
@@ -734,7 +738,9 @@ export class VFSFallbackStorage {
             await r2Storage.write(r2Path, eventData);
 
             r2Paths.push(r2Path);
-            writeOrder.push(event.sequence);
+            if (event.sequence !== undefined) {
+              writeOrder.push(event.sequence);
+            }
             eventsFlushed++;
 
             // Remove from VFS

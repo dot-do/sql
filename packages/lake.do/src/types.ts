@@ -106,9 +106,11 @@ export type CompactionJobId = string & { readonly [CompactionJobIdBrand]: never 
  *
  * @description Converts a plain string identifier to a type-safe CDCEventId.
  * This ensures type safety when working with CDC event identifiers across the API.
+ * In dev mode, validates that the id is a non-empty string.
  *
  * @param id - The plain string identifier for the CDC event
  * @returns A branded CDCEventId that can be used with lake.do APIs
+ * @throws {Error} In dev mode: if id is not a string or is empty
  *
  * @example
  * ```typescript
@@ -121,6 +123,14 @@ export type CompactionJobId = string & { readonly [CompactionJobIdBrand]: never 
  * @since 0.1.0
  */
 export function createCDCEventId(id: string): CDCEventId {
+  if (isDevMode()) {
+    if (typeof id !== 'string') {
+      throw new Error('CDCEventId must be a string');
+    }
+    if (id.trim().length === 0) {
+      throw new Error('CDCEventId cannot be empty');
+    }
+  }
   return id as CDCEventId;
 }
 
@@ -129,9 +139,11 @@ export function createCDCEventId(id: string): CDCEventId {
  *
  * @description Converts a plain string to a type-safe PartitionKey.
  * Partition keys typically follow the format "column=value" (e.g., "date=2024-01-15").
+ * In dev mode, validates that the key is a non-empty string.
  *
  * @param key - The plain string partition key
  * @returns A branded PartitionKey that can be used with lake.do APIs
+ * @throws {Error} In dev mode: if key is not a string or is empty
  *
  * @example
  * ```typescript
@@ -145,6 +157,14 @@ export function createCDCEventId(id: string): CDCEventId {
  * @since 0.1.0
  */
 export function createPartitionKey(key: string): PartitionKey {
+  if (isDevMode()) {
+    if (typeof key !== 'string') {
+      throw new Error('PartitionKey must be a string');
+    }
+    if (key.trim().length === 0) {
+      throw new Error('PartitionKey cannot be empty');
+    }
+  }
   return key as PartitionKey;
 }
 
@@ -153,9 +173,11 @@ export function createPartitionKey(key: string): PartitionKey {
  *
  * @description Converts a plain string to a type-safe ParquetFileId.
  * Parquet file IDs identify data files stored in the lakehouse.
+ * In dev mode, validates that the id is a non-empty string.
  *
  * @param id - The plain string file identifier
  * @returns A branded ParquetFileId that can be used with lake.do APIs
+ * @throws {Error} In dev mode: if id is not a string or is empty
  *
  * @example
  * ```typescript
@@ -167,6 +189,14 @@ export function createPartitionKey(key: string): PartitionKey {
  * @since 0.1.0
  */
 export function createParquetFileId(id: string): ParquetFileId {
+  if (isDevMode()) {
+    if (typeof id !== 'string') {
+      throw new Error('ParquetFileId must be a string');
+    }
+    if (id.trim().length === 0) {
+      throw new Error('ParquetFileId cannot be empty');
+    }
+  }
   return id as ParquetFileId;
 }
 
@@ -175,9 +205,11 @@ export function createParquetFileId(id: string): ParquetFileId {
  *
  * @description Converts a plain string to a type-safe SnapshotId.
  * Snapshot IDs are used for time travel queries and version management.
+ * In dev mode, validates that the id is a non-empty string.
  *
  * @param id - The plain string snapshot identifier
  * @returns A branded SnapshotId that can be used with lake.do APIs
+ * @throws {Error} In dev mode: if id is not a string or is empty
  *
  * @example
  * ```typescript
@@ -190,6 +222,14 @@ export function createParquetFileId(id: string): ParquetFileId {
  * @since 0.1.0
  */
 export function createSnapshotId(id: string): SnapshotId {
+  if (isDevMode()) {
+    if (typeof id !== 'string') {
+      throw new Error('SnapshotId must be a string');
+    }
+    if (id.trim().length === 0) {
+      throw new Error('SnapshotId cannot be empty');
+    }
+  }
   return id as SnapshotId;
 }
 
@@ -198,9 +238,11 @@ export function createSnapshotId(id: string): SnapshotId {
  *
  * @description Converts a plain string to a type-safe CompactionJobId.
  * Compaction job IDs are used to track the status of file compaction operations.
+ * In dev mode, validates that the id is a non-empty string.
  *
  * @param id - The plain string job identifier
  * @returns A branded CompactionJobId that can be used with lake.do APIs
+ * @throws {Error} In dev mode: if id is not a string or is empty
  *
  * @example
  * ```typescript
@@ -213,6 +255,14 @@ export function createSnapshotId(id: string): SnapshotId {
  * @since 0.1.0
  */
 export function createCompactionJobId(id: string): CompactionJobId {
+  if (isDevMode()) {
+    if (typeof id !== 'string') {
+      throw new Error('CompactionJobId must be a string');
+    }
+    if (id.trim().length === 0) {
+      throw new Error('CompactionJobId cannot be empty');
+    }
+  }
   return id as CompactionJobId;
 }
 
@@ -228,6 +278,7 @@ export type {
   CDCEvent,
   ClientCDCOperation,
   ClientCapabilities,
+  RetryConfig,
 } from '@dotdo/sql.do';
 
 export {
@@ -241,7 +292,17 @@ export {
   // Converters
   serverToClientCDCEvent,
   clientToServerCDCEvent,
+  // Retry Config
+  DEFAULT_RETRY_CONFIG,
+  isRetryConfig,
+  createRetryConfig,
+  // Dev Mode
+  setDevMode,
+  isDevMode,
 } from '@dotdo/sql.do';
+
+// Import isDevMode for local use in factory functions
+import { isDevMode } from '@dotdo/sql.do';
 
 // =============================================================================
 // CDC Streaming Types

@@ -58,7 +58,9 @@ export { generateIdempotencyKey, isMutationQuery } from './client.js';
  * @public
  * @stability stable
  */
-export type { SQLClientConfig, RetryConfig } from './client.js';
+export type { SQLClientConfig } from './client.js';
+export type { RetryConfig } from './types.js';
+export { DEFAULT_RETRY_CONFIG, isRetryConfig, createRetryConfig } from './types.js';
 
 // =============================================================================
 // Stable Type Exports
@@ -164,6 +166,20 @@ export {
   createLSN,
   createStatementHash,
   createShardId,
+  // LSN utilities
+  compareLSN,
+  incrementLSN,
+  lsnValue,
+  // Type guards for validation
+  isValidLSN,
+  isValidTransactionId,
+  isValidShardId,
+  isValidStatementHash,
+  // Dev mode configuration
+  setDevMode,
+  isDevMode,
+  setStrictMode,
+  isStrictMode,
 } from './types.js';
 
 /**

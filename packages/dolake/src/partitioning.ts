@@ -309,7 +309,7 @@ export function computePartitionValue(
 
   // Bucket transform
   const bucketMatch = transform.match(/^bucket\[(\d+)\]$/);
-  if (bucketMatch) {
+  if (bucketMatch && bucketMatch[1]) {
     const numBuckets = parseInt(bucketMatch[1], 10);
     return bucketTransform(value, numBuckets);
   }
@@ -400,11 +400,11 @@ export function partitionMatchesPredicate(
   const parts = partition.split('/');
   for (const part of parts) {
     const [field, valueStr] = part.split('=');
-    if (field !== predicate.field) {
+    if (!field || field !== predicate.field) {
       continue;
     }
 
-    const value = valueStr === '__HIVE_DEFAULT_PARTITION__' ? null : valueStr;
+    const value = valueStr === '__HIVE_DEFAULT_PARTITION__' || valueStr === undefined ? null : valueStr;
 
     switch (predicate.operator) {
       case '=':
@@ -475,52 +475,62 @@ export function parseWhereClause(sql: string): PartitionPredicate[] {
   // Match simple predicates: field = 'value' or field = value
   const eqMatch = sql.matchAll(/(\w+)\s*=\s*'?([^'\s]+)'?/g);
   for (const match of eqMatch) {
-    predicates.push({
-      field: match[1],
-      operator: '=',
-      value: match[2],
-    });
+    if (match[1] && match[2]) {
+      predicates.push({
+        field: match[1],
+        operator: '=',
+        value: match[2],
+      });
+    }
   }
 
   // Match IN predicates: field IN ('a', 'b', 'c')
   const inMatch = sql.matchAll(/(\w+)\s+IN\s*\(([^)]+)\)/gi);
   for (const match of inMatch) {
-    const values = match[2].split(',').map((v) => v.trim().replace(/'/g, ''));
-    predicates.push({
-      field: match[1],
-      operator: 'IN',
-      value: values,
-    });
+    if (match[1] && match[2]) {
+      const values = match[2].split(',').map((v) => v.trim().replace(/'/g, ''));
+      predicates.push({
+        field: match[1],
+        operator: 'IN',
+        value: values,
+      });
+    }
   }
 
   // Match BETWEEN predicates: field BETWEEN 'a' AND 'b'
   const betweenMatch = sql.matchAll(/(\w+)\s+BETWEEN\s+'?([^'\s]+)'?\s+AND\s+'?([^'\s]+)'?/gi);
   for (const match of betweenMatch) {
-    predicates.push({
-      field: match[1],
-      operator: 'BETWEEN',
-      value: match[2],
-      endValue: match[3],
-    });
+    if (match[1] && match[2] && match[3]) {
+      predicates.push({
+        field: match[1],
+        operator: 'BETWEEN',
+        value: match[2],
+        endValue: match[3],
+      });
+    }
   }
 
   // Match range predicates - order matters! Match >= and <= before > and <
   const geMatch = sql.matchAll(/(\w+)\s*>=\s*'?([^'\s]+)'?/g);
   for (const match of geMatch) {
-    predicates.push({
-      field: match[1],
-      operator: '>=',
-      value: match[2],
-    });
+    if (match[1] && match[2]) {
+      predicates.push({
+        field: match[1],
+        operator: '>=',
+        value: match[2],
+      });
+    }
   }
 
   const leMatch = sql.matchAll(/(\w+)\s*<=\s*'?([^'\s]+)'?/g);
   for (const match of leMatch) {
-    predicates.push({
-      field: match[1],
-      operator: '<=',
-      value: match[2],
-    });
+    if (match[1] && match[2]) {
+      predicates.push({
+        field: match[1],
+        operator: '<=',
+        value: match[2],
+      });
+    }
   }
 
   // Match > but not >= (negative lookbehind not available, so we check manually)
@@ -528,7 +538,7 @@ export function parseWhereClause(sql: string): PartitionPredicate[] {
   for (const match of gtMatch) {
     // Skip if it's part of >= which was already matched
     const fullMatch = match[0];
-    if (!fullMatch.includes('>=')) {
+    if (!fullMatch.includes('>=') && match[1] && match[2]) {
       predicates.push({
         field: match[1],
         operator: '>',
@@ -541,7 +551,7 @@ export function parseWhereClause(sql: string): PartitionPredicate[] {
   for (const match of ltMatch) {
     // Skip if it's part of <= which was already matched
     const fullMatch = match[0];
-    if (!fullMatch.includes('<=')) {
+    if (!fullMatch.includes('<=') && match[1] && match[2]) {
       predicates.push({
         field: match[1],
         operator: '<',

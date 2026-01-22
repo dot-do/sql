@@ -78,7 +78,7 @@ export interface CacheEntryStatus {
   cached: boolean;
   expiresAt: number;
   tableName: string;
-  partition?: string;
+  partition?: string | undefined;
   lastAccessed: number;
   hitCount: number;
 }
@@ -123,7 +123,7 @@ export interface ReplicaStatus {
   name: string;
   notified: boolean;
   confirmed: boolean;
-  error?: string;
+  error?: string | undefined;
   retryScheduled: boolean;
 }
 
@@ -150,7 +150,7 @@ export interface TableTTLConfig {
  */
 interface InvalidationRequest {
   table: string;
-  partition?: string;
+  partition?: string | undefined;
   key: string;
   timestamp: number;
   operation: CDCOperation;
@@ -552,20 +552,22 @@ export class CacheInvalidator {
    */
   private extractPartitionFromEvent(event: CDCEvent): string | undefined {
     const data = event.after ?? event.before;
-    if (!data) return undefined;
+    if (!data || typeof data !== 'object' || data === null) return undefined;
+
+    const record = data as Record<string, unknown>;
 
     // Look for common partition keys
     // Date-based partitions
-    if ('day' in data && typeof data.day === 'string') {
-      return `day=${data.day}`;
+    if ('day' in record && typeof record.day === 'string') {
+      return `day=${record.day}`;
     }
-    if ('date' in data && typeof data.date === 'string') {
-      return `date=${data.date}`;
+    if ('date' in record && typeof record.date === 'string') {
+      return `date=${record.date}`;
     }
 
     // Extract date from timestamp if available
-    if ('timestamp' in data) {
-      const ts = data.timestamp;
+    if ('timestamp' in record) {
+      const ts = record.timestamp;
       if (typeof ts === 'number' || typeof ts === 'string') {
         const date = new Date(ts);
         return `day=${date.toISOString().split('T')[0]}`;
@@ -820,13 +822,17 @@ export class CacheInvalidator {
       // For "day=2024-01-*", we need to match day=2024-01-01 through day=2024-01-31
       const dateMatch = prefix.match(/day=(\d{4})-(\d{2})-/);
       if (dateMatch) {
-        const year = parseInt(dateMatch[1], 10);
-        const month = parseInt(dateMatch[2], 10);
-        const daysInMonth = new Date(year, month, 0).getDate();
-        for (let day = 1; day <= daysInMonth; day++) {
-          const dayStr = day.toString().padStart(2, '0');
-          const partitionKey = `day=${year}-${dateMatch[2]}-${dayStr}`;
-          matchedKeys.push(`${table}/${partitionKey}`);
+        const yearStr = dateMatch[1];
+        const monthStr = dateMatch[2];
+        if (yearStr && monthStr) {
+          const year = parseInt(yearStr, 10);
+          const month = parseInt(monthStr, 10);
+          const daysInMonth = new Date(year, month, 0).getDate();
+          for (let day = 1; day <= daysInMonth; day++) {
+            const dayStr = day.toString().padStart(2, '0');
+            const partitionKey = `day=${year}-${monthStr}-${dayStr}`;
+            matchedKeys.push(`${table}/${partitionKey}`);
+          }
         }
       }
     }

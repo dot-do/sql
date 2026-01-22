@@ -1,6 +1,16 @@
+> **Developer Preview** - This package is under active development. APIs may change. Not recommended for production use.
+
 # @dotdo/shared-types
 
 Unified type definitions for the DoSQL ecosystem. This package provides the canonical type definitions shared between client and server packages.
+
+## Status
+
+| Property | Value |
+|----------|-------|
+| Current version | 0.1.0-alpha |
+| Stability | Experimental |
+| Breaking changes | Expected before 1.0 |
 
 ## Installation
 

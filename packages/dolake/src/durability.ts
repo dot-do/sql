@@ -251,9 +251,9 @@ export interface WriteResult {
   /** Whether the event was sent to DLQ (P0 only) */
   sentToDLQ: boolean;
   /** Path to DLQ entry if sent */
-  dlqPath?: string;
+  dlqPath?: string | undefined;
   /** Error message if failed */
-  error?: string;
+  error?: string | undefined;
   /** Write latency in milliseconds */
   latencyMs: number;
 }
@@ -948,7 +948,7 @@ export class DurabilityWriter {
       if (arr.length === 0) return 0;
       const sorted = [...arr].sort((a, b) => a - b);
       const index = Math.ceil((p / 100) * sorted.length) - 1;
-      return sorted[Math.max(0, index)];
+      return sorted[Math.max(0, index)] ?? 0;
     };
 
     return {

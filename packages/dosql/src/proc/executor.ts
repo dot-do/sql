@@ -17,7 +17,7 @@ import type {
   ProcedureEnv,
   ProcedureRegistry,
 } from './types.js';
-import { createDatabaseContext, createInMemoryAdapter, createInMemorySqlExecutor, createInMemoryTransactionManager } from './context.js';
+import { createDatabaseContext, createInMemoryAdapter, createInMemorySqlExecutor, createInMemoryTransactionManager, type DatabaseContextOptions } from './context.js';
 
 // =============================================================================
 // EXECUTOR TYPES
@@ -463,10 +463,16 @@ export function createSimpleExecutor<DB extends DatabaseSchema>(
   schema: { [K in keyof DB]: Array<Record<string, unknown>> }
 ): ProcedureExecutor<DB> {
   // Create in-memory adapters for each table
-  const adapters: Record<string, ReturnType<typeof createInMemoryAdapter>> = {};
+  // Type assertion: We're building adapters that match the DB schema at runtime
+  // but TypeScript can't verify this because DB is generic and schema keys are dynamic
+  type DBAdapters = {
+    [K in keyof DB]: ReturnType<typeof createInMemoryAdapter<Record<string, unknown>>>
+  };
+  const adapters = {} as DBAdapters;
 
   for (const [tableName, data] of Object.entries(schema)) {
-    adapters[tableName] = createInMemoryAdapter(data as Array<Record<string, unknown>>);
+    (adapters as Record<string, ReturnType<typeof createInMemoryAdapter>>)[tableName] =
+      createInMemoryAdapter(data as Array<Record<string, unknown>>);
   }
 
   // Create transaction manager
@@ -477,14 +483,16 @@ export function createSimpleExecutor<DB extends DatabaseSchema>(
   const sqlExecutor = createInMemorySqlExecutor(tableMap as Map<string, ReturnType<typeof createInMemoryAdapter>>);
 
   // Create database context
-  const db = createDatabaseContext({
-    adapters: adapters as any,
+  // Type assertion: adapters is DBAdapters which satisfies the constraint
+  // when DB schema types align with the runtime data provided
+  const db = createDatabaseContext<DB>({
+    adapters: adapters as DatabaseContextOptions<DB>['adapters'],
     sqlExecutor,
     transactionManager,
   });
 
   return createProcedureExecutor({
-    db: db as DatabaseContext<DB>,
+    db,
   });
 }
 

@@ -500,9 +500,13 @@ export class AnalyticsEventHandler {
       const match = partition.match(/year=(\d+)\/month=(\d+)\/day=(\d+)/);
       if (!match) continue;
 
-      const year = parseInt(match[1], 10);
-      const month = parseInt(match[2], 10) - 1;
-      const day = parseInt(match[3], 10);
+      const yearStr = match[1];
+      const monthStr = match[2];
+      const dayStr = match[3];
+      if (!yearStr || !monthStr || !dayStr) continue;
+      const year = parseInt(yearStr, 10);
+      const month = parseInt(monthStr, 10) - 1;
+      const day = parseInt(dayStr, 10);
       const partitionDate = new Date(Date.UTC(year, month, day));
 
       if (partitionDate >= start && partitionDate <= end) {
