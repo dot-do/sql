@@ -107,6 +107,11 @@ import {
   type ScalingStatus,
   DEFAULT_SCALING_CONFIG,
 } from './scalability.js';
+import {
+  AnalyticsEventHandler,
+  type AnalyticsEventBatch,
+  P2_DURABILITY_CONFIG,
+} from './analytics-events.js';
 
 // =============================================================================
 // Environment Interface
@@ -169,6 +174,9 @@ export class DoLake implements DurableObject {
   private memoryProcessor: MemoryEfficientProcessor;
   private scalingConfig: ScalingConfig;
 
+  // Analytics (P2 durability)
+  private analyticsHandler: AnalyticsEventHandler;
+
   constructor(ctx: DurableObjectState, env: DoLakeEnv) {
     this.ctx = ctx;
     this.env = env;
@@ -198,6 +206,9 @@ export class DoLake implements DurableObject {
     this.horizontalScalingManager = new HorizontalScalingManager(this.scalingConfig);
     this.memoryProcessor = new MemoryEfficientProcessor();
 
+    // Initialize analytics handler (P2 durability)
+    this.analyticsHandler = new AnalyticsEventHandler(P2_DURABILITY_CONFIG);
+
     // Restore state from hibernation
     this.restoreFromHibernation();
 
@@ -220,6 +231,11 @@ export class DoLake implements DurableObject {
     // WebSocket upgrade for CDC streaming
     if (request.headers.get('Upgrade') === 'websocket') {
       return this.handleWebSocketUpgrade(request);
+    }
+
+    // Analytics API (P2 durability)
+    if (url.pathname === '/analytics/status') {
+      return this.handleAnalyticsStatus();
     }
 
     // Compaction API (handle before general catalog)
@@ -2577,6 +2593,28 @@ dolake_peak_connections ${rateLimitMetrics.peakConnections}
       JSON.stringify({
         bucketCounts,
         skewRatio,
+      }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // ===========================================================================
+  // Analytics Handlers (P2 Durability)
+  // ===========================================================================
+
+  /**
+   * Handle analytics status request
+   */
+  private handleAnalyticsStatus(): Response {
+    const metrics = this.analyticsHandler.getMetrics();
+
+    return new Response(
+      JSON.stringify({
+        durabilityTier: this.analyticsHandler.getDurabilityTier(),
+        primaryStorage: this.analyticsHandler.getPrimaryStorage(),
+        fallbackStorage: this.analyticsHandler.getFallbackStorage(),
+        eventsBuffered: 0, // Buffer is client-side
+        ...metrics,
       }),
       { headers: { 'Content-Type': 'application/json' } }
     );

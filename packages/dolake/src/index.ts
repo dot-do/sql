@@ -437,3 +437,45 @@ export {
   type DORoutingResult,
   DEFAULT_SCALING_CONFIG,
 } from './scalability.js';
+
+// =============================================================================
+// Analytics Events (P2 Durability)
+// =============================================================================
+
+export {
+  AnalyticsEventBuffer,
+  AnalyticsEventHandler,
+  inferAnalyticsSchema,
+  createDatePartition,
+  type AnalyticsEvent,
+  type AnalyticsEventBatch,
+  type AnalyticsDurabilityConfig,
+  type AnalyticsSchema,
+  type AnalyticsSchemaField,
+  type DatePartition,
+  type PersistResult,
+  type RecoveryResult,
+  type BatchHandleResult,
+  type AnalyticsMetrics,
+  type BufferConfig,
+  DEFAULT_ANALYTICS_CONFIG,
+  P2_DURABILITY_CONFIG,
+} from './analytics-events.js';
+
+// =============================================================================
+// Durability Tiers
+// =============================================================================
+
+export {
+  DurabilityTier,
+  DurabilityWriter,
+  classifyEvent,
+  classifyEvents,
+  defaultDurabilityWriter,
+  type WriteResult,
+  type DurabilityConfig,
+  type R2Storage,
+  type KVStorage,
+  type VFSStorage,
+  DEFAULT_DURABILITY_CONFIG,
+} from './durability.js';

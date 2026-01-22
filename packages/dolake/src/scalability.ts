@@ -1127,3 +1127,499 @@ export class HorizontalScalingManager {
     return this.instanceCount;
   }
 }
+
+// =============================================================================
+// Auto-Scaling Types (do-d1isn.9)
+// =============================================================================
+
+/**
+ * Load metrics for scaling decisions
+ */
+export interface LoadMetrics {
+  /** Buffer utilization (0-1 percentage) */
+  bufferUtilization: number;
+  /** Average latency in milliseconds */
+  avgLatencyMs: number;
+  /** P99 latency in milliseconds */
+  p99LatencyMs: number;
+  /** Requests per second */
+  requestsPerSecond: number;
+  /** Active connections count */
+  activeConnections: number;
+}
+
+/**
+ * Shard health status for routing decisions
+ */
+export interface ShardHealth {
+  /** Unique shard identifier */
+  shardId: string;
+  /** Current health status */
+  status: 'healthy' | 'draining' | 'unhealthy';
+  /** Current load metrics */
+  loadMetrics: LoadMetrics;
+  /** Timestamp of last update */
+  lastUpdatedAt: number;
+}
+
+/**
+ * Scale event emitted when scaling occurs
+ */
+export interface ScaleEvent {
+  /** Type of scaling operation */
+  type: 'scale-up' | 'scale-down';
+  /** Number of instances before scaling */
+  fromInstances: number;
+  /** Number of instances after scaling */
+  toInstances: number;
+  /** Reason for scaling */
+  reason: string;
+  /** Timestamp of the event */
+  timestamp: number;
+  /** Shards affected by scale-down (draining) */
+  affectedShards?: string[];
+}
+
+/**
+ * Configuration for auto-scaling behavior
+ */
+export interface AutoScalingConfig extends ScalingConfig {
+  /** Buffer utilization threshold to trigger scale-up (default: 0.8 = 80%) */
+  scaleUpBufferThreshold: number;
+  /** Latency threshold in ms to trigger scale-up (default: 5000ms) */
+  scaleUpLatencyThresholdMs: number;
+  /** Buffer utilization threshold to trigger scale-down (default: 0.2 = 20%) */
+  scaleDownBufferThreshold: number;
+  /** Time buffer must be below threshold before scale-down (default: 300000ms = 5min) */
+  scaleDownCooldownMs: number;
+  /** Minimum time between scaling operations (default: 60000ms = 1min) */
+  scaleCooldownMs: number;
+  /** Maximum time to wait for shard drain (default: 300000ms = 5min) */
+  drainTimeoutMs: number;
+  /** Interval to check drain status (default: 5000ms) */
+  drainCheckIntervalMs: number;
+}
+
+/**
+ * Default auto-scaling configuration
+ */
+export const DEFAULT_AUTO_SCALING_CONFIG: AutoScalingConfig = {
+  ...DEFAULT_SCALING_CONFIG,
+  scaleUpBufferThreshold: 0.8,
+  scaleUpLatencyThresholdMs: 5000,
+  scaleDownBufferThreshold: 0.2,
+  scaleDownCooldownMs: 300000,
+  scaleCooldownMs: 60000,
+  drainTimeoutMs: 300000,
+  drainCheckIntervalMs: 5000,
+};
+
+// =============================================================================
+// Auto-Scaling Manager (do-d1isn.9)
+// =============================================================================
+
+/**
+ * AutoScalingManager - Extends HorizontalScalingManager with load-based auto-scaling
+ *
+ * Features:
+ * - Detects overload based on buffer utilization and latency
+ * - Automatically scales up when buffer > 80% OR latency > 5s
+ * - Automatically scales down when buffer < 20% for 5+ minutes
+ * - Integrates with ShardRouter for routing updates
+ * - Graceful drain of old shards before removal
+ *
+ * @example
+ * ```typescript
+ * const manager = new AutoScalingManager({
+ *   minInstances: 2,
+ *   maxInstances: 16,
+ *   scaleUpBufferThreshold: 0.8,
+ *   scaleUpLatencyThresholdMs: 5000,
+ * });
+ *
+ * // Record metrics from each shard
+ * manager.recordLoadMetrics('shard-0', {
+ *   bufferUtilization: 0.85,
+ *   avgLatencyMs: 100,
+ *   p99LatencyMs: 500,
+ *   requestsPerSecond: 1000,
+ *   activeConnections: 50,
+ * });
+ *
+ * // Evaluate if scaling is needed
+ * const scaleEvent = manager.evaluateScaling();
+ * if (scaleEvent) {
+ *   console.log(`Scaling ${scaleEvent.type}: ${scaleEvent.reason}`);
+ * }
+ * ```
+ */
+export class AutoScalingManager {
+  private config: AutoScalingConfig;
+  private instanceCount: number = 1;
+  private loadMetricsMap: Map<string, LoadMetrics> = new Map();
+  private shardHealthMap: Map<string, ShardHealth> = new Map();
+  private drainingShards: Set<string> = new Set();
+  private scaleEventCallbacks: Array<(event: ScaleEvent) => void> = [];
+  private lastScaleTime: number = 0;
+  private lowBufferStartTime: number = 0;
+
+  constructor(config: Partial<AutoScalingConfig> = {}) {
+    this.config = {
+      ...DEFAULT_AUTO_SCALING_CONFIG,
+      ...config,
+    };
+  }
+
+  // ===========================================================================
+  // Load Metrics Tracking
+  // ===========================================================================
+
+  /**
+   * Record load metrics for a shard
+   */
+  recordLoadMetrics(shardId: string, metrics: LoadMetrics): void {
+    this.loadMetricsMap.set(shardId, metrics);
+
+    const health: ShardHealth = {
+      shardId,
+      status: this.determineHealthStatus(shardId, metrics),
+      loadMetrics: metrics,
+      lastUpdatedAt: Date.now(),
+    };
+    this.shardHealthMap.set(shardId, health);
+  }
+
+  /**
+   * Get load metrics for a specific shard
+   */
+  getLoadMetrics(shardId: string): LoadMetrics | undefined {
+    return this.loadMetricsMap.get(shardId);
+  }
+
+  /**
+   * Get aggregate metrics across all shards
+   */
+  getAggregateMetrics(): LoadMetrics {
+    if (this.loadMetricsMap.size === 0) {
+      return {
+        bufferUtilization: 0,
+        avgLatencyMs: 0,
+        p99LatencyMs: 0,
+        requestsPerSecond: 0,
+        activeConnections: 0,
+      };
+    }
+
+    let totalBuffer = 0;
+    let totalLatency = 0;
+    let maxP99 = 0;
+    let totalRps = 0;
+    let totalConns = 0;
+
+    for (const metrics of this.loadMetricsMap.values()) {
+      totalBuffer += metrics.bufferUtilization;
+      totalLatency += metrics.avgLatencyMs;
+      maxP99 = Math.max(maxP99, metrics.p99LatencyMs);
+      totalRps += metrics.requestsPerSecond;
+      totalConns += metrics.activeConnections;
+    }
+
+    const count = this.loadMetricsMap.size;
+    return {
+      bufferUtilization: totalBuffer / count,
+      avgLatencyMs: totalLatency / count,
+      p99LatencyMs: maxP99,
+      requestsPerSecond: totalRps,
+      activeConnections: totalConns,
+    };
+  }
+
+  // ===========================================================================
+  // Overload Detection
+  // ===========================================================================
+
+  /**
+   * Detect if the system is currently overloaded
+   */
+  detectOverload(): { isOverloaded: boolean; reason: string | null } {
+    const metrics = this.getAggregateMetrics();
+
+    if (metrics.bufferUtilization >= this.config.scaleUpBufferThreshold) {
+      return {
+        isOverloaded: true,
+        reason: `Buffer utilization at ${(metrics.bufferUtilization * 100).toFixed(1)}% (threshold: ${this.config.scaleUpBufferThreshold * 100}%)`,
+      };
+    }
+
+    if (metrics.avgLatencyMs >= this.config.scaleUpLatencyThresholdMs) {
+      return {
+        isOverloaded: true,
+        reason: `Average latency at ${metrics.avgLatencyMs}ms (threshold: ${this.config.scaleUpLatencyThresholdMs}ms)`,
+      };
+    }
+
+    return { isOverloaded: false, reason: null };
+  }
+
+  // ===========================================================================
+  // Scaling Decisions
+  // ===========================================================================
+
+  /**
+   * Evaluate if scaling is needed and return a scale event if so
+   */
+  evaluateScaling(): ScaleEvent | null {
+    const now = Date.now();
+
+    // Check cooldown
+    if (now - this.lastScaleTime < this.config.scaleCooldownMs) {
+      return null;
+    }
+
+    const metrics = this.getAggregateMetrics();
+    const overload = this.detectOverload();
+
+    // Check for scale-up
+    if (overload.isOverloaded && this.instanceCount < this.config.maxInstances) {
+      return {
+        type: 'scale-up',
+        fromInstances: this.instanceCount,
+        toInstances: Math.min(this.instanceCount + 1, this.config.maxInstances),
+        reason: overload.reason!,
+        timestamp: now,
+      };
+    }
+
+    // Check for scale-down
+    if (metrics.bufferUtilization < this.config.scaleDownBufferThreshold) {
+      if (this.lowBufferStartTime === 0) {
+        this.lowBufferStartTime = now;
+      }
+
+      const lowBufferDuration = now - this.lowBufferStartTime;
+      if (lowBufferDuration >= this.config.scaleDownCooldownMs && this.instanceCount > this.config.minInstances) {
+        return {
+          type: 'scale-down',
+          fromInstances: this.instanceCount,
+          toInstances: Math.max(this.instanceCount - 1, this.config.minInstances),
+          reason: `Buffer utilization below ${this.config.scaleDownBufferThreshold * 100}% for ${(lowBufferDuration / 1000 / 60).toFixed(1)} minutes`,
+          timestamp: now,
+        };
+      }
+    } else {
+      // Reset timer if buffer goes above threshold
+      this.lowBufferStartTime = 0;
+    }
+
+    return null;
+  }
+
+  // ===========================================================================
+  // Scale Operations
+  // ===========================================================================
+
+  /**
+   * Scale up to target number of instances
+   */
+  async scaleUp(targetInstances?: number): Promise<ScaleEvent> {
+    const target = targetInstances ?? this.instanceCount + 1;
+    const newCount = Math.min(Math.max(target, this.config.minInstances), this.config.maxInstances);
+
+    const event: ScaleEvent = {
+      type: 'scale-up',
+      fromInstances: this.instanceCount,
+      toInstances: newCount,
+      reason: 'Manual scale-up or auto-triggered',
+      timestamp: Date.now(),
+    };
+
+    this.instanceCount = newCount;
+    this.lastScaleTime = Date.now();
+    this.emitScaleEvent(event);
+
+    return event;
+  }
+
+  /**
+   * Scale down to target number of instances
+   */
+  async scaleDown(targetInstances?: number): Promise<ScaleEvent> {
+    const target = targetInstances ?? this.instanceCount - 1;
+    const newCount = Math.min(Math.max(target, this.config.minInstances), this.config.maxInstances);
+    const shardsToRemove = this.instanceCount - newCount;
+
+    // Select shards to drain (lowest load first)
+    const affectedShards = this.selectShardsForRemoval(shardsToRemove);
+
+    const event: ScaleEvent = {
+      type: 'scale-down',
+      fromInstances: this.instanceCount,
+      toInstances: newCount,
+      reason: 'Manual scale-down or auto-triggered',
+      timestamp: Date.now(),
+      affectedShards,
+    };
+
+    // Start draining affected shards
+    for (const shardId of affectedShards) {
+      await this.startDrain(shardId);
+    }
+
+    this.instanceCount = newCount;
+    this.lastScaleTime = Date.now();
+    this.lowBufferStartTime = 0;
+    this.emitScaleEvent(event);
+
+    return event;
+  }
+
+  /**
+   * Select shards for removal based on load (lowest load first)
+   */
+  private selectShardsForRemoval(count: number): string[] {
+    const shardsByLoad = Array.from(this.shardHealthMap.entries())
+      .filter(([, health]) => health.status !== 'draining')
+      .sort((a, b) => a[1].loadMetrics.bufferUtilization - b[1].loadMetrics.bufferUtilization);
+
+    return shardsByLoad.slice(0, count).map(([id]) => id);
+  }
+
+  // ===========================================================================
+  // Shard Management
+  // ===========================================================================
+
+  /**
+   * Get health status for a specific shard
+   */
+  getShardHealth(shardId: string): ShardHealth | undefined {
+    return this.shardHealthMap.get(shardId);
+  }
+
+  /**
+   * Get health status for all shards
+   */
+  getAllShardHealth(): Map<string, ShardHealth> {
+    return new Map(this.shardHealthMap);
+  }
+
+  /**
+   * Determine health status based on metrics
+   */
+  private determineHealthStatus(shardId: string, metrics: LoadMetrics): 'healthy' | 'draining' | 'unhealthy' {
+    // If shard is being drained, keep it as draining
+    if (this.drainingShards.has(shardId)) {
+      return 'draining';
+    }
+
+    // Check for unhealthy conditions
+    if (metrics.bufferUtilization > 0.9 || metrics.avgLatencyMs > 10000) {
+      return 'unhealthy';
+    }
+
+    return 'healthy';
+  }
+
+  // ===========================================================================
+  // Drain Operations
+  // ===========================================================================
+
+  /**
+   * Start draining a shard (stop sending new requests)
+   */
+  async startDrain(shardId: string): Promise<void> {
+    this.drainingShards.add(shardId);
+
+    const health = this.shardHealthMap.get(shardId);
+    if (health) {
+      health.status = 'draining';
+      this.shardHealthMap.set(shardId, health);
+    }
+  }
+
+  /**
+   * Check if a shard is currently draining
+   */
+  isDraining(shardId: string): boolean {
+    return this.drainingShards.has(shardId);
+  }
+
+  /**
+   * Complete drain and remove shard from tracking
+   */
+  async completeDrain(shardId: string): Promise<void> {
+    this.drainingShards.delete(shardId);
+    this.shardHealthMap.delete(shardId);
+    this.loadMetricsMap.delete(shardId);
+  }
+
+  // ===========================================================================
+  // Event Subscription
+  // ===========================================================================
+
+  /**
+   * Subscribe to scale events
+   */
+  onScaleEvent(callback: (event: ScaleEvent) => void): void {
+    this.scaleEventCallbacks.push(callback);
+  }
+
+  /**
+   * Emit a scale event to all subscribers
+   */
+  private emitScaleEvent(event: ScaleEvent): void {
+    for (const callback of this.scaleEventCallbacks) {
+      callback(event);
+    }
+  }
+
+  // ===========================================================================
+  // Configuration
+  // ===========================================================================
+
+  /**
+   * Get current auto-scaling configuration
+   */
+  getAutoScalingConfig(): AutoScalingConfig {
+    return { ...this.config };
+  }
+
+  /**
+   * Update auto-scaling configuration
+   */
+  updateAutoScalingConfig(updates: Partial<AutoScalingConfig>): AutoScalingConfig {
+    this.config = { ...this.config, ...updates };
+    return { ...this.config };
+  }
+
+  // ===========================================================================
+  // Test Helpers
+  // ===========================================================================
+
+  /**
+   * Set instance count (for testing)
+   */
+  setInstanceCount(count: number): void {
+    this.instanceCount = count;
+  }
+
+  /**
+   * Get current instance count
+   */
+  getInstanceCount(): number {
+    return this.instanceCount;
+  }
+
+  /**
+   * Set low buffer start time (for testing)
+   */
+  setLowBufferStartTime(time: number): void {
+    this.lowBufferStartTime = time;
+  }
+
+  /**
+   * Reset cooldown (for testing)
+   */
+  resetCooldown(): void {
+    this.lastScaleTime = 0;
+  }
+}
