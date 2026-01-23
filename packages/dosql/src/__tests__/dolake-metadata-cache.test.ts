@@ -187,9 +187,9 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No MetadataCache class exists
      * Expected: MetadataCache class should be importable and instantiable
      */
-    it.fails('should have MetadataCache class available for import', async () => {
+    it('should have MetadataCache class available for import', async () => {
       // MetadataCache does not exist yet
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
       expect(MetadataCache).toBeDefined();
       expect(typeof MetadataCache).toBe('function');
     });
@@ -198,8 +198,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No metadata cache configuration options
      * Expected: MetadataCache should accept configuration options
      */
-    it.fails('should accept configuration options', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should accept configuration options', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const config: MetadataCacheConfig = {
         enabled: true,
@@ -220,8 +220,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: Cannot cache table metadata
      * Expected: put() method should store metadata in DO persistent storage
      */
-    it.fails('should cache table metadata in DO persistent storage', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should cache table metadata in DO persistent storage', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 });
       const metadata = createMockMetadata('users');
@@ -241,8 +241,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: Cannot retrieve cached metadata
      * Expected: get() method should return cached metadata
      */
-    it.fails('should retrieve cached metadata', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should retrieve cached metadata', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 });
       const originalMetadata = createMockMetadata('orders');
@@ -259,8 +259,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No hit/miss tracking
      * Expected: Cache should track hit and miss statistics
      */
-    it.fails('should track cache hits and misses', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should track cache hits and misses', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 });
       const metadata = createMockMetadata('events');
@@ -284,10 +284,10 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No TTL-based expiration
      * Expected: Cached entries should expire after TTL
      */
-    it.fails('should expire cached entries after TTL', async () => {
+    it('should expire cached entries after TTL', async () => {
       vi.useFakeTimers();
 
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 1000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 }); // 1 second TTL
       const metadata = createMockMetadata('expiring_table');
@@ -312,8 +312,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No LRU eviction when max tables exceeded
      * Expected: Should evict least recently used entries when capacity exceeded
      */
-    it.fails('should evict LRU entries when capacity exceeded', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should evict LRU entries when capacity exceeded', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 3, enableCoherence: false, latencyThresholdUs: 1000 });
 
@@ -342,8 +342,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No integration with DO persistent storage
      * Expected: Cache should persist across DO hibernation
      */
-    it.fails('should persist cache across DO hibernation', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should persist cache across DO hibernation', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       // Simulate DO storage
       const mockStorage = new Map<string, unknown>();
@@ -379,8 +379,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No automatic invalidation on schema changes
      * Expected: Cache should invalidate when schema changes are detected
      */
-    it.fails('should invalidate cache on schema change CDC event', async () => {
-      const { MetadataCache, processSchemaChangeEvent } = await import('../../dolake/metadata-cache.js');
+    it('should invalidate cache on schema change CDC event', async () => {
+      const { MetadataCache, processSchemaChangeEvent } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 });
 
@@ -409,8 +409,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No version tracking for cache entries
      * Expected: Cache should track schema version to detect staleness
      */
-    it.fails('should track schema version for cache entries', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should track schema version for cache entries', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 });
 
@@ -432,8 +432,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No invalidation on partition spec changes
      * Expected: Should invalidate when partition spec evolves
      */
-    it.fails('should invalidate on partition spec change', async () => {
-      const { MetadataCache, processPartitionSpecChange } = await import('../../dolake/metadata-cache.js');
+    it('should invalidate on partition spec change', async () => {
+      const { MetadataCache, processPartitionSpecChange } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 });
 
@@ -457,8 +457,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No selective invalidation based on change type
      * Expected: Different change types should have different invalidation strategies
      */
-    it.fails('should support selective invalidation strategies', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should support selective invalidation strategies', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({
         enabled: true,
@@ -491,8 +491,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No bulk invalidation for table drops
      * Expected: Table drop should clear all related cache entries
      */
-    it.fails('should clear all entries for dropped table', async () => {
-      const { MetadataCache, processTableDrop } = await import('../../dolake/metadata-cache.js');
+    it('should clear all entries for dropped table', async () => {
+      const { MetadataCache, processTableDrop } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 });
 
@@ -517,8 +517,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No latency measurement for cache hits
      * Expected: Cache hits should complete in sub-millisecond time
      */
-    it.fails('should fetch cached metadata in sub-millisecond time', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should fetch cached metadata in sub-millisecond time', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 });
       const metadata = createMockMetadata('fast_table');
@@ -548,8 +548,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No latency SLA tracking
      * Expected: Cache should track latency percentiles (p50, p99, p999)
      */
-    it.fails('should track latency percentiles', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should track latency percentiles', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 });
       const metadata = createMockMetadata('latency_tracked');
@@ -576,8 +576,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No latency budget enforcement
      * Expected: Operations exceeding latency budget should be reported
      */
-    it.fails('should report latency budget violations', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should report latency budget violations', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const onLatencyViolation = vi.fn();
 
@@ -609,8 +609,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No pre-warming capability
      * Expected: Cache should support pre-warming for hot tables
      */
-    it.fails('should support cache pre-warming', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
+    it('should support cache pre-warming', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 });
 
@@ -634,8 +634,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No memory-optimized storage format
      * Expected: Large metadata should be stored efficiently
      */
-    it.fails('should use memory-efficient storage for large metadata', async () => {
-      const { MetadataCache, estimateMemoryUsage } = await import('../../dolake/metadata-cache.js');
+    it('should use memory-efficient storage for large metadata', async () => {
+      const { MetadataCache, estimateMemoryUsage } = await import('../dolake/metadata-cache.js');
 
       const cache = new MetadataCache({ enabled: true, ttlMs: 60_000, maxTables: 100, enableCoherence: false, latencyThresholdUs: 1000 });
 
@@ -668,8 +668,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No inter-DO cache invalidation
      * Expected: Cache invalidation should propagate to all DO instances
      */
-    it.fails('should propagate invalidation across DO instances', async () => {
-      const { MetadataCache, CacheCoherenceManager } = await import('../../dolake/metadata-cache.js');
+    it('should propagate invalidation across DO instances', async () => {
+      const { MetadataCache, CacheCoherenceManager } = await import('../dolake/metadata-cache.js');
 
       // Create a coherence manager to coordinate between DOs
       const coherenceManager = new CacheCoherenceManager();
@@ -711,8 +711,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No version vector for conflict resolution
      * Expected: Should use version vectors to detect concurrent modifications
      */
-    it.fails('should use version vectors for conflict detection', async () => {
-      const { MetadataCache, CacheCoherenceManager } = await import('../../dolake/metadata-cache.js');
+    it('should use version vectors for conflict detection', async () => {
+      const { MetadataCache, CacheCoherenceManager } = await import('../dolake/metadata-cache.js');
 
       const coherenceManager = new CacheCoherenceManager();
 
@@ -751,8 +751,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No eventual consistency mode
      * Expected: Should support eventual consistency for performance
      */
-    it.fails('should support eventual consistency mode', async () => {
-      const { MetadataCache, CacheCoherenceManager } = await import('../../dolake/metadata-cache.js');
+    it('should support eventual consistency mode', async () => {
+      const { MetadataCache, CacheCoherenceManager } = await import('../dolake/metadata-cache.js');
 
       const coherenceManager = new CacheCoherenceManager({
         mode: 'eventual', // Not strict consistency
@@ -799,8 +799,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No coherence message batching
      * Expected: Should batch coherence messages for efficiency
      */
-    it.fails('should batch coherence messages', async () => {
-      const { MetadataCache, CacheCoherenceManager } = await import('../../dolake/metadata-cache.js');
+    it('should batch coherence messages', async () => {
+      const { MetadataCache, CacheCoherenceManager } = await import('../dolake/metadata-cache.js');
 
       const coherenceManager = new CacheCoherenceManager({
         batchSize: 10,
@@ -838,8 +838,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No coherence health monitoring
      * Expected: Should monitor coherence status and detect issues
      */
-    it.fails('should monitor coherence health', async () => {
-      const { MetadataCache, CacheCoherenceManager } = await import('../../dolake/metadata-cache.js');
+    it('should monitor coherence health', async () => {
+      const { MetadataCache, CacheCoherenceManager } = await import('../dolake/metadata-cache.js');
 
       const coherenceManager = new CacheCoherenceManager({
         healthCheckIntervalMs: 1000,
@@ -875,8 +875,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No partition-aware coherence
      * Expected: Should support partition-level cache coherence
      */
-    it.fails('should support partition-level coherence', async () => {
-      const { MetadataCache, CacheCoherenceManager } = await import('../../dolake/metadata-cache.js');
+    it('should support partition-level coherence', async () => {
+      const { MetadataCache, CacheCoherenceManager } = await import('../dolake/metadata-cache.js');
 
       const coherenceManager = new CacheCoherenceManager();
 
@@ -922,9 +922,9 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No integration with existing CacheInvalidator from dolake
      * Expected: MetadataCache should work alongside CacheInvalidator
      */
-    it.fails('should integrate with existing CacheInvalidator', async () => {
-      const { MetadataCache } = await import('../../dolake/metadata-cache.js');
-      const { CacheInvalidator } = await import('../../dolake/cache-invalidation.js');
+    it('should integrate with existing CacheInvalidator', async () => {
+      const { MetadataCache } = await import('../dolake/metadata-cache.js');
+      const { CacheInvalidator } = await import('../dolake/cache-invalidation.js');
 
       const metadataCache = new MetadataCache({
         enabled: true,
@@ -968,8 +968,8 @@ describe('DoLake Metadata Caching', () => {
      * GAP: No unified cache management API
      * Expected: Should have a unified API to manage all caches
      */
-    it.fails('should support unified cache management', async () => {
-      const { createUnifiedCacheManager } = await import('../../dolake/metadata-cache.js');
+    it('should support unified cache management', async () => {
+      const { createUnifiedCacheManager } = await import('../dolake/metadata-cache.js');
 
       const cacheManager = await createUnifiedCacheManager({
         metadata: {
