@@ -25,17 +25,20 @@ export const DEFAULT_MAX_WRAPPER_CACHE_SIZE = 10000;
 
 /**
  * Wrapper cache configuration
+ *
+ * The cache uses LRU (Least Recently Used) eviction strategy.
  */
 export interface WrapperCacheConfig {
-  mode?: 'lru' | 'ttl' | 'fifo';
+  /** Maximum number of entries in the cache (default: 10000) */
   maxSize?: number;
+  /** Time-to-live for cache entries in milliseconds (0 = no TTL, default: 0) */
   ttlMs?: number;
+  /** Whether caching is enabled (default: true) */
   enabled?: boolean;
 }
 
 // Internal cache configuration state
 let _wrapperCacheConfig: Required<WrapperCacheConfig> = {
-  mode: 'lru',
   maxSize: DEFAULT_MAX_WRAPPER_CACHE_SIZE,
   ttlMs: 0,
   enabled: true,
@@ -46,7 +49,6 @@ let _wrapperCacheConfig: Required<WrapperCacheConfig> = {
  */
 export function setWrapperCacheConfig(config: WrapperCacheConfig): void {
   _wrapperCacheConfig = {
-    mode: config.mode ?? _wrapperCacheConfig.mode,
     maxSize: config.maxSize ?? _wrapperCacheConfig.maxSize,
     ttlMs: config.ttlMs ?? _wrapperCacheConfig.ttlMs,
     enabled: config.enabled ?? _wrapperCacheConfig.enabled,

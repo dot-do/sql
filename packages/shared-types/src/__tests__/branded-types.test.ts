@@ -476,28 +476,3 @@ describe('LSN Utility Functions', () => {
     expect(value).toBe(12345n);
   });
 });
-
-// =============================================================================
-// TYPE GUARD STUBS (for test compilation)
-// These would need to be imported from the implementation
-// =============================================================================
-
-// Placeholder declarations so TypeScript doesn't error
-// In a real implementation, these would be imported from the module
-declare function isValidLSN(value: unknown): value is LSN;
-declare function isValidTransactionId(value: unknown): value is TransactionId;
-declare function isValidShardId(value: unknown): value is ShardId;
-declare function isValidatedLSN(value: LSN): boolean;
-declare function isValidatedTransactionId(value: TransactionId): boolean;
-declare function isValidatedShardId(value: ShardId): boolean;
-declare function setDevMode(enabled: boolean): void;
-declare function isDevMode(): boolean;
-declare function setStrictMode(enabled: boolean): void;
-declare function serializeLSN(lsn: LSN): string;
-declare function deserializeLSN(str: string): LSN;
-declare function lsnToNumber(lsn: LSN): number;
-declare function lsnToBytes(lsn: LSN): Uint8Array;
-declare function bytesToLSN(bytes: Uint8Array): LSN;
-declare function compareLSN(a: LSN, b: LSN): number;
-declare function incrementLSN(lsn: LSN, amount?: bigint): LSN;
-declare function lsnValue(lsn: LSN): bigint;

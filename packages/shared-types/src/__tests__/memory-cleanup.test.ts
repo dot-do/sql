@@ -27,7 +27,6 @@ import {
   clearWrapperMaps,
   setWrapperCacheConfig,
   getWrapperCacheConfig,
-  runWrapperCacheCleanup,
   isValidatedTransactionId,
 } from '../index.js';
 
@@ -40,7 +39,6 @@ describe('stringWrappers Map Size Limit', () => {
     setDevMode(true);
     // Reset to default config
     setWrapperCacheConfig({
-      mode: 'lru',
       maxSize: DEFAULT_MAX_WRAPPER_CACHE_SIZE,
       enabled: true,
     });
@@ -106,7 +104,6 @@ describe('lsnWrappers Map Size Limit', () => {
   beforeEach(() => {
     setDevMode(true);
     setWrapperCacheConfig({
-      mode: 'lru',
       maxSize: DEFAULT_MAX_WRAPPER_CACHE_SIZE,
       enabled: true,
     });
@@ -150,7 +147,6 @@ describe('lsnWrappers Map Size Limit', () => {
 describe('Cleanup Mechanism - TTL or WeakRef', () => {
   beforeEach(() => {
     setWrapperCacheConfig({
-      mode: 'lru',
       maxSize: DEFAULT_MAX_WRAPPER_CACHE_SIZE,
       enabled: true,
     });
@@ -190,37 +186,12 @@ describe('Cleanup Mechanism - TTL or WeakRef', () => {
     expect(stats.lsnWrappersSize).toBe(0);
   });
 
-  it.fails('should remove old entries based on TTL when TTL mode is enabled', async () => {
-    // NOTE: TTL mode is not fully implemented - this test documents expected future behavior
-    // Enable TTL mode with a short TTL for testing
-    const shortTtlMs = 100; // 100ms TTL for testing
-    setWrapperCacheConfig({
-      mode: 'ttl',
-      ttlMs: shortTtlMs,
-    });
-
-    // Create an entry
-    createTransactionId('txn_ttl_test');
-
-    // Entry should exist immediately
-    let stats = getWrapperMapStats();
-    expect(stats.stringWrappersSize).toBeGreaterThan(0);
-
-    // Wait for TTL to expire
-    await new Promise((resolve) => setTimeout(resolve, shortTtlMs + 50));
-
-    // Trigger cleanup (may happen on next access or explicitly)
-    runWrapperCacheCleanup();
-
-    // Entry should be removed
-    stats = getWrapperMapStats();
-    expect(stats.stringWrappersSize).toBe(0);
-  });
+  // NOTE: TTL-based cleanup is not implemented. When TTL support is added,
+  // add tests here that verify entries are removed after TTL expiration.
 
   it('should use LRU eviction when max size is reached', () => {
     // Configure a small max size for testing
     setWrapperCacheConfig({
-      mode: 'lru',
       maxSize: 5,
     });
 
@@ -262,7 +233,6 @@ describe('Cleanup Mechanism - TTL or WeakRef', () => {
 describe('Memory Should Not Grow Unbounded', () => {
   beforeEach(() => {
     setWrapperCacheConfig({
-      mode: 'lru',
       maxSize: DEFAULT_MAX_WRAPPER_CACHE_SIZE,
       enabled: true,
     });
@@ -334,7 +304,6 @@ describe('Wrapper Cache Configuration', () => {
   afterEach(() => {
     // Reset to defaults after each test
     setWrapperCacheConfig({
-      mode: 'lru',
       maxSize: DEFAULT_MAX_WRAPPER_CACHE_SIZE,
       enabled: true,
     });
@@ -387,7 +356,7 @@ describe('Wrapper Cache Configuration', () => {
 
     const config = getWrapperCacheConfig();
     expect(config).toHaveProperty('maxSize');
-    expect(config).toHaveProperty('mode');
+    expect(config).toHaveProperty('ttlMs');
     expect(config).toHaveProperty('enabled');
   });
 });
@@ -399,7 +368,6 @@ describe('Wrapper Cache Configuration', () => {
 describe('Production Scenario - Long Running Worker', () => {
   beforeEach(() => {
     setWrapperCacheConfig({
-      mode: 'lru',
       maxSize: DEFAULT_MAX_WRAPPER_CACHE_SIZE,
       enabled: true,
     });

@@ -19,9 +19,28 @@
  */
 
 import type { FSXBackend } from '../fsx/types.js';
-import type { WALReader, WALSegment, WALConfig, WALWriter } from './types.js';
+import type { WALReader, WALSegment, WALConfig, WALWriter, Checkpoint } from './types.js';
 import { DEFAULT_WAL_CONFIG, WALError, WALErrorCode } from './types.js';
 import type { ReplicationSlotManager, ReplicationSlot } from '../cdc/types.js';
+
+// =============================================================================
+// Checkpoint Manager Interface for Retention
+// =============================================================================
+
+/**
+ * Interface for checkpoint manager that can have its createCheckpoint method wrapped.
+ * This is a minimal interface used by the retention manager to register cleanup triggers.
+ */
+export interface CheckpointManagerForRetention {
+  /**
+   * Create a new checkpoint at the given LSN.
+   * This method may be wrapped by the retention manager to trigger cleanup after checkpoints.
+   */
+  createCheckpoint(
+    lsn: bigint,
+    activeTransactions: string[]
+  ): Promise<Checkpoint>;
+}
 
 // =============================================================================
 // Retention Policy Types

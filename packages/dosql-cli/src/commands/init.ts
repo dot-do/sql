@@ -12,7 +12,14 @@ export interface InitResult {
   createdFiles: string[];
 }
 
-const CONFIG_TEMPLATE = (name: string) => `import { defineConfig } from '@dotdo/dosql';
+// Configuration file template.
+// Note: This imports defineConfig from '@dotdo/dosql', which is the DoSQL runtime library.
+// Users must install this package separately: npm install @dotdo/dosql
+// If @dotdo/dosql is not available, users can remove the import and defineConfig wrapper,
+// or create their own defineConfig function that returns the config object unchanged.
+const CONFIG_TEMPLATE = (name: string) => `// DoSQL configuration file
+// Requires: npm install @dotdo/dosql (or remove defineConfig wrapper if not using)
+import { defineConfig } from '@dotdo/dosql';
 
 export default defineConfig({
   name: '${name}',
@@ -45,7 +52,13 @@ export async function initProject(options: InitOptions): Promise<InitResult> {
   const configExists = await fs.access(configPath).then(() => true).catch(() => false);
 
   if (configExists && !force) {
-    throw new Error(`dosql.config.ts already exists in ${directory}. Use --force to overwrite.`);
+    throw new Error(
+      `dosql.config.ts already exists in ${directory}.\n\n` +
+      `To overwrite the existing configuration, use the --force flag:\n` +
+      `  dosql init --force\n\n` +
+      `Note: --force will overwrite dosql.config.ts and schema/schema.ts,\n` +
+      `but will NOT delete existing migrations or other schema files.`
+    );
   }
 
   // Create migrations directory

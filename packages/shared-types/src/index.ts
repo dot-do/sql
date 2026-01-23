@@ -110,15 +110,6 @@ export function clearWrapperMaps(): void {
   lsnLruOrder.length = 0;
 }
 
-/**
- * Run cache cleanup (for TTL mode)
- * Currently a no-op since TTL mode is not fully implemented in this version
- */
-export function runWrapperCacheCleanup(): void {
-  // TTL mode cleanup would go here
-  // For now, this is a placeholder that can be extended
-}
-
 // Helper function to perform LRU eviction on string wrappers
 function evictStringWrappersIfNeeded(): void {
   if (!_getWrapperCacheConfigInternal().enabled) return;
@@ -227,29 +218,33 @@ export function isValidatedStatementHash(hash: StatementHash): boolean {
 
 /**
  * Check if a value is a valid LSN (bigint >= 0)
+ * @template T - The input type (defaults to unknown)
  */
-export function isValidLSN(value: unknown): value is LSN {
+export function isValidLSN<T>(value: T | unknown): value is T extends bigint ? LSN : LSN {
   return typeof value === 'bigint' && value >= 0n;
 }
 
 /**
  * Check if a value is a valid TransactionId (non-empty string)
+ * @template T - The input type (defaults to unknown)
  */
-export function isValidTransactionId(value: unknown): value is TransactionId {
+export function isValidTransactionId<T>(value: T | unknown): value is T extends string ? TransactionId : TransactionId {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
 /**
  * Check if a value is a valid ShardId (non-empty string, max 255 chars)
+ * @template T - The input type (defaults to unknown)
  */
-export function isValidShardId(value: unknown): value is ShardId {
+export function isValidShardId<T>(value: T | unknown): value is T extends string ? ShardId : ShardId {
   return typeof value === 'string' && value.trim().length > 0 && value.length <= 255;
 }
 
 /**
  * Check if a value is a valid StatementHash (non-empty string)
+ * @template T - The input type (defaults to unknown)
  */
-export function isValidStatementHash(value: unknown): value is StatementHash {
+export function isValidStatementHash<T>(value: T | unknown): value is T extends string ? StatementHash : StatementHash {
   return typeof value === 'string' && value.length > 0;
 }
 
@@ -564,7 +559,7 @@ export type JSColumnType =
 /**
  * Mapping from SQL types to JS types
  */
-export const SQL_TO_JS_TYPE_MAP: Record<SQLColumnType, JSColumnType> = {
+export const SQL_TO_JS_TYPE_MAP: Readonly<Record<SQLColumnType, JSColumnType>> = {
   INTEGER: 'number',
   REAL: 'number',
   TEXT: 'string',
@@ -573,12 +568,12 @@ export const SQL_TO_JS_TYPE_MAP: Record<SQLColumnType, JSColumnType> = {
   BOOLEAN: 'boolean',
   DATETIME: 'timestamp',
   JSON: 'json',
-};
+} as const;
 
 /**
  * Mapping from JS types to SQL types
  */
-export const JS_TO_SQL_TYPE_MAP: Record<JSColumnType, SQLColumnType> = {
+export const JS_TO_SQL_TYPE_MAP: Readonly<Record<JSColumnType, SQLColumnType>> = {
   string: 'TEXT',
   number: 'REAL',
   bigint: 'INTEGER',
@@ -589,7 +584,7 @@ export const JS_TO_SQL_TYPE_MAP: Record<JSColumnType, SQLColumnType> = {
   blob: 'BLOB',
   null: 'NULL',
   unknown: 'TEXT',
-};
+} as const;
 
 /**
  * Convert SQL column type to JS column type
@@ -630,13 +625,13 @@ export interface IdempotencyConfig {
 /**
  * Default idempotency configuration
  */
-export const DEFAULT_IDEMPOTENCY_CONFIG: IdempotencyConfig = {
+export const DEFAULT_IDEMPOTENCY_CONFIG: Readonly<IdempotencyConfig> = {
   enabled: true,
   ttlMs: 24 * 60 * 60 * 1000, // 24 hours (server-side)
   maxCacheSize: 1000,
   cacheTtlMs: 5 * 60 * 1000, // 5 minutes (client-side cache)
   cleanupIntervalMs: 60 * 1000, // 1 minute
-};
+} as const;
 
 // =============================================================================
 // Query Request Types
@@ -659,9 +654,11 @@ export interface QueryRequest {
   /** Transaction ID for transactional queries */
   transactionId?: string | TransactionId;
   /** Query timeout in milliseconds */
-  timeout?: number;
-  /** Alternative timeout field name (for compatibility) */
   timeoutMs?: number;
+  /**
+   * @deprecated Use `timeoutMs` instead for consistency with other timeout fields
+   */
+  timeout?: number;
   /** Target shard for sharded queries */
   shardId?: string | ShardId;
   /** Whether to return results as streaming chunks */
@@ -683,6 +680,10 @@ export interface QueryOptions {
   /** Read from a specific point in time */
   asOf?: Date | LSN;
   /** Timeout in milliseconds */
+  timeoutMs?: number;
+  /**
+   * @deprecated Use `timeoutMs` instead for consistency with other timeout fields
+   */
   timeout?: number;
   /** Target shard for sharded queries */
   shardId?: ShardId;
@@ -846,8 +847,12 @@ export type ServerIsolationLevel =
 export interface TransactionOptions {
   isolationLevel?: IsolationLevel;
   readOnly?: boolean;
-  timeout?: number;
+  /** Transaction timeout in milliseconds */
   timeoutMs?: number;
+  /**
+   * @deprecated Use `timeoutMs` instead for consistency with other timeout fields
+   */
+  timeout?: number;
   branch?: string;
 }
 
@@ -950,13 +955,13 @@ export enum RPCErrorCode {
 /**
  * Unified RPC error structure
  */
-export interface RPCError {
+export interface RPCError<TDetails extends Record<string, unknown> = Record<string, unknown>> {
   /** Error code (string or enum) */
   code: string | RPCErrorCode;
   /** Human-readable message */
   message: string;
   /** Additional error details */
-  details?: Record<string, unknown> | unknown;
+  details?: TDetails;
   /** Stack trace (in development) */
   stack?: string;
 }
@@ -979,13 +984,13 @@ export interface ClientCapabilities {
 /**
  * Default client capabilities
  */
-export const DEFAULT_CLIENT_CAPABILITIES: ClientCapabilities = {
+export const DEFAULT_CLIENT_CAPABILITIES: Readonly<ClientCapabilities> = {
   binaryProtocol: true,
   compression: false,
   batching: true,
   maxBatchSize: 1000,
   maxMessageSize: 4 * 1024 * 1024,
-};
+} as const;
 
 // =============================================================================
 // Schema Types
@@ -1133,10 +1138,7 @@ export function isServerCDCEvent(event: CDCEvent): boolean {
  * Check if a CDC event is from the client (has transactionId)
  */
 export function isClientCDCEvent(event: CDCEvent): boolean {
-  return (
-    'transactionId' in event &&
-    (typeof event.transactionId === 'string' || event.transactionId !== undefined)
-  );
+  return 'transactionId' in event && event.transactionId !== undefined;
 }
 
 /**
@@ -1162,6 +1164,21 @@ export function isNumericTimestamp(
 // =============================================================================
 
 /**
+ * Copy common optional CDC event fields from source to target
+ * @internal
+ */
+function copyOptionalCDCFields<T>(
+  target: CDCEvent<T>,
+  source: CDCEvent<T>,
+  options: {
+    primaryKey?: Record<string, unknown>;
+  }
+): void {
+  if (options.primaryKey !== undefined) target.primaryKey = options.primaryKey;
+  if (source.metadata !== undefined) target.metadata = source.metadata;
+}
+
+/**
  * Convert server CDC event to client format
  */
 export function serverToClientCDCEvent<T = unknown>(
@@ -1176,9 +1193,6 @@ export function serverToClientCDCEvent<T = unknown>(
     operation: serverEvent.operation,
   };
 
-  const primaryKey = serverEvent.primaryKey ?? serverEvent.newRow ?? serverEvent.oldRow;
-  if (primaryKey !== undefined) result.primaryKey = primaryKey;
-
   const before = (serverEvent.before ?? serverEvent.oldRow) as T | undefined;
   if (before !== undefined) result.before = before;
 
@@ -1188,7 +1202,9 @@ export function serverToClientCDCEvent<T = unknown>(
   const transactionId = serverEvent.transactionId ?? serverEvent.txId;
   if (transactionId !== undefined) result.transactionId = transactionId;
 
-  if (serverEvent.metadata !== undefined) result.metadata = serverEvent.metadata;
+  copyOptionalCDCFields(result, serverEvent, {
+    primaryKey: serverEvent.primaryKey ?? serverEvent.newRow ?? serverEvent.oldRow,
+  });
 
   return result;
 }
@@ -1215,8 +1231,9 @@ export function clientToServerCDCEvent<T = unknown>(
   const newRow = clientEvent.after as Record<string, unknown> | undefined;
   if (newRow !== undefined) result.newRow = newRow;
 
-  if (clientEvent.primaryKey !== undefined) result.primaryKey = clientEvent.primaryKey;
-  if (clientEvent.metadata !== undefined) result.metadata = clientEvent.metadata;
+  copyOptionalCDCFields(result, clientEvent, {
+    primaryKey: clientEvent.primaryKey,
+  });
 
   return result;
 }
@@ -1255,6 +1272,8 @@ export function resultToResponse<T = Record<string, SQLValue>>(
     columns: result.columns,
     rowCount: result.rows.length,
     rowsAffected: result.rowsAffected,
+    duration: result.duration,
+    // Also set executionTimeMs for backwards compatibility
     executionTimeMs: result.duration,
   };
 
@@ -1671,11 +1690,11 @@ export interface RetryConfig {
  * @public
  * @since 0.1.0
  */
-export const DEFAULT_RETRY_CONFIG: RetryConfig = {
+export const DEFAULT_RETRY_CONFIG: Readonly<RetryConfig> = {
   maxRetries: 3,
   baseDelayMs: 100,
   maxDelayMs: 5000,
-};
+} as const;
 
 /**
  * Type guard to check if a value is a valid RetryConfig.

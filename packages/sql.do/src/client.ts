@@ -47,8 +47,12 @@ async function hashString(input: string, length: number): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(input);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  // Optimized: iterate directly over Uint8Array to avoid intermediate array allocations
+  const bytes = new Uint8Array(hashBuffer);
+  let hashHex = '';
+  for (let i = 0; i < bytes.length && hashHex.length < length; i++) {
+    hashHex += bytes[i].toString(16).padStart(2, '0');
+  }
   return hashHex.slice(0, length);
 }
 
@@ -1039,14 +1043,15 @@ export class DoSQLClient implements SQLClient {
    * @internal
    */
   private isRetryableError(error: SQLError): boolean {
-    const retryableCodes = [
+    // Use Set for O(1) lookup instead of array.includes() which is O(n)
+    const RETRYABLE_CODES: ReadonlySet<string> = new Set([
       'TIMEOUT',
       'CONNECTION_CLOSED',
       'NETWORK_ERROR',
       'UNAVAILABLE',
       'RESOURCE_EXHAUSTED',
-    ];
-    return retryableCodes.includes(error.code);
+    ]);
+    return RETRYABLE_CODES.has(error.code);
   }
 
   /**

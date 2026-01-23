@@ -101,6 +101,15 @@ function errorResponse(error: string, status: number = 400): Response {
 }
 
 // =============================================================================
+// Route Handler Types
+// =============================================================================
+
+type RouteHandler = (request: Request, url: URL) => Promise<Response | null>;
+type SimpleHandler = (request: Request) => Promise<Response>;
+type GetHandler = () => Response;
+type UrlHandler = (url: URL) => Response;
+
+// =============================================================================
 // Catalog Router Class
 // =============================================================================
 
@@ -110,27 +119,114 @@ function errorResponse(error: string, status: number = 400): Response {
 export class CatalogRouter {
   private readonly deps: CatalogRouterDeps;
 
+  /**
+   * Static routes mapped by path and method
+   * Each entry is: [method | null (any method), handler]
+   */
+  private readonly staticRoutes: Map<string, Map<string, RouteHandler>>;
+
   constructor(deps: CatalogRouterDeps) {
     this.deps = deps;
+    this.staticRoutes = this.buildStaticRoutes();
+  }
+
+  /**
+   * Build the static route map for O(1) lookups
+   */
+  private buildStaticRoutes(): Map<string, Map<string, RouteHandler>> {
+    const routes = new Map<string, Map<string, RouteHandler>>();
+
+    const addRoute = (path: string, method: string, handler: RouteHandler) => {
+      if (!routes.has(path)) {
+        routes.set(path, new Map());
+      }
+      routes.get(path)!.set(method, handler);
+    };
+
+    // Session API
+    addRoute('/v1/session/start', 'POST', async () => this.handleSessionStart());
+
+    // Query API
+    addRoute('/v1/query', 'POST', async (req) => this.handleQueryRequest(req));
+    addRoute('/v1/query', 'GET', async (_req, url) => this.handleQueryGet(url));
+    addRoute('/v1/query/plan', 'POST', async (req) => this.handleQueryPlanRequest(req));
+    addRoute('/v1/query/route', 'POST', async (req) => this.handleQueryRouteRequest(req));
+
+    // Scaling API
+    addRoute('/v1/scaling/config', 'PUT', async (req) => this.handleScalingConfigUpdate(req));
+    addRoute('/v1/scaling/config', 'GET', async () => this.handleScalingConfigGet());
+    addRoute('/v1/scaling/status', 'GET', async () => this.handleScalingStatus());
+    addRoute('/v1/scaling/route', 'POST', async (req) => this.handleScalingRoute(req));
+
+    // Configuration API
+    addRoute('/v1/config', 'PATCH', async (req) => this.handleConfigUpdate(req));
+    addRoute('/v1/config/replication', 'PUT', async (req) => this.handleReplicationConfigRequest(req));
+    addRoute('/v1/config/replication', 'GET', async (req) => this.handleReplicationConfigRequest(req));
+
+    // Write stats
+    addRoute('/v1/write-stats', 'GET', async () => this.handleWriteStats());
+
+    // Partition API
+    addRoute('/v1/partition-analysis', 'POST', async (req) => this.handlePartitionAnalysis(req));
+    addRoute('/v1/partition-rebalance/recommend', 'POST', async (req) => this.handleRebalanceRecommend(req));
+    addRoute('/v1/partition-rebalance/execute', 'POST', async (req) => this.handleRebalanceExecute(req));
+    addRoute('/v1/partition-metadata', 'PATCH', async (req) => this.handlePartitionMetadataUpdate(req));
+
+    // Large file operations
+    addRoute('/v1/test/write-large-file', 'POST', async (req) => this.handleWriteLargeFile(req));
+    addRoute('/v1/read-parquet', 'POST', async (req) => this.handleReadParquet(req));
+    addRoute('/v1/stream-parquet', 'POST', async (req) => this.handleStreamParquet(req));
+    addRoute('/v1/process-parquet', 'POST', async (req) => this.handleProcessParquet(req));
+
+    // Memory stats
+    addRoute('/v1/memory-stats', 'GET', async () => this.handleMemoryStats());
+
+    // Test utilities
+    addRoute('/v1/test/create-partitions', 'POST', async (req) => this.handleCreateTestPartitions(req));
+    addRoute('/v1/test/create-bucket-partitions', 'POST', async (req) => this.handleCreateBucketPartitions(req));
+    addRoute('/v1/test/inject-failure', 'POST', async (req) => this.handleInjectFailure(req));
+
+    return routes;
   }
 
   /**
    * Route a request to the appropriate handler
    */
   async route(request: Request, url: URL): Promise<Response | null> {
+    // Try prefix-based routes first
+    const prefixResult = await this.routePrefixHandlers(request, url);
+    if (prefixResult !== null) {
+      return prefixResult;
+    }
+
+    // Try static routes (O(1) lookup)
+    const staticResult = await this.routeStaticHandlers(request, url);
+    if (staticResult !== null) {
+      return staticResult;
+    }
+
+    // Try dynamic/pattern-based routes
+    const dynamicResult = await this.routeDynamicHandlers(request, url);
+    if (dynamicResult !== null) {
+      return dynamicResult;
+    }
+
+    // REST Catalog API (Iceberg spec) - handles table creation with partition specs
+    if (url.pathname.startsWith('/v1/')) {
+      return this.handleExtendedCatalogRequest(request, url);
+    }
+
+    // Not handled by this router
+    return null;
+  }
+
+  /**
+   * Handle prefix-based routes (cache, compaction)
+   */
+  private async routePrefixHandlers(request: Request, url: URL): Promise<Response | null> {
     // Cache Invalidation API
     if (url.pathname.startsWith('/v1/cache/')) {
       return this.handleCacheRequest(request, url);
-    }
-
-    // Replication Configuration API
-    if (url.pathname === '/v1/config/replication') {
-      return this.handleReplicationConfigRequest(request);
-    }
-
-    // Session API (for read-your-writes consistency)
-    if (url.pathname === '/v1/session/start' && request.method === 'POST') {
-      return this.handleSessionStart();
     }
 
     // Compaction API (handle before general catalog)
@@ -138,105 +234,30 @@ export class CatalogRouter {
       return this.handleCompactionRequest(request, url);
     }
 
-    // Query API
-    if (url.pathname === '/v1/query') {
-      if (request.method === 'POST') {
-        return this.handleQueryRequest(request);
-      }
-      if (request.method === 'GET') {
-        return this.handleQueryGet(url);
-      }
+    return null;
+  }
+
+  /**
+   * Handle static routes with O(1) lookup
+   */
+  private async routeStaticHandlers(request: Request, url: URL): Promise<Response | null> {
+    const pathHandlers = this.staticRoutes.get(url.pathname);
+    if (!pathHandlers) {
+      return null;
     }
 
-    if (url.pathname === '/v1/query/plan' && request.method === 'POST') {
-      return this.handleQueryPlanRequest(request);
+    const handler = pathHandlers.get(request.method);
+    if (!handler) {
+      return null;
     }
 
-    if (url.pathname === '/v1/query/route' && request.method === 'POST') {
-      return this.handleQueryRouteRequest(request);
-    }
+    return handler(request, url);
+  }
 
-    // Scaling configuration API
-    if (url.pathname === '/v1/scaling/config') {
-      if (request.method === 'PUT') {
-        return this.handleScalingConfigUpdate(request);
-      }
-      if (request.method === 'GET') {
-        return this.handleScalingConfigGet();
-      }
-    }
-
-    if (url.pathname === '/v1/scaling/status' && request.method === 'GET') {
-      return this.handleScalingStatus();
-    }
-
-    if (url.pathname === '/v1/scaling/route' && request.method === 'POST') {
-      return this.handleScalingRoute(request);
-    }
-
-    // Configuration update API
-    if (url.pathname === '/v1/config' && request.method === 'PATCH') {
-      return this.handleConfigUpdate(request);
-    }
-
-    // Write stats
-    if (url.pathname === '/v1/write-stats' && request.method === 'GET') {
-      return this.handleWriteStats();
-    }
-
-    // Partition analysis and rebalancing API
-    if (url.pathname === '/v1/partition-analysis' && request.method === 'POST') {
-      return this.handlePartitionAnalysis(request);
-    }
-
-    if (url.pathname === '/v1/partition-rebalance/recommend' && request.method === 'POST') {
-      return this.handleRebalanceRecommend(request);
-    }
-
-    if (url.pathname === '/v1/partition-rebalance/execute' && request.method === 'POST') {
-      return this.handleRebalanceExecute(request);
-    }
-
-    // Partition metadata update
-    if (url.pathname === '/v1/partition-metadata' && request.method === 'PATCH') {
-      return this.handlePartitionMetadataUpdate(request);
-    }
-
-    // Large file operations
-    if (url.pathname === '/v1/test/write-large-file' && request.method === 'POST') {
-      return this.handleWriteLargeFile(request);
-    }
-
-    if (url.pathname === '/v1/read-parquet' && request.method === 'POST') {
-      return this.handleReadParquet(request);
-    }
-
-    if (url.pathname === '/v1/stream-parquet' && request.method === 'POST') {
-      return this.handleStreamParquet(request);
-    }
-
-    if (url.pathname === '/v1/process-parquet' && request.method === 'POST') {
-      return this.handleProcessParquet(request);
-    }
-
-    // Memory stats
-    if (url.pathname === '/v1/memory-stats' && request.method === 'GET') {
-      return this.handleMemoryStats();
-    }
-
-    // Test utilities
-    if (url.pathname === '/v1/test/create-partitions' && request.method === 'POST') {
-      return this.handleCreateTestPartitions(request);
-    }
-
-    if (url.pathname === '/v1/test/create-bucket-partitions' && request.method === 'POST') {
-      return this.handleCreateBucketPartitions(request);
-    }
-
-    if (url.pathname === '/v1/test/inject-failure' && request.method === 'POST') {
-      return this.handleInjectFailure(request);
-    }
-
+  /**
+   * Handle dynamic/pattern-based routes
+   */
+  private async routeDynamicHandlers(_request: Request, url: URL): Promise<Response | null> {
     // Partitions list with pagination
     const partitionsMatch = url.pathname.match(/^\/v1\/namespaces\/([^/]+)\/tables\/([^/]+)\/partitions$/);
     if (partitionsMatch && partitionsMatch[1] && partitionsMatch[2]) {
@@ -249,12 +270,6 @@ export class CatalogRouter {
       return this.handlePartitionStats(partitionStatsMatch[1], partitionStatsMatch[2]);
     }
 
-    // REST Catalog API (Iceberg spec) - handles table creation with partition specs
-    if (url.pathname.startsWith('/v1/')) {
-      return this.handleExtendedCatalogRequest(request, url);
-    }
-
-    // Not handled by this router
     return null;
   }
 

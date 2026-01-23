@@ -16,7 +16,7 @@ DoSQL is a database engine purpose-built for Cloudflare Workers and Durable Obje
 
 | Property | Value |
 |----------|-------|
-| Current version | 0.1.0-alpha |
+| Current version | 0.1.0 |
 | Stability | Experimental |
 | Breaking changes | Expected before 1.0 |
 
@@ -129,7 +129,7 @@ const current = await db.query('SELECT * FROM metrics');
 // Query data as of 1 hour ago
 const historical = await db.query(`
   SELECT * FROM metrics
-  FOR SYSTEM_TIME AS OF TIMESTAMP '2024-01-01 10:00:00'
+  FOR SYSTEM_TIME AS OF TIMESTAMP '2026-01-22 10:00:00'
 `);
 ```
 
@@ -233,20 +233,32 @@ import { createWALWriter, createWALReader } from '@dotdo/dosql/wal';
 // CDC
 import { createCDC, createCDCSubscription } from '@dotdo/dosql/cdc';
 
-// FSX (Storage)
-import { createDOBackend, createR2Backend, createTieredBackend } from '@dotdo/dosql/fsx';
-
 // RPC
 import { createWebSocketClient, DoSQLTarget } from '@dotdo/dosql/rpc';
 
-// Sharding
+// Errors (unified error handling)
+import { DoSQLError, DatabaseError, SQLSyntaxError } from '@dotdo/dosql/errors';
+
+// FSX (Storage) - experimental
+import { createDOBackend, createR2Backend, createTieredBackend } from '@dotdo/dosql/fsx';
+
+// Sharding - experimental
 import { createShardRouter, createShardExecutor } from '@dotdo/dosql/sharding';
 
-// Procedures
+// Procedures - experimental
 import { procedure, createProcedureRegistry } from '@dotdo/dosql/proc';
 
-// Virtual Tables
+// Virtual Tables - experimental
 import { createVirtualTableRegistry } from '@dotdo/dosql/virtual';
+
+// Columnar (OLAP storage) - experimental
+import { ColumnarWriter, ColumnarReader } from '@dotdo/dosql/columnar';
+
+// ORM Adapters
+import { drizzleAdapter } from '@dotdo/dosql/orm/drizzle';
+import { kyselyAdapter } from '@dotdo/dosql/orm/kysely';
+import { knexAdapter } from '@dotdo/dosql/orm/knex';
+import { prismaAdapter } from '@dotdo/dosql/orm/prisma';
 ```
 
 ## Requirements
@@ -259,9 +271,25 @@ import { createVirtualTableRegistry } from '@dotdo/dosql/virtual';
 
 MIT
 
+## Changelog
+
+### 0.1.0 (2026-01-22)
+
+**Initial Release**
+
+- Core database operations (DB, query, run, transaction)
+- Schema migrations with `.do/migrations/*.sql` convention
+- Transaction management with savepoints
+- Time travel queries (experimental)
+- Database branching (experimental)
+- CDC streaming to lakehouse (experimental)
+- Virtual tables for URLs, R2, external APIs (experimental)
+- CapnWeb RPC protocol (experimental)
+- Sharding and query routing (experimental)
+- Stored procedures (experimental)
+
 ## Links
 
-- [GitHub](https://github.com/dotdo/dosql)
+- [GitHub](https://github.com/dotdo/sql)
 - [npm](https://www.npmjs.com/package/@dotdo/dosql)
 - [Documentation](./docs/README.md)
-- [Changelog](../../CHANGELOG.md)

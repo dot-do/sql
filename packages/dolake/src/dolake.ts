@@ -96,50 +96,142 @@ export interface DoLakeEnv {
 /**
  * DoLake Durable Object
  *
- * Receives CDC from DoSQL and writes to R2 as Parquet/Iceberg.
+ * The main lakehouse Durable Object that receives CDC events from DoSQL instances,
+ * batches them efficiently, and writes them to R2 as Parquet files with Iceberg metadata.
+ *
+ * @remarks
+ * DoLake uses WebSocket hibernation for 95% cost reduction on idle connections.
+ * It supports multiple CDC producers (DoSQL shards) connected simultaneously,
+ * with automatic deduplication, rate limiting, and backpressure signaling.
+ *
+ * @example
+ * ```typescript
+ * // In your worker, export the DoLake class
+ * import { DoLake } from '@dotdo/dolake';
+ * export { DoLake };
+ *
+ * // Route requests to DoLake
+ * export default {
+ *   async fetch(request: Request, env: Env): Promise<Response> {
+ *     const id = env.DOLAKE.idFromName('default');
+ *     const stub = env.DOLAKE.get(id);
+ *     return stub.fetch(request);
+ *   },
+ * };
+ * ```
  */
 export class DoLake implements DurableObject {
+  /** Durable Object state for persistence and WebSocket management */
   private readonly ctx: DurableObjectState;
+
+  /** Environment bindings including R2 bucket and optional KV namespace */
   private readonly env: DoLakeEnv;
+
+  /** DoLake configuration (flush thresholds, buffer sizes, etc.) */
   private readonly config: DoLakeConfig;
+
+  /** Rate limiting configuration (connections/s, messages/s, payload limits) */
   private readonly rateLimitConfig: RateLimitConfig;
 
   // Core components
+  /** CDC buffer manager for batching and deduplication */
   private buffer: CDCBufferManager;
+
+  /** R2 storage adapter for Iceberg table operations */
   private readonly storage: R2IcebergStorage;
+
+  /** REST Catalog handler for Iceberg API compatibility */
   private readonly catalogHandler: RestCatalogHandler;
+
+  /** Compaction manager for merging small Parquet files */
   private readonly compactionManager: CompactionManager;
+
+  /** Rate limiter with token bucket and IP-based limits */
   private readonly rateLimiter: RateLimiter;
 
   // State management
+  /** State machine for tracking DoLake operational state */
   private readonly stateMachine: DoLakeStateMachine;
+
+  /** Persistence layer for state recovery after hibernation */
   private readonly persistence: StatePersistence;
+
+  /** Circuit breaker state for R2 failure handling */
   private circuitBreakerState: 'closed' | 'open' | 'half-open' = 'closed';
+
+  /** Active compaction operations by table/partition */
   private readonly compactionInProgress: Map<string, Promise<CompactionResult>> = new Map();
 
   // Modular handlers
+  /** WebSocket message handler (CDC batches, heartbeats, etc.) */
   private readonly wsHandler: WebSocketHandler;
+
+  /** HTTP router for REST Catalog API endpoints */
   private readonly catalogRouter: CatalogRouter;
+
+  /** Flush coordinator for buffer-to-R2 writes */
   private readonly flushManager: FlushManager;
+
+  /** Recovery handler for fallback storage replay */
   private readonly recoveryHandler: (events: CDCEvent[]) => Promise<{ success: boolean; eventsRecovered: number; tablesProcessed: number; error?: string }>;
 
   // Scalability components
+  /** Partition manager for routing events to partitions */
   private readonly partitionManager: PartitionManager;
+
+  /** Query engine for partition pruning and query planning */
   private readonly queryEngine: QueryEngine;
+
+  /** Parallel write manager for concurrent Parquet file creation */
   private parallelWriteManager: ParallelWriteManager;
+
+  /** Partition-level compaction coordinator */
   private readonly partitionCompactionManager: PartitionCompactionManager;
+
+  /** Load balancer for partition rebalancing */
   private readonly partitionRebalancer: PartitionRebalancer;
+
+  /** Handler for oversized files requiring chunked processing */
   private largeFileHandler: LargeFileHandler;
+
+  /** Coordinator for multi-DO horizontal scaling */
   private readonly horizontalScalingManager: HorizontalScalingManager;
+
+  /** Memory-efficient processor for streaming large datasets */
   private readonly memoryProcessor: MemoryEfficientProcessor;
+
+  /** Scaling configuration (parallelism, memory limits, etc.) */
   private scalingConfig: ScalingConfig;
 
   // Analytics (P2 durability)
+  /** Analytics event handler with P2 durability guarantees */
   private analyticsHandler: AnalyticsEventHandler;
 
   // Cache invalidation
+  /** Cache invalidator for downstream cache consistency */
   private readonly cacheInvalidator: CacheInvalidator;
 
+  /**
+   * Creates a new DoLake instance.
+   *
+   * @param ctx - Durable Object state provided by the Cloudflare runtime.
+   *              Used for persistence, WebSocket management, and alarm scheduling.
+   * @param env - Environment bindings containing:
+   *              - `LAKEHOUSE_BUCKET`: R2 bucket for Parquet/Iceberg storage (required)
+   *              - `LAKEHOUSE_KV`: KV namespace for metadata caching (optional)
+   *
+   * @remarks
+   * The constructor initializes all internal components synchronously:
+   * - Core: buffer manager, R2 storage, catalog handler, compaction manager, rate limiter
+   * - State: state machine, persistence layer
+   * - Handlers: WebSocket handler, catalog router, flush manager, recovery handler
+   * - Scalability: partition manager, query engine, parallel write manager, etc.
+   * - Analytics: P2 durability handler
+   * - Cache: invalidation coordinator
+   *
+   * After initialization, it restores state from hibernation and sets up
+   * WebSocket auto-response for ping/pong keep-alive.
+   */
   constructor(ctx: DurableObjectState, env: DoLakeEnv) {
     this.ctx = ctx;
     this.env = env;

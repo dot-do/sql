@@ -27,7 +27,13 @@ export async function findMigrations(migrationsDir: string): Promise<Migration[]
   // Check if directory exists
   const exists = await fs.access(migrationsDir).then(() => true).catch(() => false);
   if (!exists) {
-    throw new Error(`Migrations directory not found: ${migrationsDir}`);
+    throw new Error(
+      `Migrations directory not found: ${migrationsDir}\n\n` +
+      `To fix this, either:\n` +
+      `  1. Run 'dosql init' to create the default project structure, or\n` +
+      `  2. Create the migrations directory manually: mkdir -p ${migrationsDir}\n` +
+      `  3. Use --directory to specify a different migrations path`
+    );
   }
 
   const entries = await fs.readdir(migrationsDir, { withFileTypes: true });

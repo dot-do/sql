@@ -1,0 +1,186 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/dosql/**'
+      - '.github/workflows/e2e.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/dosql/**'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Enable debug logging'
+        required: false
+        default: 'false'
+        type: boolean
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Use GitHub run ID for unique worker names to avoid conflicts
+  E2E_SUFFIX: ci-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build dosql package
+        run: pnpm build --filter @dotdo/dosql
+
+      - name: Deploy E2E test worker
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          cd packages/dosql
+
+          # Create temporary wrangler config for E2E
+          cat > wrangler.e2e.json << 'EOF'
+          {
+            "name": "dosql-e2e-test-${{ env.E2E_SUFFIX }}",
+            "main": "src/worker/index.ts",
+            "compatibility_date": "2026-01-01",
+            "durable_objects": {
+              "bindings": [
+                { "name": "DOSQL_DB", "class_name": "DoSQLDatabase" }
+              ]
+            },
+            "migrations": [
+              { "tag": "v1", "new_classes": ["DoSQLDatabase"] }
+            ]
+          }
+          EOF
+
+          # Deploy the worker
+          echo "Deploying E2E test worker..."
+          DEPLOY_OUTPUT=$(npx wrangler deploy --config wrangler.e2e.json 2>&1)
+          echo "$DEPLOY_OUTPUT"
+
+          # Extract the worker URL
+          WORKER_URL=$(echo "$DEPLOY_OUTPUT" | grep -oE 'https://[^[:space:]]+\.workers\.dev' | head -1)
+
+          if [ -z "$WORKER_URL" ]; then
+            echo "Failed to extract worker URL from deployment output"
+            exit 1
+          fi
+
+          echo "Deployed to: $WORKER_URL"
+          echo "worker_url=$WORKER_URL" >> $GITHUB_OUTPUT
+          echo "DOSQL_E2E_ENDPOINT=$WORKER_URL" >> $GITHUB_ENV
+
+      - name: Wait for worker to be ready
+        env:
+          DOSQL_E2E_ENDPOINT: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          echo "Waiting for worker to be ready..."
+
+          MAX_ATTEMPTS=30
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt $ATTEMPT of $MAX_ATTEMPTS..."
+
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$DOSQL_E2E_ENDPOINT/health" || echo "000")
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "Worker is ready!"
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "Worker failed to become ready after $MAX_ATTEMPTS attempts"
+          exit 1
+
+      - name: Run E2E tests
+        env:
+          CI: true
+          DOSQL_E2E_ENDPOINT: ${{ steps.deploy.outputs.worker_url }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          cd packages/dosql
+          pnpm test:e2e
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: packages/dosql/test-results/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Cleanup E2E test worker
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          echo "Cleaning up E2E test worker..."
+
+          WORKER_NAME="dosql-e2e-test-${{ env.E2E_SUFFIX }}"
+
+          # Attempt to delete the worker
+          npx wrangler delete "$WORKER_NAME" --yes || {
+            echo "Warning: Failed to delete worker $WORKER_NAME"
+            echo "This may need manual cleanup"
+          }
+
+          # Clean up temporary config
+          rm -f packages/dosql/wrangler.e2e.json
+
+          echo "Cleanup complete"
+
+      - name: Report test summary
+        if: always()
+        run: |
+          echo "## E2E Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Worker URL**: ${{ steps.deploy.outputs.worker_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Run ID**: ${{ env.E2E_SUFFIX }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
