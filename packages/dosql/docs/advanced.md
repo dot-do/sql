@@ -35,7 +35,7 @@ This guide covers advanced patterns for experienced developers building complex 
 
 ### Common Table Expressions (CTEs)
 
-CTEs provide readable, modular queries for complex data transformations.
+CTEs provide readable, modular queries for complex data transformations. They act as temporary named result sets that exist only for the duration of the query.
 
 ```typescript
 import { DB } from '@dotdo/dosql';
@@ -103,7 +103,7 @@ const salesReport = await db.query(`
 
 ### Window Functions
 
-Window functions enable sophisticated analytics without subqueries.
+Window functions enable sophisticated analytics without subqueries. They perform calculations across a set of rows related to the current row.
 
 ```typescript
 // Running totals and moving averages
@@ -148,7 +148,7 @@ const performanceRanking = await db.query(`
   WHERE period = '2024-Q4'
 `);
 
-// Gap and island analysis
+// Gap and island analysis for session detection
 const sessionAnalysis = await db.query(`
   WITH event_gaps AS (
     SELECT
@@ -156,7 +156,7 @@ const sessionAnalysis = await db.query(`
       event_time,
       LAG(event_time) OVER (PARTITION BY user_id ORDER BY event_time) as prev_event,
       CASE
-        WHEN julianday(event_time) - julianday(LAG(event_time) OVER (PARTITION BY user_id ORDER BY event_time)) > 0.0208 -- 30 minutes
+        WHEN julianday(event_time) - julianday(LAG(event_time) OVER (PARTITION BY user_id ORDER BY event_time)) > 0.0208
         THEN 1
         ELSE 0
       END as new_session
@@ -179,12 +179,14 @@ const sessionAnalysis = await db.query(`
 `);
 ```
 
+> **Note**: The session gap threshold of `0.0208` days equals approximately 30 minutes (0.0208 * 24 * 60 = 30 minutes).
+
 ### Recursive Queries
 
-Recursive CTEs handle hierarchical data like org charts, category trees, and graph traversal.
+Recursive CTEs handle hierarchical data like org charts, category trees, and graph traversal. They consist of a base case and a recursive case joined with `UNION ALL`.
 
 ```typescript
-// Organizational hierarchy
+// Organizational hierarchy traversal
 const orgChart = await db.query(`
   WITH RECURSIVE org_tree AS (
     -- Base case: top-level employees (no manager)
@@ -215,7 +217,7 @@ const orgChart = await db.query(`
   SELECT * FROM org_tree ORDER BY path
 `);
 
-// Category tree with aggregated metrics
+// Category tree with aggregated product metrics
 const categoryTree = await db.query(`
   WITH RECURSIVE category_tree AS (
     SELECT
@@ -253,7 +255,7 @@ const categoryTree = await db.query(`
   SELECT * FROM category_products ORDER BY path
 `);
 
-// Bill of materials explosion
+// Bill of materials explosion with cumulative quantities
 const bomExplosion = await db.query(`
   WITH RECURSIVE bom AS (
     SELECT
@@ -288,9 +290,11 @@ const bomExplosion = await db.query(`
 `, { productId: 123 });
 ```
 
+> **Important**: Always include a recursion depth limit (e.g., `WHERE level < 10`) to prevent infinite loops in malformed hierarchical data.
+
 ### Hybrid Search (Text + Vector)
 
-Combine full-text search with vector similarity for semantic search applications.
+Combine full-text search with vector similarity for semantic search applications. This pattern is useful when you want both keyword matching and semantic understanding.
 
 ```typescript
 import { DB } from '@dotdo/dosql';
@@ -299,7 +303,7 @@ const db = await DB('documents');
 
 // Create table with both FTS and vector capabilities
 await db.run(`
-  CREATE TABLE documents (
+  CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
     content TEXT NOT NULL,
@@ -308,23 +312,25 @@ await db.run(`
   );
 
   -- Full-text search index
-  CREATE VIRTUAL TABLE documents_fts USING fts5(
+  CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
     title, content,
     content='documents',
     content_rowid='id'
   );
 
-  -- Vector index (HNSW)
-  CREATE INDEX idx_documents_embedding ON documents
+  -- Vector index (HNSW) for semantic similarity
+  CREATE INDEX IF NOT EXISTS idx_documents_embedding ON documents
   USING VECTOR (embedding)
   WITH (dimensions = 1536, metric = 'cosine', m = 16, ef_construction = 200);
 `);
 
 // Hybrid search combining keyword and semantic similarity
-async function hybridSearch(query: string, embedding: Float32Array, limit = 10) {
-  // Weight factors for combining scores
-  const keywordWeight = 0.4;
-  const semanticWeight = 0.6;
+async function hybridSearch(
+  query: string,
+  embedding: Float32Array,
+  options: { keywordWeight?: number; semanticWeight?: number; limit?: number } = {}
+) {
+  const { keywordWeight = 0.4, semanticWeight = 0.6, limit = 10 } = options;
 
   const results = await db.query(`
     WITH keyword_matches AS (
@@ -370,7 +376,7 @@ async function hybridSearch(query: string, embedding: Float32Array, limit = 10) 
   return results;
 }
 
-// Filtered vector search with metadata
+// Filtered vector search with metadata constraints
 async function searchWithFilters(
   embedding: Float32Array,
   filters: { category?: string; dateRange?: [string, string] }
@@ -405,41 +411,38 @@ async function searchWithFilters(
 
 ### Time Travel Queries
 
-Query data at any point in time using DoSQL's time travel capabilities.
+Query data at any point in time using DoSQL's time travel capabilities. This is useful for auditing, debugging, and historical analysis.
 
 ```typescript
 import { DB } from '@dotdo/dosql';
 import {
   createTimeTravelSession,
-  lsn,
   timestamp,
-  snapshot,
-  relative
 } from '@dotdo/dosql/timetravel';
 
 const db = await DB('analytics');
 
-// Query at specific timestamp
+// Query at a specific timestamp
 const historicalData = await db.query(`
   SELECT * FROM accounts
   FOR SYSTEM_TIME AS OF TIMESTAMP '2024-01-01 00:00:00'
   WHERE balance > 10000
 `);
 
-// Query at specific LSN (Log Sequence Number)
+// Query at a specific LSN (Log Sequence Number)
 const atLsn = await db.query(`
   SELECT * FROM transactions
   FOR SYSTEM_TIME AS OF LSN 12345
   WHERE account_id = 42
 `);
 
-// Query at named snapshot
+// Query at a named snapshot
 const atSnapshot = await db.query(`
   SELECT * FROM inventory
   FOR SYSTEM_TIME AS OF SNAPSHOT 'main@5'
 `);
 
-// Programmatic time travel session
+// Programmatic time travel session for consistent multi-query audits
 async function auditReport(asOfDate: Date) {
   const session = await createTimeTravelSession(db, {
     asOf: timestamp(asOfDate),
@@ -447,7 +450,7 @@ async function auditReport(asOfDate: Date) {
   });
 
   try {
-    // All queries see data as of asOfDate
+    // All queries within this session see data as of asOfDate
     const accounts = await session.query('SELECT * FROM accounts');
     const transactions = await session.query('SELECT * FROM transactions');
     const balances = await session.query(`
@@ -467,7 +470,7 @@ async function auditReport(asOfDate: Date) {
   }
 }
 
-// Time range queries for change history
+// Time range queries for viewing change history
 const changeHistory = await db.query(`
   SELECT
     *,
@@ -509,7 +512,7 @@ async function comparePeriods(
 
 ### Virtual Tables
 
-Query external data sources directly using SQL.
+Query external data sources directly using SQL with virtual tables. DoSQL supports URLs, APIs, and cloud storage as queryable tables.
 
 ```typescript
 import { DB } from '@dotdo/dosql';
@@ -518,7 +521,7 @@ import { createVirtualTableRegistry, createURLVirtualTable } from '@dotdo/dosql/
 const db = await DB('federation');
 const registry = createVirtualTableRegistry();
 
-// Register API endpoint as virtual table
+// Register an API endpoint as a virtual table
 registry.register('github_repos', createURLVirtualTable({
   url: 'https://api.github.com/users/{owner}/repos',
   format: 'json',
@@ -531,10 +534,10 @@ registry.register('github_repos', createURLVirtualTable({
     language: repo.language,
     updated_at: repo.updated_at,
   })),
-  cache: { ttl: 300000 }, // 5 minutes
+  cache: { ttl: 300000 }, // Cache for 5 minutes
 }));
 
-// Query virtual table
+// Query the virtual table like any other table
 const repos = await db.query(`
   SELECT name, stars, language
   FROM github_repos('octocat')
@@ -556,7 +559,7 @@ const enrichedData = await db.query(`
   ORDER BY gr.stars DESC
 `);
 
-// Parquet files from R2
+// Query Parquet files directly from R2
 const salesData = await db.query(`
   SELECT
     region,
@@ -567,7 +570,7 @@ const salesData = await db.query(`
   GROUP BY region
 `);
 
-// CSV with custom options
+// Query CSV with custom options
 const importData = await db.query(`
   SELECT * FROM 'https://data.example.com/export.csv'
   WITH (
@@ -586,14 +589,13 @@ const importData = await db.query(`
 
 ### ESM Stored Procedures
 
-DoSQL supports ESM-based stored procedures for complex business logic with full TypeScript support.
+DoSQL supports ESM-based stored procedures for complex business logic with full TypeScript support. Procedures run in sandboxed V8 isolates for security.
 
 ```typescript
 import {
   createProcedureRegistry,
   createProcedureExecutor,
   procedure,
-  defineProcedures,
   type ProcedureContext
 } from '@dotdo/dosql/proc';
 
@@ -603,7 +605,7 @@ const transferFunds = procedure('transfer_funds')
     fromAccountId: 'number',
     toAccountId: 'number',
     amount: 'number',
-    description: 'string?',
+    description: 'string?', // Optional parameter
   })
   .output({
     transactionId: 'number',
@@ -614,7 +616,7 @@ const transferFunds = procedure('transfer_funds')
     const { db } = ctx;
 
     return await db.transaction(async (tx) => {
-      // Validate source account
+      // Validate source account and lock the row
       const fromAccount = await tx.queryOne(
         'SELECT id, balance FROM accounts WHERE id = ? FOR UPDATE',
         [input.fromAccountId]
@@ -638,7 +640,7 @@ const transferFunds = procedure('transfer_funds')
         throw new Error(`Destination account ${input.toAccountId} not found`);
       }
 
-      // Perform transfer
+      // Perform the transfer
       await tx.run(
         'UPDATE accounts SET balance = balance - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         [input.amount, input.fromAccountId]
@@ -649,14 +651,14 @@ const transferFunds = procedure('transfer_funds')
         [input.amount, input.toAccountId]
       );
 
-      // Record transaction
+      // Record the transaction
       const result = await tx.run(
         `INSERT INTO transactions (from_account_id, to_account_id, amount, description, created_at)
          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
         [input.fromAccountId, input.toAccountId, input.amount, input.description ?? null]
       );
 
-      // Get updated balances
+      // Get updated balances for the response
       const updatedFrom = await tx.queryOne(
         'SELECT balance FROM accounts WHERE id = ?',
         [input.fromAccountId]
@@ -699,7 +701,7 @@ For simpler syntax, use the functional API:
 import { defineProcedures, withValidation, withRetry } from '@dotdo/dosql/proc';
 
 const procedures = defineProcedures({
-  // Simple procedure
+  // Simple procedure with no validation
   getUserOrders: async ({ db }, userId: number) => {
     return db.query(
       'SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC',
@@ -707,7 +709,7 @@ const procedures = defineProcedures({
     );
   },
 
-  // Procedure with validation
+  // Procedure with input validation
   createOrder: withValidation(
     async ({ db }, order: { userId: number; items: Array<{ productId: number; quantity: number }> }) => {
       return db.transaction(async (tx) => {
@@ -733,7 +735,7 @@ const procedures = defineProcedures({
     }
   ),
 
-  // Procedure with retry logic
+  // Procedure with automatic retry on transient failures
   syncExternalData: withRetry(
     async ({ db, env }, sourceId: string) => {
       const response = await fetch(`${env.EXTERNAL_API}/data/${sourceId}`);
@@ -750,7 +752,7 @@ const procedures = defineProcedures({
   ),
 });
 
-// Execute procedures
+// Execute procedures with type inference
 const orders = await procedures.getUserOrders(42);
 const newOrder = await procedures.createOrder({
   userId: 42,
@@ -763,10 +765,10 @@ const newOrder = await procedures.createOrder({
 
 #### SQL Procedure Syntax
 
-Create procedures using SQL syntax:
+Create procedures using SQL syntax with embedded ESM:
 
 ```sql
--- Create procedure with embedded ESM
+-- Create a procedure with embedded ESM module
 CREATE PROCEDURE calculate_customer_stats AS MODULE $$
   export default async ({ db }, customerId) => {
     const stats = await db.queryOne(`
@@ -791,23 +793,23 @@ CREATE PROCEDURE calculate_customer_stats AS MODULE $$
   }
 $$;
 
--- Call the procedure
+-- Call the procedure with positional argument
 CALL calculate_customer_stats(42);
 
--- Call with named parameters
+-- Call with named parameter
 CALL calculate_customer_stats(customerId => 42);
 ```
 
 ### SQL Triggers
 
-DoSQL supports SQLite-compatible CREATE TRIGGER syntax.
+DoSQL supports SQLite-compatible CREATE TRIGGER syntax for database-level automation.
 
 ```typescript
 import { DB } from '@dotdo/dosql';
 
 const db = await DB('app');
 
-// Create audit trigger
+// Audit trigger: log all changes to users table
 await db.run(`
   CREATE TRIGGER audit_user_changes
   AFTER UPDATE ON users
@@ -834,7 +836,7 @@ await db.run(`
   END
 `);
 
-// Trigger with WHEN clause for conditional execution
+// Conditional trigger with WHEN clause
 await db.run(`
   CREATE TRIGGER notify_large_orders
   AFTER INSERT ON orders
@@ -861,7 +863,7 @@ await db.run(`
   END
 `);
 
-// INSTEAD OF trigger for views
+// INSTEAD OF trigger for updatable views
 await db.run(`
   CREATE VIEW active_users AS
   SELECT id, name, email FROM users WHERE deleted_at IS NULL;
@@ -874,7 +876,7 @@ await db.run(`
   END
 `);
 
-// Trigger for UPDATE OF specific columns
+// Trigger for UPDATE OF specific columns only
 await db.run(`
   CREATE TRIGGER track_price_changes
   AFTER UPDATE OF price ON products
@@ -889,7 +891,7 @@ await db.run(`
 
 ### Programmatic Triggers
 
-For complex business logic, use TypeScript triggers:
+For complex business logic, use TypeScript triggers with full access to the DoSQL context:
 
 ```typescript
 import {
@@ -899,7 +901,7 @@ import {
   type TriggerContext
 } from '@dotdo/dosql/triggers';
 
-// Define a trigger
+// Define a trigger with full type safety
 const auditTrigger: TriggerDefinition<{ id: number; name: string; email: string }> = {
   name: 'audit_user_changes',
   table: 'users',
@@ -925,13 +927,13 @@ const auditTrigger: TriggerDefinition<{ id: number; name: string; email: string 
   },
 };
 
-// Validation trigger (BEFORE)
+// Validation trigger that modifies data before write
 const validationTrigger: TriggerDefinition<{ email: string; role: string }> = {
   name: 'validate_user_email',
   table: 'users',
   timing: 'before',
   events: ['insert', 'update'],
-  priority: 10, // Run early
+  priority: 10, // Run early in the trigger chain
 
   handler(ctx) {
     const row = ctx.new!;
@@ -947,7 +949,7 @@ const validationTrigger: TriggerDefinition<{ email: string; role: string }> = {
       throw new Error(`Invalid role: ${row.role}. Must be one of: ${validRoles.join(', ')}`);
     }
 
-    // Normalize email (modify the row)
+    // Return modified row (normalizes email to lowercase)
     return {
       ...row,
       email: row.email?.toLowerCase(),
@@ -962,7 +964,8 @@ registry.register(validationTrigger);
 
 const executor = createTriggerExecutor(db, registry);
 
-// Triggers fire automatically on operations, or manually:
+// Triggers fire automatically on database operations
+// Or execute manually for testing:
 const beforeResult = await executor.executeBefore(
   'users',
   'insert',
@@ -976,7 +979,7 @@ console.log(beforeResult.row);
 
 ### Trigger Execution Order
 
-Understanding trigger execution order is critical for complex applications:
+Understanding trigger execution order is critical for complex applications. Triggers execute in priority order (lower numbers first).
 
 ```typescript
 import { createTriggerRegistry, type TriggerDefinition } from '@dotdo/dosql/triggers';
@@ -990,7 +993,7 @@ const triggers: TriggerDefinition[] = [
     table: 'orders',
     timing: 'before',
     events: ['insert'],
-    priority: 10, // First
+    priority: 10, // Runs first
     handler: (ctx) => {
       if (ctx.new!.total < 0) throw new Error('Invalid total');
     },
@@ -1000,7 +1003,7 @@ const triggers: TriggerDefinition[] = [
     table: 'orders',
     timing: 'before',
     events: ['insert'],
-    priority: 20, // Second
+    priority: 20, // Runs second
     handler: (ctx) => ({
       ...ctx.new!,
       status: ctx.new!.status || 'pending',
@@ -1012,7 +1015,7 @@ const triggers: TriggerDefinition[] = [
     table: 'orders',
     timing: 'after',
     events: ['insert', 'update', 'delete'],
-    priority: 100, // After operation
+    priority: 100, // Runs after the database operation
     handler: async (ctx) => {
       await ctx.db.run('INSERT INTO audit_log ...');
     },
@@ -1022,7 +1025,7 @@ const triggers: TriggerDefinition[] = [
     table: 'orders',
     timing: 'after',
     events: ['insert'],
-    priority: 200, // Last
+    priority: 200, // Runs last
     handler: async (ctx) => {
       await sendNotification(ctx.new!.customer_id, 'New order created');
     },
@@ -1037,13 +1040,15 @@ triggers.forEach(t => registry.register(t));
 // 3. AFTER triggers (priority order): audit_log (100) -> notifications (200)
 ```
 
+> **Note**: BEFORE triggers can modify the row by returning a new object. AFTER triggers run after the operation commits and cannot modify data but are ideal for side effects like notifications.
+
 ---
 
 ## CDC Streaming Patterns
 
-### Basic CDC Subscription
+Change Data Capture (CDC) enables real-time streaming of database changes for event-driven architectures.
 
-Change Data Capture (CDC) enables real-time streaming of database changes.
+### Basic CDC Subscription
 
 ```typescript
 import { createCDC, createCDCSubscription } from '@dotdo/dosql/cdc';
@@ -1051,7 +1056,7 @@ import { createCDC, createCDCSubscription } from '@dotdo/dosql/cdc';
 const db = await DB('app', { wal: true });
 const cdc = createCDC(db.backend);
 
-// Subscribe to all changes from beginning
+// Subscribe to all changes starting from the beginning
 for await (const entry of cdc.subscribe(0n)) {
   console.log('Change:', {
     operation: entry.op,
@@ -1061,11 +1066,17 @@ for await (const entry of cdc.subscribe(0n)) {
   });
 }
 
-// Subscribe with typed events
+// Subscribe with typed events and automatic decoding
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
 const subscription = createCDCSubscription(db.backend, {
   fromLSN: 0n,
-  pollInterval: 100,
-  batchSize: 100,
+  pollInterval: 100, // Check for new entries every 100ms
+  batchSize: 100,    // Process up to 100 entries per batch
 });
 
 for await (const event of subscription.subscribeChanges<User>(0n, undefined, JSON.parse)) {
@@ -1112,13 +1123,13 @@ const highValueSubscription = createCDCSubscription(db.backend, {
 
 // Multiple consumers with different filters
 async function startCDCConsumers(backend: Backend) {
-  // Analytics consumer - all inserts
+  // Analytics: track all new records
   const analyticsConsumer = createCDCSubscription(backend, {
     fromLSN: 0n,
     filter: { operations: ['INSERT'] },
   });
 
-  // Audit consumer - all changes to sensitive tables
+  // Audit: track changes to sensitive tables
   const auditConsumer = createCDCSubscription(backend, {
     fromLSN: 0n,
     filter: {
@@ -1127,7 +1138,7 @@ async function startCDCConsumers(backend: Backend) {
     },
   });
 
-  // Cache invalidation consumer - updates and deletes
+  // Cache invalidation: invalidate on updates and deletes
   const cacheConsumer = createCDCSubscription(backend, {
     fromLSN: 0n,
     filter: { operations: ['UPDATE', 'DELETE'] },
@@ -1139,22 +1150,23 @@ async function startCDCConsumers(backend: Backend) {
 
 ### Replication Slots
 
-Replication slots provide durable position tracking for reliable CDC consumption:
+Replication slots provide durable position tracking for reliable CDC consumption. They ensure no events are missed even if the consumer restarts.
 
 ```typescript
 import { createCDC, createReplicationSlotManager } from '@dotdo/dosql/cdc';
 
 const cdc = createCDC(db.backend);
 
-// Create a replication slot
+// Create a replication slot for persistent position tracking
 await cdc.slots.createSlot('analytics-service', 0n, {
   tables: ['events', 'metrics'],
 });
 
-// Subscribe from slot position (resumes where left off)
+// Subscribe from slot position (automatically resumes where it left off)
 const subscription = await cdc.slots.subscribeFromSlot('analytics-service');
 
 let lastProcessedLSN = 0n;
+let processedCount = 0;
 
 for await (const event of subscription.subscribeChanges(0n)) {
   try {
@@ -1163,7 +1175,9 @@ for await (const event of subscription.subscribeChanges(0n)) {
 
     // Update slot position periodically (every 100 events or 5 seconds)
     lastProcessedLSN = event.lsn;
-    if (shouldCheckpoint()) {
+    processedCount++;
+
+    if (processedCount % 100 === 0) {
       await cdc.slots.updateSlot('analytics-service', lastProcessedLSN);
     }
   } catch (error) {
@@ -1173,7 +1187,7 @@ for await (const event of subscription.subscribeChanges(0n)) {
   }
 }
 
-// List all replication slots
+// List all active replication slots
 const slots = await cdc.slots.listSlots();
 console.log('Active slots:', slots.map(s => ({
   name: s.name,
@@ -1201,7 +1215,7 @@ const streamerConfig: LakehouseStreamConfig = {
   sourceDoId: 'tenant-123-orders',
   sourceShardName: 'orders-shard-0',
   maxBatchSize: 1000,
-  maxBatchAge: 5000, // 5 seconds
+  maxBatchAge: 5000, // Flush batch after 5 seconds even if not full
   retry: {
     maxAttempts: 5,
     initialDelayMs: 100,
@@ -1209,7 +1223,7 @@ const streamerConfig: LakehouseStreamConfig = {
     backoffMultiplier: 2,
   },
   heartbeatInterval: 30000,
-  exactlyOnce: true,
+  exactlyOnce: true, // Enable deduplication
 };
 
 const streamer = createLakehouseStreamer({
@@ -1267,7 +1281,7 @@ import {
   type ChangeEvent
 } from '@dotdo/dosql/cdc';
 
-// Retry with exponential backoff
+// Retry configuration with exponential backoff
 interface RetryConfig {
   maxRetries: number;
   baseDelayMs: number;
@@ -1323,7 +1337,7 @@ async function createResilientCDCConsumer(
           );
           await sleep(delay);
         } else {
-          throw error;
+          throw error; // Non-retryable error
         }
       }
     }
@@ -1339,7 +1353,7 @@ async function createResilientCDCConsumer(
   };
 }
 
-// Dead letter queue for failed events
+// Dead letter queue for events that fail processing
 class CDCDeadLetterQueue {
   private queue: Array<{
     event: ChangeEvent;
@@ -1389,7 +1403,7 @@ class CDCDeadLetterQueue {
   }
 }
 
-// Circuit breaker pattern
+// Circuit breaker pattern for downstream services
 enum CircuitState {
   CLOSED = 'CLOSED',
   OPEN = 'OPEN',
@@ -1463,6 +1477,8 @@ function sleep(ms: number): Promise<void> {
 
 ## Sharding and Scaling
 
+DoSQL supports horizontal scaling through sharding, distributing data across multiple Durable Objects.
+
 ### VSchema Configuration
 
 DoSQL uses a VSchema (Virtual Schema) to define sharding topology, inspired by Vitess but optimized for Durable Objects.
@@ -1480,19 +1496,18 @@ import {
   replica,
   createShardId,
   type VSchema,
-  type ShardConfig,
 } from '@dotdo/dosql/sharding';
 
-// Define sharding configuration
+// Define the complete sharding configuration
 const vschema: VSchema = createVSchema(
   {
-    // Sharded by user_id using hash
+    // Sharded by user_id using hash distribution
     users: shardedTable('id', hashVindex('fnv1a')),
 
-    // Sharded by user_id to colocate with users
+    // Sharded by user_id to colocate with users table
     orders: shardedTable('user_id', hashVindex('fnv1a')),
 
-    // Sharded by user_id for colocation
+    // Sharded by user_id for colocation with user data
     user_preferences: shardedTable('user_id', hashVindex('fnv1a')),
 
     // Range sharding for time-series data
@@ -1503,16 +1518,16 @@ const vschema: VSchema = createVSchema(
       { shard: createShardId('events-2024-q4'), min: '2024-10-01', max: null },
     ])),
 
-    // Unsharded table (lives on one shard)
+    // Unsharded table: all data in one shard
     system_config: unshardedTable(createShardId('config-shard')),
 
-    // Reference table (replicated to all shards for joins)
-    countries: referenceTable(true), // readOnly
+    // Reference tables: replicated to all shards for local joins
+    countries: referenceTable(true),  // Read-only
     currencies: referenceTable(true),
-    product_categories: referenceTable(false), // writable
+    product_categories: referenceTable(false), // Writable (changes replicate to all shards)
   },
   [
-    // Shard definitions
+    // Shard definitions with replicas
     shard(createShardId('shard-0'), 'DOSQL_DB', {
       replicas: [
         replica('shard-0-replica-1', 'DOSQL_DB_REPLICA', 'replica', { region: 'us-west' }),
@@ -1551,34 +1566,29 @@ import {
   consistentHashVindex,
   rangeVindex,
   createShardId,
-  type VindexConfig,
 } from '@dotdo/dosql/sharding';
 
-// Hash vindex - uniform distribution via FNV-1a or xxHash
+// Hash vindex: uniform distribution via FNV-1a or xxHash
 const userVindex = hashVindex('fnv1a');
-// Good for: Primary keys, UUIDs, random IDs
+// Best for: Primary keys, UUIDs, random IDs
 // Pros: Even distribution, O(1) lookups
 // Cons: Range queries require scatter-gather across all shards
 
-// Consistent hash vindex - virtual nodes for smooth rebalancing
+// Consistent hash vindex: virtual nodes for smooth rebalancing
 const orderVindex = consistentHashVindex(150, 'xxhash');
-// Good for: High-churn data, frequent resharding
-// Pros: Minimal data movement on shard changes
+// Best for: High-churn data, frequent resharding scenarios
+// Pros: Minimal data movement when adding/removing shards
 // Cons: Slightly more memory for virtual node ring
 
-// Range vindex - boundary-based partitioning
+// Range vindex: boundary-based partitioning
 const timeSeriesVindex = rangeVindex([
-  { shard: createShardId('hot'), min: '2024-01-01', max: null }, // Current data
+  { shard: createShardId('hot'), min: '2024-01-01', max: null },    // Current data
   { shard: createShardId('warm'), min: '2023-01-01', max: '2024-01-01' },
-  { shard: createShardId('cold'), min: null, max: '2023-01-01' }, // Historical
+  { shard: createShardId('cold'), min: null, max: '2023-01-01' },   // Historical
 ]);
-// Good for: Time-series data, date-based partitioning
-// Pros: Efficient range queries, hot/cold data separation
-// Cons: Potential hotspots on latest partition
-
-// Compound vindex for multi-tenant applications
-const tenantUserVindex = hashVindex('fnv1a');
-// Shard key: tenant_id + user_id (concatenated for colocation)
+// Best for: Time-series data, date-based partitioning, hot/cold data tiers
+// Pros: Efficient range queries, natural data tiering
+// Cons: Potential hotspots on the most recent partition
 ```
 
 ### Query Routing
@@ -1589,7 +1599,6 @@ The query router analyzes SQL and determines optimal shard routing:
 import {
   createShardRouter,
   createShardExecutor,
-  type RoutingDecision,
   type ExecutionPlan,
 } from '@dotdo/dosql/sharding';
 
@@ -1598,32 +1607,28 @@ const executor = createShardExecutor(router, {
   getDO: (shardId) => env.DOSQL_DB.get(env.DOSQL_DB.idFromName(shardId)),
 });
 
-// Single-shard query (equality on shard key)
+// Single-shard query: equality on shard key routes to one shard
 const user = await executor.query(
   'SELECT * FROM users WHERE id = ?',
   [42]
 );
 // Routes to: specific shard based on hash(42)
-// Query type: single-shard
 
-// Scatter-gather query (no shard key filter)
+// Scatter-gather query: no shard key requires querying all shards
 const activeUsers = await executor.query(
   'SELECT COUNT(*) as count FROM users WHERE active = ?',
   [true]
 );
-// Routes to: all shards
-// Query type: scatter-gather
-// Post-processing: SUM the counts from each shard
+// Routes to: all shards, results aggregated
 
-// IN-list optimization
+// IN-list optimization: routes only to shards containing those IDs
 const specificUsers = await executor.query(
   'SELECT * FROM users WHERE id IN (?, ?, ?, ?)',
   [1, 2, 3, 4]
 );
-// Routes to: only shards containing those IDs (may be subset of all shards)
-// Query type: multi-shard
+// Routes to: subset of shards (may not be all shards)
 
-// Colocated join (same shard key)
+// Colocated join: both tables sharded by same key
 const userOrders = await executor.query(
   `SELECT u.name, o.total, o.created_at
    FROM users u
@@ -1631,10 +1636,9 @@ const userOrders = await executor.query(
    WHERE u.id = ?`,
   [42]
 );
-// Routes to: single shard (both tables sharded by user_id)
-// Query type: single-shard
+// Routes to: single shard (both tables colocated by user_id)
 
-// Cross-shard join with reference table
+// Join with reference table: reference tables are on all shards
 const ordersWithCurrency = await executor.query(
   `SELECT o.*, c.symbol, c.name as currency_name
    FROM orders o
@@ -1642,10 +1646,9 @@ const ordersWithCurrency = await executor.query(
    WHERE o.user_id = ?`,
   [42]
 );
-// Routes to: single shard (currencies replicated, orders sharded)
-// Query type: single-shard
+// Routes to: single shard (currencies replicated everywhere)
 
-// Analyze query without executing
+// Analyze a query without executing it
 const plan: ExecutionPlan = await router.analyze(
   'SELECT * FROM users WHERE created_at > ? ORDER BY created_at LIMIT 10',
   ['2024-01-01']
@@ -1675,20 +1678,20 @@ console.log(plan);
 DoSQL supports distributed transactions across shards using a two-phase commit protocol (2PC):
 
 ```typescript
-import { createShardExecutor, type ShardId } from '@dotdo/dosql/sharding';
+import { createShardExecutor, createShardId } from '@dotdo/dosql/sharding';
 
 const executor = createShardExecutor(router, {
   getDO: (shardId) => env.DOSQL_DB.get(env.DOSQL_DB.idFromName(shardId)),
 });
 
-// Cross-shard transaction
+// Cross-shard transaction: transfer between users on different shards
 async function transferBetweenUsers(
   fromUserId: number,
   toUserId: number,
   amount: number
 ): Promise<{ transactionId: string }> {
   return executor.transaction(async (tx) => {
-    // These may hit different shards
+    // These queries may hit different shards
     const fromAccount = await tx.queryOne(
       'SELECT balance FROM accounts WHERE user_id = ? FOR UPDATE',
       [fromUserId]
@@ -1707,7 +1710,7 @@ async function transferBetweenUsers(
       throw new Error('Destination account not found');
     }
 
-    // Updates coordinated across shards
+    // Updates are coordinated across shards via 2PC
     await tx.run(
       'UPDATE accounts SET balance = balance - ? WHERE user_id = ?',
       [amount, fromUserId]
@@ -1718,7 +1721,7 @@ async function transferBetweenUsers(
       [amount, toUserId]
     );
 
-    // Record in ledger (may be on different shard)
+    // Record in ledger (may be on a different shard)
     const result = await tx.run(
       `INSERT INTO transactions (from_user, to_user, amount, created_at)
        VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
@@ -1731,7 +1734,7 @@ async function transferBetweenUsers(
 
 // Transaction with explicit shard hints
 await executor.transaction(async (tx) => {
-  // Force query to specific shard (advanced use case)
+  // Force query to a specific shard (advanced use case)
   const result = await tx.queryOnShard(
     createShardId('shard-0'),
     'SELECT * FROM system_stats'
@@ -1757,7 +1760,6 @@ Configure read replicas for scaling reads and geographic distribution:
 import {
   createShardExecutor,
   type ReadPreference,
-  type ReplicaRole,
 } from '@dotdo/dosql/sharding';
 
 const executor = createShardExecutor(router, {
@@ -1778,12 +1780,12 @@ const users = await executor.query(
 );
 
 // Read preference options:
-// - 'primary': Always read from primary (strongest consistency)
+// - 'primary':          Always read from primary (strongest consistency)
 // - 'primaryPreferred': Primary if available, else replica
-// - 'replica': Always read from replica (may have lag)
+// - 'replica':          Always read from replica (may have replication lag)
 // - 'replicaPreferred': Replica if available, else primary
-// - 'nearest': Lowest latency (considers geographic distance)
-// - 'analytics': Route to analytics replica (for heavy queries)
+// - 'nearest':          Lowest latency (considers geographic distance)
+// - 'analytics':        Route to analytics replica (for heavy queries)
 
 // Heavy analytics query routed to analytics replica
 const report = await executor.query(
@@ -1799,7 +1801,7 @@ const report = await executor.query(
   { readPreference: 'analytics' }
 );
 
-// Monitor replica health
+// Monitor cluster health
 const health = await executor.getClusterHealth();
 console.log('Cluster health:', {
   healthyShards: health.healthyShards,
@@ -1815,7 +1817,7 @@ console.log('Cluster health:', {
   })),
 });
 
-// Failover handling
+// Event handlers for failover
 executor.on('replicaDown', (shardId, replicaId) => {
   console.warn(`Replica ${replicaId} on shard ${shardId} is down`);
 });

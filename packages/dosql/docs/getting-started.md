@@ -1,55 +1,78 @@
 # Getting Started with DoSQL
 
-Build SQL-powered applications on Cloudflare Workers with type-safe queries and automatic migrations. This guide walks you through creating a working REST API in under 10 minutes.
+Build SQL-powered applications on Cloudflare Workers with type-safe queries and automatic migrations. This guide takes you from zero to a deployed REST API in under 10 minutes.
+
+## What You Will Build
+
+A fully functional task management API with:
+- Create, read, update, and delete operations
+- Persistent storage in Durable Objects
+- Automatic database migrations
+- Type-safe queries
 
 ## What is DoSQL?
 
-DoSQL is a lightweight SQL database engine for Cloudflare Workers and Durable Objects. It provides:
+DoSQL is a lightweight SQL database engine designed specifically for Cloudflare Workers and Durable Objects. It brings the familiarity of SQL to the edge with modern developer experience features:
 
-- **Type-safe SQL queries** - Catch errors at compile time, not runtime
-- **Automatic migrations** - Schema changes applied seamlessly on startup
-- **Multi-tenant isolation** - Each Durable Object is an isolated database instance
-- **Edge-native performance** - Data lives close to your users with zero cold starts
+| Feature | Description |
+|---------|-------------|
+| **Type-Safe Queries** | TypeScript catches query errors at compile time |
+| **Auto Migrations** | Schema changes deploy automatically with your code |
+| **Multi-Tenant Ready** | Each Durable Object instance is an isolated database |
+| **Edge Performance** | Data lives close to users with sub-millisecond latency |
 
 ---
 
 ## Prerequisites
 
-Before starting, ensure you have:
+Before you begin, make sure you have:
 
-1. **Node.js 20+** installed (check with `node --version`)
-2. **A Cloudflare account** with a Workers Paid plan ($5/month for Durable Objects)
-3. **Wrangler CLI** installed and authenticated
+- **Node.js 20 or later** - Check with `node --version`
+- **A Cloudflare account** - [Sign up free](https://dash.cloudflare.com/sign-up)
+- **Workers Paid plan** - Required for Durable Objects ($5/month)
+
+### Install and Configure Wrangler
+
+Wrangler is Cloudflare's CLI for managing Workers projects.
 
 ```bash
 # Install Wrangler globally
 npm install -g wrangler
 
-# Login to your Cloudflare account
+# Log in to your Cloudflare account
 wrangler login
 
-# Verify you're logged in
+# Verify your login
 wrangler whoami
 ```
 
-> **Note**: Durable Objects require a Workers Paid plan. You can upgrade at [dash.cloudflare.com](https://dash.cloudflare.com) under Workers & Pages > Plans.
+You should see your account email and name. If you see an error, make sure you completed the login flow in your browser.
 
 ---
 
-## Quick Start
+## Step 1: Create Your Project
 
-### Step 1: Create Your Project
+Start by creating a new directory and initializing the project:
 
 ```bash
-mkdir my-dosql-app && cd my-dosql-app
+# Create project directory
+mkdir my-tasks-api && cd my-tasks-api
+
+# Initialize package.json
 npm init -y
+
+# Install dependencies
 npm install @dotdo/dosql
 npm install -D wrangler @cloudflare/workers-types typescript
 ```
 
-### Step 2: Configure TypeScript
+Your `package.json` should now include `@dotdo/dosql` in dependencies.
 
-Create `tsconfig.json`:
+---
+
+## Step 2: Configure TypeScript
+
+Create a `tsconfig.json` file in your project root:
 
 ```json
 {
@@ -60,65 +83,74 @@ Create `tsconfig.json`:
     "strict": true,
     "skipLibCheck": true,
     "types": ["@cloudflare/workers-types"],
-    "lib": ["ES2022"]
+    "lib": ["ES2022"],
+    "outDir": "./dist"
   },
   "include": ["src/**/*"]
 }
 ```
 
-### Step 3: Create Your Database Schema
+This configuration ensures TypeScript understands Cloudflare Workers globals like `DurableObject` and `Request`.
 
-Create the migrations folder and your first migration:
+---
+
+## Step 3: Define Your Database Schema
+
+DoSQL uses SQL migration files to define and evolve your database schema. Create the migrations folder:
 
 ```bash
 mkdir -p .do/migrations
 ```
 
-Create `.do/migrations/001_init.sql`:
+Create your first migration file at `.do/migrations/001_create_tasks.sql`:
 
 ```sql
 -- Create the tasks table
-CREATE TABLE tasks (
+CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
   completed INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
--- Add an index for faster queries
-CREATE INDEX idx_tasks_completed ON tasks(completed);
+-- Index for filtering by completion status
+CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completed);
 ```
 
-> **Note**: SQLite uses `INTEGER` (0/1) for boolean values. DoSQL handles the conversion automatically.
+**Key points:**
+- Files are executed in alphabetical order (prefix with numbers like `001_`, `002_`)
+- Use `IF NOT EXISTS` to make migrations idempotent
+- SQLite uses `INTEGER` (0/1) for boolean values
 
-### Step 4: Write Your Worker
+---
 
-Create `src/index.ts`:
+## Step 4: Write Your Worker Code
+
+Create `src/index.ts` with the following code:
 
 ```typescript
 import { DB } from '@dotdo/dosql';
 
+// Environment bindings
 export interface Env {
   TASKS_DB: DurableObjectNamespace;
 }
 
-// Define the Task type for type safety
+// Type definition for a task
 interface Task {
   id: number;
   title: string;
-  completed: number;
+  completed: number;  // 0 = false, 1 = true
   created_at: string;
 }
 
-// The Durable Object that holds your database
+// The Durable Object class that manages the database
 export class TasksDatabase implements DurableObject {
   private db: Awaited<ReturnType<typeof DB>> | null = null;
-  private state: DurableObjectState;
 
-  constructor(state: DurableObjectState) {
-    this.state = state;
-  }
+  constructor(private state: DurableObjectState) {}
 
+  // Lazy initialization of the database
   private async getDB() {
     if (!this.db) {
       this.db = await DB('tasks', {
@@ -129,138 +161,270 @@ export class TasksDatabase implements DurableObject {
     return this.db;
   }
 
+  // Handle incoming requests
   async fetch(request: Request): Promise<Response> {
     const db = await this.getDB();
     const url = new URL(request.url);
+    const path = url.pathname;
+    const method = request.method;
 
     try {
       // GET /tasks - List all tasks
-      if (url.pathname === '/tasks' && request.method === 'GET') {
-        const tasks = await db.query<Task>('SELECT * FROM tasks ORDER BY created_at DESC');
+      if (path === '/tasks' && method === 'GET') {
+        const tasks = await db.query<Task>(
+          'SELECT * FROM tasks ORDER BY created_at DESC'
+        );
         return Response.json(tasks);
       }
 
-      // POST /tasks - Create a task
-      if (url.pathname === '/tasks' && request.method === 'POST') {
-        const { title } = await request.json() as { title: string };
-        if (!title || typeof title !== 'string') {
-          return Response.json({ error: 'Title is required' }, { status: 400 });
+      // POST /tasks - Create a new task
+      if (path === '/tasks' && method === 'POST') {
+        const body = await request.json() as { title?: string };
+
+        if (!body.title || typeof body.title !== 'string') {
+          return Response.json(
+            { error: 'Title is required and must be a string' },
+            { status: 400 }
+          );
         }
+
         const result = await db.run(
           'INSERT INTO tasks (title) VALUES (?)',
-          [title]
+          [body.title]
         );
-        return Response.json({ id: result.lastInsertRowId, title }, { status: 201 });
+
+        return Response.json(
+          { id: result.lastInsertRowId, title: body.title },
+          { status: 201 }
+        );
+      }
+
+      // GET /tasks/:id - Get a single task
+      if (path.match(/^\/tasks\/\d+$/) && method === 'GET') {
+        const id = parseInt(path.split('/')[2], 10);
+        const task = await db.queryOne<Task>(
+          'SELECT * FROM tasks WHERE id = ?',
+          [id]
+        );
+
+        if (!task) {
+          return Response.json({ error: 'Task not found' }, { status: 404 });
+        }
+
+        return Response.json(task);
       }
 
       // PUT /tasks/:id - Update a task
-      if (url.pathname.startsWith('/tasks/') && request.method === 'PUT') {
-        const id = parseInt(url.pathname.split('/')[2], 10);
-        if (isNaN(id)) {
-          return Response.json({ error: 'Invalid task ID' }, { status: 400 });
+      if (path.match(/^\/tasks\/\d+$/) && method === 'PUT') {
+        const id = parseInt(path.split('/')[2], 10);
+        const body = await request.json() as { title?: string; completed?: boolean };
+
+        // Build dynamic update query
+        const updates: string[] = [];
+        const params: (string | number)[] = [];
+
+        if (body.title !== undefined) {
+          updates.push('title = ?');
+          params.push(body.title);
         }
-        const { completed } = await request.json() as { completed: boolean };
-        await db.run('UPDATE tasks SET completed = ? WHERE id = ?', [completed ? 1 : 0, id]);
+        if (body.completed !== undefined) {
+          updates.push('completed = ?');
+          params.push(body.completed ? 1 : 0);
+        }
+
+        if (updates.length === 0) {
+          return Response.json(
+            { error: 'No fields to update' },
+            { status: 400 }
+          );
+        }
+
+        params.push(id);
+        await db.run(
+          `UPDATE tasks SET ${updates.join(', ')} WHERE id = ?`,
+          params
+        );
+
         return Response.json({ success: true });
       }
 
       // DELETE /tasks/:id - Delete a task
-      if (url.pathname.startsWith('/tasks/') && request.method === 'DELETE') {
-        const id = parseInt(url.pathname.split('/')[2], 10);
-        if (isNaN(id)) {
-          return Response.json({ error: 'Invalid task ID' }, { status: 400 });
+      if (path.match(/^\/tasks\/\d+$/) && method === 'DELETE') {
+        const id = parseInt(path.split('/')[2], 10);
+        const result = await db.run('DELETE FROM tasks WHERE id = ?', [id]);
+
+        if (result.rowsAffected === 0) {
+          return Response.json({ error: 'Task not found' }, { status: 404 });
         }
-        await db.run('DELETE FROM tasks WHERE id = ?', [id]);
+
         return Response.json({ success: true });
       }
 
-      return new Response('Not Found', { status: 404 });
+      // 404 for unmatched routes
+      return Response.json({ error: 'Not found' }, { status: 404 });
+
     } catch (error) {
-      console.error('Database error:', error);
-      return Response.json({ error: 'Internal server error' }, { status: 500 });
+      console.error('Request error:', error);
+      return Response.json(
+        { error: 'Internal server error' },
+        { status: 500 }
+      );
     }
   }
 }
 
-// The Worker entry point that routes to the Durable Object
+// Worker entry point - routes requests to the Durable Object
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // Get a reference to the Durable Object
     const id = env.TASKS_DB.idFromName('default');
     const stub = env.TASKS_DB.get(id);
+
+    // Forward the request to the Durable Object
     return stub.fetch(request);
   },
 };
 ```
 
-### Step 5: Configure Wrangler
+---
 
-Create `wrangler.jsonc`:
+## Step 5: Configure Wrangler
+
+Create `wrangler.jsonc` in your project root:
 
 ```jsonc
 {
-  "name": "my-dosql-app",
+  "name": "my-tasks-api",
   "main": "src/index.ts",
   "compatibility_date": "2024-12-01",
+
+  // Durable Object configuration
   "durable_objects": {
     "bindings": [
-      { "name": "TASKS_DB", "class_name": "TasksDatabase" }
+      {
+        "name": "TASKS_DB",
+        "class_name": "TasksDatabase"
+      }
     ]
   },
+
+  // Required for Durable Objects - tracks class versions
   "migrations": [
-    { "tag": "v1", "new_classes": ["TasksDatabase"] }
-  ],
-  // Include migration files in the build
-  "rules": [
-    { "type": "Data", "globs": [".do/migrations/*.sql"] }
+    {
+      "tag": "v1",
+      "new_classes": ["TasksDatabase"]
+    }
   ]
 }
 ```
 
-> **Tip**: The `compatibility_date` should be set to a recent date. Check the [Cloudflare docs](https://developers.cloudflare.com/workers/configuration/compatibility-dates/) for the latest recommended date.
+**Important notes:**
+- The `name` in `durable_objects.bindings` must match the property name in your `Env` interface
+- The `class_name` must match your exported class name exactly (case-sensitive)
+- The `migrations` array tracks Durable Object class changes (separate from SQL migrations)
 
-### Step 6: Run Locally
+---
+
+## Step 6: Run Locally
+
+Start the local development server:
 
 ```bash
 npx wrangler dev
 ```
 
-You should see output indicating the worker is running on `http://localhost:8787`.
+You should see output like:
 
-### Step 7: Test Your API
+```
+Starting local server...
+Ready on http://localhost:8787
+```
 
-Open a new terminal and test your API:
+The first request may take a moment as the database initializes and runs migrations.
+
+---
+
+## Step 7: Test Your API
+
+Open a new terminal and test each endpoint:
+
+### Create a Task
 
 ```bash
-# Create a task
 curl -X POST http://localhost:8787/tasks \
   -H "Content-Type: application/json" \
   -d '{"title": "Learn DoSQL"}'
-
-# Expected response: {"id":1,"title":"Learn DoSQL"}
 ```
 
+**Expected response:**
+```json
+{"id":1,"title":"Learn DoSQL"}
+```
+
+### List All Tasks
+
 ```bash
-# List all tasks
 curl http://localhost:8787/tasks
-
-# Expected response: [{"id":1,"title":"Learn DoSQL","completed":0,"created_at":"..."}]
 ```
 
+**Expected response:**
+```json
+[{"id":1,"title":"Learn DoSQL","completed":0,"created_at":"2024-12-15 10:30:00"}]
+```
+
+### Get a Single Task
+
 ```bash
-# Mark task as complete
+curl http://localhost:8787/tasks/1
+```
+
+**Expected response:**
+```json
+{"id":1,"title":"Learn DoSQL","completed":0,"created_at":"2024-12-15 10:30:00"}
+```
+
+### Update a Task
+
+```bash
 curl -X PUT http://localhost:8787/tasks/1 \
   -H "Content-Type: application/json" \
   -d '{"completed": true}'
-
-# Expected response: {"success":true}
 ```
+
+**Expected response:**
+```json
+{"success":true}
+```
+
+### Delete a Task
 
 ```bash
-# Delete a task
 curl -X DELETE http://localhost:8787/tasks/1
-
-# Expected response: {"success":true}
 ```
+
+**Expected response:**
+```json
+{"success":true}
+```
+
+---
+
+## Step 8: Deploy to Production
+
+When you are ready to go live:
+
+```bash
+npx wrangler deploy
+```
+
+Wrangler will upload your code and output your production URL:
+
+```
+Published my-tasks-api (1.23 sec)
+  https://my-tasks-api.<your-subdomain>.workers.dev
+```
+
+Your API is now running globally on Cloudflare's edge network.
 
 ---
 
@@ -268,91 +432,79 @@ curl -X DELETE http://localhost:8787/tasks/1
 
 ### The DB() Function
 
-`DB()` is the main entry point for DoSQL. It creates or connects to a database with automatic migration support.
+`DB()` creates a database connection with automatic migration support:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
-
-const db = await DB('my-database', {
-  migrations: { folder: '.do/migrations' },  // Path to SQL migrations
-  storage: { hot: state.storage },           // Durable Object storage
+const db = await DB('database-name', {
+  migrations: { folder: '.do/migrations' },
+  storage: { hot: state.storage },
 });
 ```
 
-The first argument is a database name (used for identification and logging). The second argument configures migrations and storage.
+| Parameter | Description |
+|-----------|-------------|
+| First argument | A name for the database (used for logging and identification) |
+| `migrations.folder` | Path to SQL migration files |
+| `storage.hot` | Durable Object storage for fast reads/writes |
 
-### Querying Data
+### Query Methods
 
-Use `query()` to fetch data and `run()` to modify data:
+DoSQL provides three primary methods for database operations:
 
 ```typescript
-// Fetch multiple rows with type safety
-interface User {
-  id: number;
-  name: string;
-  active: number;
-}
+// query() - Fetch multiple rows
+const users = await db.query<User>('SELECT * FROM users');
+// Returns: User[]
 
-const users = await db.query<User>('SELECT * FROM users WHERE active = ?', [1]);
-// users is typed as User[]
-
-// Fetch a single row
+// queryOne() - Fetch a single row
 const user = await db.queryOne<User>('SELECT * FROM users WHERE id = ?', [1]);
-// user is typed as User | undefined
+// Returns: User | undefined
 
-// Insert, update, or delete
+// run() - Execute INSERT, UPDATE, DELETE
 const result = await db.run('INSERT INTO users (name) VALUES (?)', ['Alice']);
-console.log(result.lastInsertRowId);  // The new row's ID (e.g., 1)
-console.log(result.rowsAffected);     // Number of rows changed (e.g., 1)
+// Returns: { lastInsertRowId: number; rowsAffected: number }
+```
+
+### Transactions
+
+Use `transaction()` to execute multiple operations atomically:
+
+```typescript
+await db.transaction(async (tx) => {
+  // Debit from one account
+  await tx.run(
+    'UPDATE accounts SET balance = balance - ? WHERE id = ?',
+    [100, 1]
+  );
+
+  // Credit to another account
+  await tx.run(
+    'UPDATE accounts SET balance = balance + ? WHERE id = ?',
+    [100, 2]
+  );
+
+  // If either fails, both are rolled back
+});
 ```
 
 ### Migrations
 
-Migrations are SQL files in `.do/migrations/` that run automatically when the database initializes:
+Migration files in `.do/migrations/` run automatically when the database initializes:
 
 ```
 .do/migrations/
-  001_init.sql
-  002_add_users.sql
-  003_add_indexes.sql
+  001_create_users.sql
+  002_add_email_column.sql
+  003_create_orders.sql
 ```
 
-**Migration naming convention:**
-- Prefix with a number for ordering (e.g., `001_`, `002_`)
-- Use descriptive names (e.g., `001_create_users.sql`)
-- Migrations are run in alphabetical order
+**Best practices:**
+- Prefix files with numbers for ordering (`001_`, `002_`)
+- Use descriptive names (`001_create_users.sql`)
+- Include `IF NOT EXISTS` / `IF EXISTS` for safety
+- Never modify a deployed migration; create a new one instead
 
-Each migration runs exactly once. DoSQL tracks completed migrations in a `__dosql_migrations` table to ensure idempotency.
-
-### Transactions
-
-Use `transaction()` to group multiple operations atomically:
-
-```typescript
-await db.transaction(async (tx) => {
-  // Debit from account 1
-  await tx.run('UPDATE accounts SET balance = balance - ? WHERE id = ?', [100, 1]);
-  // Credit to account 2
-  await tx.run('UPDATE accounts SET balance = balance + ? WHERE id = ?', [100, 2]);
-  // If either operation fails, both are rolled back automatically
-});
-```
-
-Transactions ensure data consistency. If any operation within the transaction throws an error, all changes are rolled back.
-
----
-
-## Deploy to Production
-
-When you're ready to go live:
-
-```bash
-npx wrangler deploy
-```
-
-Your API is now running globally on Cloudflare's edge network. The output will show your production URL (e.g., `https://my-dosql-app.<your-subdomain>.workers.dev`).
-
-> **Production tip**: For production applications, consider adding authentication and rate limiting to protect your API.
+DoSQL tracks completed migrations in `__dosql_migrations` to ensure each runs only once.
 
 ---
 
@@ -360,43 +512,46 @@ Your API is now running globally on Cloudflare's edge network. The output will s
 
 ### Multi-Tenant Applications
 
-Create one Durable Object per tenant for complete data isolation:
+Give each tenant their own isolated database:
 
 ```typescript
-function getTenantId(request: Request): string {
-  // Option 1: Extract from subdomain
-  const url = new URL(request.url);
-  const subdomain = url.hostname.split('.')[0];
-  if (subdomain && subdomain !== 'www') return subdomain;
-
-  // Option 2: Extract from header
-  const tenantHeader = request.headers.get('X-Tenant-ID');
-  if (tenantHeader) return tenantHeader;
-
-  // Option 3: Extract from path (e.g., /tenant/acme/tasks)
-  const pathMatch = url.pathname.match(/^\/tenant\/([^/]+)/);
-  if (pathMatch) return pathMatch[1];
-
-  return 'default';
-}
-
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // Extract tenant from request (subdomain, header, or path)
     const tenantId = getTenantId(request);
 
-    // Each tenant gets their own isolated database
+    // Each tenant gets a separate Durable Object instance
     const id = env.TENANT_DB.idFromName(tenantId);
     const stub = env.TENANT_DB.get(id);
+
     return stub.fetch(request);
   },
 };
-```
 
-This pattern provides complete data isolation between tenants, as each Durable Object instance maintains its own database.
+function getTenantId(request: Request): string {
+  // Option 1: From subdomain (tenant.example.com)
+  const host = new URL(request.url).hostname;
+  const subdomain = host.split('.')[0];
+  if (subdomain && subdomain !== 'www' && subdomain !== 'api') {
+    return subdomain;
+  }
+
+  // Option 2: From header (X-Tenant-ID: acme)
+  const header = request.headers.get('X-Tenant-ID');
+  if (header) return header;
+
+  // Option 3: From path (/tenant/acme/tasks)
+  const path = new URL(request.url).pathname;
+  const match = path.match(/^\/tenant\/([^/]+)/);
+  if (match) return match[1];
+
+  return 'default';
+}
+```
 
 ### Type-Safe Queries
 
-Add TypeScript types to your queries for compile-time safety:
+Define interfaces for your data and use generics for compile-time safety:
 
 ```typescript
 interface User {
@@ -406,34 +561,34 @@ interface User {
   created_at: string;
 }
 
-// The generic parameter ensures type safety
-const users = await db.query<User>('SELECT id, name, email, created_at FROM users');
-// users is typed as User[]
+// TypeScript knows the return type
+const users = await db.query<User>('SELECT * FROM users');
 
-const user = await db.queryOne<User>('SELECT * FROM users WHERE id = ?', [1]);
-// user is typed as User | undefined
-
-// TypeScript will catch typos and type mismatches
-users.forEach(u => {
-  console.log(u.name);    // OK
-  console.log(u.invalid); // TypeScript error!
+// IDE autocompletion works
+users.forEach(user => {
+  console.log(user.name);   // OK
+  console.log(user.invalid); // TypeScript error
 });
+
+// queryOne returns T | undefined
+const user = await db.queryOne<User>('SELECT * FROM users WHERE id = ?', [1]);
+if (user) {
+  console.log(user.email);
+}
 ```
 
-### Parameterized Queries
+### Parameterized Queries (SQL Injection Prevention)
 
-Always use parameterized queries to prevent SQL injection:
+Always use parameter placeholders instead of string interpolation:
 
 ```typescript
-// GOOD: Uses parameters (safe)
-const userInput = "alice@example.com";
-await db.query('SELECT * FROM users WHERE email = ?', [userInput]);
+// SAFE: Parameters are escaped automatically
+const email = "alice@example.com";
+await db.query('SELECT * FROM users WHERE email = ?', [email]);
 
-// BAD: String interpolation (vulnerable to SQL injection!)
-// await db.query(`SELECT * FROM users WHERE email = '${userInput}'`);
+// DANGEROUS: Never do this!
+// await db.query(`SELECT * FROM users WHERE email = '${email}'`);
 ```
-
-Parameters are automatically escaped and quoted by DoSQL, protecting against SQL injection attacks.
 
 ---
 
@@ -441,57 +596,47 @@ Parameters are automatically escaped and quoted by DoSQL, protecting against SQL
 
 ### "Durable Objects require a Workers Paid plan"
 
-Durable Objects are only available on the Workers Paid plan ($5/month). Upgrade at [dash.cloudflare.com](https://dash.cloudflare.com) > Workers & Pages > Plans.
+Durable Objects are only available on the Workers Paid plan ($5/month). Upgrade at:
+[dash.cloudflare.com](https://dash.cloudflare.com) > Workers & Pages > Plans
 
-### "class_name 'TasksDatabase' not found in exports"
+### "class_name 'TasksDatabase' not found"
 
-Ensure your Durable Object class is exported from `src/index.ts`:
+Make sure your Durable Object class is exported:
 
 ```typescript
-// The export keyword is required!
+// The 'export' keyword is required
 export class TasksDatabase implements DurableObject {
   // ...
 }
 ```
 
-Also verify that the `class_name` in `wrangler.jsonc` matches exactly (case-sensitive).
-
-### "Migration folder not found"
-
-Create the migrations directory and ensure it contains at least one `.sql` file:
-
-```bash
-mkdir -p .do/migrations
-touch .do/migrations/001_init.sql
-```
+And verify the name matches exactly in `wrangler.jsonc` (case-sensitive).
 
 ### "Port 8787 is already in use"
 
-Another process is using the port. Either kill it or use a different port:
+Another process is using the port. Options:
 
 ```bash
-# Option 1: Kill existing wrangler processes
+# Kill existing wrangler processes
 pkill -f wrangler
 
-# Option 2: Use a different port
+# Or use a different port
 npx wrangler dev --port 8788
 ```
 
+### Migrations Not Running
+
+1. Verify the folder exists: `ls -la .do/migrations/`
+2. Check file extensions are `.sql`
+3. Look for errors in the console output when the worker starts
+
 ### "TypeError: Cannot read properties of undefined"
 
-This often occurs when the Durable Object binding is not configured correctly. Verify your `wrangler.jsonc`:
+This usually means a Durable Object binding is misconfigured. Check:
 
-```jsonc
-{
-  "durable_objects": {
-    "bindings": [
-      { "name": "TASKS_DB", "class_name": "TasksDatabase" }
-    ]
-  }
-}
-```
-
-The `name` must match the property name in your `Env` interface.
+1. The `name` in `wrangler.jsonc` bindings matches your `Env` interface
+2. The `class_name` matches your exported class exactly
+3. Your class is exported from the main entry file
 
 ---
 
@@ -499,25 +644,72 @@ The `name` must match the property name in your `Env` interface.
 
 Now that you have DoSQL running, explore these topics:
 
-- **[API Reference](./api-reference.md)** - Complete documentation for all functions
-- **[Migrations Guide](./migrations.md)** - Advanced migration patterns and rollback strategies
-- **[Transactions](./transactions.md)** - Isolation levels and best practices
-- **[Advanced Features](./advanced.md)** - Time travel, branching, CDC streaming
-- **[Multi-Tenancy](./multi-tenancy.md)** - Building SaaS applications
-- **[Performance](./performance.md)** - Indexing and query optimization
-
----
-
-## Example Applications
-
-- **[Todo App](./examples/todo-app.md)** - Simple CRUD application (expanded version of this guide)
-- **[E-commerce](./examples/ecommerce.md)** - Inventory and orders with transactions
-- **[Real-time Chat](./examples/chat.md)** - WebSockets with CDC streaming
+| Guide | Description |
+|-------|-------------|
+| [API Reference](./api-reference.md) | Complete documentation for all methods |
+| [Advanced Features](./advanced.md) | Time travel, branching, CDC streaming |
+| [Architecture](./architecture.md) | Storage tiers and performance optimization |
+| [Troubleshooting](./TROUBLESHOOTING.md) | Common issues and solutions |
+| [Deployment](./DEPLOYMENT.md) | Production deployment patterns |
 
 ---
 
 ## Getting Help
 
 - **GitHub Issues**: [github.com/dotdo/sql/issues](https://github.com/dotdo/sql/issues)
-- **Discord**: Join the DoSQL community for real-time support
-- **Stack Overflow**: Tag your questions with `dosql`
+- **Discord**: Join the DoSQL community for real-time help
+- **Stack Overflow**: Tag questions with `dosql`
+
+---
+
+## Quick Reference
+
+### File Structure
+
+```
+my-tasks-api/
+  .do/
+    migrations/
+      001_create_tasks.sql
+  src/
+    index.ts
+  package.json
+  tsconfig.json
+  wrangler.jsonc
+```
+
+### Essential Commands
+
+```bash
+# Development
+npx wrangler dev              # Start local server
+npx wrangler dev --port 8788  # Custom port
+
+# Deployment
+npx wrangler deploy           # Deploy to production
+npx wrangler tail             # View live logs
+
+# Debugging
+npx wrangler whoami           # Check auth status
+```
+
+### API Summary
+
+```typescript
+// Initialize
+const db = await DB(name, { migrations, storage });
+
+// Query
+const rows = await db.query<T>(sql, params);      // T[]
+const row = await db.queryOne<T>(sql, params);    // T | undefined
+
+// Mutate
+const result = await db.run(sql, params);
+// { lastInsertRowId: number, rowsAffected: number }
+
+// Transaction
+await db.transaction(async (tx) => {
+  await tx.run(sql, params);
+  await tx.query(sql, params);
+});
+```

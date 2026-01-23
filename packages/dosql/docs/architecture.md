@@ -10,7 +10,7 @@ DoSQL is a SQL database engine built from scratch for Cloudflare Workers. Unlike
 
 ## High-Level Architecture
 
-At its core, DoSQL follows a classic database architecture with some important adaptations for the edge computing environment:
+At its core, DoSQL follows a classic database architecture with important adaptations for the edge computing environment:
 
 ```
                     Your Application
@@ -18,7 +18,7 @@ At its core, DoSQL follows a classic database architecture with some important a
                           v
            +------------------------------+
            |         DoSQL Client         |
-           |    (@dotdo/sql.do SDK)       |
+           |       (dosql package)        |
            +------------------------------+
                           |
                    WebSocket/HTTP
@@ -109,7 +109,15 @@ SQL: "SELECT * FROM users WHERE active = ?"
    [*]     "users"    active = ?
 ```
 
-**Key files**: `src/parser/unified.ts`, `src/parser/shared/tokenizer.ts`, `src/parser.ts`
+The parser is split into specialized modules for different SQL constructs:
+
+- **DDL** (Data Definition Language): `CREATE`, `ALTER`, `DROP` statements
+- **DML** (Data Manipulation Language): `SELECT`, `INSERT`, `UPDATE`, `DELETE`
+- **CTE** (Common Table Expressions): `WITH` clauses
+- **Set Operations**: `UNION`, `INTERSECT`, `EXCEPT`
+- **Window Functions**: `OVER`, `PARTITION BY`, `ORDER BY`
+
+**Key files**: `src/parser/unified.ts`, `src/parser/shared/tokenizer.ts`, `src/parser/ddl.ts`, `src/parser/dml.ts`
 
 ### Stage 2: Planning
 
@@ -118,7 +126,8 @@ The planner analyzes the AST and decides how to execute the query efficiently:
 1. **Table resolution**: Verifies tables exist, resolves schemas
 2. **Column validation**: Checks all referenced columns are valid
 3. **Index selection**: Determines if indexes can speed up the query
-4. **Path selection**: Chooses between B-tree (OLTP) or columnar (OLAP) scan
+4. **Cost estimation**: Uses statistics to estimate query cost
+5. **Path selection**: Chooses between B-tree (OLTP) or columnar (OLAP) scan
 
 ```mermaid
 flowchart TD
@@ -134,7 +143,14 @@ flowchart TD
     G --> H
 ```
 
-**Key files**: `src/planner/`, `src/planner/stats.ts`, `src/planner/optimizer.ts`, `src/planner/cost.ts`
+The planner includes a cost-based optimizer that considers:
+
+- Table statistics (row counts, value distributions)
+- Index selectivity
+- Join ordering for multi-table queries
+- Predicate pushdown opportunities
+
+**Key files**: `src/planner/optimizer.ts`, `src/planner/stats.ts`, `src/planner/cost.ts`, `src/planner/types.ts`
 
 ### Stage 3: Execution
 
@@ -148,14 +164,15 @@ The executor transforms the plan into a tree of operators that produce rows:
         ScanOperator (read from storage)
 ```
 
-Each operator follows a **pull-based** model:
+Each operator follows a **pull-based iterator model**:
+
 - The top operator calls `next()` on its child
 - The child produces rows on demand
 - Rows flow upward through the tree
 
-This approach is memory-efficient because it processes one row at a time rather than materializing entire result sets.
+This approach is memory-efficient because it processes one row at a time rather than materializing entire result sets in memory.
 
-**Key files**: `src/engine/executor.ts`, `src/engine/operators/`, `src/engine/planner.ts`
+**Key files**: `src/engine/executor.ts`, `src/engine/operators/`, `src/engine/planner.ts`, `src/engine/types.ts`
 
 ## Core Components
 
@@ -182,12 +199,19 @@ flowchart TD
 ```
 
 **Why a custom B-tree?**
-- Durable Object storage has a 2MB value limit
+
+- Durable Object storage has a 2 MB value limit per key
 - Pages are sized to fit within this constraint
 - Linked leaf nodes enable efficient range scans
 - Custom key/value codecs support any data type
 
-**Key files**: `src/btree/`, `src/index/`
+The B-tree implementation includes:
+
+- **Page management**: Efficient serialization/deserialization of tree nodes
+- **LRU caching**: Recently accessed pages stay in memory
+- **Split/merge operations**: Automatic tree rebalancing
+
+**Key files**: `src/btree/btree.ts`, `src/btree/page.ts`, `src/btree/types.ts`
 
 ### Columnar Storage
 
@@ -204,11 +228,15 @@ Row-oriented (B-tree):        Column-oriented:
 ```
 
 Columnar storage is faster for analytics because:
-- Queries only read needed columns
-- Better compression (similar values together)
-- Zone maps enable predicate pushdown (skip irrelevant data)
 
-**Key files**: `src/columnar/`
+- Queries only read the columns they need (projection pushdown)
+- Better compression ratios (similar values stored together)
+- Zone maps enable predicate pushdown (skip irrelevant chunks)
+- SIMD-friendly memory layout for aggregations
+
+The columnar engine organizes data into chunks with metadata that allows skipping entire chunks when they cannot match query predicates.
+
+**Key files**: `src/columnar/chunk.ts`, `src/columnar/encoding.ts`, `src/columnar/reader.ts`, `src/columnar/writer.ts`
 
 ### Storage Layer (FSX)
 
@@ -233,14 +261,14 @@ flowchart TD
 
 **Tiered Storage Flow**:
 
-1. **Writes** go to hot tier (DO storage) for low latency
+1. **Writes** always go to the hot tier (DO storage) for low latency
 2. **Background migration** moves old or large data to cold tier (R2)
-3. **Reads** check hot tier first, then cold tier
-4. **Copy-on-Write** enables time-travel and branching functionality
+3. **Reads** check hot tier first, then fall back to cold tier
+4. **Copy-on-Write** enables time-travel queries and database branching
 
-This gives you fast access to recent data while supporting unlimited storage capacity.
+This architecture gives you fast access to recent data while supporting unlimited storage capacity for historical data.
 
-**Key files**: `src/fsx/`, `src/fsx/tiered.ts`, `src/fsx/do-backend.ts`, `src/fsx/r2-backend.ts`, `src/fsx/cow-backend.ts`
+**Key files**: `src/fsx/do-backend.ts`, `src/fsx/r2-backend.ts`, `src/fsx/tiered.ts`, `src/fsx/tier-migration.ts`, `src/fsx/cow-backend.ts`
 
 ### Write-Ahead Log (WAL)
 
@@ -269,9 +297,9 @@ sequenceDiagram
 
 ```typescript
 interface WALEntry {
-  lsn: LSN;              // Log Sequence Number (branded bigint)
+  lsn: LSN;              // Log Sequence Number (monotonic identifier)
   timestamp: number;     // Unix timestamp (ms)
-  txnId: TransactionId;  // Transaction ID (branded string)
+  txnId: TransactionId;  // Transaction identifier
   op: WALOperation;      // 'INSERT' | 'UPDATE' | 'DELETE' | 'BEGIN' | 'COMMIT' | 'ROLLBACK'
   table: string;         // Target table name
   key?: Uint8Array;      // Primary key for UPDATE/DELETE
@@ -281,13 +309,14 @@ interface WALEntry {
 }
 ```
 
-The WAL enables:
-- **Crash recovery**: Replay uncommitted transactions from checkpoints
-- **Point-in-time recovery**: Restore to any LSN
-- **CDC streaming**: Derive change events from WAL entries
-- **Causal ordering**: HLC timestamps enable correct ordering in distributed scenarios
+The WAL enables several critical features:
 
-**Key files**: `src/wal/`, `src/wal/writer.ts`, `src/wal/reader.ts`, `src/wal/checkpoint.ts`, `src/wal/types.ts`
+- **Crash recovery**: Replay uncommitted transactions from the last checkpoint
+- **Point-in-time recovery**: Restore the database to any LSN
+- **CDC streaming**: Derive change events directly from WAL entries
+- **Causal ordering**: HLC timestamps ensure correct ordering in distributed scenarios
+
+**Key files**: `src/wal/writer.ts`, `src/wal/reader.ts`, `src/wal/checkpoint.ts`, `src/wal/types.ts`
 
 ### Transaction Manager
 
@@ -307,24 +336,28 @@ stateDiagram-v2
 ```
 
 **Transaction Modes** (SQLite-compatible):
+
 - **DEFERRED** (default): Locks acquired only when needed
-- **IMMEDIATE**: Acquires write lock immediately
+- **IMMEDIATE**: Acquires write lock immediately, preventing other writers
 - **EXCLUSIVE**: Acquires exclusive lock, preventing all other access
 
 **Isolation Levels**:
+
 | Level | Description |
 |-------|-------------|
 | READ_UNCOMMITTED | Dirty reads allowed (lowest isolation) |
-| READ_COMMITTED | Only committed data visible |
-| REPEATABLE_READ | Repeatable reads within transaction |
+| READ_COMMITTED | Only sees committed data |
+| REPEATABLE_READ | Consistent reads within transaction |
 | SNAPSHOT | MVCC-based snapshot isolation |
 | SERIALIZABLE | Full serialization (default, highest isolation) |
 
-**Key files**: `src/transaction/`, `src/transaction/manager.ts`, `src/transaction/types.ts`
+The transaction manager uses MVCC (Multi-Version Concurrency Control) to allow readers and writers to operate concurrently without blocking each other.
+
+**Key files**: `src/transaction/manager.ts`, `src/transaction/isolation.ts`, `src/transaction/types.ts`
 
 ## Change Data Capture (CDC)
 
-CDC captures all database changes and streams them to consumers:
+CDC captures all database changes and streams them to consumers in real-time:
 
 ```mermaid
 flowchart LR
@@ -370,12 +403,13 @@ interface ChangeEvent<T = Record<string, unknown>> {
 ```
 
 **CDC Features**:
-- **Replication Slots**: Persistent position tracking for reliable delivery
-- **Filtering**: Subscribe to specific tables, operations, or custom predicates
-- **Batching**: Efficient batch delivery with backpressure support
-- **Lakehouse Streaming**: Direct integration with Iceberg for historical analytics
 
-**Key files**: `src/cdc/`, `src/cdc/stream.ts`, `src/cdc/capture.ts`, `src/cdc/types.ts`
+- **Replication Slots**: Persistent position tracking for exactly-once delivery
+- **Filtering**: Subscribe to specific tables, operations, or custom predicates
+- **Batching**: Efficient batch delivery with configurable backpressure
+- **Lakehouse Integration**: Direct streaming to Iceberg tables for historical analytics
+
+**Key files**: `src/cdc/capture.ts`, `src/cdc/stream.ts`, `src/cdc/types.ts`
 
 ## Sharding Architecture
 
@@ -406,20 +440,23 @@ flowchart TD
 | Type | Use Case | How It Works |
 |------|----------|--------------|
 | HASH | Even distribution | FNV-1a or xxHash of shard key |
-| CONSISTENT-HASH | Rebalancing | Virtual nodes for seamless shard additions |
+| CONSISTENT_HASH | Rebalancing | Virtual nodes minimize data movement |
 | RANGE | Range queries | Boundary-based partitioning |
 
 **Table Sharding Types**:
+
 - **sharded**: Data distributed across shards using vindex
 - **unsharded**: All data lives in a single designated shard
-- **reference**: Data replicated to all shards (lookup tables)
+- **reference**: Data replicated to all shards (for lookup/dimension tables)
 
 **Query Routing**:
 
-1. **Single-shard**: Query includes shard key, route to one shard
+1. **Single-shard**: Query includes shard key in WHERE clause, route to one shard
 2. **Scatter-gather**: No shard key, query all shards and merge results
 
-**Key files**: `src/sharding/`, `src/sharding/router.ts`, `src/sharding/vindex.ts`, `src/sharding/executor.ts`
+The router analyzes each query to determine the optimal routing strategy, minimizing cross-shard operations when possible.
+
+**Key files**: `src/sharding/router.ts`, `src/sharding/vindex.ts`, `src/sharding/executor.ts`, `src/sharding/types.ts`
 
 ## Storage Tiers
 
@@ -457,11 +494,13 @@ DoSQL implements a three-tier storage architecture optimized for different acces
 
 **Performance Summary**:
 
-| Tier | Read Latency (p50) | Write Latency | Capacity | Use Case |
+| Tier | Read Latency (p50) | Write Latency | Capacity | Best For |
 |------|-------------------|---------------|----------|----------|
 | Hot (DO) | 0.5-1ms | 1-2ms | ~100MB | Active working set |
 | Warm (R2+Cache) | 1-50ms | 20-40ms | Unlimited | Recent historical data |
 | Cold (Iceberg) | 100-300ms | 200-500ms | Unlimited | Analytics and archives |
+
+The tiered storage system automatically manages data placement based on access patterns, age, and size thresholds.
 
 **Key files**: `src/fsx/tier-migration.ts`, `src/lakehouse/`, `src/iceberg/`
 
@@ -479,7 +518,7 @@ DoSQL implements a three-tier storage architecture optimized for different acces
 1. **No Infrastructure**: Runs entirely on Cloudflare's managed platform
 2. **Auto-scaling**: Durable Objects scale automatically with demand
 3. **Global Distribution**: Deploy close to users worldwide
-4. **Cost Efficiency**: Pay only for what you use; idle connections hibernate automatically
+4. **Cost Efficiency**: Pay only for what you use; idle databases hibernate automatically
 
 ### For Data Teams
 
@@ -500,6 +539,7 @@ DoSQL's native TypeScript approach results in dramatically smaller bundles:
 | DuckDB-WASM | ~4 MB |
 
 This matters because:
+
 - Cloudflare Workers have a 1 MB bundle limit (free tier) and 10 MB (paid)
 - Smaller bundles mean faster cold starts (sub-millisecond for DoSQL)
 - Less code to load and parse reduces CPU time billing
@@ -508,20 +548,22 @@ This matters because:
 
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
-| SQL Parser | `src/parser/` | SQL string to AST |
+| SQL Parser | `src/parser/` | SQL string to AST (DDL, DML, CTE, Set ops) |
 | Query Planner | `src/planner/` | AST to physical plan with cost-based optimization |
 | Executor | `src/engine/` | Execute plan, produce rows via pull-based operators |
-| B-tree | `src/btree/` | OLTP storage and secondary indexes |
-| Columnar | `src/columnar/` | OLAP storage for analytics |
+| B-tree | `src/btree/` | OLTP storage, primary keys, secondary indexes |
+| Columnar | `src/columnar/` | OLAP storage for analytical queries |
 | FSX | `src/fsx/` | Storage abstraction layer with tiering |
 | WAL | `src/wal/` | Durability, crash recovery, checkpointing |
-| Transactions | `src/transaction/` | ACID guarantees with MVCC |
-| CDC | `src/cdc/` | Change data capture and streaming |
+| Transactions | `src/transaction/` | ACID guarantees with MVCC isolation |
+| CDC | `src/cdc/` | Change data capture and real-time streaming |
 | Sharding | `src/sharding/` | Distributed queries with vindex routing |
 | RPC | `src/rpc/` | Client-server communication (CapnWeb protocol) |
-| Vector | `src/vector/` | Vector similarity search |
-| Time Travel | `src/timetravel/` | Point-in-time queries |
+| Vector | `src/vector/` | Vector similarity search (HNSW index) |
+| Time Travel | `src/timetravel/` | Point-in-time and branch queries |
 | Full-Text Search | `src/fts/` | Full-text indexing and search |
+| Secondary Index | `src/index/` | Secondary index management and optimization |
+| Lakehouse | `src/lakehouse/` | Iceberg table integration |
 
 ## Further Reading
 
