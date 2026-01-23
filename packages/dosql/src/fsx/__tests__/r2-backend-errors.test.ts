@@ -1,8 +1,9 @@
 /**
- * R2 Backend Error Handling Tests - RED PHASE TDD
+ * R2 Backend Error Handling Tests
  *
  * These tests document expected error handling behavior for the R2 storage backend.
- * All tests are marked with `it.fails` to indicate unimplemented functionality.
+ * Tests that are now passing have been converted from `it.fails` to regular `it`.
+ * Remaining `it.fails` tests document functionality that is still in development.
  *
  * Test scenarios:
  * 1. Network timeout during read
@@ -549,7 +550,7 @@ describe('R2StorageBackend Error Handling', () => {
   // 1. Network timeout during read
   // ===========================================================================
   describe('Network timeout during read', () => {
-    it.fails('should throw FSXError with READ_FAILED code on read timeout', async () => {
+    it('should throw FSXError with READ_FAILED code on read timeout', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'timeout_read' });
       const backend = createR2Backend(bucket);
 
@@ -603,7 +604,7 @@ describe('R2StorageBackend Error Handling', () => {
       }
     });
 
-    it.fails('should not leave partial data on write timeout', async () => {
+    it('should not leave partial data on write timeout', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'timeout_write' });
       const backend = createR2Backend(bucket);
 
@@ -690,7 +691,7 @@ describe('R2StorageBackend Error Handling', () => {
       }
     });
 
-    it.fails('should verify write integrity using checksums', async () => {
+    it('should verify write integrity using checksums', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'partial_write' });
       const backend = createR2Backend(bucket);
 
@@ -704,7 +705,7 @@ describe('R2StorageBackend Error Handling', () => {
       }
     });
 
-    it.fails('should clean up partial data on failure', async () => {
+    it('should clean up partial data on failure', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'partial_write' });
       const backend = createR2Backend(bucket);
 
@@ -796,7 +797,7 @@ describe('R2StorageBackend Error Handling', () => {
   // 6. Object not found vs permission denied
   // ===========================================================================
   describe('Object not found vs permission denied', () => {
-    it.fails('should return null for non-existent object', async () => {
+    it('should return null for non-existent object', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'none' });
       const backend = createR2Backend(bucket);
 
@@ -852,7 +853,7 @@ describe('R2StorageBackend Error Handling', () => {
       }
     });
 
-    it.fails('should detect unbound bucket on write operations', async () => {
+    it('should detect unbound bucket on write operations', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'bucket_not_bound' });
       const backend = createR2Backend(bucket);
 
@@ -880,7 +881,7 @@ describe('R2StorageBackend Error Handling', () => {
   // 8. Large object (>5GB) handling
   // ===========================================================================
   describe('Large object (>5GB) handling', () => {
-    it.fails('should throw SIZE_EXCEEDED error for objects over 5GB', async () => {
+    it('should throw SIZE_EXCEEDED error for objects over 5GB', async () => {
       const bucket = createFailingR2Bucket({
         failureMode: 'none',
         maxSize: 5 * 1024 * 1024 * 1024, // 5GB
@@ -937,7 +938,7 @@ describe('R2StorageBackend Error Handling', () => {
   // 9. Concurrent write conflicts
   // ===========================================================================
   describe('Concurrent write conflicts', () => {
-    it.fails('should detect concurrent writes to same key', async () => {
+    it('should detect concurrent writes to same key', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'concurrent_conflict' });
       const backend = createR2Backend(bucket);
 
@@ -1018,7 +1019,7 @@ describe('R2StorageBackend Error Handling', () => {
       }
     });
 
-    it.fails('should wait for write completion on read', async () => {
+    it('should wait for write completion on read', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'read_during_write' });
       const backend = createR2Backend(bucket);
 
@@ -1131,7 +1132,7 @@ describe('R2StorageBackend Error Handling', () => {
   // 12. Circuit breaker after multiple failures
   // ===========================================================================
   describe('Circuit breaker after multiple failures', () => {
-    it.fails('should open circuit after threshold failures', async () => {
+    it('should open circuit after threshold failures', async () => {
       const bucket = createFailingR2Bucket({
         failureMode: 'circuit_breaker',
       });
@@ -1186,7 +1187,7 @@ describe('R2StorageBackend Error Handling', () => {
       expect(exists).toBe(true);
     });
 
-    it.fails('should close circuit after successful request in half-open state', async () => {
+    it('should close circuit after successful request in half-open state', async () => {
       const bucket = createFailingR2Bucket({
         failureMode: 'transient',
         failUntilAttempt: 6,
@@ -1296,7 +1297,7 @@ describe('R2StorageBackend Error Handling', () => {
       expect(health.r2Available).toBe(false);
     });
 
-    it.fails('should recover automatically when R2 becomes available', async () => {
+    it('should recover automatically when R2 becomes available', async () => {
       const bucket = createFailingR2Bucket({
         failureMode: 'transient',
         failUntilAttempt: 5,
@@ -1354,7 +1355,7 @@ describe('R2StorageBackend Error Handling', () => {
   // Additional edge cases
   // ===========================================================================
   describe('Edge cases and error context', () => {
-    it.fails('should include path in all error messages', async () => {
+    it('should include path in all error messages', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'timeout_read' });
       const backend = createR2Backend(bucket);
 
@@ -1378,7 +1379,7 @@ describe('R2StorageBackend Error Handling', () => {
       }
     });
 
-    it.fails('should handle empty data writes gracefully', async () => {
+    it('should handle empty data writes gracefully', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'none' });
       const backend = createR2Backend(bucket);
 
@@ -1389,7 +1390,7 @@ describe('R2StorageBackend Error Handling', () => {
       expect(result?.length).toBe(0);
     });
 
-    it.fails('should handle special characters in paths', async () => {
+    it('should handle special characters in paths', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'none' });
       const backend = createR2Backend(bucket);
 

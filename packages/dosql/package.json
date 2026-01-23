@@ -94,6 +94,8 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.5",
     "@cloudflare/workers-types": "^4.0.0",
+    "@dotdo/dolake": "workspace:*",
+    "@dotdo/lake.do": "workspace:*",
     "@types/better-sqlite3": "^7.6.8",
     "@types/node": "^22.0.0",
     "@types/sql.js": "^1.4.9",

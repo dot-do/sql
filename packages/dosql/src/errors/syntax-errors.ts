@@ -394,29 +394,61 @@ export class SQLSyntaxError extends DoSQLError {
   /** Expected token(s) (if available) */
   expected?: string;
 
+  /**
+   * Constructor supporting both old and new API signatures:
+   * - Old: SQLSyntaxError(message, location?, sql?)
+   * - New: SQLSyntaxError(code, message, location?, sql?, options?)
+   */
   constructor(
-    code: SyntaxErrorCode,
-    message: string,
-    location?: SourceLocation,
-    sql?: string,
+    codeOrMessage: SyntaxErrorCode | string,
+    messageOrLocation?: string | SourceLocation,
+    locationOrSql?: SourceLocation | string,
+    sqlOrOptions?: string | { cause?: Error; context?: ErrorContext; token?: string; expected?: string },
     options?: { cause?: Error; context?: ErrorContext; token?: string; expected?: string }
   ) {
+    // Detect which API signature is being used
+    // Old API: first arg is message string (not a SyntaxErrorCode enum value)
+    // New API: first arg is SyntaxErrorCode enum value
+    const isOldApi = typeof codeOrMessage === 'string' && !Object.values(SyntaxErrorCode).includes(codeOrMessage as SyntaxErrorCode);
+
+    let code: SyntaxErrorCode;
+    let message: string;
+    let location: SourceLocation | undefined;
+    let sql: string | undefined;
+    let opts: { cause?: Error; context?: ErrorContext; token?: string; expected?: string } | undefined;
+
+    if (isOldApi) {
+      // Old API: SQLSyntaxError(message, location?, sql?)
+      code = SyntaxErrorCode.GENERAL;
+      message = codeOrMessage as string;
+      location = messageOrLocation as SourceLocation | undefined;
+      sql = locationOrSql as string | undefined;
+      opts = undefined;
+    } else {
+      // New API: SQLSyntaxError(code, message, location?, sql?, options?)
+      code = codeOrMessage as SyntaxErrorCode;
+      message = messageOrLocation as string;
+      location = locationOrSql as SourceLocation | undefined;
+      sql = sqlOrOptions as string | undefined;
+      opts = options;
+    }
+
     // Build message with location
     const locStr = location
       ? ` at line ${location.line}, column ${location.column}`
       : '';
-    super(message + locStr, options);
+    super(message + locStr, opts);
 
     this.name = 'SQLSyntaxError';
     this.code = code;
     this.location = location;
     this.sql = sql;
-    this.token = options?.token;
-    this.expected = options?.expected;
+    this.token = opts?.token;
+    this.expected = opts?.expected;
 
     // Auto-generate suggestion for typos
-    if (options?.token && !this.suggestion) {
-      const suggestion = getSuggestionForTypo(options.token);
+    if (opts?.token && !this.suggestion) {
+      const suggestion = getSuggestionForTypo(opts.token);
       if (suggestion) {
         this.suggestion = suggestion;
       }

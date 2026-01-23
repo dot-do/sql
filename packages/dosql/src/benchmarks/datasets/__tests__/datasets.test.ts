@@ -14,7 +14,9 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { env, runInDurableObject } from 'cloudflare:test';
-import { DurableObject } from 'cloudflare:workers';
+
+// Import the actual BenchmarkTestDO type from the adapter tests
+import { BenchmarkTestDO } from '../../adapters/__tests__/do-sqlite.test.js';
 
 // Import all datasets
 import {
@@ -52,104 +54,6 @@ import {
   getAllQueriesByCategory,
   ALL_DATASET_METADATA,
 } from '../index.js';
-
-// =============================================================================
-// Test Durable Object for Query Execution
-// =============================================================================
-
-/**
- * Test DO for executing queries against generated datasets
- */
-export class BenchmarkTestDO extends DurableObject {
-  private sql: SqlStorage;
-
-  constructor(ctx: DurableObjectState, env: unknown) {
-    super(ctx, env);
-    this.sql = (ctx.storage as { sql: SqlStorage }).sql;
-  }
-
-  /**
-   * Execute a SQL statement
-   */
-  exec(sql: string): { rowsRead: number; rowsWritten: number; rows: unknown[] } {
-    const cursor = this.sql.exec(sql);
-    const rows = cursor.toArray();
-    return {
-      rowsRead: cursor.rowsRead,
-      rowsWritten: cursor.rowsWritten,
-      rows,
-    };
-  }
-
-  /**
-   * Execute multiple SQL statements
-   */
-  execMany(statements: string[]): void {
-    for (const stmt of statements) {
-      this.sql.exec(stmt.trim());
-    }
-  }
-
-  /**
-   * Check if query executes without error
-   */
-  validateQuery(sql: string): { valid: boolean; error?: string; rowCount: number } {
-    try {
-      const result = this.exec(sql);
-      return { valid: true, rowCount: result.rows.length };
-    } catch (error) {
-      return {
-        valid: false,
-        error: error instanceof Error ? error.message : String(error),
-        rowCount: 0,
-      };
-    }
-  }
-
-  /**
-   * Insert data into a table
-   */
-  insertRows(tableName: string, rows: Record<string, unknown>[]): number {
-    if (rows.length === 0) return 0;
-
-    const columns = Object.keys(rows[0]);
-    const placeholders = columns.map(() => '?').join(', ');
-    const sql = `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`;
-
-    let insertedCount = 0;
-    for (const row of rows) {
-      const values = columns.map((col) => row[col]);
-      try {
-        this.sql.exec(sql, ...values);
-        insertedCount++;
-      } catch {
-        // Skip duplicates or constraint violations
-      }
-    }
-
-    return insertedCount;
-  }
-
-  /**
-   * Get row count for a table
-   */
-  getRowCount(tableName: string): number {
-    const cursor = this.sql.exec<{ count: number }>(`SELECT COUNT(*) as count FROM ${tableName}`);
-    const result = cursor.one();
-    return result?.count ?? 0;
-  }
-}
-
-interface SqlStorage {
-  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): SqlStorageCursor<T>;
-}
-
-interface SqlStorageCursor<T = Record<string, unknown>> {
-  toArray(): T[];
-  one(): T | null;
-  rowsRead: number;
-  rowsWritten: number;
-}
 
 // =============================================================================
 // Test Helpers
@@ -317,9 +221,12 @@ describe('Northwind Dataset', () => {
     it('should create tables successfully in DO', async () => {
       const stub = getUniqueStub();
       await runInDurableObject(stub, async (instance: BenchmarkTestDO) => {
+        await instance.initialize();
         const statements = getNorthwindSchemaStatements();
 
-        expect(() => instance.execMany(statements)).not.toThrow();
+        // execMany executes all statements - check no errors thrown
+        const results = instance.execMany(statements);
+        expect(results.every((r) => r.success)).toBe(true);
       });
     });
   });
@@ -357,33 +264,52 @@ describe('Northwind Dataset', () => {
     it('should execute queries successfully against schema', async () => {
       const stub = getUniqueStub();
       await runInDurableObject(stub, async (instance: BenchmarkTestDO) => {
+        await instance.initialize();
+
         // Create schema
-        instance.execMany(getNorthwindSchemaStatements());
+        const schemaResults = instance.execMany(getNorthwindSchemaStatements());
+        expect(schemaResults.every((r) => r.success)).toBe(true);
 
         // Generate and insert minimal data
         const data = generateNorthwindData({ orderCount: 10 });
 
-        // Insert reference data
-        instance.insertRows('categories', data.categories);
-        instance.insertRows('shippers', data.shippers);
-        instance.insertRows('suppliers', data.suppliers);
-        instance.insertRows('employees', data.employees.map((e) => ({ ...e, reports_to: null })));
-        instance.insertRows('products', data.products);
-        instance.insertRows('customers', data.customers);
+        // Insert reference data using insertBatch
+        const catResult = await instance.insertBatch('categories', data.categories);
+        expect(catResult.success).toBe(true);
 
-        // Test a few key queries
-        const pointLookup = instance.validateQuery(
+        const shipResult = await instance.insertBatch('shippers', data.shippers);
+        expect(shipResult.success).toBe(true);
+
+        const suppResult = await instance.insertBatch('suppliers', data.suppliers);
+        expect(suppResult.success).toBe(true);
+
+        const empResult = await instance.insertBatch('employees', data.employees.map((e) => ({ ...e, reports_to: null })));
+        expect(empResult.success).toBe(true);
+
+        const prodResult = await instance.insertBatch('products', data.products);
+        if (!prodResult.success) {
+          throw new Error(`Products insert failed: ${prodResult.error}`);
+        }
+
+        const custResult = await instance.insertBatch('customers', data.customers);
+        expect(custResult.success).toBe(true);
+
+        // Test a few key queries using query method
+        const pointLookup = await instance.query(
           "SELECT * FROM customers WHERE customer_id = 'XXXXX'"
         );
-        expect(pointLookup.valid).toBe(true);
+        expect(pointLookup.success).toBe(true);
 
-        const joinQuery = instance.validateQuery(`
-          SELECT c.company_name
+        const joinQuery = await instance.query(`
+          SELECT c.category_name
           FROM categories c
           JOIN products p ON c.category_id = p.category_id
           LIMIT 5
         `);
-        expect(joinQuery.valid).toBe(true);
+        if (!joinQuery.success) {
+          throw new Error(`Join query failed: ${joinQuery.error}`);
+        }
+        expect(joinQuery.success).toBe(true);
       });
     });
   });
@@ -447,8 +373,10 @@ describe('O*NET Dataset', () => {
     it('should create tables successfully in DO', async () => {
       const stub = getUniqueStub();
       await runInDurableObject(stub, async (instance: BenchmarkTestDO) => {
+        await instance.initialize();
         const statements = getOnetSchemaStatements();
-        expect(() => instance.execMany(statements)).not.toThrow();
+        const results = instance.execMany(statements);
+        expect(results.every((r) => r.success)).toBe(true);
       });
     });
   });
@@ -553,8 +481,10 @@ describe('IMDB Dataset', () => {
     it('should create tables successfully in DO', async () => {
       const stub = getUniqueStub();
       await runInDurableObject(stub, async (instance: BenchmarkTestDO) => {
+        await instance.initialize();
         const statements = getImdbSchemaStatements();
-        expect(() => instance.execMany(statements)).not.toThrow();
+        const results = instance.execMany(statements);
+        expect(results.every((r) => r.success)).toBe(true);
       });
     });
   });
@@ -685,8 +615,10 @@ describe('UNSPSC Dataset', () => {
     it('should create tables successfully in DO', async () => {
       const stub = getUniqueStub();
       await runInDurableObject(stub, async (instance: BenchmarkTestDO) => {
+        await instance.initialize();
         const statements = getUnspscSchemaStatements();
-        expect(() => instance.execMany(statements)).not.toThrow();
+        const results = instance.execMany(statements);
+        expect(results.every((r) => r.success)).toBe(true);
       });
     });
   });
@@ -721,20 +653,22 @@ describe('Query Execution', () => {
   it('should execute Northwind queries against populated schema', async () => {
     const stub = getUniqueStub();
     await runInDurableObject(stub, async (instance: BenchmarkTestDO) => {
+      await instance.initialize();
+
       // Create schema
       instance.execMany(getNorthwindSchemaStatements());
 
       // Generate and insert data
       const data = generateNorthwindData({ orderCount: 20 });
 
-      instance.insertRows('categories', data.categories);
-      instance.insertRows('shippers', data.shippers);
-      instance.insertRows('suppliers', data.suppliers.slice(0, 10));
-      instance.insertRows('employees', data.employees.map((e) => ({ ...e, reports_to: null })));
-      instance.insertRows('products', data.products.slice(0, 30));
-      instance.insertRows('customers', data.customers.slice(0, 20));
-      instance.insertRows('orders', data.orders.map((o) => ({ ...o, shipped_date: o.shipped_date ?? null })));
-      instance.insertRows('order_details', data.orderDetails.slice(0, 50));
+      await instance.insertBatch('categories', data.categories);
+      await instance.insertBatch('shippers', data.shippers);
+      await instance.insertBatch('suppliers', data.suppliers.slice(0, 10));
+      await instance.insertBatch('employees', data.employees.map((e) => ({ ...e, reports_to: null })));
+      await instance.insertBatch('products', data.products.slice(0, 30));
+      await instance.insertBatch('customers', data.customers.slice(0, 20));
+      await instance.insertBatch('orders', data.orders.map((o) => ({ ...o, shipped_date: o.shipped_date ?? null })));
+      await instance.insertBatch('order_details', data.orderDetails.slice(0, 50));
 
       // Test sample queries
       const sampleQueries = NORTHWIND_BENCHMARK_QUERIES.filter((q) =>
@@ -742,8 +676,8 @@ describe('Query Execution', () => {
       );
 
       for (const query of sampleQueries) {
-        const result = instance.validateQuery(query.sql);
-        expect(result.valid).toBe(true);
+        const result = await instance.query(query.sql);
+        expect(result.success).toBe(true);
       }
     });
   });
@@ -751,31 +685,33 @@ describe('Query Execution', () => {
   it('should execute UNSPSC prefix queries', async () => {
     const stub = getUniqueStub();
     await runInDurableObject(stub, async (instance: BenchmarkTestDO) => {
+      await instance.initialize();
+
       // Create schema
       instance.execMany(getUnspscSchemaStatements());
 
       // Generate and insert minimal data
       const data = generateUnspscData({ commoditiesPerClass: 2 });
 
-      instance.insertRows('segments', data.segments.slice(0, 5));
-      instance.insertRows('families', data.families.slice(0, 10));
-      instance.insertRows('classes', data.classes.slice(0, 20));
-      instance.insertRows('commodities', data.commodities.slice(0, 50));
+      await instance.insertBatch('segments', data.segments.slice(0, 5));
+      await instance.insertBatch('families', data.families.slice(0, 10));
+      await instance.insertBatch('classes', data.classes.slice(0, 20));
+      await instance.insertBatch('commodities', data.commodities.slice(0, 50));
 
       // Test prefix query
-      const prefixResult = instance.validateQuery(
+      const prefixResult = await instance.query(
         "SELECT * FROM commodities WHERE commodity_code LIKE '10%'"
       );
-      expect(prefixResult.valid).toBe(true);
+      expect(prefixResult.success).toBe(true);
 
       // Test hierarchical query
-      const hierResult = instance.validateQuery(`
+      const hierResult = await instance.query(`
         SELECT s.name, COUNT(f.family_code)
         FROM segments s
         LEFT JOIN families f ON s.segment_code = f.segment_code
         GROUP BY s.segment_code
       `);
-      expect(hierResult.valid).toBe(true);
+      expect(hierResult.success).toBe(true);
     });
   });
 });

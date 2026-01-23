@@ -812,7 +812,7 @@ export class InMemoryEngine implements ExecutionEngine {
 
     let paramIndex = startParamIndex;
     for (const cond of conditions) {
-      const match = cond.match(/^(\w+)\s*(=|!=|<>|>|<|>=|<=|LIKE|IS)\s*(.+)$/i);
+      const match = cond.match(/^(\w+)\s*(>=|<=|<>|!=|>|<|=|LIKE|IS)\s*(.+)$/i);
       if (!match) continue;
 
       const [, col, op, valStr] = match;

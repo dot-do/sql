@@ -75,6 +75,12 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.0.0
         version: 4.20260122.0
+      '@dotdo/dolake':
+        specifier: workspace:*
+        version: link:../dolake
+      '@dotdo/lake.do':
+        specifier: workspace:*
+        version: link:../lake.do
       '@types/better-sqlite3':
         specifier: ^7.6.8
         version: 7.6.13
