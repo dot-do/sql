@@ -115,7 +115,7 @@ ORDER BY distance ASC
 LIMIT 10;
 ```
 
-**Dot Product**
+**Dot Product (Inner Product)**
 
 For normalized vectors, negative dot product serves as a distance metric. Fastest to compute.
 
@@ -126,6 +126,15 @@ SELECT id, title,
 FROM documents
 ORDER BY distance ASC
 LIMIT 10;
+```
+
+**Note:** For dot product, ensure your vectors are normalized (unit length). If not, normalize them before storage:
+
+```typescript
+function normalize(vec: Float32Array): Float32Array {
+  const norm = Math.sqrt(vec.reduce((sum, v) => sum + v * v, 0));
+  return vec.map(v => v / norm);
+}
 ```
 
 ### HNSW Algorithm
@@ -984,6 +993,13 @@ const correct = await get1536DimEmbedding(query);  // 1536 dims
 2. Use smaller dimensions if model supports it
 3. Shard data across multiple Durable Objects
 4. Reduce `M` parameter (fewer connections = less memory)
+
+### Low recall (missing relevant results)
+
+1. Increase `efSearch` for better query accuracy
+2. Rebuild index with higher `efConstruction`
+3. Verify your query embedding uses the same model as indexed embeddings
+4. Check if distance threshold is too strict
 
 ---
 

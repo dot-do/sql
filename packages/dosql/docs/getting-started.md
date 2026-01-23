@@ -317,7 +317,12 @@ Migrations are SQL files in `.do/migrations/` that run automatically when the da
   003_add_indexes.sql
 ```
 
-Each migration runs once and is tracked in a `__dosql_migrations` table.
+**Migration naming convention:**
+- Prefix with a number for ordering (e.g., `001_`, `002_`)
+- Use descriptive names (e.g., `001_create_users.sql`)
+- Migrations are run in alphabetical order
+
+Each migration runs exactly once. DoSQL tracks completed migrations in a `__dosql_migrations` table to ensure idempotency.
 
 ### Transactions
 
@@ -325,11 +330,15 @@ Use `transaction()` to group multiple operations atomically:
 
 ```typescript
 await db.transaction(async (tx) => {
+  // Debit from account 1
   await tx.run('UPDATE accounts SET balance = balance - ? WHERE id = ?', [100, 1]);
+  // Credit to account 2
   await tx.run('UPDATE accounts SET balance = balance + ? WHERE id = ?', [100, 2]);
-  // If either fails, both are rolled back
+  // If either operation fails, both are rolled back automatically
 });
 ```
+
+Transactions ensure data consistency. If any operation within the transaction throws an error, all changes are rolled back.
 
 ---
 
@@ -341,7 +350,9 @@ When you're ready to go live:
 npx wrangler deploy
 ```
 
-Your API is now running globally on Cloudflare's edge network.
+Your API is now running globally on Cloudflare's edge network. The output will show your production URL (e.g., `https://my-dosql-app.<your-subdomain>.workers.dev`).
+
+> **Production tip**: For production applications, consider adding authentication and rate limiting to protect your API.
 
 ---
 
@@ -352,9 +363,25 @@ Your API is now running globally on Cloudflare's edge network.
 Create one Durable Object per tenant for complete data isolation:
 
 ```typescript
+function getTenantId(request: Request): string {
+  // Option 1: Extract from subdomain
+  const url = new URL(request.url);
+  const subdomain = url.hostname.split('.')[0];
+  if (subdomain && subdomain !== 'www') return subdomain;
+
+  // Option 2: Extract from header
+  const tenantHeader = request.headers.get('X-Tenant-ID');
+  if (tenantHeader) return tenantHeader;
+
+  // Option 3: Extract from path (e.g., /tenant/acme/tasks)
+  const pathMatch = url.pathname.match(/^\/tenant\/([^/]+)/);
+  if (pathMatch) return pathMatch[1];
+
+  return 'default';
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    // Extract tenant from subdomain, header, or path
     const tenantId = getTenantId(request);
 
     // Each tenant gets their own isolated database
@@ -365,35 +392,48 @@ export default {
 };
 ```
 
+This pattern provides complete data isolation between tenants, as each Durable Object instance maintains its own database.
+
 ### Type-Safe Queries
 
-Add TypeScript types to your queries:
+Add TypeScript types to your queries for compile-time safety:
 
 ```typescript
 interface User {
   id: number;
   name: string;
   email: string;
+  created_at: string;
 }
 
-const users = await db.query<User>('SELECT id, name, email FROM users');
+// The generic parameter ensures type safety
+const users = await db.query<User>('SELECT id, name, email, created_at FROM users');
 // users is typed as User[]
 
 const user = await db.queryOne<User>('SELECT * FROM users WHERE id = ?', [1]);
 // user is typed as User | undefined
+
+// TypeScript will catch typos and type mismatches
+users.forEach(u => {
+  console.log(u.name);    // OK
+  console.log(u.invalid); // TypeScript error!
+});
 ```
 
 ### Parameterized Queries
 
-Always use parameters to prevent SQL injection:
+Always use parameterized queries to prevent SQL injection:
 
 ```typescript
-// Good - uses parameters
+// GOOD: Uses parameters (safe)
+const userInput = "alice@example.com";
 await db.query('SELECT * FROM users WHERE email = ?', [userInput]);
 
-// Bad - vulnerable to SQL injection
-await db.query(`SELECT * FROM users WHERE email = '${userInput}'`);
+// BAD: String interpolation (vulnerable to SQL injection!)
+// await db.query(`SELECT * FROM users WHERE email = '${userInput}'`);
 ```
+
+Parameters are automatically escaped and quoted by DoSQL, protecting against SQL injection attacks.
 
 ---
 
@@ -401,35 +441,57 @@ await db.query(`SELECT * FROM users WHERE email = '${userInput}'`);
 
 ### "Durable Objects require a Workers Paid plan"
 
-Upgrade to the Workers Paid plan ($5/month) at [dash.cloudflare.com](https://dash.cloudflare.com) > Workers & Pages > Plans.
+Durable Objects are only available on the Workers Paid plan ($5/month). Upgrade at [dash.cloudflare.com](https://dash.cloudflare.com) > Workers & Pages > Plans.
 
 ### "class_name 'TasksDatabase' not found in exports"
 
-Make sure you export your Durable Object class from `src/index.ts`:
+Ensure your Durable Object class is exported from `src/index.ts`:
 
 ```typescript
+// The export keyword is required!
 export class TasksDatabase implements DurableObject {
   // ...
 }
 ```
 
+Also verify that the `class_name` in `wrangler.jsonc` matches exactly (case-sensitive).
+
 ### "Migration folder not found"
 
-Create the migrations directory:
+Create the migrations directory and ensure it contains at least one `.sql` file:
 
 ```bash
 mkdir -p .do/migrations
+touch .do/migrations/001_init.sql
 ```
 
 ### "Port 8787 is already in use"
 
-Kill any existing wrangler processes:
+Another process is using the port. Either kill it or use a different port:
 
 ```bash
+# Option 1: Kill existing wrangler processes
 pkill -f wrangler
-# Or use a different port
+
+# Option 2: Use a different port
 npx wrangler dev --port 8788
 ```
+
+### "TypeError: Cannot read properties of undefined"
+
+This often occurs when the Durable Object binding is not configured correctly. Verify your `wrangler.jsonc`:
+
+```jsonc
+{
+  "durable_objects": {
+    "bindings": [
+      { "name": "TASKS_DB", "class_name": "TasksDatabase" }
+    ]
+  }
+}
+```
+
+The `name` must match the property name in your `Env` interface.
 
 ---
 
@@ -438,9 +500,9 @@ npx wrangler dev --port 8788
 Now that you have DoSQL running, explore these topics:
 
 - **[API Reference](./api-reference.md)** - Complete documentation for all functions
-- **[Migrations Guide](./migrations.md)** - Advanced migration patterns
+- **[Migrations Guide](./migrations.md)** - Advanced migration patterns and rollback strategies
 - **[Transactions](./transactions.md)** - Isolation levels and best practices
-- **[CDC Streaming](./cdc.md)** - Real-time change data capture
+- **[Advanced Features](./advanced.md)** - Time travel, branching, CDC streaming
 - **[Multi-Tenancy](./multi-tenancy.md)** - Building SaaS applications
 - **[Performance](./performance.md)** - Indexing and query optimization
 
@@ -448,6 +510,14 @@ Now that you have DoSQL running, explore these topics:
 
 ## Example Applications
 
-- **[Todo App](./examples/todo-app.md)** - Simple CRUD application
+- **[Todo App](./examples/todo-app.md)** - Simple CRUD application (expanded version of this guide)
 - **[E-commerce](./examples/ecommerce.md)** - Inventory and orders with transactions
 - **[Real-time Chat](./examples/chat.md)** - WebSockets with CDC streaming
+
+---
+
+## Getting Help
+
+- **GitHub Issues**: [github.com/dotdo/sql/issues](https://github.com/dotdo/sql/issues)
+- **Discord**: Join the DoSQL community for real-time support
+- **Stack Overflow**: Tag your questions with `dosql`

@@ -23,7 +23,7 @@ Before deploying, ensure you have the following:
 | Requirement | Details |
 |-------------|---------|
 | Cloudflare Account | Sign up at [dash.cloudflare.com](https://dash.cloudflare.com) |
-| Workers Paid Plan | Required for Durable Objects ($5/month minimum) |
+| Workers Paid Plan | Required for Durable Objects (starts at $5/month) |
 | Account ID | Found in Workers & Pages > Overview |
 
 ### Development Tools
@@ -671,6 +671,7 @@ For zero-downtime deployments:
 | Resource | Limit |
 |----------|-------|
 | CPU time per request | 30 seconds |
+| Memory | 128 MB |
 | Storage key size | 2 KB |
 | Storage value size | 128 KB |
 | SQLite database size | Unlimited (paid) |

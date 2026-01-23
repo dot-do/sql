@@ -186,7 +186,7 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["DatabaseDO"]
+new_sqlite_classes = ["DatabaseDO"]
 ```
 
 </td>
@@ -892,7 +892,7 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["DatabaseDO"]
+new_sqlite_classes = ["DatabaseDO"]
 
 # Optional: R2 for cold storage
 [[r2_buckets]]

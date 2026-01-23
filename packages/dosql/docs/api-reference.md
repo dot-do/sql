@@ -478,7 +478,7 @@ try {
 }
 
 // Example 3: Checking if closed
-const db = new Database();
+const db = createDatabase();
 console.log(db.open); // true
 db.close();
 console.log(db.open); // false
@@ -1827,7 +1827,7 @@ import {
   BindingErrorCode,
   SQLSyntaxError,
   ErrorCategory,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Example 1: Basic error handling
 try {
@@ -1952,7 +1952,7 @@ The RPC module provides client/server communication for remote database access u
 Create a DoSQL client using WebSocket transport (recommended for streaming and CDC).
 
 ```typescript
-import { createWebSocketClient, type ConnectionOptions } from '@dotdo/dosql/rpc';
+import { createWebSocketClient, type ConnectionOptions } from 'dosql/rpc';
 
 interface ConnectionOptions {
   /** WebSocket URL for the RPC endpoint */
@@ -1997,7 +1997,7 @@ client.close();
 Create a DoSQL client using HTTP batch transport (for stateless requests).
 
 ```typescript
-import { createHttpClient } from '@dotdo/dosql/rpc';
+import { createHttpClient } from 'dosql/rpc';
 
 const client = createHttpClient({
   url: 'https://dosql.example.com/rpc',
@@ -2113,7 +2113,7 @@ for await (const chunk of client.queryStream({
 ### Transaction Operations
 
 ```typescript
-import { withTransaction, type TransactionContext } from '@dotdo/dosql/rpc';
+import { withTransaction, type TransactionContext } from 'dosql/rpc';
 
 interface BeginTransactionRequest {
   /** Isolation level */
@@ -2246,7 +2246,7 @@ client.close();
 Implement the RPC server in your Durable Object:
 
 ```typescript
-import { DoSQLTarget, handleDoSQLRequest, type QueryExecutor } from '@dotdo/dosql/rpc';
+import { DoSQLTarget, handleDoSQLRequest, type QueryExecutor } from 'dosql/rpc';
 
 export class DoSQLDurableObject implements DurableObject {
   private target: DoSQLTarget;
@@ -2323,7 +2323,7 @@ import {
   type WALConfig,
   type AppendOptions,
   type AppendResult,
-} from '@dotdo/dosql/wal';
+} from 'dosql/wal';
 
 interface WALConfig {
   /** Maximum segment size in bytes (default: 2MB) */
@@ -2394,7 +2394,7 @@ import {
   reconstructTransactions,
   type WALReader,
   type ReadOptions,
-} from '@dotdo/dosql/wal';
+} from 'dosql/wal';
 
 // Create a reader
 const reader = createWALReader(backend);
@@ -2438,7 +2438,7 @@ import {
   type CheckpointManager,
   type Checkpoint,
   type RecoveryState,
-} from '@dotdo/dosql/wal';
+} from 'dosql/wal';
 
 // Create checkpoint manager
 const checkpointManager = createCheckpointManager(storage, writer);
@@ -2478,7 +2478,7 @@ import {
   RETENTION_PRESETS,
   type WALRetentionManager,
   type RetentionPolicy,
-} from '@dotdo/dosql/wal';
+} from 'dosql/wal';
 
 interface RetentionPolicy {
   /** Maximum age of entries in ms */
@@ -2534,7 +2534,7 @@ import {
   subscribeBatched,
   type CDCSubscription,
   type CDCFilter,
-} from '@dotdo/dosql/cdc';
+} from 'dosql/cdc';
 
 interface CDCFilter {
   /** Tables to subscribe to (empty = all) */
@@ -2640,7 +2640,7 @@ import {
   createReplicationSlotManager,
   type ReplicationSlotManager,
   type ReplicationSlot,
-} from '@dotdo/dosql/cdc';
+} from 'dosql/cdc';
 
 interface ReplicationSlot {
   /** Slot name */
@@ -2696,7 +2696,7 @@ import {
   DEFAULT_LAKEHOUSE_CONFIG,
   type LakehouseStreamer,
   type LakehouseStreamConfig,
-} from '@dotdo/dosql/cdc';
+} from 'dosql/cdc';
 
 interface LakehouseStreamConfig {
   /** Target lakehouse URL */
@@ -2751,7 +2751,7 @@ import {
   type BranchManager,
   type BranchMetadata,
   type BranchManagerConfig,
-} from '@dotdo/dosql/branch';
+} from 'dosql';
 
 interface BranchMetadata {
   /** Branch name */
@@ -2841,7 +2841,7 @@ import {
   type MergeStrategy,
   type MergeResult,
   type MergeConflict,
-} from '@dotdo/dosql/branch';
+} from 'dosql';
 
 type MergeStrategy = 'fast-forward' | 'merge' | 'squash' | 'rebase';
 
@@ -2915,7 +2915,7 @@ import {
   type MigrationRunner,
   type Migration,
   type MigrationResult,
-} from '@dotdo/dosql/migrations';
+} from 'dosql';
 
 interface Migration {
   /** Unique migration ID (timestamp-based recommended) */
@@ -2987,7 +2987,7 @@ import {
   isCloneReady,
   type SchemaTracker,
   type MigrationStatus,
-} from '@dotdo/dosql/migrations';
+} from 'dosql';
 
 // Create schema tracker
 const tracker = createSchemaTracker(storage, {
@@ -3030,7 +3030,7 @@ import {
   parseDrizzleConfig,
   toDoSqlMigration,
   type DrizzleMigrationFolder,
-} from '@dotdo/dosql/migrations';
+} from 'dosql';
 
 // Load from Drizzle migrations folder
 const migrations = await loadDrizzleMigrations('./drizzle', {
@@ -3064,7 +3064,7 @@ import {
   createURLVirtualTable,
   createVirtualTableRegistry,
   resolveVirtualTableFromClause,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create registry
 const registry = createVirtualTableRegistry({
@@ -3101,7 +3101,7 @@ import {
   createR2Source,
   parseR2Uri,
   listR2Objects,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create R2 source
 const source = createR2Source(r2Bucket, 'data/users.parquet');

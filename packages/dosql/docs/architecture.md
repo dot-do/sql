@@ -355,24 +355,31 @@ flowchart LR
     C3 --> E
 ```
 
-**CDC Event Format**:
+**CDC Event Structure**:
+
 ```typescript
-interface ChangeEvent {
-  type: 'insert' | 'update' | 'delete';
+interface ChangeEvent<T = Record<string, unknown>> {
+  operation: 'INSERT' | 'UPDATE' | 'DELETE';
   table: string;
-  lsn: bigint;          // Logical sequence number
-  txnId: string;        // Transaction ID
-  timestamp: Date;
-  before?: Record<string, unknown>;  // Previous values (update/delete)
-  after?: Record<string, unknown>;   // New values (insert/update)
+  lsn: bigint;           // Log Sequence Number
+  txnId: string;         // Transaction ID
+  timestamp: number;     // Unix timestamp (ms)
+  before?: T;            // Previous values (UPDATE/DELETE)
+  after?: T;             // New values (INSERT/UPDATE)
 }
 ```
 
-**Key files**: `src/cdc/`
+**CDC Features**:
+- **Replication Slots**: Persistent position tracking for reliable delivery
+- **Filtering**: Subscribe to specific tables, operations, or custom predicates
+- **Batching**: Efficient batch delivery with backpressure support
+- **Lakehouse Streaming**: Direct integration with Iceberg for historical analytics
+
+**Key files**: `src/cdc/`, `src/cdc/stream.ts`, `src/cdc/capture.ts`, `src/cdc/types.ts`
 
 ## Sharding Architecture
 
-For large-scale deployments, DoSQL supports automatic sharding:
+For large-scale deployments, DoSQL supports automatic sharding inspired by Vitess VSchema:
 
 ```mermaid
 flowchart TD
@@ -398,21 +405,25 @@ flowchart TD
 
 | Type | Use Case | How It Works |
 |------|----------|--------------|
-| HASH | Even distribution | Consistent hash of shard key |
-| RANGE | Range queries | Key ranges mapped to shards |
-| LOOKUP | Flexible routing | External lookup table |
-| REGION | Geo-affinity | Geographic zone mapping |
+| HASH | Even distribution | FNV-1a or xxHash of shard key |
+| CONSISTENT-HASH | Rebalancing | Virtual nodes for seamless shard additions |
+| RANGE | Range queries | Boundary-based partitioning |
+
+**Table Sharding Types**:
+- **sharded**: Data distributed across shards using vindex
+- **unsharded**: All data lives in a single designated shard
+- **reference**: Data replicated to all shards (lookup tables)
 
 **Query Routing**:
 
 1. **Single-shard**: Query includes shard key, route to one shard
 2. **Scatter-gather**: No shard key, query all shards and merge results
 
-**Key files**: `src/sharding/`
+**Key files**: `src/sharding/`, `src/sharding/router.ts`, `src/sharding/vindex.ts`, `src/sharding/executor.ts`
 
 ## Storage Tiers
 
-DoSQL implements a three-tier storage architecture:
+DoSQL implements a three-tier storage architecture optimized for different access patterns:
 
 ```
 +-------------------------------------------------------------------------+
@@ -446,34 +457,36 @@ DoSQL implements a three-tier storage architecture:
 
 **Performance Summary**:
 
-| Tier | Read Latency (p50) | Write Latency | Capacity |
-|------|-------------------|---------------|----------|
-| Hot (DO) | 0.5-1ms | 1-2ms | ~100MB |
-| Warm (R2+Cache) | 1-50ms | 20-40ms | Unlimited |
-| Cold (Iceberg) | 100-300ms | 200-500ms | Unlimited |
+| Tier | Read Latency (p50) | Write Latency | Capacity | Use Case |
+|------|-------------------|---------------|----------|----------|
+| Hot (DO) | 0.5-1ms | 1-2ms | ~100MB | Active working set |
+| Warm (R2+Cache) | 1-50ms | 20-40ms | Unlimited | Recent historical data |
+| Cold (Iceberg) | 100-300ms | 200-500ms | Unlimited | Analytics and archives |
+
+**Key files**: `src/fsx/tier-migration.ts`, `src/lakehouse/`, `src/iceberg/`
 
 ## Why This Architecture Matters
 
 ### For Application Developers
 
-1. **Predictable Performance**: The tiered storage ensures hot data stays fast
-2. **Unlimited Scale**: Cold tier provides infinite storage for historical data
+1. **Predictable Performance**: Tiered storage ensures hot data stays fast
+2. **Unlimited Scale**: Cold tier provides unlimited storage for historical data
 3. **Real-time CDC**: Build reactive applications with change streaming
-4. **Type Safety**: TypeScript-native means better tooling and fewer bugs
+4. **Type Safety**: TypeScript-native means better tooling and fewer runtime errors
 
 ### For Operations Teams
 
 1. **No Infrastructure**: Runs entirely on Cloudflare's managed platform
-2. **Auto-scaling**: Durable Objects scale automatically
+2. **Auto-scaling**: Durable Objects scale automatically with demand
 3. **Global Distribution**: Deploy close to users worldwide
-4. **Cost Efficiency**: Pay only for what you use, hibernate idle connections
+4. **Cost Efficiency**: Pay only for what you use; idle connections hibernate automatically
 
 ### For Data Teams
 
-1. **Iceberg Integration**: Query historical data with Spark, Trino, DuckDB
-2. **CDC Streaming**: Build real-time data pipelines
-3. **Time Travel**: Query data at any point in history
-4. **Schema Evolution**: Iceberg handles schema changes gracefully
+1. **Iceberg Integration**: Query historical data with Spark, Trino, or DuckDB
+2. **CDC Streaming**: Build real-time data pipelines to external systems
+3. **Time Travel**: Query data at any point in history using LSN or timestamp
+4. **Schema Evolution**: Iceberg handles schema changes gracefully without downtime
 
 ## Bundle Size Comparison
 
@@ -487,25 +500,28 @@ DoSQL's native TypeScript approach results in dramatically smaller bundles:
 | DuckDB-WASM | ~4 MB |
 
 This matters because:
-- Cloudflare Workers have a 1MB bundle limit (free tier)
-- Smaller bundles mean faster cold starts
-- Less code to load and parse
+- Cloudflare Workers have a 1 MB bundle limit (free tier) and 10 MB (paid)
+- Smaller bundles mean faster cold starts (sub-millisecond for DoSQL)
+- Less code to load and parse reduces CPU time billing
 
 ## Component Summary
 
 | Component | Location | Responsibility |
 |-----------|----------|----------------|
 | SQL Parser | `src/parser/` | SQL string to AST |
-| Query Planner | `src/planner/` | AST to physical plan |
-| Executor | `src/engine/` | Execute plan, produce rows |
-| B-tree | `src/btree/` | OLTP storage, indexes |
-| Columnar | `src/columnar/` | OLAP storage, analytics |
-| FSX | `src/fsx/` | Storage abstraction layer |
-| WAL | `src/wal/` | Durability, recovery |
-| Transactions | `src/transaction/` | ACID guarantees |
-| CDC | `src/cdc/` | Change data capture |
-| Sharding | `src/sharding/` | Distributed queries |
-| RPC | `src/rpc/` | Client-server communication |
+| Query Planner | `src/planner/` | AST to physical plan with cost-based optimization |
+| Executor | `src/engine/` | Execute plan, produce rows via pull-based operators |
+| B-tree | `src/btree/` | OLTP storage and secondary indexes |
+| Columnar | `src/columnar/` | OLAP storage for analytics |
+| FSX | `src/fsx/` | Storage abstraction layer with tiering |
+| WAL | `src/wal/` | Durability, crash recovery, checkpointing |
+| Transactions | `src/transaction/` | ACID guarantees with MVCC |
+| CDC | `src/cdc/` | Change data capture and streaming |
+| Sharding | `src/sharding/` | Distributed queries with vindex routing |
+| RPC | `src/rpc/` | Client-server communication (CapnWeb protocol) |
+| Vector | `src/vector/` | Vector similarity search |
+| Time Travel | `src/timetravel/` | Point-in-time queries |
+| Full-Text Search | `src/fts/` | Full-text indexing and search |
 
 ## Further Reading
 

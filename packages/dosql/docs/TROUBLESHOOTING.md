@@ -427,9 +427,10 @@ await db.transaction(async (tx) => {
   }
 }); // Single commit at the end
 
-// Use INSERT with multiple rows
-const values = items.map(i => `(${i.id}, '${i.data}')`).join(',');
-await db.run(`INSERT INTO items (id, data) VALUES ${values}`);
+// Use INSERT with multiple rows (use parameterized queries in production)
+const placeholders = items.map(() => '(?, ?)').join(',');
+const values = items.flatMap(i => [i.id, i.data]);
+await db.run(`INSERT INTO items (id, data) VALUES ${placeholders}`, values);
 ```
 
 ---
@@ -1206,10 +1207,10 @@ A: There's no hard limit, but each WebSocket connection consumes memory. Monitor
 
 A: Always use parameterized queries:
 ```typescript
-// WRONG
+// WRONG: Vulnerable to SQL injection
 db.query(`SELECT * FROM users WHERE name = '${userInput}'`);
 
-// CORRECT
+// CORRECT: Parameterized query - safe from injection
 db.query('SELECT * FROM users WHERE name = ?', [userInput]);
 ```
 

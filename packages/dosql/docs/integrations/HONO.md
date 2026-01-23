@@ -166,7 +166,7 @@ Hono and DoSQL are a natural pairing for Cloudflare Workers:
 |    DoSQL Durable       |     |    DoSQL Durable       |
 |    Object (Tenant A)   |     |    Object (Tenant B)   |
 |  +------------------+  |     |  +------------------+  |
-|  |   SQLite DB      |  |     |   SQLite DB      |    |
+|  |   SQLite DB      |  |     |  |   SQLite DB      |  |
 |  +------------------+  |     |  +------------------+  |
 +------------------------+     +------------------------+
 ```
