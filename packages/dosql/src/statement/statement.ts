@@ -654,8 +654,9 @@ export class InMemoryEngine implements ExecutionEngine {
 
   private executeInsert(sql: string, params: SqlValue[]): ExecutionResult {
     // Try matching INSERT with explicit column list first
+    // Support both quoted ("table") and unquoted (table) table names
     let match = sql.match(
-      /INSERT\s+INTO\s+(\w+)\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i
+      /INSERT\s+INTO\s+(?:"([^"]+)"|(\w+))\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i
     );
 
     let tableName: string;
@@ -664,21 +665,24 @@ export class InMemoryEngine implements ExecutionEngine {
 
     if (match) {
       // INSERT INTO t (cols) VALUES (vals)
-      tableName = match[1];
-      columnNames = match[2].split(',').map(c => c.trim());
-      valuePlaceholders = this.parseInsertValues(match[3]);
+      // Table name is either in group 1 (quoted) or group 2 (unquoted)
+      tableName = match[1] || match[2];
+      columnNames = match[3].split(',').map(c => c.trim());
+      valuePlaceholders = this.parseInsertValues(match[4]);
     } else {
       // Try matching INSERT without column list: INSERT INTO t VALUES (vals)
+      // Support both quoted ("table") and unquoted (table) table names
       const noColMatch = sql.match(
-        /INSERT\s+INTO\s+(\w+)\s+VALUES\s*\(([^)]+)\)/i
+        /INSERT\s+INTO\s+(?:"([^"]+)"|(\w+))\s+VALUES\s*\(([^)]+)\)/i
       );
 
       if (!noColMatch) {
         throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid INSERT syntax', sql);
       }
 
-      tableName = noColMatch[1];
-      valuePlaceholders = this.parseInsertValues(noColMatch[2]);
+      // Table name is either in group 1 (quoted) or group 2 (unquoted)
+      tableName = noColMatch[1] || noColMatch[2];
+      valuePlaceholders = this.parseInsertValues(noColMatch[3]);
 
       // Get column names from table schema
       const table = this.storage.tables.get(tableName);
@@ -1501,15 +1505,39 @@ export class InMemoryEngine implements ExecutionEngine {
 
   /**
    * Parse a table reference: table AS alias, table alias, or just table
+   * Supports both quoted ("table") and unquoted (table) table names
    */
   private parseTableReference(ref: string): { tableName: string; alias: string } {
     const trimmed = ref.trim();
-    // Match: tableName AS alias
+
+    // Match: "tableName" AS alias (quoted table with explicit alias)
+    const quotedAsMatch = trimmed.match(/^"([^"]+)"\s+AS\s+(\w+)$/i);
+    if (quotedAsMatch) {
+      return { tableName: quotedAsMatch[1], alias: quotedAsMatch[2] };
+    }
+
+    // Match: "tableName" alias (quoted table with implicit alias)
+    const quotedImplicitMatch = trimmed.match(/^"([^"]+)"\s+(\w+)$/);
+    if (quotedImplicitMatch) {
+      const possibleAlias = quotedImplicitMatch[2].toUpperCase();
+      const keywords = ['WHERE', 'ORDER', 'LIMIT', 'GROUP', 'HAVING', 'JOIN', 'ON', 'AND', 'OR'];
+      if (!keywords.includes(possibleAlias)) {
+        return { tableName: quotedImplicitMatch[1], alias: quotedImplicitMatch[2] };
+      }
+    }
+
+    // Match: "tableName" (just quoted table name)
+    const quotedSimpleMatch = trimmed.match(/^"([^"]+)"$/);
+    if (quotedSimpleMatch) {
+      return { tableName: quotedSimpleMatch[1], alias: quotedSimpleMatch[1] };
+    }
+
+    // Match: tableName AS alias (unquoted table with explicit alias)
     const asMatch = trimmed.match(/^(\w+)\s+AS\s+(\w+)$/i);
     if (asMatch) {
       return { tableName: asMatch[1], alias: asMatch[2] };
     }
-    // Match: tableName alias (implicit, no AS keyword)
+    // Match: tableName alias (unquoted table with implicit alias, no AS keyword)
     const implicitMatch = trimmed.match(/^(\w+)\s+(\w+)$/);
     if (implicitMatch) {
       // Make sure the second word is not a keyword
@@ -1677,18 +1705,19 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   private executeUpdate(sql: string, params: SqlValue[]): ExecutionResult {
-    // Simple UPDATE parsing
+    // Simple UPDATE parsing - support both quoted ("table") and unquoted (table) table names
     const match = sql.match(
-      /UPDATE\s+(\w+)\s+SET\s+(.+?)(?:\s+WHERE\s+(.+))?$/i
+      /UPDATE\s+(?:"([^"]+)"|(\w+))\s+SET\s+(.+?)(?:\s+WHERE\s+(.+))?$/i
     );
 
     if (!match) {
       throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid UPDATE syntax', sql);
     }
 
-    const tableName = match[1];
-    const setClause = match[2];
-    const whereClause = match[3];
+    // Table name is either in group 1 (quoted) or group 2 (unquoted)
+    const tableName = match[1] || match[2];
+    const setClause = match[3];
+    const whereClause = match[4];
 
     const table = this.storage.tables.get(tableName);
     if (!table) {
@@ -1803,17 +1832,18 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   private executeDelete(sql: string, params: SqlValue[]): ExecutionResult {
-    // Simple DELETE parsing
+    // Simple DELETE parsing - support both quoted ("table") and unquoted (table) table names
     const match = sql.match(
-      /DELETE\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?$/i
+      /DELETE\s+FROM\s+(?:"([^"]+)"|(\w+))(?:\s+WHERE\s+(.+))?$/i
     );
 
     if (!match) {
       throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid DELETE syntax', sql);
     }
 
-    const tableName = match[1];
-    const whereClause = match[2];
+    // Table name is either in group 1 (quoted) or group 2 (unquoted)
+    const tableName = match[1] || match[2];
+    const whereClause = match[3];
 
     const table = this.storage.tables.get(tableName);
     if (!table) {

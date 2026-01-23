@@ -52,7 +52,8 @@ class SpanImpl implements Span {
     this.spanId = spanId;
     this.kind = kind;
     this.parentSpanId = parentSpanId;
-    this.startTime = startTime ?? Date.now();
+    // Use performance.now() for high-resolution timing, fall back to Date.now()
+    this.startTime = startTime ?? (typeof performance !== 'undefined' ? performance.now() : Date.now());
   }
 
   setAttribute(key: string, value: AttributeValue): this {
@@ -83,7 +84,8 @@ class SpanImpl implements Span {
 
   end(endTime?: number): void {
     if (this.recording) {
-      this.endTime = endTime ?? Date.now();
+      // Use performance.now() for high-resolution timing, fall back to Date.now()
+      this.endTime = endTime ?? (typeof performance !== 'undefined' ? performance.now() : Date.now());
       this.recording = false;
       if (this.status === 'UNSET') {
         this.status = 'OK';

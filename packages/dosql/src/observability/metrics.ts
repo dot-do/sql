@@ -114,10 +114,12 @@ class HistogramImpl implements Histogram {
     data.sum += value;
     data.count += 1;
 
-    // Increment bucket counts
+    // Increment the appropriate bucket count (non-cumulative)
+    // Find the smallest bucket that the value fits into
     for (const bucket of this.buckets) {
       if (value <= bucket) {
         data.buckets.set(bucket, (data.buckets.get(bucket) ?? 0) + 1);
+        break; // Only increment the first matching bucket
       }
     }
   }
@@ -134,10 +136,18 @@ class HistogramImpl implements Histogram {
       };
     }
 
+    // Return cumulative bucket counts (Prometheus histogram semantics)
+    const cumulativeBuckets = new Map<number, number>();
+    let cumulative = 0;
+    for (const bucket of this.buckets) {
+      cumulative += data.buckets.get(bucket) ?? 0;
+      cumulativeBuckets.set(bucket, cumulative);
+    }
+
     return {
       sum: data.sum,
       count: data.count,
-      buckets: new Map(data.buckets),
+      buckets: cumulativeBuckets,
     };
   }
 

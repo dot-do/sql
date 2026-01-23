@@ -79,6 +79,7 @@ export function createDistributedTransactionCoordinator(
 
   let currentContext: DistributedTransactionContext | null = null;
   let participantStates: Map<string, ParticipantState> = new Map();
+  let lastCompletedState: DistributedTransactionState | null = null;
 
   /**
    * Generate unique transaction ID
@@ -162,6 +163,9 @@ export function createDistributedTransactionCoordinator(
       const timeout = options?.timeout ?? transactionTimeoutMs;
       const isolationLevel = options?.isolationLevel ?? defaultIsolationLevel;
 
+      // Reset last completed state for new transaction
+      lastCompletedState = null;
+
       currentContext = {
         txnId,
         coordinatorId,
@@ -243,12 +247,9 @@ export function createDistributedTransactionCoordinator(
 
       // For write operations, add to write set for read-your-writes
       if (opType !== 'SELECT') {
-        // Execute and track the write
-        const result = await withRetry(
-          () => rpc.execute(shardId as string, sql, params),
-          shardId as string,
-          'execute'
-        );
+        // Execute directly without retry - errors during execute phase should
+        // fail the transaction immediately (e.g., constraint violations)
+        const result = await rpc.execute(shardId as string, sql, params);
 
         // Track in write set for read-your-writes
         let shardWriteSet = currentContext.writeSet.get(shardId as string);
@@ -265,12 +266,9 @@ export function createDistributedTransactionCoordinator(
         // For SELECT, check write set first (read-your-writes)
         const shardWriteSet = currentContext.writeSet.get(shardId as string);
 
-        // Execute the read
-        const result = await withRetry(
-          () => rpc.execute(shardId as string, sql, params),
-          shardId as string,
-          'execute'
-        );
+        // Execute directly without retry - errors during execute phase should
+        // fail the transaction immediately
+        const result = await rpc.execute(shardId as string, sql, params);
 
         // Track in read set
         let shardReadSet = currentContext.readSet.get(shardId as string);
@@ -489,6 +487,9 @@ export function createDistributedTransactionCoordinator(
       // Clear locked rows
       currentContext.lockedRows.clear();
 
+      // Preserve the final state before clearing context
+      lastCompletedState = 'COMMITTED';
+
       // Clear context
       const ctx = currentContext;
       currentContext = null;
@@ -565,13 +566,20 @@ export function createDistributedTransactionCoordinator(
       // Clear locked rows
       currentContext.lockedRows.clear();
 
+      // Preserve the final state before clearing context
+      lastCompletedState = 'ABORTED';
+
       // Clear context
       currentContext = null;
       participantStates.clear();
     },
 
     getState(): DistributedTransactionState {
-      return currentContext?.state ?? 'ABORTED';
+      // Return current state if transaction is active, otherwise return last completed state
+      if (currentContext) {
+        return currentContext.state;
+      }
+      return lastCompletedState ?? 'ABORTED';
     },
 
     getContext(): DistributedTransactionContext | null {

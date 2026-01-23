@@ -411,8 +411,35 @@ describe('Stream State Cleanup - Abandoned Stream Detection', () => {
   });
 
   it('should identify abandoned streams via getStreamInfo comparison', async () => {
-    // Create streams with different activity patterns
-    const streamIds = await createStreams(target, 3);
+    // Add tables with enough rows so streams don't auto-close on first chunk
+    executor.addTable('test_table_0', ['id', 'data'], ['number', 'string'], [
+      [1, 'a'], [2, 'b'], [3, 'c'], [4, 'd'], [5, 'e'],
+    ]);
+    executor.addTable('test_table_1', ['id', 'data'], ['number', 'string'], [
+      [1, 'a'], [2, 'b'], [3, 'c'], [4, 'd'], [5, 'e'],
+    ]);
+    executor.addTable('test_table_2', ['id', 'data'], ['number', 'string'], [
+      [1, 'a'], [2, 'b'], [3, 'c'], [4, 'd'], [5, 'e'],
+    ]);
+
+    // Create streams with different activity patterns using small chunkSize
+    const streamIds: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const streamId = `stream_${i}_${Date.now()}`;
+      await target._initStream({
+        sql: `SELECT * FROM test_table_${i}`,
+        streamId,
+        chunkSize: 1, // Small chunk size so streams stay open
+      });
+      streamIds.push(streamId);
+    }
+
+    // Record lastActivity before waiting
+    const info1Before = target.getStreamInfo(streamIds[1]);
+    expect(info1Before).toBeDefined();
+
+    // Wait a bit to ensure time difference
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Access one stream to update its lastActivity
     await target._nextChunk(streamIds[0]);
@@ -431,7 +458,28 @@ describe('Stream State Cleanup - Abandoned Stream Detection', () => {
     // Configure a short TTL
     target = new DoSQLTarget(executor, undefined, { streamTTLMs: 50 });
 
-    const streamIds = await createStreams(target, 3);
+    // Add tables with enough rows so streams don't auto-close on fetch
+    executor.addTable('test_table_0', ['id', 'data'], ['number', 'string'], [
+      [1, 'a'], [2, 'b'], [3, 'c'], [4, 'd'], [5, 'e'], [6, 'f'], [7, 'g'], [8, 'h'],
+    ]);
+    executor.addTable('test_table_1', ['id', 'data'], ['number', 'string'], [
+      [1, 'a'], [2, 'b'], [3, 'c'], [4, 'd'], [5, 'e'],
+    ]);
+    executor.addTable('test_table_2', ['id', 'data'], ['number', 'string'], [
+      [1, 'a'], [2, 'b'], [3, 'c'], [4, 'd'], [5, 'e'],
+    ]);
+
+    // Create streams with small chunk size so they stay open
+    const streamIds: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const streamId = `stream_${i}_${Date.now()}`;
+      await target._initStream({
+        sql: `SELECT * FROM test_table_${i}`,
+        streamId,
+        chunkSize: 1, // Small chunk size so streams stay open after fetch
+      });
+      streamIds.push(streamId);
+    }
 
     // Make one stream active by fetching from it
     await target._nextChunk(streamIds[0]);
@@ -526,9 +574,10 @@ describe('Stream State Cleanup - Manual Cleanup API', () => {
   });
 
   it('should track totalClosed in stats', async () => {
-    await createStreams(target, 5);
-    target.closeStream('stream_0');
-    target.closeStream('stream_1');
+    const streamIds = await createStreams(target, 5);
+    // Use actual streamIds returned by createStreams (which include timestamps)
+    target.closeStream(streamIds[0]);
+    target.closeStream(streamIds[1]);
 
     const stats = target.getStreamStats();
     expect(stats.activeStreams).toBe(3);

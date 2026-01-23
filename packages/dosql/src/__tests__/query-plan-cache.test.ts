@@ -394,9 +394,9 @@ describe('Plan Cache Uses Query Hash as Key [GREEN]', () => {
 
 describe('Parameterized Queries Share Cached Plan [GREEN]', () => {
   /**
-   * GAP: Parameter extraction for cache key generation - ? placeholder handling inconsistent
+   * Parameter extraction for cache key generation - normalizes both $N and ? placeholders
    */
-  it.fails('should normalize query with parameters for caching', async () => {
+  it('should normalize query with parameters for caching', async () => {
     const { normalizeParameterizedQuery } = await importPlannerCache();
 
     const sql1 = 'SELECT * FROM users WHERE id = $1';

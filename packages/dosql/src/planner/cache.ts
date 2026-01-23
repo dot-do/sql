@@ -250,11 +250,12 @@ export function normalizeLiterals(sql: string): string {
  * @returns Normalized parameterized query
  */
 export function normalizeParameterizedQuery(sql: string): string {
-  // Replace $N with $? placeholder
-  let normalized = sql.replace(/\$\d+/g, '$?');
+  // Replace ? with $? first (before $N replacement to avoid double replacement)
+  // Use negative lookbehind to avoid replacing ? that are part of $?
+  let normalized = sql.replace(/(?<!\$)\?/g, '$?');
 
-  // Replace ? with $? for consistency
-  normalized = normalized.replace(/\?/g, '$?');
+  // Replace $N with $? placeholder
+  normalized = normalized.replace(/\$\d+/g, '$?');
 
   // Normalize whitespace and keywords
   return normalizeQueryForCache(normalized);
