@@ -155,6 +155,56 @@ export function evaluateCaseExpr(
     if (p) return evalCaseExpr(p.caseExpr, row, params, pIdx);
   }
 
+  // Handle NOT IN expression: col NOT IN (val1, val2, ...)
+  const notInMatch = tr.match(/^(\w+)\s+NOT\s+IN\s*\(([^)]*)\)$/i);
+  if (notInMatch) {
+    const colName = notInMatch[1];
+    const valueList = notInMatch[2];
+    const colVal = row[colName] ?? null;
+
+    // NULL NOT IN (...) returns NULL
+    if (colVal === null) return null;
+
+    const values = parseValueListForExpr(valueList, params, pIdx);
+
+    // Check if list contains NULL
+    const hasNull = values.some(v => v === null);
+
+    // Empty list: NOT IN () = TRUE
+    if (values.length === 0) return 1;
+
+    // Check if value is in the list
+    const inList = values.some(v => v !== null && valuesEqualForExpr(v, colVal));
+
+    if (inList) return 0; // value found, NOT IN = FALSE
+
+    // Value not found
+    if (hasNull) return null; // NULL in list makes result NULL
+
+    return 1; // NOT IN = TRUE
+  }
+
+  // Handle IN expression: col IN (val1, val2, ...)
+  const inMatch = tr.match(/^(\w+)\s+IN\s*\(([^)]*)\)$/i);
+  if (inMatch) {
+    const colName = inMatch[1];
+    const valueList = inMatch[2];
+    const colVal = row[colName] ?? null;
+
+    // NULL IN (...) returns NULL
+    if (colVal === null) return null;
+
+    const values = parseValueListForExpr(valueList, params, pIdx);
+
+    // Empty list: IN () = FALSE
+    if (values.length === 0) return 0;
+
+    // Check if value is in the list
+    const inList = values.some(v => v !== null && valuesEqualForExpr(v, colVal));
+
+    return inList ? 1 : 0;
+  }
+
   if (tr === '?') return params[pIdx.value++];
   if (utr === 'NULL') return null;
   if (tr.startsWith("'") && tr.endsWith("'")) return tr.slice(1, -1).replace(/''/g, "'");
@@ -163,6 +213,66 @@ export function evaluateCaseExpr(
   if (/^\w+$/.test(tr)) return row[tr] ?? null;
 
   return evalArith(tr, row, params, pIdx);
+}
+
+/**
+ * Parse value list for expression evaluation
+ */
+function parseValueListForExpr(valueList: string, params: SqlValue[], pIdx: {value: number}): SqlValue[] {
+  const values: SqlValue[] = [];
+  const items: string[] = [];
+  let current = '';
+  let inQuote = false;
+
+  for (let i = 0; i < valueList.length; i++) {
+    const char = valueList[i];
+    if (!inQuote && char === "'") {
+      inQuote = true;
+      current += char;
+    } else if (inQuote && char === "'") {
+      if (i + 1 < valueList.length && valueList[i + 1] === "'") {
+        current += "''";
+        i++;
+      } else {
+        inQuote = false;
+        current += char;
+      }
+    } else if (!inQuote && char === ',') {
+      items.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  if (current.trim()) {
+    items.push(current.trim());
+  }
+
+  for (const item of items) {
+    if (item === '?') {
+      values.push(params[pIdx.value++]);
+    } else if (item.startsWith("'") && item.endsWith("'")) {
+      values.push(item.slice(1, -1).replace(/''/g, "'"));
+    } else if (item.toUpperCase() === 'NULL') {
+      values.push(null);
+    } else if (!isNaN(Number(item))) {
+      values.push(Number(item));
+    } else {
+      values.push(item);
+    }
+  }
+
+  return values;
+}
+
+/**
+ * Compare values for expression evaluation
+ */
+function valuesEqualForExpr(a: SqlValue, b: SqlValue): boolean {
+  if (a === null || b === null) return false;
+  if (typeof a === 'number' && typeof b === 'number') return a === b;
+  if (typeof a === 'string' && typeof b === 'string') return a === b;
+  return String(a) === String(b) || Number(a) === Number(b);
 }
 
 /**

@@ -3,24 +3,19 @@
  *
  * Tests for NOT IN operator in DoSQL's InMemoryEngine.
  *
- * WORKING FEATURES:
+ * ALL FEATURES WORKING:
  * - Column references: SELECT * FROM t1 WHERE a NOT IN (1, 2, 3)
+ * - Literal as left operand: SELECT 1 FROM t WHERE 1 NOT IN (2)
  * - Empty list: NOT IN ()
- * - Case-sensitive strings
+ * - Case-sensitive strings and special characters (escaped quotes)
  * - NULL handling in columns and lists (proper SQL NULL semantics)
- * - Combined with AND/LIKE
+ * - Subquery support: NOT IN (SELECT ...)
+ * - Combined with AND/OR/BETWEEN/LIKE
+ * - NOT (expr IN (...)) syntax (parenthesized negation)
+ * - NOT IN in SELECT expression (non-WHERE usage)
  * - Edge cases (zero, negative, large lists, duplicates)
  * - Parameter binding support
  * - Float and mixed integer/float comparisons
- *
- * STILL FAILING (marked with it.fails()):
- * - Literal as left operand with SELECT literal: SELECT 1 FROM t WHERE 1 NOT IN (2) (literal projection issue)
- * - Special characters in strings (escaped quotes)
- * - Subquery support: NOT IN (SELECT ...)
- * - Combined with OR (only AND is supported)
- * - Combined with BETWEEN
- * - NOT (expr IN (...)) syntax (parenthesized negation)
- * - NOT IN in SELECT expression (non-WHERE usage)
  *
  * Run with: npx vitest run src/__tests__/sqllogictest-not-in.test.ts
  */
@@ -60,7 +55,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
      * Expected: Returns 1 for each row since 1 is NOT IN (2)
      * Current: NOT IN filtering works, but SELECT expression returns null for literal
      */
-    it.fails('should handle NOT IN with single integer value - literal comparison', () => {
+    it('should handle NOT IN with single integer value - literal comparison', () => {
       // SELECT 1 FROM t1 WHERE 1 NOT IN (2)
       // 1 is not equal to 2, so condition is true for all rows
       const result = db.prepare('SELECT 1 AS result FROM t1 WHERE 1 NOT IN (2)').all();
@@ -275,7 +270,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with special characters
      */
-    it.fails('should handle NOT IN with special characters', () => {
+    it('should handle NOT IN with special characters', () => {
       db.exec("INSERT INTO strings (id, name) VALUES (6, 'it''s')");
 
       const result = db.prepare("SELECT id FROM strings WHERE name NOT IN ('it''s')").all();
@@ -448,7 +443,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
      * 2. Collect results into a set
      * 3. Check each row against the set
      */
-    it.fails('should handle NOT IN with subquery', () => {
+    it('should handle NOT IN with subquery', () => {
       // SELECT * FROM users WHERE department_id NOT IN (SELECT dept_id FROM active_departments)
       const result = db
         .prepare('SELECT id, name, department_id FROM users WHERE department_id NOT IN (SELECT dept_id FROM active_departments)')
@@ -483,7 +478,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with subquery returning NULL
      */
-    it.fails('should handle NOT IN with subquery containing NULL', () => {
+    it('should handle NOT IN with subquery containing NULL', () => {
       db.exec('CREATE TABLE dept_list (dept_id INTEGER)');
       db.exec('INSERT INTO dept_list (dept_id) VALUES (1)');
       db.exec('INSERT INTO dept_list (dept_id) VALUES (NULL)');
@@ -540,7 +535,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with OR condition
      */
-    it.fails('should handle NOT IN combined with OR', () => {
+    it('should handle NOT IN combined with OR', () => {
       // SELECT * FROM products WHERE category NOT IN ('A') OR price > 250
       const result = db.prepare("SELECT id, name FROM products WHERE category NOT IN ('A') OR price > 250").all();
 
@@ -556,7 +551,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: Nested NOT IN conditions
      */
-    it.fails('should handle nested NOT and IN conditions', () => {
+    it('should handle nested NOT and IN conditions', () => {
       // SELECT * FROM products WHERE NOT (category IN ('A', 'B'))
       // This is equivalent to NOT IN
       const result = db.prepare("SELECT id, name FROM products WHERE NOT (category IN ('A', 'B'))").all();
@@ -568,7 +563,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with BETWEEN
      */
-    it.fails('should handle NOT IN combined with BETWEEN', () => {
+    it('should handle NOT IN combined with BETWEEN', () => {
       // SELECT * FROM products WHERE category NOT IN ('C') AND price BETWEEN 100 AND 200
       const result = db
         .prepare("SELECT id, name, price FROM products WHERE category NOT IN ('C') AND price BETWEEN 100 AND 200")
@@ -665,7 +660,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN in SELECT expression (not WHERE)
      */
-    it.fails('should handle NOT IN in SELECT expression', () => {
+    it('should handle NOT IN in SELECT expression', () => {
       const result = db.prepare('SELECT id, value NOT IN (0, 1) AS not_in_result FROM edge').all();
 
       const sorted = (result as { id: number; not_in_result: number }[]).sort((a, b) => a.id - b.id);

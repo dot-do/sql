@@ -26,6 +26,10 @@ import {
   createUnsupportedSqlError,
 } from '../errors/index.js';
 import {
+  evaluateWhereCondition,
+  type WhereEvaluatorDeps,
+} from './where-evaluator.js';
+import {
   evaluateCaseExpr,
   splitSelectColumns,
   containsCaseExpression,
@@ -801,9 +805,9 @@ export class InMemoryEngine implements ExecutionEngine {
   private parseInsertLiteralValue(placeholder: string): SqlValue {
     const trimmed = placeholder.trim();
 
-    // String literal
+    // String literal - handle escaped quotes ('' -> ')
     if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
-      return trimmed.slice(1, -1);
+      return trimmed.slice(1, -1).replace(/''/g, "'");
     }
 
     // BLOB literal (X'...')
@@ -838,7 +842,7 @@ export class InMemoryEngine implements ExecutionEngine {
       throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid SELECT syntax', sql);
     }
 
-    const { columnList, tableName, tableRefs, whereClause, orderBy, limit } = parsed;
+    const { columnList, tableName, tableRefs, whereClause, groupBy, havingClause, orderBy, limit } = parsed;
 
     // Validate all tables exist and build alias map
     const aliasToTable: Map<string, InMemoryTable> = new Map();
@@ -880,16 +884,6 @@ export class InMemoryEngine implements ExecutionEngine {
       }
     }
 
-    // Order rows
-    if (orderBy) {
-      rows = this.orderRowsWithAliases(rows, orderBy);
-    }
-
-    // Limit rows
-    if (limit !== undefined) {
-      rows = rows.slice(0, limit);
-    }
-
     // Project columns
     const selectAll = columnList.trim() === '*';
     if (!selectAll) {
@@ -902,7 +896,48 @@ export class InMemoryEngine implements ExecutionEngine {
         return this.isAggregateFunction(aliasInfo.expr);
       });
 
-      if (hasAggregate) {
+      // Handle GROUP BY
+      if (groupBy && groupBy.length > 0) {
+        // Group rows by the GROUP BY columns
+        const groups = new Map<string, Record<string, SqlValue>[]>();
+
+        for (const row of rows) {
+          const groupKey = groupBy.map(col => {
+            const val = row[col] ?? row[col.split('.')[1]] ?? null;
+            return JSON.stringify(val);
+          }).join('|');
+
+          if (!groups.has(groupKey)) {
+            groups.set(groupKey, []);
+          }
+          groups.get(groupKey)!.push(row);
+        }
+
+        // For each group, compute aggregates
+        const resultRows: Record<string, SqlValue>[] = [];
+
+        for (const [, groupRows] of groups) {
+          const resultRow: Record<string, SqlValue> = {};
+
+          for (const col of colDefs) {
+            const aliasInfo = this.parseColumnAlias(col);
+            const expr = aliasInfo.expr;
+            const alias = aliasInfo.alias;
+
+            if (this.isAggregateFunction(expr)) {
+              resultRow[alias] = this.evaluateAggregate(expr, groupRows, params);
+            } else {
+              // Non-aggregate column in GROUP BY query - take value from first row
+              const resolvedCol = this.resolveColumnName(expr.trim());
+              resultRow[alias] = groupRows.length > 0 ? (groupRows[0][resolvedCol] ?? groupRows[0][resolvedCol.split('.')[1]] ?? null) : null;
+            }
+          }
+
+          resultRows.push(resultRow);
+        }
+
+        rows = resultRows;
+      } else if (hasAggregate) {
         // Compute aggregates over all rows and return single row
         const aggregateRow: Record<string, SqlValue> = {};
         for (const col of colDefs) {
@@ -911,7 +946,7 @@ export class InMemoryEngine implements ExecutionEngine {
           const alias = aliasInfo.alias;
 
           if (this.isAggregateFunction(expr)) {
-            aggregateRow[alias] = this.evaluateAggregate(expr, rows);
+            aggregateRow[alias] = this.evaluateAggregate(expr, rows, params);
           } else {
             // For non-aggregate columns in aggregate query, resolve and take first row value
             const resolvedCol = this.resolveColumnName(expr.trim());
@@ -988,6 +1023,16 @@ export class InMemoryEngine implements ExecutionEngine {
       }
     }
 
+    // Order rows (after aggregation/grouping)
+    if (orderBy) {
+      rows = this.orderRowsWithAliases(rows, orderBy);
+    }
+
+    // Limit rows
+    if (limit !== undefined) {
+      rows = rows.slice(0, limit);
+    }
+
     return {
       rows,
       columns: selectAll ? (aliasToTable.get(tableRefs[0].alias)?.columns ?? []) : [],
@@ -1038,6 +1083,7 @@ export class InMemoryEngine implements ExecutionEngine {
 
   /**
    * Filter rows with alias-aware column resolution
+   * Uses the new evaluateWhereCondition for complex WHERE clause support
    */
   private filterRowsWithAliases(
     rows: Record<string, SqlValue>[],
@@ -1045,167 +1091,15 @@ export class InMemoryEngine implements ExecutionEngine {
     params: SqlValue[],
     aliasToTable: Map<string, InMemoryTable>
   ): Record<string, SqlValue>[] {
-    // Split by AND (simple implementation)
-    const conditions = whereClause.split(/\s+AND\s+/i);
-
-    let paramIndex = 0;
-
-    // Parse conditions
-    type ParsedCondition =
-      | { type: 'comparison'; leftCol: string; op: string; rightVal: SqlValue | { col: string } }
-      | { type: 'not_in'; col: string; values: SqlValue[]; hasNull: boolean }
-      | { type: 'literal_not_in'; result: boolean };
-    const parsedConditions: ParsedCondition[] = [];
-
-    for (const cond of conditions) {
-      // Check for literal NOT IN pattern (e.g., 1.0 NOT IN (2.0))
-      const literalNotInMatch = cond.match(
-        /^(-?\d+(?:\.\d+)?|'[^']*')\s+NOT\s+IN\s*\(([^)]*)\)$/i
-      );
-      if (literalNotInMatch) {
-        const [, literalStr, valueList] = literalNotInMatch;
-        const literalValue: SqlValue = literalStr.startsWith("'")
-          ? literalStr.slice(1, -1)
-          : Number(literalStr);
-        const values: SqlValue[] = [];
-        let hasNull = false;
-        if (valueList.trim()) {
-          const items = this.parseValueList(valueList, params, paramIndex);
-          for (const item of items.values) {
-            if (item === null) hasNull = true;
-            values.push(item);
-          }
-          paramIndex = items.paramIndex;
-        }
-        // For literal NOT IN, evaluate the condition once
-        const conditionResult = hasNull
-          ? false
-          : values.length === 0
-            ? true
-            : !values.some(v => this.valuesEqual(v, literalValue));
-        parsedConditions.push({ type: 'literal_not_in', result: conditionResult });
-        continue;
-      }
-
-      // Check for NOT IN pattern: column NOT IN (value1, value2, ...)
-      const notInMatch = cond.match(/^(\w+(?:\.\w+)?)\s+NOT\s+IN\s*\(([^)]*)\)$/i);
-      if (notInMatch) {
-        const [, col, valueList] = notInMatch;
-        const values: SqlValue[] = [];
-        let hasNull = false;
-        if (valueList.trim()) {
-          const items = this.parseValueList(valueList, params, paramIndex);
-          for (const item of items.values) {
-            if (item === null) hasNull = true;
-            values.push(item);
-          }
-          paramIndex = items.paramIndex;
-        }
-        parsedConditions.push({ type: 'not_in', col, values, hasNull });
-        continue;
-      }
-
-      // Standard comparison: col op val OR col op col (for joins)
-      const match = cond.match(/^(\w+(?:\.\w+)?)\s*(>=|<=|<>|!=|>|<|=|LIKE|IS)\s*(.+)$/i);
-      if (!match) continue;
-
-      const [, leftCol, op, rightStr] = match;
-      const rightTrimmed = rightStr.trim();
-
-      // Check if right side is another column reference (alias.column)
-      // Must start with a letter to be a column reference (not a number like 2.5)
-      if (/^[a-zA-Z_]\w*\.[a-zA-Z_]\w*$/.test(rightTrimmed)) {
-        parsedConditions.push({
-          type: 'comparison',
-          leftCol,
-          op: op.toUpperCase(),
-          rightVal: { col: rightTrimmed }
-        });
-      } else {
-        // Parse as value
-        let val: SqlValue;
-        if (rightTrimmed === '?') {
-          val = params[paramIndex++];
-        } else if (rightTrimmed.startsWith("'") && rightTrimmed.endsWith("'")) {
-          val = rightTrimmed.slice(1, -1);
-        } else if (!isNaN(Number(rightTrimmed))) {
-          val = Number(rightTrimmed);
-        } else if (rightTrimmed.toUpperCase() === 'NULL') {
-          val = null;
-        } else {
-          val = rightTrimmed;
-        }
-        parsedConditions.push({
-          type: 'comparison',
-          leftCol,
-          op: op.toUpperCase(),
-          rightVal: val
-        });
-      }
-    }
+    const deps: WhereEvaluatorDeps = {
+      parseValueList: (valueList, params, startParamIndex) => this.parseValueList(valueList, params, startParamIndex),
+      valuesEqual: (a, b) => this.valuesEqual(a, b),
+      getColumnValue: (row, colRef) => this.getColumnValue(row, colRef),
+    };
 
     return rows.filter(row => {
-      for (const cond of parsedConditions) {
-        // Handle literal NOT IN - if condition is false, exclude all rows
-        if (cond.type === 'literal_not_in') {
-          if (!cond.result) return false;
-          continue;
-        }
-
-        if (cond.type === 'not_in') {
-          const rowVal = this.getColumnValue(row, cond.col);
-          if (rowVal === null) return false;
-          if (cond.hasNull) return false;
-          if (cond.values.some(v => this.valuesEqual(v, rowVal))) return false;
-          continue;
-        }
-
-        // comparison
-        const leftVal = this.getColumnValue(row, cond.leftCol);
-        const rightVal = (cond.rightVal !== null && typeof cond.rightVal === 'object' && 'col' in cond.rightVal)
-          ? this.getColumnValue(row, cond.rightVal.col)
-          : cond.rightVal;
-
-        switch (cond.op) {
-          case '=':
-            if (!this.valuesEqual(leftVal, rightVal)) return false;
-            break;
-          case '!=':
-          case '<>':
-            if (this.valuesEqual(leftVal, rightVal)) return false;
-            break;
-          case '>':
-            // NULL comparisons should return false (exclude the row)
-            if (leftVal === null || rightVal === null) return false;
-            if (!(Number(leftVal) > Number(rightVal))) return false;
-            break;
-          case '<':
-            if (leftVal === null || rightVal === null) return false;
-            if (!(Number(leftVal) < Number(rightVal))) return false;
-            break;
-          case '>=':
-            if (leftVal === null || rightVal === null) return false;
-            if (!(Number(leftVal) >= Number(rightVal))) return false;
-            break;
-          case '<=':
-            if (leftVal === null || rightVal === null) return false;
-            if (!(Number(leftVal) <= Number(rightVal))) return false;
-            break;
-          case 'IS':
-            if (rightVal === null && leftVal !== null) return false;
-            break;
-          case 'LIKE':
-            if (typeof leftVal === 'string' && typeof rightVal === 'string') {
-              const regex = new RegExp(
-                '^' + rightVal.replace(/%/g, '.*').replace(/_/g, '.') + '$',
-                'i'
-              );
-              if (!regex.test(leftVal)) return false;
-            }
-            break;
-        }
-      }
-      return true;
+      const pIdx = { value: 0 };
+      return evaluateWhereCondition(whereClause, row, params, pIdx, deps);
     });
   }
 
@@ -1282,9 +1176,15 @@ export class InMemoryEngine implements ExecutionEngine {
    * Check if expression contains arithmetic operators or function calls
    */
   private isArithmeticOrFunctionExpression(expr: string): boolean {
+    const trimmed = expr.trim();
     // Check for arithmetic operators: + - * / %
     // Check for function calls: identifier followed by parenthesis like abs(...)
-    return /[+\-*/%]/.test(expr) || /\w+\s*\(/.test(expr);
+    // Check for numeric literals
+    // Check for string literals
+    return /[+\-*/%]/.test(trimmed) ||
+           /\w+\s*\(/.test(trimmed) ||
+           /^-?\d+(\.\d+)?$/.test(trimmed) ||
+           (trimmed.startsWith("'") && trimmed.endsWith("'"));
   }
 
   /**
@@ -1298,58 +1198,186 @@ export class InMemoryEngine implements ExecutionEngine {
   ): Record<string, SqlValue>[] {
     const trimmed = whereClause.trim();
 
-    // Check for EXISTS
+    // Check for EXISTS - needs correlated subquery support
     const existsMatch = this.parseExistsCondition(trimmed);
     if (existsMatch) {
-      const subqueryResult = this.execute(existsMatch.subquery, params);
-      const exists = subqueryResult.rows.length > 0;
-      return existsMatch.isNot ? (exists ? [] : rows) : (exists ? rows : []);
+      // Check if subquery references outer tables (correlated)
+      const isCorrelated = this.isCorrelatedSubquery(existsMatch.subquery, rows);
+
+      if (isCorrelated && rows.length > 0) {
+        // For correlated EXISTS, evaluate subquery for each outer row
+        return rows.filter(outerRow => {
+          const substitutedSubquery = this.substituteOuterReferences(existsMatch.subquery, outerRow);
+          const subqueryResult = this.execute(substitutedSubquery, params);
+          const exists = subqueryResult.rows.length > 0;
+          return existsMatch.isNot ? !exists : exists;
+        });
+      } else {
+        // Non-correlated EXISTS - evaluate once
+        const subqueryResult = this.execute(existsMatch.subquery, params);
+        const exists = subqueryResult.rows.length > 0;
+        return existsMatch.isNot ? (exists ? [] : rows) : (exists ? rows : []);
+      }
     }
 
     // Check for IN with subquery
     const inMatch = this.parseInSubquery(trimmed);
     if (inMatch) {
       const subqueryResult = this.execute(inMatch.subquery, params);
-      const values = new Set(subqueryResult.rows.map(r => {
+      const subqueryValues = subqueryResult.rows.map(r => {
         const keys = Object.keys(r);
         return keys.length > 0 ? r[keys[0]] : null;
-      }));
+      });
+
+      // Handle empty subquery result
+      if (subqueryValues.length === 0) {
+        // x IN () = FALSE for all x, x NOT IN () = TRUE for all x
+        return inMatch.isNot ? rows : [];
+      }
+
+      const values = new Set(subqueryValues);
+      const hasNullInSubquery = subqueryValues.some(v => v === null);
 
       return rows.filter(row => {
         const col = inMatch.column.includes('.')
           ? inMatch.column.split('.')[1]
           : inMatch.column;
         const val = row[col];
+
+        // Handle NULL column values
+        if (val === null) {
+          // NULL IN (...) or NULL NOT IN (...) returns NULL (falsy)
+          return false;
+        }
+
+        // Check if value matches any in the set
         const matches = values.has(val);
-        return inMatch.isNot ? !matches : matches;
+
+        if (inMatch.isNot) {
+          // NOT IN: if NULL is in subquery result and value not found, result is NULL
+          if (!matches && hasNullInSubquery) {
+            return false;
+          }
+          return !matches;
+        } else {
+          return matches;
+        }
       });
     }
 
     // Check for comparison with scalar subquery: col > (SELECT ...)
     const scalarCompMatch = this.parseScalarComparison(trimmed);
     if (scalarCompMatch) {
-      const subqueryResult = this.execute(scalarCompMatch.subquery, params);
-      let scalarValue: SqlValue = null;
-      if (subqueryResult.rows.length > 0) {
-        const firstRow = subqueryResult.rows[0];
-        const keys = Object.keys(firstRow);
-        if (keys.length > 0) {
-          scalarValue = firstRow[keys[0]];
-        }
-      }
+      // Check if it's a correlated subquery
+      const isCorrelated = this.isCorrelatedSubquery(scalarCompMatch.subquery, rows);
 
-      return rows.filter(row => {
-        const col = scalarCompMatch.column.includes('.')
-          ? scalarCompMatch.column.split('.')[1]
-          : scalarCompMatch.column;
-        const rowVal = row[col];
-        return this.compareValuesForSubquery(rowVal, scalarValue, scalarCompMatch.op);
-      });
+      if (isCorrelated && rows.length > 0) {
+        // For correlated scalar comparison, evaluate for each row
+        return rows.filter(outerRow => {
+          const substitutedSubquery = this.substituteOuterReferences(scalarCompMatch.subquery, outerRow);
+          const subqueryResult = this.execute(substitutedSubquery, params);
+          let scalarValue: SqlValue = null;
+          if (subqueryResult.rows.length > 0) {
+            const firstRow = subqueryResult.rows[0];
+            const keys = Object.keys(firstRow);
+            if (keys.length > 0) {
+              scalarValue = firstRow[keys[0]];
+            }
+          }
+          const col = scalarCompMatch.column.includes('.')
+            ? scalarCompMatch.column.split('.')[1]
+            : scalarCompMatch.column;
+          const rowVal = outerRow[col];
+          return this.compareValuesForSubquery(rowVal, scalarValue, scalarCompMatch.op);
+        });
+      } else {
+        // Non-correlated scalar comparison
+        const subqueryResult = this.execute(scalarCompMatch.subquery, params);
+        let scalarValue: SqlValue = null;
+        if (subqueryResult.rows.length > 0) {
+          const firstRow = subqueryResult.rows[0];
+          const keys = Object.keys(firstRow);
+          if (keys.length > 0) {
+            scalarValue = firstRow[keys[0]];
+          }
+        }
+
+        return rows.filter(row => {
+          const col = scalarCompMatch.column.includes('.')
+            ? scalarCompMatch.column.split('.')[1]
+            : scalarCompMatch.column;
+          const rowVal = row[col];
+          return this.compareValuesForSubquery(rowVal, scalarValue, scalarCompMatch.op);
+        });
+      }
     }
 
     // Fallback to simple filtering
     const result = this.filterRows(rows, whereClause, params, 0);
     return result.filtered;
+  }
+
+  /**
+   * Check if a subquery references columns from the outer query (correlated)
+   */
+  private isCorrelatedSubquery(subquerySql: string, outerRows: Record<string, SqlValue>[]): boolean {
+    if (outerRows.length === 0) return false;
+
+    // Get column names from first outer row (includes alias.col format)
+    const outerRow = outerRows[0];
+    const outerColumns = Object.keys(outerRow);
+
+    // Look for references in the subquery that match outer columns
+    // Match patterns like: alias.column where alias.column exists in outer row
+    for (const col of outerColumns) {
+      if (col.includes('.')) {
+        // Check if subquery contains this alias.column reference
+        const regex = new RegExp(`\\b${this.escapeRegex(col)}\\b`, 'i');
+        if (regex.test(subquerySql)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Substitute outer row references in a subquery with actual values
+   */
+  private substituteOuterReferences(subquerySql: string, outerRow: Record<string, SqlValue>): string {
+    let result = subquerySql;
+
+    // Sort columns by length (longest first) to avoid partial replacements
+    const columns = Object.keys(outerRow).sort((a, b) => b.length - a.length);
+
+    for (const col of columns) {
+      if (col.includes('.')) {
+        const value = outerRow[col];
+        const regex = new RegExp(`\\b${this.escapeRegex(col)}\\b`, 'gi');
+
+        // Format value for SQL
+        let sqlValue: string;
+        if (value === null) {
+          sqlValue = 'NULL';
+        } else if (typeof value === 'string') {
+          sqlValue = `'${value.replace(/'/g, "''")}'`;
+        } else {
+          sqlValue = String(value);
+        }
+
+        result = result.replace(regex, sqlValue);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Escape special regex characters in a string
+   */
+  private escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   /**
@@ -1429,35 +1457,68 @@ export class InMemoryEngine implements ExecutionEngine {
    */
   private isAggregateFunction(expr: string): boolean {
     const trimmed = expr.trim().toUpperCase();
-    return /^(COUNT|SUM|AVG|MIN|MAX)\s*\(/i.test(trimmed);
+    return /^(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT|TOTAL)\s*\(/i.test(trimmed);
   }
 
   /**
    * Evaluate an aggregate function over a set of rows
    */
-  private evaluateAggregate(expr: string, rows: Record<string, SqlValue>[]): SqlValue {
-    const match = expr.trim().match(/^(COUNT|SUM|AVG|MIN|MAX)\s*\(\s*(.+?)\s*\)$/i);
+  private evaluateAggregate(expr: string, rows: Record<string, SqlValue>[], params: SqlValue[] = []): SqlValue {
+    // Match aggregate function with optional DISTINCT
+    const match = expr.trim().match(/^(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT|TOTAL)\s*\(\s*(DISTINCT\s+)?(.+?)\s*\)$/i);
     if (!match) return null;
 
-    const [, fn, arg] = match;
+    const [, fn, distinctMod, argWithSeparator] = match;
     const fnUpper = fn.toUpperCase();
-    const argTrimmed = arg.trim();
+    const isDistinct = !!distinctMod;
+
+    // For GROUP_CONCAT, check for separator: GROUP_CONCAT(col, 'sep')
+    let argTrimmed = argWithSeparator.trim();
+    let separator = ','; // default separator
+
+    if (fnUpper === 'GROUP_CONCAT') {
+      // Check for custom separator
+      const sepMatch = argTrimmed.match(/^(.+?),\s*'([^']*)'$/);
+      if (sepMatch) {
+        argTrimmed = sepMatch[1].trim();
+        separator = sepMatch[2];
+      }
+    }
 
     // COUNT(*)
     if (fnUpper === 'COUNT' && argTrimmed === '*') {
       return rows.length;
     }
 
-    // Extract column values
+    // Extract column values - evaluate expressions if needed
+    const pIdx = { value: 0 };
     const values: SqlValue[] = rows.map(row => {
-      if (argTrimmed.includes('.')) {
+      // Check if it's a simple column reference
+      if (/^\w+$/.test(argTrimmed)) {
+        return row[argTrimmed] ?? null;
+      }
+      // Check for table.column format
+      if (/^\w+\.\w+$/.test(argTrimmed)) {
         return row[argTrimmed.split('.')[1]] ?? row[argTrimmed] ?? null;
       }
-      return row[argTrimmed] ?? null;
+      // Otherwise evaluate as expression (arithmetic, CASE, etc.)
+      return evaluateCaseExpr(argTrimmed, row, params, pIdx);
     });
 
+    // Handle DISTINCT
+    let processedValues = values;
+    if (isDistinct) {
+      const seen = new Set<string>();
+      processedValues = values.filter(v => {
+        const key = JSON.stringify(v);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
     // Filter out NULLs for most aggregates (except COUNT(*))
-    const nonNullValues = values.filter(v => v !== null);
+    const nonNullValues = processedValues.filter(v => v !== null);
 
     switch (fnUpper) {
       case 'COUNT':
@@ -1465,6 +1526,12 @@ export class InMemoryEngine implements ExecutionEngine {
 
       case 'SUM': {
         if (nonNullValues.length === 0) return null;
+        return nonNullValues.reduce((sum, v) => sum + Number(v), 0);
+      }
+
+      case 'TOTAL': {
+        // TOTAL is like SUM but returns 0.0 for empty set instead of NULL
+        if (nonNullValues.length === 0) return 0.0;
         return nonNullValues.reduce((sum, v) => sum + Number(v), 0);
       }
 
@@ -1496,6 +1563,11 @@ export class InMemoryEngine implements ExecutionEngine {
           }
           return String(v) > String(max) ? v : max;
         });
+      }
+
+      case 'GROUP_CONCAT': {
+        if (nonNullValues.length === 0) return null;
+        return nonNullValues.map(v => String(v)).join(separator);
       }
 
       default:
@@ -1563,6 +1635,8 @@ export class InMemoryEngine implements ExecutionEngine {
     tableName: string;
     tableRefs: Array<{ tableName: string; alias: string }>;
     whereClause?: string;
+    groupBy?: string[];
+    havingClause?: string;
     orderBy?: string;
     limit?: number;
   } | null {
@@ -1578,15 +1652,19 @@ export class InMemoryEngine implements ExecutionEngine {
 
     const columnList = sql.slice(selectStart, fromPos).trim();
 
-    // Find WHERE, ORDER BY, LIMIT using CASE-aware search
+    // Find WHERE, GROUP BY, HAVING, ORDER BY, LIMIT using CASE-aware search
     const afterFromStart = fromPos + 4;
     const wherePos = findKeywordOutsideCaseAndStrings(sql, afterFromStart, 'WHERE');
+    const groupPos = findKeywordOutsideCaseAndStrings(sql, afterFromStart, 'GROUP');
+    const havingPos = findKeywordOutsideCaseAndStrings(sql, afterFromStart, 'HAVING');
     const orderPos = findKeywordOutsideCaseAndStrings(sql, afterFromStart, 'ORDER');
     const limitPos = findKeywordOutsideCaseAndStrings(sql, afterFromStart, 'LIMIT');
 
     // Determine where the FROM clause ends
     let fromClauseEnd = sql.length;
     if (wherePos !== -1) fromClauseEnd = Math.min(fromClauseEnd, wherePos);
+    if (groupPos !== -1) fromClauseEnd = Math.min(fromClauseEnd, groupPos);
+    if (havingPos !== -1) fromClauseEnd = Math.min(fromClauseEnd, havingPos);
     if (orderPos !== -1) fromClauseEnd = Math.min(fromClauseEnd, orderPos);
     if (limitPos !== -1) fromClauseEnd = Math.min(fromClauseEnd, limitPos);
 
@@ -1608,6 +1686,8 @@ export class InMemoryEngine implements ExecutionEngine {
     const tableName = tableRefs[0].tableName;
 
     let whereClause: string | undefined;
+    let groupBy: string[] | undefined;
+    let havingClause: string | undefined;
     let orderBy: string | undefined;
     let limit: number | undefined;
 
@@ -1615,14 +1695,33 @@ export class InMemoryEngine implements ExecutionEngine {
     if (wherePos !== -1) {
       const whereStart = wherePos + 5; // "WHERE".length
       let whereEnd = sql.length;
+      if (groupPos !== -1 && groupPos > wherePos) whereEnd = Math.min(whereEnd, groupPos);
+      if (havingPos !== -1 && havingPos > wherePos) whereEnd = Math.min(whereEnd, havingPos);
       if (orderPos !== -1 && orderPos > wherePos) whereEnd = Math.min(whereEnd, orderPos);
       if (limitPos !== -1 && limitPos > wherePos) whereEnd = Math.min(whereEnd, limitPos);
       whereClause = sql.slice(whereStart, whereEnd).trim();
     }
 
+    // Extract GROUP BY clause
+    if (groupPos !== -1) {
+      const groupMatch = sql.slice(groupPos).match(/^GROUP\s+BY\s+(.+?)(?:\s+HAVING\s+|\s+ORDER\s+|\s+LIMIT\s+|\s*$)/i);
+      if (groupMatch) {
+        groupBy = groupMatch[1].split(',').map(c => c.trim());
+      }
+    }
+
+    // Extract HAVING clause
+    if (havingPos !== -1) {
+      const havingStart = havingPos + 6; // "HAVING".length
+      let havingEnd = sql.length;
+      if (orderPos !== -1 && orderPos > havingPos) havingEnd = Math.min(havingEnd, orderPos);
+      if (limitPos !== -1 && limitPos > havingPos) havingEnd = Math.min(havingEnd, limitPos);
+      havingClause = sql.slice(havingStart, havingEnd).trim();
+    }
+
     // Extract ORDER BY clause
     if (orderPos !== -1) {
-      const orderMatch = sql.slice(orderPos).match(/^ORDER\s+BY\s+(.+?)(?:\s+LIMIT\s+|$)/i);
+      const orderMatch = sql.slice(orderPos).match(/^ORDER\s+BY\s+(.+?)(?:\s+LIMIT\s+|\s*$)/i);
       if (orderMatch) {
         orderBy = orderMatch[1].trim();
       }
@@ -1636,7 +1735,7 @@ export class InMemoryEngine implements ExecutionEngine {
       }
     }
 
-    return { columnList, tableName, tableRefs, whereClause, orderBy, limit };
+    return { columnList, tableName, tableRefs, whereClause, groupBy, havingClause, orderBy, limit };
   }
 
   /**

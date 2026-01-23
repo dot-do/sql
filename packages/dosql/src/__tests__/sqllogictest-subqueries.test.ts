@@ -254,6 +254,7 @@ describe('SQLLogicTest Subqueries', () => {
 
     /**
      * KNOWN FAILURE: Subquery from different table in WHERE with compound conditions
+     * TODO: Compound AND conditions with multiple subqueries not supported
      */
     it.fails('should support subquery from different table in WHERE', () => {
       db.exec('CREATE TABLE thresholds (min_val INTEGER, max_val INTEGER)');
@@ -289,6 +290,7 @@ describe('SQLLogicTest Subqueries', () => {
 
     /**
      * KNOWN FAILURE: Correlated subquery with count
+     * TODO: Correlated scalar subqueries in SELECT clause not supported
      *
      * SQLLogicTest: SELECT (SELECT count(*) FROM t1 AS x WHERE x.b < t1.b) FROM t1
      * For each row, count how many rows have smaller b values
@@ -317,6 +319,7 @@ describe('SQLLogicTest Subqueries', () => {
 
     /**
      * KNOWN FAILURE: Correlated subquery with max
+     * TODO: Correlated scalar subqueries in SELECT clause not supported
      */
     it.fails('should support correlated subquery with max of smaller values', () => {
       const result = db.prepare(`
@@ -340,9 +343,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Correlated subquery in WHERE clause
+     * Correlated subquery in WHERE clause
      */
-    it.fails('should support correlated subquery in WHERE clause', () => {
+    it('should support correlated subquery in WHERE clause', () => {
       // Select rows where a is greater than the average a of rows with smaller b
       const result = db.prepare(`
         SELECT * FROM t1
@@ -359,6 +362,7 @@ describe('SQLLogicTest Subqueries', () => {
 
     /**
      * KNOWN FAILURE: Correlated subquery with sum
+     * TODO: Correlated scalar subqueries in SELECT clause not supported
      */
     it.fails('should support correlated subquery with sum', () => {
       const result = db.prepare(`
@@ -402,6 +406,7 @@ describe('SQLLogicTest Subqueries', () => {
 
     /**
      * KNOWN FAILURE: Subquery in CASE WHEN condition
+     * TODO: Subqueries in CASE conditions not supported
      *
      * SQLLogicTest: SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END FROM t1
      */
@@ -427,6 +432,7 @@ describe('SQLLogicTest Subqueries', () => {
 
     /**
      * KNOWN FAILURE: Subquery in CASE THEN branch
+     * TODO: Subqueries in CASE THEN branches not supported
      */
     it.fails('should support subquery in CASE THEN branch', () => {
       const result = db.prepare(`
@@ -447,6 +453,7 @@ describe('SQLLogicTest Subqueries', () => {
 
     /**
      * KNOWN FAILURE: Subquery in CASE ELSE branch
+     * TODO: Subqueries in CASE ELSE branches not supported
      */
     it.fails('should support subquery in CASE ELSE branch', () => {
       const result = db.prepare(`
@@ -486,9 +493,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: EXISTS with correlated subquery
+     * EXISTS with correlated subquery
      */
-    it.fails('should support EXISTS subquery', () => {
+    it('should support EXISTS subquery', () => {
       // Select customers who have at least one order
       const result = db.prepare(`
         SELECT * FROM customers c
@@ -504,9 +511,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: EXISTS with correlated conditions
+     * EXISTS with correlated conditions
      */
-    it.fails('should support EXISTS with additional conditions in subquery', () => {
+    it('should support EXISTS with additional conditions in subquery', () => {
       // Select customers who have orders over 100
       const result = db.prepare(`
         SELECT * FROM customers c
@@ -523,6 +530,7 @@ describe('SQLLogicTest Subqueries', () => {
 
     /**
      * KNOWN FAILURE: EXISTS with aggregate correlated condition
+     * TODO: EXISTS with GROUP BY/HAVING in subquery not supported
      */
     it.fails('should support EXISTS with aggregate in subquery', () => {
       // Select customers who have more than 1 order
@@ -561,9 +569,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: NOT EXISTS with correlated subquery
+     * NOT EXISTS with correlated subquery
      */
-    it.fails('should support NOT EXISTS subquery', () => {
+    it('should support NOT EXISTS subquery', () => {
       // Select customers who have NO orders
       const result = db.prepare(`
         SELECT * FROM customers c
@@ -575,9 +583,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: NOT EXISTS with correlated condition
+     * NOT EXISTS with correlated condition
      */
-    it.fails('should support NOT EXISTS with additional conditions', () => {
+    it('should support NOT EXISTS with additional conditions', () => {
       // Select customers who have no orders over 175
       const result = db.prepare(`
         SELECT * FROM customers c
@@ -593,9 +601,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: NOT EXISTS for correlated anti-join pattern
+     * NOT EXISTS for correlated anti-join pattern
      */
-    it.fails('should support NOT EXISTS for anti-join pattern', () => {
+    it('should support NOT EXISTS for anti-join pattern', () => {
       db.exec('CREATE TABLE premium_customers (customer_id INTEGER)');
       db.exec('INSERT INTO premium_customers (customer_id) VALUES (1)');
 
@@ -698,7 +706,8 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Subquery in arithmetic expression (complex)
+     * KNOWN FAILURE: Subquery in arithmetic expression
+     * TODO: Subqueries in arithmetic expressions not supported
      */
     it.fails('should support subquery in arithmetic expression', () => {
       // Calculate each a as a percentage of the total
@@ -721,7 +730,8 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Subquery with subtraction (complex)
+     * KNOWN FAILURE: Subquery with subtraction
+     * TODO: Subqueries in arithmetic expressions not supported
      */
     it.fails('should support subquery in subtraction expression', () => {
       // Calculate deviation from average
@@ -844,9 +854,9 @@ describe('InMemoryEngine Direct Subquery Tests', () => {
   });
 
   /**
-   * KNOWN FAILURE: Engine should parse correlated EXISTS subquery
+   * Engine should parse correlated EXISTS subquery
    */
-  it.fails('should parse and execute EXISTS subquery', () => {
+  it('should parse and execute EXISTS subquery', () => {
     engine.execute('CREATE TABLE t2 (x INTEGER)', []);
     engine.execute('INSERT INTO t2 (x) VALUES (?)', [1]);
 
