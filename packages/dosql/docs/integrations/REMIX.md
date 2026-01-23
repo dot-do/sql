@@ -1,15 +1,20 @@
 # DoSQL + Remix Integration Guide
 
-This guide covers how to integrate DoSQL with Remix applications running on Cloudflare Workers, providing a seamless full-stack development experience with server-side rendering and edge-native data persistence.
+Build full-stack applications with DoSQL and Remix on Cloudflare Workers. This guide covers loaders, actions, resource routes, real-time features, and deployment patterns for production-ready applications.
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Quick Start](#quick-start)
 - [Setup](#setup)
-- [Basic Usage](#basic-usage)
+- [Database Module](#database-module)
+- [Loaders](#loaders)
+- [Actions](#actions)
+- [Resource Routes](#resource-routes)
 - [Patterns](#patterns)
 - [Type Safety](#type-safety)
-- [Advanced](#advanced)
+- [Advanced Features](#advanced-features)
+- [Testing](#testing)
 - [Deployment](#deployment)
 
 ---
@@ -18,15 +23,16 @@ This guide covers how to integrate DoSQL with Remix applications running on Clou
 
 ### Why DoSQL + Remix
 
-Remix and DoSQL are a natural fit for Cloudflare Workers:
+Remix and DoSQL are a natural fit for building full-stack applications on Cloudflare Workers:
 
 | Remix Feature | DoSQL Benefit |
 |---------------|---------------|
-| Loaders | Direct database queries at the edge |
-| Actions | Transactional mutations with automatic rollback |
-| Nested routes | Scoped data loading per route segment |
-| defer() | Streaming database results |
-| Resource routes | REST/JSON API endpoints |
+| Loaders | Direct database queries at the edge with zero cold starts |
+| Actions | Transactional mutations with automatic rollback on errors |
+| Nested Routes | Parallel data loading per route segment |
+| `defer()` | Streaming deferred database results for optimal UX |
+| Resource Routes | JSON APIs, webhooks, and file downloads |
+| Forms | Progressive enhancement with optimistic UI |
 
 ### Architecture
 
@@ -41,7 +47,7 @@ Remix and DoSQL are a natural fit for Cloudflare Workers:
 +------------------------------------------------------------------+
 |                    Cloudflare Worker                              |
 |  +------------------------------------------------------------+  |
-|  |                   Remix Server                              |  |
+|  |                   Remix Application                         |  |
 |  |  +------------------+  +------------------+                 |  |
 |  |  |    Loaders       |  |    Actions       |                 |  |
 |  |  |  (data fetching) |  |  (mutations)     |                 |  |
@@ -70,14 +76,134 @@ Remix and DoSQL are a natural fit for Cloudflare Workers:
 +------------------------+     +------------------------+
 ```
 
-**Data flow:**
+**Request flow:**
 
-1. Browser requests a page
-2. Remix loader runs on Cloudflare Worker
-3. Loader accesses DoSQL via Durable Object binding
-4. DoSQL executes queries against SQLite
-5. Remix renders the page with data
-6. Browser receives fully-rendered HTML
+1. Browser sends request to Cloudflare Worker
+2. Remix router matches the URL and runs loaders/actions
+3. Loaders and actions access DoSQL via Durable Object RPC
+4. DoSQL executes queries against SQLite with full ACID guarantees
+5. Remix renders the response (HTML for pages, JSON for resource routes)
+6. Browser receives the response with zero cold start latency
+
+---
+
+## Quick Start
+
+Get a Remix + DoSQL application running in under 5 minutes.
+
+```bash
+# Create a new Remix project with Cloudflare template
+npx create-remix@latest my-remix-app --template remix-run/remix/templates/cloudflare
+
+cd my-remix-app
+
+# Install DoSQL
+npm install @dotdo/dosql
+
+# Create migrations folder
+mkdir -p .do/migrations
+```
+
+Create your first migration at `.do/migrations/001_init.sql`:
+
+```sql
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_users_email ON users(email);
+```
+
+Create `app/db.server.ts`:
+
+```typescript
+import { DB } from '@dotdo/dosql';
+
+export interface Env {
+  DOSQL_DB: DurableObjectNamespace;
+}
+
+export async function getDB(env: Env, tenantId: string = 'default') {
+  const id = env.DOSQL_DB.idFromName(tenantId);
+  const stub = env.DOSQL_DB.get(id);
+  return createDBClient(stub);
+}
+
+function createDBClient(stub: DurableObjectStub) {
+  return {
+    async query<T>(sql: string, params?: unknown[]): Promise<T[]> {
+      const res = await stub.fetch('http://internal/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql, params }),
+      });
+      const data = await res.json() as { rows: T[] };
+      return data.rows;
+    },
+
+    async queryOne<T>(sql: string, params?: unknown[]): Promise<T | null> {
+      const rows = await this.query<T>(sql, params);
+      return rows[0] ?? null;
+    },
+
+    async run(sql: string, params?: unknown[]) {
+      const res = await stub.fetch('http://internal/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql, params }),
+      });
+      return res.json() as Promise<{ rowsAffected: number; lastInsertRowId: number }>;
+    },
+  };
+}
+```
+
+Create a simple route at `app/routes/users._index.tsx`:
+
+```typescript
+import { json, type LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { useLoaderData, Link } from '@remix-run/react';
+import { getDB } from '~/db.server';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+export async function loader({ context }: LoaderFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+  const users = await db.query<User>('SELECT * FROM users ORDER BY id DESC');
+  return json({ users });
+}
+
+export default function UsersIndex() {
+  const { users } = useLoaderData<typeof loader>();
+
+  return (
+    <div>
+      <h1>Users</h1>
+      <Link to="/users/new">Add User</Link>
+      <ul>
+        {users.map((user) => (
+          <li key={user.id}>
+            <Link to={`/users/${user.id}`}>{user.name}</Link> - {user.email}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+Run locally:
+
+```bash
+npm run dev
+```
 
 ---
 
@@ -86,13 +212,13 @@ Remix and DoSQL are a natural fit for Cloudflare Workers:
 ### Installation
 
 ```bash
-# Create a new Remix project with Cloudflare template
-npx create-remix@latest --template remix-run/remix/templates/cloudflare
+# Create Remix project with Cloudflare Workers template
+npx create-remix@latest my-remix-app --template remix-run/remix/templates/cloudflare
 
-# Install DoSQL
+cd my-remix-app
+
+# Install DoSQL and dev dependencies
 npm install @dotdo/dosql
-
-# Install dev dependencies
 npm install -D @cloudflare/workers-types wrangler
 ```
 
@@ -105,32 +231,39 @@ my-remix-app/
 │       ├── 001_create_users.sql
 │       └── 002_create_posts.sql
 ├── app/
-│   ├── db.server.ts          # Database utilities (server only)
+│   ├── db.server.ts          # Database client (server-only)
+│   ├── types/
+│   │   └── database.ts       # Shared type definitions
 │   ├── routes/
 │   │   ├── _index.tsx
 │   │   ├── users._index.tsx
+│   │   ├── users.new.tsx
 │   │   ├── users.$id.tsx
+│   │   ├── users.$id.edit.tsx
 │   │   └── api.users.tsx     # Resource route
 │   ├── root.tsx
 │   └── entry.server.tsx
-├── public/
+├── server/
+│   └── durable-object.ts     # DoSQL Durable Object
+├── load-context.ts           # Cloudflare context types
 ├── wrangler.toml
 ├── package.json
+├── vite.config.ts
 └── tsconfig.json
 ```
 
 ### Environment Configuration
 
-Create a `load-context.ts` file:
+Create `load-context.ts` for type-safe environment bindings:
 
 ```typescript
 // load-context.ts
 import { type PlatformProxy } from 'wrangler';
 
-// Define your environment bindings
 export interface Env {
   DOSQL_DB: DurableObjectNamespace;
-  DATA_BUCKET: R2Bucket;
+  DATA_BUCKET?: R2Bucket;
+  SESSION_KV?: KVNamespace;
 }
 
 type Cloudflare = Omit<PlatformProxy<Env>, 'dispose'>;
@@ -151,17 +284,17 @@ export function getLoadContext({
 }
 ```
 
-### Worker Bindings
+### Wrangler Configuration
 
 Configure `wrangler.toml`:
 
 ```toml
 name = "my-remix-app"
 main = "build/server/index.js"
-compatibility_date = "2024-01-01"
+compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Assets for Remix client-side
+# Static assets
 [site]
 bucket = "./build/client"
 
@@ -174,82 +307,86 @@ class_name = "DoSQLDatabase"
 tag = "v1"
 new_classes = ["DoSQLDatabase"]
 
-# Optional: R2 for cold storage
+# Optional: R2 for cold storage tier
 [[r2_buckets]]
 binding = "DATA_BUCKET"
 bucket_name = "my-remix-data"
+
+# Optional: KV for sessions
+[[kv_namespaces]]
+binding = "SESSION_KV"
+id = "your-kv-id"
 ```
 
-### Database Server Module
+### Vite Configuration
 
-Create `app/db.server.ts`:
+Update `vite.config.ts` to copy migrations:
 
 ```typescript
-// app/db.server.ts
-import { DB, type Database } from '@dotdo/dosql';
-import type { Env } from '../load-context';
+import { vitePlugin as remix } from '@remix-run/dev';
+import { defineConfig } from 'vite';
+import { copyFileSync, mkdirSync, readdirSync } from 'fs';
 
-// Cache database connection per request
-let dbPromise: Promise<Database> | null = null;
+export default defineConfig({
+  plugins: [
+    remix({
+      future: {
+        v3_fetcherPersist: true,
+        v3_relativeSplatPath: true,
+        v3_throwAbortReason: true,
+        v3_singleFetch: true,
+        v3_lazyRouteDiscovery: true,
+      },
+    }),
+    {
+      name: 'copy-migrations',
+      buildEnd() {
+        const srcDir = '.do/migrations';
+        const destDir = 'build/server/.do/migrations';
+        mkdirSync(destDir, { recursive: true });
 
-export async function getDB(env: Env, tenantId: string = 'default'): Promise<Database> {
-  // Get Durable Object stub
-  const id = env.DOSQL_DB.idFromName(tenantId);
-  const stub = env.DOSQL_DB.get(id);
+        for (const file of readdirSync(srcDir)) {
+          if (file.endsWith('.sql')) {
+            copyFileSync(`${srcDir}/${file}`, `${destDir}/${file}`);
+          }
+        }
+      },
+    },
+  ],
+});
+```
 
-  // Return RPC client to the DO
-  return createDBClient(stub);
+---
+
+## Database Module
+
+### Durable Object Implementation
+
+Create `server/durable-object.ts`:
+
+```typescript
+import { DB } from '@dotdo/dosql';
+
+export interface Env {
+  DOSQL_DB: DurableObjectNamespace;
+  DATA_BUCKET?: R2Bucket;
 }
 
-// Simple RPC client for database operations
-function createDBClient(stub: DurableObjectStub): Database {
-  return {
-    async query<T>(sql: string, params?: unknown[]): Promise<T[]> {
-      const response = await stub.fetch('http://internal/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql, params }),
-      });
-      const data = await response.json() as { rows: T[] };
-      return data.rows;
-    },
-
-    async queryOne<T>(sql: string, params?: unknown[]): Promise<T | null> {
-      const rows = await this.query<T>(sql, params);
-      return rows[0] ?? null;
-    },
-
-    async run(sql: string, params?: unknown[]) {
-      const response = await stub.fetch('http://internal/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql, params }),
-      });
-      return response.json() as Promise<{ rowsAffected: number; lastInsertRowId: number }>;
-    },
-
-    async transaction<T>(fn: (tx: Transaction) => Promise<T>): Promise<T> {
-      // For complex transactions, use the RPC transaction endpoint
-      const response = await stub.fetch('http://internal/transaction', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ operations: await collectOperations(fn) }),
-      });
-      return response.json() as Promise<T>;
-    },
-  } as Database;
+interface Operation {
+  type: 'query' | 'run';
+  sql: string;
+  params?: unknown[];
 }
 
-// DoSQL Durable Object class (export in your worker entry)
 export class DoSQLDatabase implements DurableObject {
-  private db: Database | null = null;
+  private db: Awaited<ReturnType<typeof DB>> | null = null;
 
   constructor(
     private state: DurableObjectState,
     private env: Env
   ) {}
 
-  private async getDB(): Promise<Database> {
+  private async getDB() {
     if (!this.db) {
       this.db = await DB('remix-app', {
         migrations: { folder: '.do/migrations' },
@@ -267,36 +404,46 @@ export class DoSQLDatabase implements DurableObject {
     const db = await this.getDB();
 
     try {
-      if (url.pathname === '/query' && request.method === 'POST') {
-        const { sql, params } = await request.json() as { sql: string; params?: unknown[] };
-        const rows = await db.query(sql, params);
-        return Response.json({ rows });
-      }
+      switch (url.pathname) {
+        case '/query': {
+          const { sql, params } = await request.json() as { sql: string; params?: unknown[] };
+          const rows = await db.query(sql, params);
+          return Response.json({ rows });
+        }
 
-      if (url.pathname === '/run' && request.method === 'POST') {
-        const { sql, params } = await request.json() as { sql: string; params?: unknown[] };
-        const result = await db.run(sql, params);
-        return Response.json(result);
-      }
+        case '/queryOne': {
+          const { sql, params } = await request.json() as { sql: string; params?: unknown[] };
+          const rows = await db.query(sql, params);
+          return Response.json({ row: rows[0] ?? null });
+        }
 
-      if (url.pathname === '/transaction' && request.method === 'POST') {
-        const { operations } = await request.json() as { operations: Operation[] };
-        const result = await db.transaction(async (tx) => {
-          let lastResult;
-          for (const op of operations) {
-            if (op.type === 'query') {
-              lastResult = await tx.query(op.sql, op.params);
-            } else {
-              lastResult = await tx.run(op.sql, op.params);
+        case '/run': {
+          const { sql, params } = await request.json() as { sql: string; params?: unknown[] };
+          const result = await db.run(sql, params);
+          return Response.json(result);
+        }
+
+        case '/transaction': {
+          const { operations } = await request.json() as { operations: Operation[] };
+          const result = await db.transaction(async (tx) => {
+            const results: unknown[] = [];
+            for (const op of operations) {
+              if (op.type === 'query') {
+                results.push(await tx.query(op.sql, op.params));
+              } else {
+                results.push(await tx.run(op.sql, op.params));
+              }
             }
-          }
-          return lastResult;
-        });
-        return Response.json(result);
-      }
+            return results;
+          });
+          return Response.json({ results: result });
+        }
 
-      return new Response('Not Found', { status: 404 });
+        default:
+          return new Response('Not Found', { status: 404 });
+      }
     } catch (error) {
+      console.error('Database error:', error);
       return Response.json(
         { error: (error as Error).message },
         { status: 500 }
@@ -304,24 +451,126 @@ export class DoSQLDatabase implements DurableObject {
     }
   }
 }
+```
 
-interface Operation {
-  type: 'query' | 'run';
-  sql: string;
-  params?: unknown[];
+### Database Client
+
+Create `app/db.server.ts`:
+
+```typescript
+// app/db.server.ts
+// This file has the .server suffix so Remix excludes it from client bundles
+
+export interface Env {
+  DOSQL_DB: DurableObjectNamespace;
+  DATA_BUCKET?: R2Bucket;
+}
+
+export interface DBClient {
+  query<T>(sql: string, params?: unknown[]): Promise<T[]>;
+  queryOne<T>(sql: string, params?: unknown[]): Promise<T | null>;
+  run(sql: string, params?: unknown[]): Promise<{ rowsAffected: number; lastInsertRowId: number }>;
+  transaction<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T>;
+}
+
+export interface TransactionClient {
+  query<T>(sql: string, params?: unknown[]): Promise<T[]>;
+  run(sql: string, params?: unknown[]): Promise<{ rowsAffected: number; lastInsertRowId: number }>;
+}
+
+export async function getDB(env: Env, tenantId: string = 'default'): Promise<DBClient> {
+  const id = env.DOSQL_DB.idFromName(tenantId);
+  const stub = env.DOSQL_DB.get(id);
+  return createDBClient(stub);
+}
+
+function createDBClient(stub: DurableObjectStub): DBClient {
+  const rpc = async <T>(endpoint: string, body: unknown): Promise<T> => {
+    const response = await stub.fetch(`http://internal${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const error = await response.json() as { error: string };
+      throw new Error(error.error || 'Database error');
+    }
+
+    return response.json() as Promise<T>;
+  };
+
+  return {
+    async query<T>(sql: string, params?: unknown[]): Promise<T[]> {
+      const result = await rpc<{ rows: T[] }>('/query', { sql, params });
+      return result.rows;
+    },
+
+    async queryOne<T>(sql: string, params?: unknown[]): Promise<T | null> {
+      const result = await rpc<{ row: T | null }>('/queryOne', { sql, params });
+      return result.row;
+    },
+
+    async run(sql: string, params?: unknown[]) {
+      return rpc<{ rowsAffected: number; lastInsertRowId: number }>('/run', { sql, params });
+    },
+
+    async transaction<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T> {
+      // Collect operations from the transaction function
+      const operations: Array<{ type: 'query' | 'run'; sql: string; params?: unknown[] }> = [];
+
+      const txClient: TransactionClient = {
+        async query<U>(sql: string, params?: unknown[]): Promise<U[]> {
+          operations.push({ type: 'query', sql, params });
+          return [] as U[];
+        },
+        async run(sql: string, params?: unknown[]) {
+          operations.push({ type: 'run', sql, params });
+          return { rowsAffected: 0, lastInsertRowId: 0 };
+        },
+      };
+
+      await fn(txClient);
+
+      const result = await rpc<{ results: unknown[] }>('/transaction', { operations });
+      return result.results[result.results.length - 1] as T;
+    },
+  };
+}
+
+// Multi-tenant helper
+export function getTenantId(request: Request): string {
+  // Option 1: From header
+  const headerTenant = request.headers.get('X-Tenant-ID');
+  if (headerTenant) return headerTenant;
+
+  // Option 2: From subdomain
+  const url = new URL(request.url);
+  const subdomain = url.hostname.split('.')[0];
+  if (subdomain && subdomain !== 'www' && subdomain !== 'app') {
+    return subdomain;
+  }
+
+  // Option 3: From path (e.g., /tenant/acme/...)
+  const pathMatch = url.pathname.match(/^\/tenant\/([^/]+)/);
+  if (pathMatch) return pathMatch[1];
+
+  return 'default';
 }
 ```
 
 ---
 
-## Basic Usage
+## Loaders
 
-### Loader with Database Queries
+Loaders fetch data on the server before rendering. They run on every navigation and can access the database directly.
+
+### Basic Loader
 
 ```typescript
 // app/routes/users._index.tsx
 import { json, type LoaderFunctionArgs } from '@remix-run/cloudflare';
-import { useLoaderData } from '@remix-run/react';
+import { useLoaderData, Link } from '@remix-run/react';
 import { getDB } from '~/db.server';
 
 interface User {
@@ -349,11 +598,13 @@ export default function UsersIndex() {
 
   return (
     <div>
-      <h1>Users</h1>
+      <h1>Users ({users.length})</h1>
+      <Link to="/users/new">Add User</Link>
       <ul>
         {users.map((user) => (
           <li key={user.id}>
-            <a href={`/users/${user.id}`}>{user.name}</a> - {user.email}
+            <Link to={`/users/${user.id}`}>{user.name}</Link>
+            <span> - {user.email}</span>
           </li>
         ))}
       </ul>
@@ -362,97 +613,12 @@ export default function UsersIndex() {
 }
 ```
 
-### Action with Mutations
-
-```typescript
-// app/routes/users.new.tsx
-import {
-  json,
-  redirect,
-  type ActionFunctionArgs,
-  type LoaderFunctionArgs,
-} from '@remix-run/cloudflare';
-import { Form, useActionData, useNavigation } from '@remix-run/react';
-import { getDB } from '~/db.server';
-
-export async function action({ request, context }: ActionFunctionArgs) {
-  const db = await getDB(context.cloudflare.env);
-  const formData = await request.formData();
-
-  const name = formData.get('name') as string;
-  const email = formData.get('email') as string;
-
-  // Validation
-  const errors: Record<string, string> = {};
-  if (!name || name.length < 2) {
-    errors.name = 'Name must be at least 2 characters';
-  }
-  if (!email || !email.includes('@')) {
-    errors.email = 'Valid email is required';
-  }
-
-  if (Object.keys(errors).length > 0) {
-    return json({ errors }, { status: 400 });
-  }
-
-  try {
-    const result = await db.run(
-      'INSERT INTO users (name, email) VALUES (?, ?)',
-      [name, email]
-    );
-
-    return redirect(`/users/${result.lastInsertRowId}`);
-  } catch (error) {
-    if ((error as Error).message.includes('UNIQUE constraint')) {
-      return json(
-        { errors: { email: 'Email already exists' } },
-        { status: 400 }
-      );
-    }
-    throw error;
-  }
-}
-
-export default function NewUser() {
-  const actionData = useActionData<typeof action>();
-  const navigation = useNavigation();
-  const isSubmitting = navigation.state === 'submitting';
-
-  return (
-    <Form method="post">
-      <div>
-        <label htmlFor="name">Name</label>
-        <input type="text" name="name" id="name" required />
-        {actionData?.errors?.name && (
-          <span className="error">{actionData.errors.name}</span>
-        )}
-      </div>
-
-      <div>
-        <label htmlFor="email">Email</label>
-        <input type="email" name="email" id="email" required />
-        {actionData?.errors?.email && (
-          <span className="error">{actionData.errors.email}</span>
-        )}
-      </div>
-
-      <button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? 'Creating...' : 'Create User'}
-      </button>
-    </Form>
-  );
-}
-```
-
-### Error Handling
+### Loader with URL Parameters
 
 ```typescript
 // app/routes/users.$id.tsx
-import {
-  json,
-  type LoaderFunctionArgs,
-} from '@remix-run/cloudflare';
-import { useLoaderData, isRouteErrorResponse, useRouteError } from '@remix-run/react';
+import { json, type LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { useLoaderData, Link } from '@remix-run/react';
 import { getDB } from '~/db.server';
 
 interface User {
@@ -472,10 +638,7 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
   );
 
   if (!user) {
-    throw json(
-      { message: 'User not found' },
-      { status: 404 }
-    );
+    throw json({ message: 'User not found' }, { status: 404 });
   }
 
   return json({ user });
@@ -486,32 +649,219 @@ export default function UserProfile() {
 
   return (
     <div>
+      <Link to="/users">Back to Users</Link>
       <h1>{user.name}</h1>
-      <p>{user.email}</p>
-      {user.bio && <p>{user.bio}</p>}
+      <p>Email: {user.email}</p>
+      {user.bio && <p>Bio: {user.bio}</p>}
       <p>Joined: {new Date(user.created_at).toLocaleDateString()}</p>
+      <Link to={`/users/${user.id}/edit`}>Edit</Link>
     </div>
   );
 }
+```
 
-export function ErrorBoundary() {
-  const error = useRouteError();
+### Loader with Search and Pagination
 
-  if (isRouteErrorResponse(error)) {
-    if (error.status === 404) {
-      return (
-        <div>
-          <h1>User Not Found</h1>
-          <p>The user you're looking for doesn't exist.</p>
-        </div>
-      );
-    }
+```typescript
+// app/routes/users._index.tsx
+import { json, type LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { useLoaderData, useSearchParams, Link, Form } from '@remix-run/react';
+import { getDB } from '~/db.server';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+  const url = new URL(request.url);
+
+  const search = url.searchParams.get('q') || '';
+  const page = parseInt(url.searchParams.get('page') || '1', 10);
+  const limit = 20;
+  const offset = (page - 1) * limit;
+
+  let sql = 'SELECT id, name, email FROM users';
+  let countSql = 'SELECT COUNT(*) as total FROM users';
+  const params: unknown[] = [];
+  const countParams: unknown[] = [];
+
+  if (search) {
+    const whereClause = ' WHERE name LIKE ? OR email LIKE ?';
+    sql += whereClause;
+    countSql += whereClause;
+    params.push(`%${search}%`, `%${search}%`);
+    countParams.push(`%${search}%`, `%${search}%`);
   }
+
+  sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+  params.push(limit, offset);
+
+  const [users, countResult] = await Promise.all([
+    db.query<User>(sql, params),
+    db.queryOne<{ total: number }>(countSql, countParams),
+  ]);
+
+  const total = countResult?.total || 0;
+  const totalPages = Math.ceil(total / limit);
+
+  return json({ users, page, totalPages, search, total });
+}
+
+export default function UsersIndex() {
+  const { users, page, totalPages, search, total } = useLoaderData<typeof loader>();
+  const [searchParams] = useSearchParams();
 
   return (
     <div>
-      <h1>Error</h1>
-      <p>Something went wrong loading this user.</p>
+      <h1>Users ({total})</h1>
+
+      <Form method="get">
+        <input
+          type="search"
+          name="q"
+          placeholder="Search users..."
+          defaultValue={search}
+        />
+        <button type="submit">Search</button>
+      </Form>
+
+      <ul>
+        {users.map((user) => (
+          <li key={user.id}>
+            <Link to={`/users/${user.id}`}>{user.name}</Link> - {user.email}
+          </li>
+        ))}
+      </ul>
+
+      <nav>
+        {page > 1 && (
+          <Link to={`?${new URLSearchParams({ ...Object.fromEntries(searchParams), page: String(page - 1) })}`}>
+            Previous
+          </Link>
+        )}
+        <span>Page {page} of {totalPages}</span>
+        {page < totalPages && (
+          <Link to={`?${new URLSearchParams({ ...Object.fromEntries(searchParams), page: String(page + 1) })}`}>
+            Next
+          </Link>
+        )}
+      </nav>
+    </div>
+  );
+}
+```
+
+### Deferred Loading with defer()
+
+Use `defer()` to stream non-critical data for better perceived performance:
+
+```typescript
+// app/routes/dashboard.tsx
+import { defer, type LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { Await, useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { getDB } from '~/db.server';
+
+interface Stats {
+  totalUsers: number;
+  totalPosts: number;
+  activeToday: number;
+}
+
+interface RecentUser {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+export async function loader({ context }: LoaderFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+
+  // Critical data - await immediately for initial render
+  const stats = await db.queryOne<Stats>(`
+    SELECT
+      (SELECT COUNT(*) FROM users) as totalUsers,
+      (SELECT COUNT(*) FROM posts) as totalPosts,
+      (SELECT COUNT(DISTINCT user_id) FROM activity
+       WHERE created_at > datetime('now', '-24 hours')) as activeToday
+  `);
+
+  // Non-critical data - defer and stream
+  const recentUsersPromise = db.query<RecentUser>(`
+    SELECT id, name, created_at
+    FROM users
+    ORDER BY created_at DESC
+    LIMIT 10
+  `);
+
+  const topPostsPromise = db.query<{ id: number; title: string; likes: number }>(`
+    SELECT p.id, p.title, COUNT(l.id) as likes
+    FROM posts p
+    LEFT JOIN likes l ON l.post_id = p.id
+    WHERE p.published = 1
+    GROUP BY p.id
+    ORDER BY likes DESC
+    LIMIT 5
+  `);
+
+  return defer({
+    stats,
+    recentUsers: recentUsersPromise,
+    topPosts: topPostsPromise,
+  });
+}
+
+export default function Dashboard() {
+  const { stats, recentUsers, topPosts } = useLoaderData<typeof loader>();
+
+  return (
+    <div>
+      <h1>Dashboard</h1>
+
+      {/* Critical data renders immediately */}
+      <section className="stats">
+        <div>Total Users: {stats?.totalUsers ?? 0}</div>
+        <div>Total Posts: {stats?.totalPosts ?? 0}</div>
+        <div>Active Today: {stats?.activeToday ?? 0}</div>
+      </section>
+
+      {/* Deferred data streams in */}
+      <div className="panels">
+        <section>
+          <h2>Recent Users</h2>
+          <Suspense fallback={<div>Loading recent users...</div>}>
+            <Await resolve={recentUsers}>
+              {(users) => (
+                <ul>
+                  {users.map((user) => (
+                    <li key={user.id}>{user.name}</li>
+                  ))}
+                </ul>
+              )}
+            </Await>
+          </Suspense>
+        </section>
+
+        <section>
+          <h2>Top Posts</h2>
+          <Suspense fallback={<div>Loading top posts...</div>}>
+            <Await resolve={topPosts}>
+              {(posts) => (
+                <ul>
+                  {posts.map((post) => (
+                    <li key={post.id}>
+                      {post.title} ({post.likes} likes)
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Await>
+          </Suspense>
+        </section>
+      </div>
     </div>
   );
 }
@@ -519,21 +869,324 @@ export function ErrorBoundary() {
 
 ---
 
-## Patterns
+## Actions
 
-### Resource Routes for API Endpoints
+Actions handle form submissions and mutations. They run on POST, PUT, PATCH, and DELETE requests.
+
+### Basic Action
+
+```typescript
+// app/routes/users.new.tsx
+import {
+  json,
+  redirect,
+  type ActionFunctionArgs,
+} from '@remix-run/cloudflare';
+import { Form, useActionData, useNavigation } from '@remix-run/react';
+import { getDB } from '~/db.server';
+
+interface ActionData {
+  errors?: {
+    name?: string;
+    email?: string;
+  };
+}
+
+export async function action({ request, context }: ActionFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+  const formData = await request.formData();
+
+  const name = formData.get('name') as string;
+  const email = formData.get('email') as string;
+
+  // Validation
+  const errors: ActionData['errors'] = {};
+
+  if (!name || name.length < 2) {
+    errors.name = 'Name must be at least 2 characters';
+  }
+  if (!email || !email.includes('@')) {
+    errors.email = 'Valid email is required';
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return json<ActionData>({ errors }, { status: 400 });
+  }
+
+  try {
+    const result = await db.run(
+      'INSERT INTO users (name, email) VALUES (?, ?)',
+      [name, email]
+    );
+
+    return redirect(`/users/${result.lastInsertRowId}`);
+  } catch (error) {
+    if ((error as Error).message.includes('UNIQUE constraint')) {
+      return json<ActionData>(
+        { errors: { email: 'Email already exists' } },
+        { status: 400 }
+      );
+    }
+    throw error;
+  }
+}
+
+export default function NewUser() {
+  const actionData = useActionData<ActionData>();
+  const navigation = useNavigation();
+  const isSubmitting = navigation.state === 'submitting';
+
+  return (
+    <div>
+      <h1>New User</h1>
+      <Form method="post">
+        <div>
+          <label htmlFor="name">Name</label>
+          <input
+            type="text"
+            id="name"
+            name="name"
+            required
+            minLength={2}
+          />
+          {actionData?.errors?.name && (
+            <span className="error">{actionData.errors.name}</span>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="email">Email</label>
+          <input
+            type="email"
+            id="email"
+            name="email"
+            required
+          />
+          {actionData?.errors?.email && (
+            <span className="error">{actionData.errors.email}</span>
+          )}
+        </div>
+
+        <button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? 'Creating...' : 'Create User'}
+        </button>
+      </Form>
+    </div>
+  );
+}
+```
+
+### Action with Multiple Intents
+
+```typescript
+// app/routes/users.$id.tsx
+import {
+  json,
+  redirect,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from '@remix-run/cloudflare';
+import { Form, useLoaderData, useNavigation } from '@remix-run/react';
+import { getDB } from '~/db.server';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+export async function loader({ params, context }: LoaderFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+
+  const user = await db.queryOne<User>(
+    'SELECT * FROM users WHERE id = ?',
+    [params.id]
+  );
+
+  if (!user) {
+    throw json({ message: 'User not found' }, { status: 404 });
+  }
+
+  return json({ user });
+}
+
+export async function action({ request, params, context }: ActionFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+  const formData = await request.formData();
+  const intent = formData.get('intent');
+
+  switch (intent) {
+    case 'update': {
+      const name = formData.get('name') as string;
+      const email = formData.get('email') as string;
+
+      await db.run(
+        'UPDATE users SET name = ?, email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [name, email, params.id]
+      );
+
+      return json({ success: true });
+    }
+
+    case 'delete': {
+      await db.run('DELETE FROM users WHERE id = ?', [params.id]);
+      return redirect('/users');
+    }
+
+    default:
+      return json({ error: 'Invalid intent' }, { status: 400 });
+  }
+}
+
+export default function UserDetail() {
+  const { user } = useLoaderData<typeof loader>();
+  const navigation = useNavigation();
+  const isUpdating = navigation.formData?.get('intent') === 'update';
+  const isDeleting = navigation.formData?.get('intent') === 'delete';
+
+  return (
+    <div>
+      <h1>Edit User</h1>
+
+      <Form method="post">
+        <input type="hidden" name="intent" value="update" />
+        <div>
+          <label htmlFor="name">Name</label>
+          <input
+            type="text"
+            id="name"
+            name="name"
+            defaultValue={user.name}
+            required
+          />
+        </div>
+        <div>
+          <label htmlFor="email">Email</label>
+          <input
+            type="email"
+            id="email"
+            name="email"
+            defaultValue={user.email}
+            required
+          />
+        </div>
+        <button type="submit" disabled={isUpdating}>
+          {isUpdating ? 'Saving...' : 'Save Changes'}
+        </button>
+      </Form>
+
+      <Form method="post">
+        <input type="hidden" name="intent" value="delete" />
+        <button
+          type="submit"
+          disabled={isDeleting}
+          onClick={(e) => {
+            if (!confirm('Are you sure you want to delete this user?')) {
+              e.preventDefault();
+            }
+          }}
+        >
+          {isDeleting ? 'Deleting...' : 'Delete User'}
+        </button>
+      </Form>
+    </div>
+  );
+}
+```
+
+### Transactional Actions
+
+```typescript
+// app/routes/api.transfer.tsx
+import { json, type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { getDB } from '~/db.server';
+
+export async function action({ request, context }: ActionFunctionArgs) {
+  if (request.method !== 'POST') {
+    return json({ error: 'Method not allowed' }, { status: 405 });
+  }
+
+  const db = await getDB(context.cloudflare.env);
+  const { fromAccountId, toAccountId, amount } = await request.json() as {
+    fromAccountId: number;
+    toAccountId: number;
+    amount: number;
+  };
+
+  if (amount <= 0) {
+    return json({ error: 'Amount must be positive' }, { status: 400 });
+  }
+
+  try {
+    const result = await db.transaction(async (tx) => {
+      // Check source balance
+      const source = await tx.query<{ balance: number }>(
+        'SELECT balance FROM accounts WHERE id = ?',
+        [fromAccountId]
+      );
+
+      if (!source[0] || source[0].balance < amount) {
+        throw new Error('Insufficient funds');
+      }
+
+      // Debit source account
+      await tx.run(
+        'UPDATE accounts SET balance = balance - ? WHERE id = ?',
+        [amount, fromAccountId]
+      );
+
+      // Credit destination account
+      await tx.run(
+        'UPDATE accounts SET balance = balance + ? WHERE id = ?',
+        [amount, toAccountId]
+      );
+
+      // Record the transfer
+      await tx.run(
+        `INSERT INTO transfers (from_account_id, to_account_id, amount)
+         VALUES (?, ?, ?)`,
+        [fromAccountId, toAccountId, amount]
+      );
+
+      return { success: true };
+    });
+
+    return json(result);
+  } catch (error) {
+    return json(
+      { error: (error as Error).message },
+      { status: 400 }
+    );
+  }
+}
+```
+
+---
+
+## Resource Routes
+
+Resource routes return non-HTML responses like JSON, files, or streams. They have no default export (no UI component).
+
+### JSON API Endpoint
 
 ```typescript
 // app/routes/api.users.tsx
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { getDB } from '~/db.server';
 
-// GET /api/users - List users
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  created_at: string;
+}
+
+// GET /api/users
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const db = await getDB(context.cloudflare.env);
   const url = new URL(request.url);
 
-  const limit = parseInt(url.searchParams.get('limit') || '50', 10);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 100);
   const offset = parseInt(url.searchParams.get('offset') || '0', 10);
   const search = url.searchParams.get('q');
 
@@ -548,43 +1201,258 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
   params.push(limit, offset);
 
-  const users = await db.query(sql, params);
-  const countResult = await db.queryOne<{ total: number }>(
-    'SELECT COUNT(*) as total FROM users' + (search ? ' WHERE name LIKE ? OR email LIKE ?' : ''),
-    search ? [`%${search}%`, `%${search}%`] : []
-  );
+  const [users, countResult] = await Promise.all([
+    db.query<User>(sql, params),
+    db.queryOne<{ total: number }>(
+      'SELECT COUNT(*) as total FROM users' +
+        (search ? ' WHERE name LIKE ? OR email LIKE ?' : ''),
+      search ? [`%${search}%`, `%${search}%`] : []
+    ),
+  ]);
 
   return json({
-    users,
-    total: countResult?.total || 0,
-    limit,
-    offset,
+    data: users,
+    pagination: {
+      total: countResult?.total || 0,
+      limit,
+      offset,
+    },
   });
 }
 
-// POST /api/users - Create user
+// POST /api/users
 export async function action({ request, context }: ActionFunctionArgs) {
   const db = await getDB(context.cloudflare.env);
 
-  if (request.method === 'POST') {
-    const body = await request.json() as { name: string; email: string };
+  switch (request.method) {
+    case 'POST': {
+      const body = await request.json() as { name: string; email: string };
 
-    const result = await db.run(
-      'INSERT INTO users (name, email) VALUES (?, ?)',
-      [body.name, body.email]
-    );
+      if (!body.name || !body.email) {
+        return json({ error: 'Name and email are required' }, { status: 400 });
+      }
 
-    return json(
-      { id: result.lastInsertRowId, ...body },
-      { status: 201 }
-    );
+      try {
+        const result = await db.run(
+          'INSERT INTO users (name, email) VALUES (?, ?)',
+          [body.name, body.email]
+        );
+
+        const user = await db.queryOne<User>(
+          'SELECT * FROM users WHERE id = ?',
+          [result.lastInsertRowId]
+        );
+
+        return json({ data: user }, { status: 201 });
+      } catch (error) {
+        if ((error as Error).message.includes('UNIQUE constraint')) {
+          return json({ error: 'Email already exists' }, { status: 409 });
+        }
+        throw error;
+      }
+    }
+
+    default:
+      return json({ error: 'Method not allowed' }, { status: 405 });
   }
-
-  return json({ error: 'Method not allowed' }, { status: 405 });
 }
 ```
 
-### Optimistic UI with Mutations
+### Individual Resource Endpoint
+
+```typescript
+// app/routes/api.users.$id.tsx
+import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { getDB } from '~/db.server';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  bio: string | null;
+  created_at: string;
+}
+
+// GET /api/users/:id
+export async function loader({ params, context }: LoaderFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+
+  const user = await db.queryOne<User>(
+    'SELECT * FROM users WHERE id = ?',
+    [params.id]
+  );
+
+  if (!user) {
+    return json({ error: 'User not found' }, { status: 404 });
+  }
+
+  return json({ data: user });
+}
+
+// PATCH/DELETE /api/users/:id
+export async function action({ request, params, context }: ActionFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+
+  switch (request.method) {
+    case 'PATCH': {
+      const body = await request.json() as Partial<{ name: string; email: string; bio: string }>;
+
+      const updates: string[] = [];
+      const values: unknown[] = [];
+
+      if (body.name !== undefined) {
+        updates.push('name = ?');
+        values.push(body.name);
+      }
+      if (body.email !== undefined) {
+        updates.push('email = ?');
+        values.push(body.email);
+      }
+      if (body.bio !== undefined) {
+        updates.push('bio = ?');
+        values.push(body.bio);
+      }
+
+      if (updates.length === 0) {
+        return json({ error: 'No fields to update' }, { status: 400 });
+      }
+
+      updates.push('updated_at = CURRENT_TIMESTAMP');
+      values.push(params.id);
+
+      const result = await db.run(
+        `UPDATE users SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+
+      if (result.rowsAffected === 0) {
+        return json({ error: 'User not found' }, { status: 404 });
+      }
+
+      const user = await db.queryOne<User>(
+        'SELECT * FROM users WHERE id = ?',
+        [params.id]
+      );
+
+      return json({ data: user });
+    }
+
+    case 'DELETE': {
+      const result = await db.run(
+        'DELETE FROM users WHERE id = ?',
+        [params.id]
+      );
+
+      if (result.rowsAffected === 0) {
+        return json({ error: 'User not found' }, { status: 404 });
+      }
+
+      return json({ success: true });
+    }
+
+    default:
+      return json({ error: 'Method not allowed' }, { status: 405 });
+  }
+}
+```
+
+### Server-Sent Events (SSE)
+
+```typescript
+// app/routes/api.events.users.tsx
+import type { LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { getDB } from '~/db.server';
+
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+  let lastId = 0;
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+
+      // Send initial connection message
+      controller.enqueue(encoder.encode('event: connected\ndata: {}\n\n'));
+
+      const poll = async () => {
+        // Check if client disconnected
+        if (request.signal.aborted) {
+          controller.close();
+          return;
+        }
+
+        try {
+          const events = await db.query<{
+            id: number;
+            type: string;
+            data: string;
+          }>(
+            'SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT 10',
+            [lastId]
+          );
+
+          for (const event of events) {
+            const sseMessage = `id: ${event.id}\nevent: ${event.type}\ndata: ${event.data}\n\n`;
+            controller.enqueue(encoder.encode(sseMessage));
+            lastId = event.id;
+          }
+        } catch (error) {
+          console.error('SSE poll error:', error);
+        }
+
+        // Poll every second
+        setTimeout(poll, 1000);
+      };
+
+      poll();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+}
+```
+
+### File Download
+
+```typescript
+// app/routes/api.export.users.tsx
+import type { LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { getDB } from '~/db.server';
+
+export async function loader({ context }: LoaderFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+
+  const users = await db.query<{ name: string; email: string; created_at: string }>(
+    'SELECT name, email, created_at FROM users ORDER BY created_at DESC'
+  );
+
+  // Generate CSV
+  const header = 'Name,Email,Created At\n';
+  const rows = users
+    .map((u) => `"${u.name}","${u.email}","${u.created_at}"`)
+    .join('\n');
+  const csv = header + rows;
+
+  return new Response(csv, {
+    headers: {
+      'Content-Type': 'text/csv',
+      'Content-Disposition': 'attachment; filename="users.csv"',
+    },
+  });
+}
+```
+
+---
+
+## Patterns
+
+### Optimistic UI
 
 ```typescript
 // app/routes/tasks._index.tsx
@@ -609,64 +1477,90 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const formData = await request.formData();
   const intent = formData.get('intent');
 
-  if (intent === 'toggle') {
-    const id = formData.get('id');
-    const completed = formData.get('completed') === 'true';
+  switch (intent) {
+    case 'toggle': {
+      const id = formData.get('id');
+      const completed = formData.get('completed') === 'true';
+      await db.run(
+        'UPDATE tasks SET completed = ? WHERE id = ?',
+        [!completed ? 1 : 0, id]
+      );
+      return json({ success: true });
+    }
 
-    await db.run(
-      'UPDATE tasks SET completed = ? WHERE id = ?',
-      [!completed, id]
-    );
+    case 'delete': {
+      const id = formData.get('id');
+      await db.run('DELETE FROM tasks WHERE id = ?', [id]);
+      return json({ success: true });
+    }
 
-    return json({ success: true });
+    case 'create': {
+      const title = formData.get('title') as string;
+      await db.run('INSERT INTO tasks (title) VALUES (?)', [title]);
+      return json({ success: true });
+    }
+
+    default:
+      return json({ error: 'Unknown intent' }, { status: 400 });
   }
-
-  if (intent === 'delete') {
-    const id = formData.get('id');
-    await db.run('DELETE FROM tasks WHERE id = ?', [id]);
-    return json({ success: true });
-  }
-
-  return json({ error: 'Unknown intent' }, { status: 400 });
 }
 
 export default function TasksIndex() {
   const { tasks } = useLoaderData<typeof loader>();
+  const createFetcher = useFetcher();
 
   return (
-    <ul>
-      {tasks.map((task) => (
-        <TaskItem key={task.id} task={task} />
-      ))}
-    </ul>
+    <div>
+      <h1>Tasks</h1>
+
+      <createFetcher.Form method="post">
+        <input type="hidden" name="intent" value="create" />
+        <input type="text" name="title" placeholder="New task..." required />
+        <button type="submit">Add</button>
+      </createFetcher.Form>
+
+      <ul>
+        {tasks.map((task) => (
+          <TaskItem key={task.id} task={task} />
+        ))}
+      </ul>
+    </div>
   );
 }
 
 function TaskItem({ task }: { task: Task }) {
   const fetcher = useFetcher();
 
-  // Optimistic UI: compute the optimistic state
+  // Optimistic state
   const isToggling = fetcher.formData?.get('intent') === 'toggle';
+  const isDeleting = fetcher.formData?.get('intent') === 'delete';
+
+  // Optimistically compute completed state
   const optimisticCompleted = isToggling
     ? fetcher.formData?.get('completed') !== 'true'
     : task.completed;
 
-  const isDeleting = fetcher.formData?.get('intent') === 'delete';
+  // Optimistically hide if deleting
   if (isDeleting) {
-    return null; // Optimistically remove from UI
+    return null;
   }
 
   return (
     <li style={{ opacity: fetcher.state === 'submitting' ? 0.5 : 1 }}>
-      <fetcher.Form method="post">
+      <fetcher.Form method="post" style={{ display: 'inline' }}>
         <input type="hidden" name="id" value={task.id} />
         <input type="hidden" name="completed" value={String(task.completed)} />
         <button type="submit" name="intent" value="toggle">
           {optimisticCompleted ? '[x]' : '[ ]'}
         </button>
-        <span style={{ textDecoration: optimisticCompleted ? 'line-through' : 'none' }}>
-          {task.title}
-        </span>
+      </fetcher.Form>
+
+      <span style={{ textDecoration: optimisticCompleted ? 'line-through' : 'none' }}>
+        {task.title}
+      </span>
+
+      <fetcher.Form method="post" style={{ display: 'inline' }}>
+        <input type="hidden" name="id" value={task.id} />
         <button type="submit" name="intent" value="delete">
           Delete
         </button>
@@ -676,111 +1570,165 @@ function TaskItem({ task }: { task: Task }) {
 }
 ```
 
-### Streaming with defer()
+### Error Boundary
 
 ```typescript
-// app/routes/dashboard.tsx
-import { defer, type LoaderFunctionArgs } from '@remix-run/cloudflare';
-import { Await, useLoaderData } from '@remix-run/react';
-import { Suspense } from 'react';
+// app/routes/users.$id.tsx
+import { json, type LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { useLoaderData, isRouteErrorResponse, useRouteError, Link } from '@remix-run/react';
 import { getDB } from '~/db.server';
 
-interface DashboardStats {
-  totalUsers: number;
-  totalPosts: number;
-  recentActivity: number;
-}
-
-interface RecentUser {
+interface User {
   id: number;
   name: string;
-  created_at: string;
+  email: string;
 }
 
-export async function loader({ context }: LoaderFunctionArgs) {
+export async function loader({ params, context }: LoaderFunctionArgs) {
   const db = await getDB(context.cloudflare.env);
 
-  // Critical data - await immediately
-  const stats = db.queryOne<DashboardStats>(`
-    SELECT
-      (SELECT COUNT(*) FROM users) as totalUsers,
-      (SELECT COUNT(*) FROM posts) as totalPosts,
-      (SELECT COUNT(*) FROM activity WHERE created_at > datetime('now', '-24 hours')) as recentActivity
-  `);
+  const user = await db.queryOne<User>(
+    'SELECT * FROM users WHERE id = ?',
+    [params.id]
+  );
 
-  // Non-critical data - defer and stream
-  const recentUsersPromise = db.query<RecentUser>(`
-    SELECT id, name, created_at
-    FROM users
-    ORDER BY created_at DESC
-    LIMIT 10
-  `);
+  if (!user) {
+    throw json({ message: 'User not found' }, { status: 404 });
+  }
 
-  const popularPostsPromise = db.query(`
-    SELECT p.id, p.title, COUNT(l.id) as likes
-    FROM posts p
-    LEFT JOIN likes l ON l.post_id = p.id
-    GROUP BY p.id
-    ORDER BY likes DESC
-    LIMIT 5
-  `);
-
-  return defer({
-    stats: await stats,
-    recentUsers: recentUsersPromise,
-    popularPosts: popularPostsPromise,
-  });
+  return json({ user });
 }
 
-export default function Dashboard() {
-  const { stats, recentUsers, popularPosts } = useLoaderData<typeof loader>();
+export default function UserProfile() {
+  const { user } = useLoaderData<typeof loader>();
 
   return (
     <div>
-      <h1>Dashboard</h1>
-
-      {/* Critical data rendered immediately */}
-      <div className="stats">
-        <div>Users: {stats?.totalUsers}</div>
-        <div>Posts: {stats?.totalPosts}</div>
-        <div>Recent Activity: {stats?.recentActivity}</div>
-      </div>
-
-      {/* Deferred data streams in */}
-      <div className="panels">
-        <Suspense fallback={<div>Loading recent users...</div>}>
-          <Await resolve={recentUsers}>
-            {(users) => (
-              <div>
-                <h2>Recent Users</h2>
-                <ul>
-                  {users.map((user) => (
-                    <li key={user.id}>{user.name}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </Await>
-        </Suspense>
-
-        <Suspense fallback={<div>Loading popular posts...</div>}>
-          <Await resolve={popularPosts}>
-            {(posts) => (
-              <div>
-                <h2>Popular Posts</h2>
-                <ul>
-                  {posts.map((post: { id: number; title: string; likes: number }) => (
-                    <li key={post.id}>
-                      {post.title} ({post.likes} likes)
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </Await>
-        </Suspense>
-      </div>
+      <h1>{user.name}</h1>
+      <p>{user.email}</p>
     </div>
+  );
+}
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  if (isRouteErrorResponse(error)) {
+    if (error.status === 404) {
+      return (
+        <div>
+          <h1>User Not Found</h1>
+          <p>The user you are looking for does not exist.</p>
+          <Link to="/users">Back to Users</Link>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <h1>Error {error.status}</h1>
+        <p>{error.data?.message || 'Something went wrong'}</p>
+        <Link to="/users">Back to Users</Link>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h1>Unexpected Error</h1>
+      <p>An unexpected error occurred. Please try again.</p>
+      <Link to="/users">Back to Users</Link>
+    </div>
+  );
+}
+```
+
+### Nested Routes with Parallel Data Loading
+
+```typescript
+// app/routes/users.$id.tsx (parent)
+import { json, type LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { useLoaderData, Outlet, Link, NavLink } from '@remix-run/react';
+import { getDB } from '~/db.server';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+export async function loader({ params, context }: LoaderFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+
+  const user = await db.queryOne<User>(
+    'SELECT id, name, email FROM users WHERE id = ?',
+    [params.id]
+  );
+
+  if (!user) {
+    throw json({ message: 'User not found' }, { status: 404 });
+  }
+
+  return json({ user });
+}
+
+export default function UserLayout() {
+  const { user } = useLoaderData<typeof loader>();
+
+  return (
+    <div>
+      <header>
+        <h1>{user.name}</h1>
+        <nav>
+          <NavLink to={`/users/${user.id}`} end>Profile</NavLink>
+          <NavLink to={`/users/${user.id}/posts`}>Posts</NavLink>
+          <NavLink to={`/users/${user.id}/activity`}>Activity</NavLink>
+        </nav>
+      </header>
+
+      {/* Child routes render here */}
+      <Outlet />
+    </div>
+  );
+}
+```
+
+```typescript
+// app/routes/users.$id.posts.tsx (child)
+import { json, type LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { useLoaderData } from '@remix-run/react';
+import { getDB } from '~/db.server';
+
+interface Post {
+  id: number;
+  title: string;
+  created_at: string;
+}
+
+export async function loader({ params, context }: LoaderFunctionArgs) {
+  const db = await getDB(context.cloudflare.env);
+
+  // This runs in parallel with the parent loader
+  const posts = await db.query<Post>(
+    'SELECT id, title, created_at FROM posts WHERE user_id = ? ORDER BY created_at DESC',
+    [params.id]
+  );
+
+  return json({ posts });
+}
+
+export default function UserPosts() {
+  const { posts } = useLoaderData<typeof loader>();
+
+  return (
+    <section>
+      <h2>Posts ({posts.length})</h2>
+      <ul>
+        {posts.map((post) => (
+          <li key={post.id}>{post.title}</li>
+        ))}
+      </ul>
+    </section>
   );
 }
 ```
@@ -789,17 +1737,19 @@ export default function Dashboard() {
 
 ## Type Safety
 
-### TypeScript Integration
+### Database Types
 
-Define your database types in a shared module:
+Create `app/types/database.ts` for shared type definitions:
 
 ```typescript
 // app/types/database.ts
+
 export interface User {
   id: number;
   name: string;
   email: string;
   bio: string | null;
+  role: 'user' | 'admin';
   created_at: string;
   updated_at: string;
 }
@@ -822,7 +1772,7 @@ export interface Comment {
   created_at: string;
 }
 
-// Joined types for queries
+// Joined query results
 export interface PostWithAuthor extends Post {
   author_name: string;
   author_email: string;
@@ -831,111 +1781,30 @@ export interface PostWithAuthor extends Post {
 export interface CommentWithUser extends Comment {
   user_name: string;
 }
+
+// Input types for mutations
+export type CreateUserInput = Pick<User, 'name' | 'email'> & Partial<Pick<User, 'bio'>>;
+export type UpdateUserInput = Partial<CreateUserInput>;
 ```
 
-### Typed Loaders and Actions
-
-```typescript
-// app/routes/posts.$id.tsx
-import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from '@remix-run/cloudflare';
-import { useLoaderData, Form } from '@remix-run/react';
-import { getDB } from '~/db.server';
-import type { Post, CommentWithUser } from '~/types/database';
-
-interface LoaderData {
-  post: Post;
-  comments: CommentWithUser[];
-}
-
-export async function loader({ params, context }: LoaderFunctionArgs) {
-  const db = await getDB(context.cloudflare.env);
-
-  const post = await db.queryOne<Post>(
-    'SELECT * FROM posts WHERE id = ?',
-    [params.id]
-  );
-
-  if (!post) {
-    throw json({ message: 'Post not found' }, { status: 404 });
-  }
-
-  const comments = await db.query<CommentWithUser>(`
-    SELECT c.*, u.name as user_name
-    FROM comments c
-    JOIN users u ON c.user_id = u.id
-    WHERE c.post_id = ?
-    ORDER BY c.created_at DESC
-  `, [params.id]);
-
-  return json<LoaderData>({ post, comments });
-}
-
-interface ActionData {
-  errors?: {
-    content?: string;
-  };
-}
-
-export async function action({ request, params, context }: ActionFunctionArgs) {
-  const db = await getDB(context.cloudflare.env);
-  const formData = await request.formData();
-
-  const content = formData.get('content') as string;
-  const userId = formData.get('userId') as string;
-
-  if (!content || content.length < 1) {
-    return json<ActionData>(
-      { errors: { content: 'Comment cannot be empty' } },
-      { status: 400 }
-    );
-  }
-
-  await db.run(
-    'INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)',
-    [params.id, userId, content]
-  );
-
-  return json({ success: true });
-}
-
-export default function PostDetail() {
-  const { post, comments } = useLoaderData<LoaderData>();
-
-  return (
-    <article>
-      <h1>{post.title}</h1>
-      <div dangerouslySetInnerHTML={{ __html: post.content }} />
-
-      <section>
-        <h2>Comments ({comments.length})</h2>
-        {comments.map((comment) => (
-          <div key={comment.id}>
-            <strong>{comment.user_name}</strong>
-            <p>{comment.content}</p>
-          </div>
-        ))}
-
-        <Form method="post">
-          <input type="hidden" name="userId" value="1" />
-          <textarea name="content" placeholder="Add a comment..." />
-          <button type="submit">Post Comment</button>
-        </Form>
-      </section>
-    </article>
-  );
-}
-```
-
-### Zod Schema Validation
+### Zod Validation
 
 ```typescript
 // app/schemas/user.ts
 import { z } from 'zod';
 
 export const CreateUserSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Invalid email address'),
-  bio: z.string().max(500, 'Bio must be under 500 characters').optional(),
+  name: z
+    .string()
+    .min(2, 'Name must be at least 2 characters')
+    .max(100, 'Name must be under 100 characters'),
+  email: z
+    .string()
+    .email('Invalid email address'),
+  bio: z
+    .string()
+    .max(500, 'Bio must be under 500 characters')
+    .optional(),
 });
 
 export const UpdateUserSchema = CreateUserSchema.partial();
@@ -945,168 +1814,55 @@ export type UpdateUserInput = z.infer<typeof UpdateUserSchema>;
 ```
 
 ```typescript
-// app/routes/api.users.$id.tsx
+// app/routes/api.users.tsx (using Zod validation)
 import { json, type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { getDB } from '~/db.server';
-import { UpdateUserSchema } from '~/schemas/user';
+import { CreateUserSchema } from '~/schemas/user';
 
-export async function action({ request, params, context }: ActionFunctionArgs) {
-  const db = await getDB(context.cloudflare.env);
-
-  if (request.method === 'PATCH') {
-    const body = await request.json();
-
-    // Validate with Zod
-    const result = UpdateUserSchema.safeParse(body);
-    if (!result.success) {
-      return json(
-        { errors: result.error.flatten().fieldErrors },
-        { status: 400 }
-      );
-    }
-
-    const { name, email, bio } = result.data;
-
-    // Build dynamic update query
-    const updates: string[] = [];
-    const values: unknown[] = [];
-
-    if (name !== undefined) {
-      updates.push('name = ?');
-      values.push(name);
-    }
-    if (email !== undefined) {
-      updates.push('email = ?');
-      values.push(email);
-    }
-    if (bio !== undefined) {
-      updates.push('bio = ?');
-      values.push(bio);
-    }
-
-    if (updates.length === 0) {
-      return json({ error: 'No fields to update' }, { status: 400 });
-    }
-
-    values.push(params.id);
-
-    await db.run(
-      `UPDATE users SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      values
-    );
-
-    return json({ success: true });
+export async function action({ request, context }: ActionFunctionArgs) {
+  if (request.method !== 'POST') {
+    return json({ error: 'Method not allowed' }, { status: 405 });
   }
 
-  return json({ error: 'Method not allowed' }, { status: 405 });
+  const db = await getDB(context.cloudflare.env);
+  const body = await request.json();
+
+  // Validate with Zod
+  const result = CreateUserSchema.safeParse(body);
+
+  if (!result.success) {
+    return json(
+      { errors: result.error.flatten().fieldErrors },
+      { status: 400 }
+    );
+  }
+
+  const { name, email, bio } = result.data;
+
+  try {
+    const dbResult = await db.run(
+      'INSERT INTO users (name, email, bio) VALUES (?, ?, ?)',
+      [name, email, bio || null]
+    );
+
+    return json({ id: dbResult.lastInsertRowId }, { status: 201 });
+  } catch (error) {
+    if ((error as Error).message.includes('UNIQUE constraint')) {
+      return json(
+        { errors: { email: ['Email already exists'] } },
+        { status: 409 }
+      );
+    }
+    throw error;
+  }
 }
 ```
 
 ---
 
-## Advanced
+## Advanced Features
 
-### CDC Subscriptions in Routes
-
-Stream real-time changes to the client using Server-Sent Events:
-
-```typescript
-// app/routes/api.events.users.tsx
-import type { LoaderFunctionArgs } from '@remix-run/cloudflare';
-import { getDB } from '~/db.server';
-
-export async function loader({ request, context }: LoaderFunctionArgs) {
-  const db = await getDB(context.cloudflare.env);
-
-  // Create a readable stream for SSE
-  const stream = new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-
-      // Subscribe to CDC events
-      const subscription = await db.subscribeCDC({
-        tables: ['users'],
-        fromLSN: 0n,
-      });
-
-      // Handle client disconnect
-      request.signal.addEventListener('abort', () => {
-        subscription.close();
-      });
-
-      // Stream events to client
-      for await (const event of subscription) {
-        const data = JSON.stringify({
-          type: event.type,
-          table: event.table,
-          data: event.after || event.before,
-          timestamp: event.timestamp,
-        });
-
-        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-      }
-
-      controller.close();
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    },
-  });
-}
-```
-
-Client-side subscription:
-
-```typescript
-// app/hooks/useRealtimeUsers.ts
-import { useEffect, useState } from 'react';
-import type { User } from '~/types/database';
-
-interface CDCEvent {
-  type: 'insert' | 'update' | 'delete';
-  table: string;
-  data: User;
-  timestamp: string;
-}
-
-export function useRealtimeUsers(initialUsers: User[]) {
-  const [users, setUsers] = useState(initialUsers);
-
-  useEffect(() => {
-    const eventSource = new EventSource('/api/events/users');
-
-    eventSource.onmessage = (event) => {
-      const change: CDCEvent = JSON.parse(event.data);
-
-      setUsers((current) => {
-        switch (change.type) {
-          case 'insert':
-            return [change.data, ...current];
-          case 'update':
-            return current.map((u) =>
-              u.id === change.data.id ? change.data : u
-            );
-          case 'delete':
-            return current.filter((u) => u.id !== change.data.id);
-          default:
-            return current;
-        }
-      });
-    };
-
-    return () => eventSource.close();
-  }, []);
-
-  return users;
-}
-```
-
-### Real-time Updates with WebSocket
+### Real-Time with WebSocket
 
 ```typescript
 // app/routes/ws.tsx
@@ -1114,16 +1870,13 @@ import type { LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { getDB } from '~/db.server';
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  // Check for WebSocket upgrade
   const upgradeHeader = request.headers.get('Upgrade');
+
   if (upgradeHeader !== 'websocket') {
-    return new Response('Expected WebSocket', { status: 426 });
+    return new Response('Expected WebSocket upgrade', { status: 426 });
   }
 
-  // Create WebSocket pair
   const { 0: client, 1: server } = new WebSocketPair();
-
-  // Handle WebSocket connection
   server.accept();
 
   const db = await getDB(context.cloudflare.env);
@@ -1135,24 +1888,17 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       switch (message.type) {
         case 'query': {
           const result = await db.query(message.sql, message.params);
-          server.send(JSON.stringify({ id: message.id, result }));
+          server.send(JSON.stringify({ id: message.id, data: result }));
           break;
         }
-        case 'subscribe': {
-          const subscription = await db.subscribeCDC({
-            tables: message.tables,
-          });
 
-          for await (const change of subscription) {
-            server.send(JSON.stringify({ type: 'change', data: change }));
-          }
+        case 'subscribe': {
+          // Implement subscription logic
           break;
         }
       }
     } catch (error) {
-      server.send(JSON.stringify({
-        error: (error as Error).message,
-      }));
+      server.send(JSON.stringify({ error: (error as Error).message }));
     }
   });
 
@@ -1163,133 +1909,243 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 }
 ```
 
-### Transaction Handling
+### Session Management
 
 ```typescript
-// app/routes/api.transfer.tsx
-import { json, type ActionFunctionArgs } from '@remix-run/cloudflare';
+// app/sessions.server.ts
+import { createCookieSessionStorage } from '@remix-run/cloudflare';
+
+export const sessionStorage = createCookieSessionStorage({
+  cookie: {
+    name: '__session',
+    httpOnly: true,
+    maxAge: 60 * 60 * 24 * 7, // 1 week
+    path: '/',
+    sameSite: 'lax',
+    secrets: ['s3cr3t'], // Use environment variable in production
+    secure: process.env.NODE_ENV === 'production',
+  },
+});
+
+export const { getSession, commitSession, destroySession } = sessionStorage;
+```
+
+```typescript
+// app/routes/login.tsx
+import {
+  json,
+  redirect,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from '@remix-run/cloudflare';
+import { Form, useActionData } from '@remix-run/react';
 import { getDB } from '~/db.server';
+import { getSession, commitSession } from '~/sessions.server';
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const session = await getSession(request.headers.get('Cookie'));
+
+  if (session.has('userId')) {
+    return redirect('/dashboard');
+  }
+
+  return json({});
+}
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const db = await getDB(context.cloudflare.env);
-  const { fromAccountId, toAccountId, amount } = await request.json() as {
-    fromAccountId: number;
-    toAccountId: number;
-    amount: number;
-  };
+  const session = await getSession(request.headers.get('Cookie'));
+  const formData = await request.formData();
 
-  try {
-    const result = await db.transaction(async (tx) => {
-      // Check source balance
-      const source = await tx.queryOne<{ balance: number }>(
-        'SELECT balance FROM accounts WHERE id = ?',
-        [fromAccountId]
-      );
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
 
-      if (!source || source.balance < amount) {
-        throw new Error('Insufficient funds');
-      }
+  const user = await db.queryOne<{ id: number; password_hash: string }>(
+    'SELECT id, password_hash FROM users WHERE email = ?',
+    [email]
+  );
 
-      // Debit source account
-      await tx.run(
-        'UPDATE accounts SET balance = balance - ? WHERE id = ?',
-        [amount, fromAccountId]
-      );
+  if (!user) {
+    return json({ error: 'Invalid email or password' }, { status: 401 });
+  }
 
-      // Credit destination account
-      await tx.run(
-        'UPDATE accounts SET balance = balance + ? WHERE id = ?',
-        [amount, toAccountId]
-      );
+  // Verify password (implement proper password hashing)
+  // const isValid = await verifyPassword(password, user.password_hash);
+  // if (!isValid) { ... }
 
-      // Record the transfer
-      const transfer = await tx.run(
-        `INSERT INTO transfers (from_account_id, to_account_id, amount)
-         VALUES (?, ?, ?)`,
-        [fromAccountId, toAccountId, amount]
-      );
+  session.set('userId', user.id);
 
-      return { transferId: transfer.lastInsertRowId };
+  return redirect('/dashboard', {
+    headers: {
+      'Set-Cookie': await commitSession(session),
+    },
+  });
+}
+
+export default function Login() {
+  const actionData = useActionData<typeof action>();
+
+  return (
+    <Form method="post">
+      {actionData?.error && <p className="error">{actionData.error}</p>}
+      <input type="email" name="email" placeholder="Email" required />
+      <input type="password" name="password" placeholder="Password" required />
+      <button type="submit">Log In</button>
+    </Form>
+  );
+}
+```
+
+### Multi-Tenant Routes
+
+```typescript
+// app/routes/tenant.$tenantId.tsx
+import { json, type LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { Outlet, useLoaderData } from '@remix-run/react';
+import { getDB } from '~/db.server';
+
+export async function loader({ params, context }: LoaderFunctionArgs) {
+  // Each tenant gets their own isolated database
+  const db = await getDB(context.cloudflare.env, params.tenantId);
+
+  const settings = await db.queryOne<{ name: string; plan: string }>(
+    'SELECT name, plan FROM tenant_settings LIMIT 1'
+  );
+
+  return json({ tenantId: params.tenantId, settings });
+}
+
+export default function TenantLayout() {
+  const { tenantId, settings } = useLoaderData<typeof loader>();
+
+  return (
+    <div>
+      <header>
+        <span>Tenant: {settings?.name || tenantId}</span>
+        <span>Plan: {settings?.plan || 'free'}</span>
+      </header>
+      <Outlet />
+    </div>
+  );
+}
+```
+
+---
+
+## Testing
+
+### Loader/Action Tests
+
+```typescript
+// app/routes/users._index.test.ts
+import { describe, it, expect, vi } from 'vitest';
+import { loader } from './users._index';
+
+// Mock the database client
+vi.mock('~/db.server', () => ({
+  getDB: vi.fn().mockResolvedValue({
+    query: vi.fn().mockResolvedValue([
+      { id: 1, name: 'Alice', email: 'alice@example.com' },
+      { id: 2, name: 'Bob', email: 'bob@example.com' },
+    ]),
+  }),
+}));
+
+describe('users._index loader', () => {
+  it('returns users', async () => {
+    const response = await loader({
+      request: new Request('http://localhost/users'),
+      params: {},
+      context: {
+        cloudflare: {
+          env: { DOSQL_DB: {} as DurableObjectNamespace },
+        },
+      },
+    } as any);
+
+    const data = await response.json();
+    expect(data.users).toHaveLength(2);
+    expect(data.users[0].name).toBe('Alice');
+  });
+});
+```
+
+### Integration Tests with Miniflare
+
+```typescript
+// test/integration/users.test.ts
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { unstable_dev } from 'wrangler';
+import type { UnstableDevWorker } from 'wrangler';
+
+describe('Users API', () => {
+  let worker: UnstableDevWorker;
+
+  beforeAll(async () => {
+    worker = await unstable_dev('build/server/index.js', {
+      experimental: { disableExperimentalWarning: true },
+    });
+  });
+
+  afterAll(async () => {
+    await worker.stop();
+  });
+
+  it('lists users', async () => {
+    const response = await worker.fetch('/api/users');
+    expect(response.status).toBe(200);
+
+    const data = await response.json();
+    expect(data).toHaveProperty('data');
+    expect(Array.isArray(data.data)).toBe(true);
+  });
+
+  it('creates a user', async () => {
+    const response = await worker.fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Test User', email: 'test@example.com' }),
     });
 
-    return json(result);
-  } catch (error) {
-    return json(
-      { error: (error as Error).message },
-      { status: 400 }
-    );
-  }
-}
+    expect(response.status).toBe(201);
+
+    const data = await response.json();
+    expect(data.data.name).toBe('Test User');
+  });
+});
 ```
 
 ---
 
 ## Deployment
 
-### Cloudflare Pages Deployment
-
-For Remix on Cloudflare Pages:
+### Production Wrangler Configuration
 
 ```toml
 # wrangler.toml
-name = "my-remix-app"
-pages_build_output_dir = "./build/client"
-compatibility_date = "2024-01-01"
-compatibility_flags = ["nodejs_compat"]
-
-# Functions configuration
-[build]
-command = "npm run build"
-
-# Durable Objects (requires Workers paid plan)
-[[durable_objects.bindings]]
-name = "DOSQL_DB"
-class_name = "DoSQLDatabase"
-script_name = "dosql-worker"  # Separate worker for DO
-
-# R2 binding
-[[r2_buckets]]
-binding = "DATA_BUCKET"
-bucket_name = "remix-app-data"
-
-# Environment variables
-[vars]
-ENVIRONMENT = "production"
-```
-
-### Wrangler Configuration for Remix
-
-Complete `wrangler.toml` for Remix Workers:
-
-```toml
 name = "remix-dosql-app"
 main = "build/server/index.js"
-compatibility_date = "2024-01-01"
+compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Worker sites for static assets
 [site]
 bucket = "./build/client"
 
-# Durable Objects
 [[durable_objects.bindings]]
 name = "DOSQL_DB"
 class_name = "DoSQLDatabase"
 
-# DO migrations
 [[migrations]]
 tag = "v1"
 new_classes = ["DoSQLDatabase"]
 
-# R2 for data
 [[r2_buckets]]
 binding = "DATA_BUCKET"
 bucket_name = "remix-data"
 
-# KV for sessions (optional)
 [[kv_namespaces]]
-binding = "SESSIONS"
-id = "your-kv-namespace-id"
+binding = "SESSION_KV"
+id = "your-kv-id"
 
 # Production environment
 [env.production]
@@ -1299,16 +2155,12 @@ name = "remix-dosql-app-prod"
 binding = "DATA_BUCKET"
 bucket_name = "remix-data-prod"
 
-# Staging environment
-[env.staging]
-name = "remix-dosql-app-staging"
-
-[[env.staging.r2_buckets]]
-binding = "DATA_BUCKET"
-bucket_name = "remix-data-staging"
+[[env.production.kv_namespaces]]
+binding = "SESSION_KV"
+id = "your-prod-kv-id"
 ```
 
-### Build and Deploy Scripts
+### Package Scripts
 
 ```json
 {
@@ -1316,57 +2168,78 @@ bucket_name = "remix-data-staging"
     "build": "remix vite:build",
     "dev": "remix vite:dev",
     "start": "wrangler pages dev ./build/client",
-    "deploy": "npm run build && wrangler pages deploy ./build/client",
-    "deploy:staging": "npm run build && wrangler pages deploy ./build/client --env staging",
-    "deploy:production": "npm run build && wrangler pages deploy ./build/client --env production",
-    "typecheck": "tsc"
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:production": "npm run build && wrangler deploy --env production",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
   }
 }
 ```
 
-### Migrations in Production
+### GitHub Actions CI/CD
 
-Include migrations in your build:
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy
 
-```typescript
-// vite.config.ts
-import { vitePlugin as remix } from '@remix-run/dev';
-import { defineConfig } from 'vite';
-import { copyFileSync, mkdirSync } from 'fs';
-import { glob } from 'glob';
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-export default defineConfig({
-  plugins: [
-    remix(),
-    {
-      name: 'copy-migrations',
-      buildEnd() {
-        // Copy SQL migrations to build output
-        mkdirSync('build/server/.do/migrations', { recursive: true });
-        const files = glob.sync('.do/migrations/*.sql');
-        files.forEach((file) => {
-          const dest = file.replace('.do', 'build/server/.do');
-          copyFileSync(file, dest);
-        });
-      },
-    },
-  ],
-});
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy --env production
 ```
 
 ### Production Checklist
 
-1. **Environment bindings configured** - DOSQL_DB, DATA_BUCKET
-2. **Migrations bundled** - SQL files included in build
-3. **Error boundaries** - Graceful error handling in routes
-4. **Rate limiting** - Consider adding rate limits for API routes
-5. **Monitoring** - Set up Cloudflare analytics and logging
+- [ ] Configure environment-specific Durable Object namespaces
+- [ ] Set up R2 buckets for each environment
+- [ ] Configure KV namespaces for sessions
+- [ ] Use environment variables for secrets (session secrets, API keys)
+- [ ] Enable Cloudflare Analytics
+- [ ] Set up error tracking (Sentry, LogRocket)
+- [ ] Configure rate limiting for API routes
+- [ ] Test migrations in staging before production
+- [ ] Set up monitoring and alerting
+- [ ] Configure custom domains
 
 ---
 
 ## Next Steps
 
-- [Getting Started](../getting-started.md) - DoSQL basics
+- [Getting Started](../getting-started.md) - DoSQL fundamentals
 - [API Reference](../api-reference.md) - Complete API documentation
-- [Advanced Features](../advanced.md) - CDC, time travel, branching
+- [Advanced Features](../advanced.md) - Time travel, branching, CDC
 - [Architecture](../architecture.md) - Understanding DoSQL internals
+- [Hono Integration](./HONO.md) - Alternative lightweight framework
