@@ -3300,7 +3300,7 @@ console.log('Reclaimed:', gcResult.bytesReclaimed);
 
 ### Sharding
 
-DoSQL provides a Vitess-inspired native sharding implementation with real SQL parsing, cost-based query routing, and type-safe shard keys.
+DoSQL provides a Vitess-inspired native sharding implementation with real SQL parsing, cost-based query routing, and type-safe shard keys. Sharding APIs are exported from the main `dosql` package.
 
 ```typescript
 import {
@@ -3314,9 +3314,13 @@ import {
   shard,
   replica,
   createShardId,
+  createRouter,
+  createExecutor,
+  createReplicaSelector,
   type ShardingClient,
   type VSchema,
   type ShardConfig,
+  type ShardRPC,
 } from 'dosql';
 
 // Define your VSchema (Virtual Schema)
@@ -3363,20 +3367,27 @@ for await (const row of client.queryStream('SELECT * FROM users')) {
 
 ### Stored Procedures
 
+DoSQL supports ESM-based stored procedures with PL/pgSQL-like semantics, executed in sandboxed V8 isolates.
+
 ```typescript
 import {
   createProcedureRegistry,
   createProcedureExecutor,
+  createInMemoryCatalogStorage,
   procedure,
   ProcedureBuilder,
+  parseProcedure,
+  defineProcedure,
+  defineProcedures,
   type Procedure,
   type ProcedureContext,
+  type ProcedureExecutor,
 } from 'dosql/proc';
 
 // Define a procedure using the builder
-const createUser = procedure()
-  .input({ name: 'string', email: 'string' })
-  .output({ id: 'number', created: 'boolean' })
+const createUser = procedure('createUser')
+  .input<{ name: string; email: string }>()
+  .output<{ id: number; created: boolean }>()
   .handler(async (ctx, input) => {
     const result = await ctx.db.sql`
       INSERT INTO users (name, email)
@@ -3386,19 +3397,46 @@ const createUser = procedure()
       id: Number(result.lastInsertRowid),
       created: true,
     };
-  });
+  })
+  .build();
 
-// Create registry
-const registry = createProcedureRegistry(catalogStorage);
+// Create registry with storage
+const registry = createProcedureRegistry({
+  storage: createInMemoryCatalogStorage(),
+});
 
 // Register procedure
-await registry.register('createUser', createUser);
+await registry.register(createUser);
 
 // Execute procedure
-const executor = createProcedureExecutor(registry, { db });
-const result = await executor.execute('createUser', {
+const executor = createProcedureExecutor({ db, registry });
+const result = await executor.call('createUser', {
   name: 'Alice',
   email: 'alice@example.com',
+});
+
+// Alternative: Parse SQL-defined procedure
+const parsed = parseProcedure(`
+  CREATE PROCEDURE calculate_total AS MODULE $$
+    export default async ({ db }, userId) => {
+      const orders = await db.orders.where({ userId });
+      return orders.reduce((sum, o) => sum + o.total, 0);
+    }
+  $$;
+`);
+await registry.register({
+  name: parsed.name,
+  code: parsed.code,
+});
+
+// Functional API for defining multiple procedures
+const procs = defineProcedures(dbContext, {
+  getUser: defineProcedure(async (ctx, userId: number) => {
+    return ctx.db.users.find(userId);
+  }),
+  updateEmail: defineProcedure(async (ctx, userId: number, email: string) => {
+    return ctx.db.users.update(userId, { email });
+  }),
 });
 ```
 

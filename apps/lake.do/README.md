@@ -1,39 +1,41 @@
 # lake.do
 
-**Real-time Iceberg Lakehouse on Cloudflare.**
+**Real-time Iceberg lakehouse on Cloudflare.**
 
 ---
 
-## Your Data Is Trapped
+## Your Analytics Are Always Late
 
-You built something great. Users are active. Data is flowing. But when your CEO asks "What happened in the last hour?" you have to say: "Check back tomorrow."
+Your CEO asks: "What happened in the last hour?"
 
-The gap between your application and your analytics is killing you:
+You say: "I'll have that for you tomorrow."
 
-- Your database chokes on analytical queries
-- ETL pipelines mean your dashboards are always 24 hours stale
-- Setting up Kafka, Spark, and Airflow feels like building a second company
-- Every "quick" data request turns into a week-long project
+The gap between your application and your analytics is costing you:
 
-**You need real-time analytics. Not another infrastructure team.**
+- Database queries timeout when analysts run them
+- Dashboards are 24 hours stale by the time anyone sees them
+- Setting up Kafka, Spark, and Airflow requires a dedicated team
+- Every "quick" data request becomes a multi-day project
+
+You need real-time analytics. Not another infrastructure team.
 
 ---
 
-## lake.do: Your Lakehouse, Zero Ops
+## lake.do Closes the Gap
 
-lake.do runs where your application already lives: Cloudflare's global edge. No clusters. No provisioning. No ETL pipelines to babysit.
+lake.do runs where your application already lives: Cloudflare's edge. No clusters to manage. No pipelines to monitor. No vendors to negotiate with.
 
-Every change in DoSQL flows to lake.do in real-time. Batched intelligently. Written as Parquet to R2. Wrapped in proper Iceberg metadata. Within seconds, your data is queryable by DuckDB, Spark, Trino, or our built-in engine.
+Every change flows from DoSQL to lake.do in real-time. Written as Parquet to R2. Wrapped in proper Iceberg metadata. Query with DuckDB, Spark, Trino, or the built-in engine.
 
 ```typescript
-import { createLakeClient } from '@dotdo/lake.do'
+import { Lake } from '@dotdo/lake.do'
 
-const lake = createLakeClient({
-  url: 'https://lake.example.com',
+const lake = new Lake({
+  endpoint: 'https://lake.example.com',
   token: process.env.LAKE_TOKEN,
 })
 
-// Analytical queries on real-time data
+// Query data from seconds ago
 const revenue = await lake.query(`
   SELECT
     date_trunc('hour', created_at) as hour,
@@ -45,221 +47,205 @@ const revenue = await lake.query(`
   ORDER BY 1
 `)
 
-// Data from seconds ago, not hours
-console.log(`Last hour revenue: $${revenue.rows[0].revenue}`)
+console.log(`Last hour: $${revenue.rows[0].revenue}`)
 ```
 
 ---
 
 ## Three Steps to Real-Time Analytics
 
-### 1. Stream Your Changes
+### 1. Stream Changes Automatically
 
-CDC events flow from DoSQL automatically. Every INSERT, UPDATE, DELETE. WebSocket connections hibernate when idle (95% cost savings).
+CDC events flow from DoSQL without configuration. Every INSERT, UPDATE, DELETE. WebSocket connections hibernate when idle.
 
 ```typescript
-// CDC flows automatically from DoSQL. Or subscribe manually:
-for await (const batch of lake.subscribe({
-  tables: ['orders', 'customers'],
-  operations: ['INSERT', 'UPDATE'],
-})) {
-  console.log(`${batch.events.length} changes in real-time`)
+// Subscribe to real-time changes
+for await (const batch of lake.subscribe(['orders', 'customers'])) {
+  console.log(`${batch.events.length} changes`)
 }
 ```
 
-### 2. Query Across Time
+### 2. Query Any Point in Time
 
-Full history on every table. Query now. Query last Tuesday. Query any snapshot.
+Full history on every table. Query now. Query last Tuesday. Query the exact moment a bug was reported.
 
 ```typescript
 // What did inventory look like last week?
-const historical = await lake.query(
+const then = await lake.query(
   'SELECT * FROM inventory WHERE product_id = ?',
-  { params: ['SKU-123'], asOf: new Date('2025-01-14T00:00:00Z') }
+  ['SKU-123'],
+  { asOf: '2025-01-14T00:00:00Z' }
 )
 
-// Compare to now
-const current = await lake.query(
+const now = await lake.query(
   'SELECT * FROM inventory WHERE product_id = ?',
-  { params: ['SKU-123'] }
+  ['SKU-123']
 )
 
-console.log('Then:', historical.rows[0])
-console.log('Now:', current.rows[0])
+console.log('Then:', then.rows[0].quantity)
+console.log('Now:', now.rows[0].quantity)
 ```
 
-### 3. Connect Your Tools
+### 3. Use Your Existing Tools
 
-Standard Iceberg. Your existing stack just works.
+Standard Iceberg format. Your stack already supports it.
 
-**DuckDB** (local analysis):
 ```sql
-SELECT * FROM iceberg_scan('r2://my-lakehouse/warehouse/default/orders');
-```
+-- DuckDB
+SELECT * FROM iceberg_scan('r2://lakehouse/orders');
 
-**Spark** (large-scale processing):
-```python
-spark.table("dolake.default.orders").groupBy("region").sum("revenue")
-```
+-- Spark
+spark.table("lake.orders").groupBy("region").sum("revenue")
 
-**Trino** (federated queries):
-```sql
-SELECT * FROM dolake.default.orders WHERE created_at > DATE '2025-01-01';
+-- Trino
+SELECT * FROM lake.orders WHERE created_at > DATE '2025-01-01';
 ```
 
 ---
 
-## What You're Avoiding
-
-Without lake.do, you're stuck with:
-
-- **Stale data**: Analysts always looking at yesterday
-- **Infrastructure sprawl**: Kafka + Spark + S3 + Hive + Airflow = a team just for plumbing
-- **Audit gaps**: No time travel means no audit trail, no point-in-time recovery
-- **Cost overruns**: Paying for peak capacity you use 10% of the time
+## What You Avoid
 
 | Traditional Lakehouse | lake.do |
-|----------------------|---------|
+|-----------------------|---------|
 | Hours of latency | Seconds |
-| Dedicated infra team | Zero ops |
-| Fixed capacity costs | Pay-per-request |
+| Dedicated infrastructure team | Zero ops |
+| Fixed capacity billing | Pay per query |
 | Complex CDC pipelines | Automatic |
 | Vendor lock-in | Standard Iceberg |
 
 ---
 
-## What Success Looks Like
+## Real Code for Real Problems
 
 ```typescript
-import { createLakeClient } from '@dotdo/lake.do'
+import { Lake } from '@dotdo/lake.do'
 
-const lake = createLakeClient({
-  url: 'https://lake.example.com',
+const lake = new Lake({
+  endpoint: 'https://lake.example.com',
   token: process.env.LAKE_TOKEN,
 })
 
-// Real-time dashboard in 10 lines
-async function getDashboardMetrics() {
-  const [revenue, users, inventory] = await Promise.all([
-    lake.query(`SELECT SUM(amount) as total FROM orders WHERE created_at >= NOW() - INTERVAL '1 hour'`),
-    lake.query(`SELECT COUNT(DISTINCT user_id) as active FROM events WHERE date = CURRENT_DATE`),
-    lake.query(`SELECT product_name, quantity FROM inventory WHERE quantity < reorder_point`),
+// Real-time dashboard
+async function getDashboard() {
+  const [revenue, users, alerts] = await Promise.all([
+    lake.query(`
+      SELECT SUM(amount) as total
+      FROM orders
+      WHERE created_at >= NOW() - INTERVAL '1 hour'
+    `),
+    lake.query(`
+      SELECT COUNT(DISTINCT user_id) as active
+      FROM events
+      WHERE timestamp >= NOW() - INTERVAL '1 hour'
+    `),
+    lake.query(`
+      SELECT product_name, quantity
+      FROM inventory
+      WHERE quantity < reorder_point
+    `),
   ])
 
   return {
     hourlyRevenue: revenue.rows[0].total,
     activeUsers: users.rows[0].active,
-    lowStockItems: inventory.rows,
-    dataAge: 'seconds',  // not hours
+    lowStock: alerts.rows,
   }
 }
 
-// React to changes in real-time
+// React to changes as they happen
 async function syncDownstream() {
-  for await (const batch of lake.subscribe({ tables: ['orders'] })) {
+  for await (const batch of lake.subscribe(['orders'])) {
     for (const event of batch.events) {
-      if (event.operation === 'INSERT') {
-        await notifyWarehouse(event.after)
-        await updateSearchIndex(event.after)
-        await refreshCache(event.after.id)
+      if (event.op === 'INSERT') {
+        await notifyWarehouse(event.data)
+        await updateSearchIndex(event.data)
       }
     }
   }
 }
 
-// Debug with time travel
-async function investigateIssue(orderId: string, reportedAt: Date) {
+// Debug production issues with time travel
+async function investigate(orderId: string, reportedAt: Date) {
   const snapshot = await lake.query(
     'SELECT * FROM orders WHERE id = ?',
-    { params: [orderId], asOf: reportedAt }
+    [orderId],
+    { asOf: reportedAt }
   )
-  console.log('State when bug was reported:', snapshot.rows[0])
+  console.log('State at time of report:', snapshot.rows[0])
 }
 ```
 
 ---
 
-## Get Started in 60 Seconds
+## Start in 60 Seconds
 
 ```bash
 npm install @dotdo/lake.do
 ```
 
 ```typescript
-import { createLakeClient } from '@dotdo/lake.do'
+import { Lake } from '@dotdo/lake.do'
 
-const lake = createLakeClient({
-  url: 'https://your-lakehouse.workers.dev',
+const lake = new Lake({
+  endpoint: 'https://your-lakehouse.workers.dev',
   token: process.env.LAKE_TOKEN,
 })
 
-// Query
-const result = await lake.query('SELECT COUNT(*) FROM orders')
-console.log(`Total orders: ${result.rows[0].count}`)
-
-// Subscribe to changes
-for await (const batch of lake.subscribe({ tables: ['orders'] })) {
-  console.log(`${batch.events.length} changes`)
-}
+const result = await lake.query('SELECT COUNT(*) as total FROM orders')
+console.log(`Orders: ${result.rows[0].total}`)
 ```
 
-That's it. You're running a lakehouse.
+You now have a lakehouse.
 
 ---
 
-## How It Works
+## Architecture
 
 ```
-Your App --> DoSQL --> lake.do --> R2 (Iceberg/Parquet)
-                                       |
-                         +-------------+-------------+
-                         |             |             |
-                      DuckDB        Spark         Trino
+DoSQL (OLTP) --> lake.do --> R2 (Iceberg/Parquet)
+                                    |
+                      +-------------+-------------+
+                      |             |             |
+                   DuckDB        Spark         Trino
 ```
 
-**DoSQL**: OLTP. Every transaction emits CDC events.
-
-**lake.do**: Batches events. Writes Parquet. Manages Iceberg metadata.
-
-**R2**: Standard Iceberg tables. Query with any tool.
-
-**Result**: Real-time data, full history, edge latency.
+DoSQL handles transactions and emits CDC events. lake.do batches events, writes Parquet files, and manages Iceberg metadata. R2 stores standard Iceberg tables that any tool can read.
 
 ---
 
-## Features
+## Capabilities
 
-- **Real-time CDC**: Seconds, not hours
-- **Iceberg Native**: No vendor lock-in
-- **Time Travel**: Query any point in history
-- **Partition Pruning**: Fast on large datasets
-- **Auto Compaction**: Small files merged automatically
-- **REST Catalog**: Standard API for external engines
-- **WebSocket Hibernation**: 95% cost savings when idle
-- **Edge Latency**: Data where your users are
+- **Real-time CDC** - Seconds, not hours
+- **Time Travel** - Query any historical snapshot
+- **Standard Iceberg** - No vendor lock-in
+- **Partition Pruning** - Fast scans on large tables
+- **Auto Compaction** - Small files merged automatically
+- **REST Catalog** - Standard API for external engines
+- **WebSocket Hibernation** - Pay only when data flows
+- **Edge Latency** - Compute where your users are
 
 ---
 
 ## Documentation
 
-- [Getting Started](https://lake.do/docs/getting-started)
-- [CDC Streaming](https://lake.do/docs/cdc-streaming)
+- [Getting Started](https://lake.do/docs)
+- [CDC Streaming](https://lake.do/docs/cdc)
 - [Time Travel](https://lake.do/docs/time-travel)
-- [External Tools](https://lake.do/docs/external-tools)
+- [External Tools](https://lake.do/docs/tools)
 - [API Reference](https://lake.do/docs/api)
 
 ---
 
-## Stop Waiting. Start Querying.
+## Stop Waiting for Yesterday's Data
 
-Your data is flowing. Your analysts are waiting. The infrastructure excuse is over.
+Your data is flowing. Your analysts are waiting.
 
 ```bash
 npm install @dotdo/lake.do
 ```
 
-**[Get Started Now](https://lake.do/docs/getting-started)** | **[Examples](https://github.com/dotdo/lake.do/tree/main/examples)** | **[Discord](https://discord.gg/dotdo)**
+[Get Started](https://lake.do/docs) | [Examples](https://github.com/dotdo/lake.do/examples) | [Discord](https://discord.gg/dotdo)
 
 ---
 
-*lake.do: Real-time analytics. Zero ops. Standard Iceberg.*
+*Real-time analytics. Zero ops. Standard Iceberg.*
