@@ -55,6 +55,11 @@ export class DefaultWALEncoder implements WALEncoder {
       key: entry.key ? this.encodeBytes(entry.key) : undefined,
       before: entry.before ? this.encodeBytes(entry.before) : undefined,
       after: entry.after ? this.encodeBytes(entry.after) : undefined,
+      hlc: entry.hlc ? {
+        physicalTime: entry.hlc.physicalTime,
+        logicalCounter: entry.hlc.logicalCounter,
+        nodeId: entry.hlc.nodeId,
+      } : undefined,
     };
     return this.textEncoder.encode(JSON.stringify(obj));
   }
@@ -71,6 +76,11 @@ export class DefaultWALEncoder implements WALEncoder {
       key: obj.key ? this.decodeBytes(obj.key) : undefined,
       before: obj.before ? this.decodeBytes(obj.before) : undefined,
       after: obj.after ? this.decodeBytes(obj.after) : undefined,
+      hlc: obj.hlc ? {
+        physicalTime: obj.hlc.physicalTime,
+        logicalCounter: obj.hlc.logicalCounter,
+        nodeId: obj.hlc.nodeId,
+      } : undefined,
     };
   }
 
@@ -88,6 +98,11 @@ export class DefaultWALEncoder implements WALEncoder {
         key: e.key ? this.encodeBytes(e.key) : undefined,
         before: e.before ? this.encodeBytes(e.before) : undefined,
         after: e.after ? this.encodeBytes(e.after) : undefined,
+        hlc: e.hlc ? {
+          physicalTime: e.hlc.physicalTime,
+          logicalCounter: e.hlc.logicalCounter,
+          nodeId: e.hlc.nodeId,
+        } : undefined,
       })),
       checksum: segment.checksum,
       createdAt: segment.createdAt,
@@ -112,6 +127,11 @@ export class DefaultWALEncoder implements WALEncoder {
         key: e.key ? this.decodeBytes(e.key) : undefined,
         before: e.before ? this.decodeBytes(e.before) : undefined,
         after: e.after ? this.decodeBytes(e.after) : undefined,
+        hlc: e.hlc ? {
+          physicalTime: e.hlc.physicalTime,
+          logicalCounter: e.hlc.logicalCounter,
+          nodeId: e.hlc.nodeId,
+        } : undefined,
       })),
       checksum: obj.checksum,
       createdAt: obj.createdAt,
@@ -143,20 +163,81 @@ export class DefaultWALEncoder implements WALEncoder {
 }
 
 // =============================================================================
+// WAL Writer HLC Extension
+// =============================================================================
+
+/**
+ * Extended WAL Writer interface with HLC support
+ */
+export interface WALWriterHLC {
+  /**
+   * Receive a remote HLC timestamp and update the local clock
+   * @param hlc Remote HLC timestamp
+   * @param options Optional HLC receive options
+   */
+  receiveHLC(hlc: HLCTimestamp, options?: HLCReceiveOptions): Promise<void>;
+
+  /**
+   * Register an event handler for HLC events
+   * @param event Event type
+   * @param callback Event handler
+   */
+  on(event: string, callback: (...args: unknown[]) => void): void;
+
+  /**
+   * Get drift metrics for monitoring
+   */
+  getDriftMetrics(): DriftMetrics;
+
+  /**
+   * Get the HLC clock instance
+   */
+  getHLCClock(): HLCClock;
+}
+
+// =============================================================================
 // WAL Writer Implementation
 // =============================================================================
 
 /**
- * Creates a new WAL Writer
+ * Configuration for HLC in WAL Writer
+ */
+export interface WALWriterHLCConfig {
+  /** Node ID for HLC (default: auto-generated) */
+  nodeId?: string;
+  /** Maximum allowed drift from wall clock in milliseconds (default: 60000 = 1 minute) */
+  maxDriftMs?: number;
+  /** Warning threshold as fraction of maxDrift (default: 0.8 = 80%) */
+  warningThreshold?: number;
+}
+
+/**
+ * Creates a new WAL Writer with HLC support
+ * @param backend FSX backend for storage
+ * @param initialLSN Starting LSN (default: 0n)
+ * @param config WAL configuration
+ * @param encoder Custom encoder (optional)
+ * @param hlcConfig HLC configuration (optional)
  */
 export function createWALWriter(
   backend: FSXBackend,
   initialLSN: bigint = 0n,
   config: Partial<WALConfig> = {},
-  encoder?: WALEncoder
-): WALWriter {
+  encoder?: WALEncoder,
+  hlcConfig?: WALWriterHLCConfig
+): WALWriter & WALWriterHLC {
   const fullConfig: WALConfig = { ...DEFAULT_WAL_CONFIG, ...config };
   const walEncoder = encoder ?? new DefaultWALEncoder();
+
+  // Generate a unique node ID if not provided
+  const nodeId = hlcConfig?.nodeId ?? `node_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+
+  // Create HLC clock
+  const hlcClock = createHLCClock({
+    nodeId,
+    maxDriftMs: hlcConfig?.maxDriftMs,
+    warningThreshold: hlcConfig?.warningThreshold,
+  });
 
   // Current state
   let currentLSN = initialLSN;
@@ -254,7 +335,7 @@ export function createWALWriter(
   }
 
   // Public interface
-  const writer: WALWriter = {
+  const writer: WALWriter & WALWriterHLC = {
     async append(
       entryWithoutLSN: Omit<WALEntry, 'lsn'>,
       options: AppendOptions = {}
@@ -266,10 +347,11 @@ export function createWALWriter(
         );
       }
 
-      // Assign monotonically increasing LSN
+      // Assign monotonically increasing LSN and HLC timestamp
       const entry: WALEntry = {
         ...entryWithoutLSN,
         lsn: currentLSN++,
+        hlc: hlcClock.now(),
       };
 
       pendingEntries.push(entry);
@@ -330,6 +412,25 @@ export function createWALWriter(
       }
 
       closed = true;
+    },
+
+    // HLC extension methods
+    async receiveHLC(hlc: HLCTimestamp, options?: HLCReceiveOptions): Promise<void> {
+      await hlcClock.receive(hlc, options);
+    },
+
+    on(event: string, callback: (...args: unknown[]) => void): void {
+      if (event === 'drift-warning') {
+        hlcClock.on('drift-warning', callback as HLCEventHandler);
+      }
+    },
+
+    getDriftMetrics(): DriftMetrics {
+      return hlcClock.getDriftMetrics();
+    },
+
+    getHLCClock(): HLCClock {
+      return hlcClock;
     },
   };
 

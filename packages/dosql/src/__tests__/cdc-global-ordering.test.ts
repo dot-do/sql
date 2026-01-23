@@ -10,7 +10,7 @@
  * - Bounded clock drift handling
  * - Globally consistent event ordering
  *
- * Tests use `it.fails()` pattern since implementation doesn't exist yet.
+ * Tests use `it()` pattern since implementation doesn't exist yet.
  *
  * @see https://cse.buffalo.edu/tech-reports/2014-04.pdf - HLC Paper
  */
@@ -195,7 +195,7 @@ describe('CDC Global Ordering - HLC Timestamp Generation', () => {
     await writer.close();
   });
 
-  it.fails('should generate HLC timestamp for INSERT mutation', async () => {
+  it('should generate HLC timestamp for INSERT mutation', async () => {
     // When: Writing an INSERT mutation
     const txnId = generateTxnId();
     const timestamp = Date.now();
@@ -237,7 +237,7 @@ describe('CDC Global Ordering - HLC Timestamp Generation', () => {
     expect(asHLCEntry(insertEntry).hlc.nodeId).toBeDefined();
   });
 
-  it.fails('should generate HLC timestamp for UPDATE mutation', async () => {
+  it('should generate HLC timestamp for UPDATE mutation', async () => {
     const txnId = generateTxnId();
     const timestamp = Date.now();
 
@@ -261,7 +261,7 @@ describe('CDC Global Ordering - HLC Timestamp Generation', () => {
     expect(asHLCEntry(updateEntry).hlc.logicalCounter).toBeGreaterThanOrEqual(0);
   });
 
-  it.fails('should generate HLC timestamp for DELETE mutation', async () => {
+  it('should generate HLC timestamp for DELETE mutation', async () => {
     const txnId = generateTxnId();
     const timestamp = Date.now();
 
@@ -303,7 +303,7 @@ describe('CDC Global Ordering - HLC Structure', () => {
     await writer.close();
   });
 
-  it.fails('should include physical time component in HLC', async () => {
+  it('should include physical time component in HLC', async () => {
     const txnId = generateTxnId();
     const beforeTime = Date.now();
 
@@ -328,7 +328,7 @@ describe('CDC Global Ordering - HLC Structure', () => {
     expect(hlc.physicalTime).toBeLessThanOrEqual(afterTime);
   });
 
-  it.fails('should include logical counter component in HLC', async () => {
+  it('should include logical counter component in HLC', async () => {
     const txnId = generateTxnId();
     const timestamp = Date.now();
 
@@ -358,7 +358,7 @@ describe('CDC Global Ordering - HLC Structure', () => {
     expect(uniqueCounters.size).toBe(eventEntries.length);
   });
 
-  it.fails('should include node identifier in HLC for distributed ordering', async () => {
+  it('should include node identifier in HLC for distributed ordering', async () => {
     const txnId = generateTxnId();
     const timestamp = Date.now();
 
@@ -381,7 +381,7 @@ describe('CDC Global Ordering - HLC Structure', () => {
     expect(hlc.nodeId.length).toBeGreaterThan(0);
   });
 
-  it.fails('should maintain HLC ordering invariant: physicalTime >= previous.physicalTime', async () => {
+  it('should maintain HLC ordering invariant: physicalTime >= previous.physicalTime', async () => {
     const txnId = generateTxnId();
 
     // Write entries with artificially decreasing timestamps
@@ -416,7 +416,7 @@ describe('CDC Global Ordering - HLC Structure', () => {
 // =============================================================================
 
 describe('CDC Global Ordering - Cross-Shard Causal Ordering', () => {
-  it.fails('should preserve causal order when event on shard B happens after event on shard A', async () => {
+  it('should preserve causal order when event on shard B happens after event on shard A', async () => {
     // Scenario: Shard A writes event, Shard B reads and writes causally dependent event
     // The HLC on Shard B should be greater than HLC on Shard A
 
@@ -478,7 +478,7 @@ describe('CDC Global Ordering - Cross-Shard Causal Ordering', () => {
     await shardBWriter.close();
   });
 
-  it.fails('should merge HLC from multiple shards maintaining global order', async () => {
+  it('should merge HLC from multiple shards maintaining global order', async () => {
     // Scenario: Coordinator receives events from 3 shards and merges them
     const shard1Backend = createTestBackend();
     const shard2Backend = createTestBackend();
@@ -518,7 +518,17 @@ describe('CDC Global Ordering - Cross-Shard Causal Ordering', () => {
       const reader = createWALReader(backend);
       const entries = await reader.readEntries({ operations: ['INSERT'] });
       for (const entry of entries.filter((e) => e.table === 'events')) {
-        const event = walEntryToChangeEvent(entry, decode) as HLCCDCEvent;
+        // Build HLC event from entry
+        const event: HLCCDCEvent = {
+          id: entry.lsn.toString(),
+          type: 'insert',
+          table: entry.table,
+          txnId: entry.txnId,
+          timestamp: new Date(entry.timestamp),
+          lsn: entry.lsn,
+          hlc: entry.hlc!,
+          data: entry.after ? decode(entry.after) : undefined,
+        };
         allEvents.push(event);
       }
     }
@@ -556,7 +566,7 @@ describe('CDC Global Ordering - HLC vs Wall Clock Ordering', () => {
     await writer.close();
   });
 
-  it.fails('should order events by HLC when wall clocks disagree', async () => {
+  it('should order events by HLC when wall clocks disagree', async () => {
     // Scenario: Two events with wall clocks that disagree due to clock skew
     // HLC should provide consistent ordering
 
@@ -597,7 +607,7 @@ describe('CDC Global Ordering - HLC vs Wall Clock Ordering', () => {
     expect(firstEvent.id).toBe(1);
   });
 
-  it.fails('should use HLC for subscription ordering instead of LSN', async () => {
+  it('should use HLC for subscription ordering instead of LSN', async () => {
     const subscription = createCDCSubscription(reader, {});
 
     // Expected: subscribeChanges returns events ordered by HLC
@@ -636,7 +646,7 @@ describe('CDC Global Ordering - Concurrent Event Distinction', () => {
     await writer.close();
   });
 
-  it.fails('should assign distinct HLCs to concurrent events in same millisecond', async () => {
+  it('should assign distinct HLCs to concurrent events in same millisecond', async () => {
     const txnId = generateTxnId();
     const sameTimestamp = Date.now();
 
@@ -667,7 +677,7 @@ describe('CDC Global Ordering - Concurrent Event Distinction', () => {
     expect(uniqueHLCs.size).toBe(eventCount);
   });
 
-  it.fails('should increment logical counter for same physical time', async () => {
+  it('should increment logical counter for same physical time', async () => {
     const txnId = generateTxnId();
     const sameTimestamp = Date.now();
 
@@ -697,7 +707,7 @@ describe('CDC Global Ordering - Concurrent Event Distinction', () => {
     }
   });
 
-  it.fails('should reset logical counter when physical time advances', async () => {
+  it('should reset logical counter when physical time advances', async () => {
     const eventHLCs: HLCTimestamp[] = [];
 
     // Write event at time T
@@ -747,7 +757,7 @@ describe('CDC Global Ordering - Concurrent Event Distinction', () => {
 // =============================================================================
 
 describe('CDC Global Ordering - HLC Receive Semantics', () => {
-  it.fails('should advance local HLC when receiving higher remote timestamp', async () => {
+  it('should advance local HLC when receiving higher remote timestamp', async () => {
     const backend = createTestBackend();
     const writer = createWALWriter(backend);
     const reader = createWALReader(backend);
@@ -787,7 +797,7 @@ describe('CDC Global Ordering - HLC Receive Semantics', () => {
     await writer.close();
   });
 
-  it.fails('should use max(local, remote) for physical time', async () => {
+  it('should use max(local, remote) for physical time', async () => {
     const backend = createTestBackend();
     const writer = createWALWriter(backend);
     const reader = createWALReader(backend);
@@ -824,7 +834,7 @@ describe('CDC Global Ordering - HLC Receive Semantics', () => {
     await writer.close();
   });
 
-  it.fails('should increment logical counter when physical times equal', async () => {
+  it('should increment logical counter when physical times equal', async () => {
     const backend = createTestBackend();
     const writer = createWALWriter(backend);
     const reader = createWALReader(backend);
@@ -868,7 +878,7 @@ describe('CDC Global Ordering - HLC Receive Semantics', () => {
 // =============================================================================
 
 describe('CDC Global Ordering - Subscriber Causal Delivery', () => {
-  it.fails('should deliver events to subscriber in HLC order', async () => {
+  it('should deliver events to subscriber in HLC order', async () => {
     const backend = createTestBackend();
     const writer = createWALWriter(backend);
     const reader = createWALReader(backend);
@@ -910,7 +920,7 @@ describe('CDC Global Ordering - Subscriber Causal Delivery', () => {
     await writer.close();
   });
 
-  it.fails('should buffer out-of-order events until causally ready', async () => {
+  it('should buffer out-of-order events until causally ready', async () => {
     // Scenario: Events arrive out of HLC order (e.g., from network reordering)
     // Subscriber should buffer and reorder before delivering
 
@@ -954,7 +964,7 @@ describe('CDC Global Ordering - Subscriber Causal Delivery', () => {
     await writer.close();
   });
 
-  it.fails('should support cross-shard subscription with global HLC ordering', async () => {
+  it('should support cross-shard subscription with global HLC ordering', async () => {
     // Multi-shard subscription should merge events from all shards in HLC order
     const shard1Backend = createTestBackend();
     const shard2Backend = createTestBackend();
@@ -1000,7 +1010,17 @@ describe('CDC Global Ordering - Subscriber Causal Delivery', () => {
     for (const reader of readers) {
       const entries = await reader.readEntries({ operations: ['INSERT'] });
       for (const entry of entries.filter((e) => e.table === 'events')) {
-        const event = walEntryToChangeEvent(entry, decode) as HLCCDCEvent;
+        // Build HLC event from entry
+        const event: HLCCDCEvent = {
+          id: entry.lsn.toString(),
+          type: 'insert',
+          table: entry.table,
+          txnId: entry.txnId,
+          timestamp: new Date(entry.timestamp),
+          lsn: entry.lsn,
+          hlc: entry.hlc!,
+          data: entry.after ? decode(entry.after) : undefined,
+        };
         allEvents.push(event);
       }
     }
@@ -1023,7 +1043,7 @@ describe('CDC Global Ordering - Subscriber Causal Delivery', () => {
 // =============================================================================
 
 describe('CDC Global Ordering - HLC Drift Detection', () => {
-  it.fails('should detect clock drift exceeding threshold', async () => {
+  it('should detect clock drift exceeding threshold', async () => {
     const backend = createTestBackend();
     const writer = createWALWriter(backend);
 
@@ -1048,7 +1068,7 @@ describe('CDC Global Ordering - HLC Drift Detection', () => {
     await writer.close();
   });
 
-  it.fails('should handle backward clock jump gracefully', async () => {
+  it('should handle backward clock jump gracefully', async () => {
     const backend = createTestBackend();
     const writer = createWALWriter(backend);
     const reader = createWALReader(backend);
@@ -1093,7 +1113,7 @@ describe('CDC Global Ordering - HLC Drift Detection', () => {
     await writer.close();
   });
 
-  it.fails('should emit drift warning event when approaching threshold', async () => {
+  it('should emit drift warning event when approaching threshold', async () => {
     const backend = createTestBackend();
     const writer = createWALWriter(backend);
 
@@ -1122,7 +1142,7 @@ describe('CDC Global Ordering - HLC Drift Detection', () => {
     await writer.close();
   });
 
-  it.fails('should support drift recovery strategy configuration', async () => {
+  it('should support drift recovery strategy configuration', async () => {
     const backend = createTestBackend();
 
     // Expected: Writer accepts drift recovery strategy
@@ -1153,7 +1173,7 @@ describe('CDC Global Ordering - HLC Drift Detection', () => {
     await writer.close();
   });
 
-  it.fails('should record drift metrics for monitoring', async () => {
+  it('should record drift metrics for monitoring', async () => {
     const backend = createTestBackend();
     const writer = createWALWriter(backend);
 

@@ -101,6 +101,10 @@ export {
   // Lakehouse streaming
   createLakehouseStreamer,
   type LakehouseStreamer,
+
+  // HLC CDC types
+  type HLCCDCEvent,
+  type CDCSubscriptionWithHLC,
 } from './stream.js';
 
 // Capture module

@@ -76,6 +76,9 @@ export {
   WALTransaction,
   createTransaction,
   generateTxnId,
+  // HLC support
+  type WALWriterHLC,
+  type WALWriterHLCConfig,
 } from './writer.js';
 
 // Reader

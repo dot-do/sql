@@ -15,10 +15,12 @@ import type {
   WALReader,
   WALConfig,
   LSN,
+  HLCTimestamp,
 } from '../wal/types.js';
 import { createWALReader, tailWAL } from '../wal/reader.js';
 import { DEFAULT_WAL_CONFIG } from '../wal/types.js';
 import { createLSN, incrementLSN } from '../engine/types.js';
+import { compareHLC, sortByHLC } from '../hlc.js';
 import {
   type CDCFilter,
   type CDCSubscription,
@@ -35,6 +37,32 @@ import {
   CDCError,
   CDCErrorCode,
 } from './types.js';
+
+// =============================================================================
+// HLC CDC Event Types
+// =============================================================================
+
+/**
+ * CDC Event with HLC ordering
+ */
+export interface HLCCDCEvent<T = unknown> extends ChangeEvent<T> {
+  /** HLC timestamp for global ordering */
+  hlc: HLCTimestamp;
+}
+
+/**
+ * Extended CDC Subscription with HLC ordering support
+ */
+export interface CDCSubscriptionWithHLC extends CDCSubscription {
+  /**
+   * Subscribe to changes ordered by HLC timestamp
+   * This ensures causal ordering across shards
+   */
+  subscribeByHLC<T = unknown>(
+    fromLSN: bigint,
+    options?: { tables?: string[]; operations?: WALOperation[] }
+  ): AsyncIterableIterator<HLCCDCEvent<T>>;
+}
 
 // =============================================================================
 // Filter Helpers
@@ -114,12 +142,12 @@ function opToTxnType(op: WALOperation): 'begin' | 'commit' | 'rollback' | null {
 // =============================================================================
 
 /**
- * Create a CDC subscription
+ * Create a CDC subscription with HLC support
  */
 export function createCDCSubscription(
   reader: WALReader,
   options: CDCSubscriptionOptions = {}
-): CDCSubscription {
+): CDCSubscriptionWithHLC {
   const pollInterval = options.pollInterval ?? 100;
   const batchSize = options.batchSize ?? 100;
   const includeTransactionControl = options.includeTransactionControl ?? false;
@@ -132,7 +160,7 @@ export function createCDCSubscription(
   let lastEntryAt: Date | undefined;
   let stopRequested = false;
 
-  const subscription: CDCSubscription = {
+  const subscription: CDCSubscriptionWithHLC = {
     async *subscribe(
       fromLSN: LSN,
       filter?: CDCFilter
@@ -263,6 +291,62 @@ export function createCDCSubscription(
 
     isActive(): boolean {
       return active;
+    },
+
+    async *subscribeByHLC<T = unknown>(
+      fromLSN: bigint,
+      filterOptions?: { tables?: string[]; operations?: WALOperation[] }
+    ): AsyncIterableIterator<HLCCDCEvent<T>> {
+      // Build filter from options
+      const filter: CDCFilter | undefined = filterOptions
+        ? {
+            tables: filterOptions.tables,
+            operations: filterOptions.operations,
+          }
+        : undefined;
+
+      // Iterate over entries sorted by HLC
+      for await (const entry of subscription.subscribe(fromLSN, filter)) {
+        // Skip entries without HLC
+        if (!entry.hlc) continue;
+
+        // Skip transaction control entries
+        if (entry.op === 'BEGIN' || entry.op === 'COMMIT' || entry.op === 'ROLLBACK') {
+          continue;
+        }
+
+        const changeType = opToChangeType(entry.op);
+        if (!changeType) continue;
+
+        const event: HLCCDCEvent<T> = {
+          id: `${entry.lsn}`,
+          type: changeType,
+          table: entry.table,
+          txnId: entry.txnId,
+          timestamp: new Date(entry.timestamp),
+          lsn: entry.lsn,
+          key: entry.key,
+          hlc: entry.hlc,
+        };
+
+        // Decode data values if present
+        if (entry.after) {
+          try {
+            event.data = JSON.parse(new TextDecoder().decode(entry.after)) as T;
+          } catch {
+            event.data = entry.after as unknown as T;
+          }
+        }
+        if (entry.before) {
+          try {
+            event.oldData = JSON.parse(new TextDecoder().decode(entry.before)) as T;
+          } catch {
+            event.oldData = entry.before as unknown as T;
+          }
+        }
+
+        yield event;
+      }
     },
   };
 

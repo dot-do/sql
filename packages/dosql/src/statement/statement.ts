@@ -501,17 +501,19 @@ export class InMemoryEngine implements ExecutionEngine {
   // ==========================================================================
 
   private executeCreateTable(sql: string): ExecutionResult {
-    // Simple CREATE TABLE parsing
+    // Simple CREATE TABLE parsing - supports both quoted and unquoted identifiers
     const match = sql.match(
-      /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\(([\s\S]+)\)/i
+      /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|(\w+))\s*\(([\s\S]+)\)/i
     );
 
     if (!match) {
       throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid CREATE TABLE syntax', sql);
     }
 
-    const tableName = match[1];
-    const columnDefs = match[2];
+    // Table name is either in group 1 (quoted) or group 2 (unquoted)
+    // Column definitions are in group 3
+    const tableName = match[1] || match[2];
+    const columnDefs = match[3];
 
     // Parse columns
     const columns: ColumnInfo[] = [];
