@@ -73,7 +73,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
      * - Row 2: a=5, b=5 -> a=b is true -> 222
      * - Row 3: a=10, b=5 -> else -> 333
      */
-    it.fails('should evaluate simple CASE WHEN with comparison operators', () => {
+    it('should evaluate simple CASE WHEN with comparison operators', () => {
       const result = db.prepare(`
         SELECT CASE WHEN a < b THEN 111 WHEN a = b THEN 222 ELSE 333 END as result
         FROM t1
@@ -91,7 +91,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
      *
      * When no ELSE is provided and no WHEN condition matches, result should be NULL
      */
-    it.fails('should return NULL when no WHEN matches and no ELSE provided', () => {
+    it('should return NULL when no WHEN matches and no ELSE provided', () => {
       const result = db.prepare(`
         SELECT CASE WHEN a > 100 THEN 'big' WHEN a > 50 THEN 'medium' END as result
         FROM t1
@@ -107,7 +107,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: CASE WHEN with single condition
      */
-    it.fails('should handle CASE WHEN with single WHEN clause', () => {
+    it('should handle CASE WHEN with single WHEN clause', () => {
       const result = db.prepare(`
         SELECT CASE WHEN a = 5 THEN 'match' ELSE 'no match' END as result
         FROM t1
@@ -142,7 +142,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
      *
      * This is a common grading pattern where first matching WHEN wins
      */
-    it.fails('should evaluate multiple WHEN clauses in order (first match wins)', () => {
+    it('should evaluate multiple WHEN clauses in order (first match wins)', () => {
       const result = db.prepare(`
         SELECT id, score,
           CASE
@@ -167,7 +167,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Many WHEN clauses (stress test)
      */
-    it.fails('should handle many WHEN clauses', () => {
+    it('should handle many WHEN clauses', () => {
       db.exec('CREATE TABLE nums (n INTEGER)');
       db.exec('INSERT INTO nums (n) VALUES (1)');
       db.exec('INSERT INTO nums (n) VALUES (5)');
@@ -217,7 +217,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: CASE WHEN with < operator
      */
-    it.fails('should handle less than (<) in WHEN condition', () => {
+    it('should handle less than (<) in WHEN condition', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a < b THEN 'less' ELSE 'not less' END as cmp
         FROM t1
@@ -234,7 +234,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: CASE WHEN with > operator
      */
-    it.fails('should handle greater than (>) in WHEN condition', () => {
+    it('should handle greater than (>) in WHEN condition', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a > b THEN 'greater' ELSE 'not greater' END as cmp
         FROM t1
@@ -251,7 +251,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: CASE WHEN with <= operator
      */
-    it.fails('should handle less than or equal (<=) in WHEN condition', () => {
+    it('should handle less than or equal (<=) in WHEN condition', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a <= b THEN 'lte' ELSE 'gt' END as cmp
         FROM t1
@@ -268,7 +268,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: CASE WHEN with >= operator
      */
-    it.fails('should handle greater than or equal (>=) in WHEN condition', () => {
+    it('should handle greater than or equal (>=) in WHEN condition', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a >= b THEN 'gte' ELSE 'lt' END as cmp
         FROM t1
@@ -285,7 +285,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: CASE WHEN with = operator
      */
-    it.fails('should handle equal (=) in WHEN condition', () => {
+    it('should handle equal (=) in WHEN condition', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a = b THEN 'equal' ELSE 'not equal' END as cmp
         FROM t1
@@ -302,7 +302,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: CASE WHEN with <> (not equal) operator
      */
-    it.fails('should handle not equal (<>) in WHEN condition', () => {
+    it('should handle not equal (<>) in WHEN condition', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a <> b THEN 'different' ELSE 'same' END as cmp
         FROM t1
@@ -346,7 +346,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
      * - a=13: 13 < 7 (false), 13 <= 10 (false), 13 < 13 (false) -> 444
      * - a=15: 15 < 7 (false), 15 <= 10 (false), 15 < 13 (false) -> 444
      */
-    it.fails('should handle arithmetic subtraction in WHEN condition', () => {
+    it('should handle arithmetic subtraction in WHEN condition', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a < b - 3 THEN 111 WHEN a <= b THEN 222 WHEN a < b + 3 THEN 333 ELSE 444 END as result
         FROM t1
@@ -364,7 +364,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Arithmetic addition in WHEN condition
      */
-    it.fails('should handle arithmetic addition in WHEN condition', () => {
+    it('should handle arithmetic addition in WHEN condition', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a > b + 2 THEN 'over' ELSE 'under' END as result
         FROM t1
@@ -382,7 +382,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Arithmetic multiplication in WHEN condition
      */
-    it.fails('should handle arithmetic multiplication in WHEN condition', () => {
+    it('should handle arithmetic multiplication in WHEN condition', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a < b * 2 THEN 'small' ELSE 'large' END as result
         FROM t1
@@ -401,7 +401,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Arithmetic division in WHEN condition
      */
-    it.fails('should handle arithmetic division in WHEN condition', () => {
+    it('should handle arithmetic division in WHEN condition', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a > b / 2 THEN 'above half' ELSE 'at or below half' END as result
         FROM t1
@@ -420,7 +420,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Complex arithmetic expression in WHEN condition
      */
-    it.fails('should handle complex arithmetic expressions', () => {
+    it('should handle complex arithmetic expressions', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a * 2 > b + 5 THEN 'yes' ELSE 'no' END as result
         FROM t1
@@ -461,7 +461,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
      * This is the "simple CASE" form where the expression after CASE is compared
      * to each WHEN value for equality.
      */
-    it.fails('should evaluate simple CASE with numeric comparison', () => {
+    it('should evaluate simple CASE with numeric comparison', () => {
       const result = db.prepare(`
         SELECT x, CASE x WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'other' END as word
         FROM t1
@@ -478,7 +478,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Simple CASE with string expression
      */
-    it.fails('should evaluate simple CASE with string comparison', () => {
+    it('should evaluate simple CASE with string comparison', () => {
       const result = db.prepare(`
         SELECT label, CASE label WHEN 'first' THEN 1 WHEN 'second' THEN 2 ELSE 0 END as num
         FROM t1
@@ -495,7 +495,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Simple CASE without ELSE (should return NULL)
      */
-    it.fails('should return NULL for simple CASE when no WHEN matches and no ELSE', () => {
+    it('should return NULL for simple CASE when no WHEN matches and no ELSE', () => {
       const result = db.prepare(`
         SELECT x, CASE x WHEN 1 THEN 'one' WHEN 2 THEN 'two' END as word
         FROM t1
@@ -512,7 +512,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Simple CASE with many WHEN values
      */
-    it.fails('should handle simple CASE with many WHEN values', () => {
+    it('should handle simple CASE with many WHEN values', () => {
       const result = db.prepare(`
         SELECT x,
           CASE x
@@ -554,7 +554,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
      *
      * Outer CASE determines category, inner CASE determines size
      */
-    it.fails('should handle CASE nested inside THEN clause', () => {
+    it('should handle CASE nested inside THEN clause', () => {
       const result = db.prepare(`
         SELECT category, value,
           CASE category
@@ -578,7 +578,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Nested CASE in WHEN condition
      */
-    it.fails('should handle CASE nested inside WHEN condition', () => {
+    it('should handle CASE nested inside WHEN condition', () => {
       const result = db.prepare(`
         SELECT category, value,
           CASE
@@ -601,7 +601,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Deeply nested CASE (3 levels)
      */
-    it.fails('should handle deeply nested CASE expressions', () => {
+    it('should handle deeply nested CASE expressions', () => {
       const result = db.prepare(`
         SELECT category, value,
           CASE
@@ -650,7 +650,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
      * In SQL, NULL comparisons (NULL = anything, NULL < anything) are always NULL/false
      * So NULL values should fall through to ELSE
      */
-    it.fails('should handle NULL in WHEN condition (comparison always fails)', () => {
+    it('should handle NULL in WHEN condition (comparison always fails)', () => {
       const result = db.prepare(`
         SELECT id, value,
           CASE WHEN value > 15 THEN 'high' ELSE 'low or null' END as category
@@ -669,7 +669,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
      *
      * CASE x WHEN NULL THEN ... does NOT match NULL because NULL = NULL is NULL
      */
-    it.fails('should not match NULL with simple CASE (NULL = NULL is NULL)', () => {
+    it('should not match NULL with simple CASE (NULL = NULL is NULL)', () => {
       const result = db.prepare(`
         SELECT id, value,
           CASE value WHEN 10 THEN 'ten' WHEN NULL THEN 'null-matched' ELSE 'other' END as label
@@ -686,7 +686,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Using IS NULL in WHEN condition
      */
-    it.fails('should handle IS NULL in WHEN condition', () => {
+    it('should handle IS NULL in WHEN condition', () => {
       const result = db.prepare(`
         SELECT id, value,
           CASE WHEN value IS NULL THEN 'missing' ELSE 'present' END as status
@@ -703,7 +703,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: COALESCE-like behavior with CASE
      */
-    it.fails('should implement COALESCE-like behavior with CASE', () => {
+    it('should implement COALESCE-like behavior with CASE', () => {
       const result = db.prepare(`
         SELECT id, value,
           CASE WHEN value IS NOT NULL THEN value ELSE -1 END as safe_value
@@ -735,6 +735,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
 
     /**
      * KNOWN FAILURE: CASE in ORDER BY
+     * Requires ORDER BY expression support (not implemented in InMemoryEngine)
      */
     it.fails('should handle CASE in ORDER BY clause', () => {
       const result = db.prepare(`
@@ -753,6 +754,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
 
     /**
      * KNOWN FAILURE: CASE in WHERE clause
+     * Requires WHERE expression support (not implemented in InMemoryEngine)
      */
     it.fails('should handle CASE in WHERE clause', () => {
       const result = db.prepare(`
@@ -769,6 +771,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
 
     /**
      * KNOWN FAILURE: CASE with aggregate functions
+     * Requires GROUP BY support (not implemented in InMemoryEngine)
      */
     it.fails('should handle CASE inside aggregate functions', () => {
       const result = db.prepare(`
@@ -789,6 +792,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
 
     /**
      * KNOWN FAILURE: COUNT with CASE (conditional counting)
+     * Requires GROUP BY support (not implemented in InMemoryEngine)
      */
     it.fails('should handle COUNT with CASE for conditional counting', () => {
       const result = db.prepare(`
@@ -827,7 +831,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
      *
      * All THEN branches should return compatible types
      */
-    it.fails('should handle mixed numeric and string results', () => {
+    it('should handle mixed numeric and string results', () => {
       const result = db.prepare(`
         SELECT id,
           CASE WHEN num_val < 15 THEN 'small' ELSE 'large' END as size
@@ -843,7 +847,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     /**
      * KNOWN FAILURE: Integer results from CASE
      */
-    it.fails('should return integer from CASE when all branches are integers', () => {
+    it('should return integer from CASE when all branches are integers', () => {
       const result = db.prepare(`
         SELECT id,
           CASE WHEN num_val < 15 THEN 1 ELSE 2 END as category
@@ -881,7 +885,7 @@ describe('InMemoryEngine CASE WHEN Tests', () => {
   /**
    * KNOWN FAILURE: Basic CASE WHEN at engine level
    */
-  it.fails('should execute basic CASE WHEN expression', () => {
+  it('should execute basic CASE WHEN expression', () => {
     const result = engine.execute(
       'SELECT id, CASE WHEN a < b THEN 1 WHEN a = b THEN 2 ELSE 3 END as cmp FROM test ORDER BY id',
       []
@@ -896,7 +900,7 @@ describe('InMemoryEngine CASE WHEN Tests', () => {
   /**
    * KNOWN FAILURE: Simple CASE at engine level
    */
-  it.fails('should execute simple CASE expression', () => {
+  it('should execute simple CASE expression', () => {
     const result = engine.execute(
       "SELECT id, CASE a WHEN 5 THEN 'five' WHEN 10 THEN 'ten' ELSE 'other' END as word FROM test ORDER BY id",
       []
@@ -911,7 +915,7 @@ describe('InMemoryEngine CASE WHEN Tests', () => {
   /**
    * KNOWN FAILURE: CASE with parameter binding
    */
-  it.fails('should handle CASE with parameter binding', () => {
+  it('should handle CASE with parameter binding', () => {
     const result = engine.execute(
       'SELECT id, CASE WHEN a > ? THEN 1 ELSE 0 END as above FROM test ORDER BY id',
       [7]

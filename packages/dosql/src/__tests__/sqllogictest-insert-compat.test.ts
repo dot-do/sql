@@ -33,16 +33,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
   // ===========================================================================
 
   describe('INSERT without explicit column list - Basic Patterns', () => {
-    /**
-     * KNOWN FAILURE: INSERT without column list
-     *
-     * Bug: The InMemoryEngine regex requires explicit column names in INSERT statements.
-     * Pattern: /INSERT\s+INTO\s+(\w+)\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i
-     *
-     * Expected: INSERT INTO t1 VALUES(1,'true') should work
-     * Actual: Throws "Invalid INSERT syntax"
-     */
-    it.fails('should accept INSERT without column list - integer and text', () => {
+    it('should accept INSERT without column list - integer and text', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       // This is standard SQL - columns are inferred from table definition order
@@ -53,7 +44,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 1, b: 'true' });
     });
 
-    it.fails('should accept INSERT without column list - multiple rows', () => {
+    it('should accept INSERT without column list - multiple rows', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       db.exec("INSERT INTO t1 VALUES(1,'true')");
@@ -65,7 +56,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[1]).toEqual({ a: 1, b: 'true' });
     });
 
-    it.fails('should accept INSERT without column list - NULL value', () => {
+    it('should accept INSERT without column list - NULL value', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       db.exec("INSERT INTO t1 VALUES(NULL,'NULL')");
@@ -81,7 +72,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
   // ===========================================================================
 
   describe('INSERT without column list - Various Data Types', () => {
-    it.fails('should accept INSERT without column list - INTEGER only', () => {
+    it('should accept INSERT without column list - INTEGER only', () => {
       db.exec('CREATE TABLE nums (x INTEGER, y INTEGER, z INTEGER)');
 
       db.exec('INSERT INTO nums VALUES(1, 2, 3)');
@@ -91,7 +82,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ x: 1, y: 2, z: 3 });
     });
 
-    it.fails('should accept INSERT without column list - REAL values', () => {
+    it('should accept INSERT without column list - REAL values', () => {
       db.exec('CREATE TABLE floats (a REAL, b REAL)');
 
       db.exec('INSERT INTO floats VALUES(1.5, 2.7)');
@@ -101,7 +92,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 1.5, b: 2.7 });
     });
 
-    it.fails('should accept INSERT without column list - TEXT only', () => {
+    it('should accept INSERT without column list - TEXT only', () => {
       db.exec('CREATE TABLE strings (a TEXT, b TEXT, c TEXT)');
 
       db.exec("INSERT INTO strings VALUES('hello', 'world', 'test')");
@@ -111,7 +102,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 'hello', b: 'world', c: 'test' });
     });
 
-    it.fails('should accept INSERT without column list - BLOB data', () => {
+    it('should accept INSERT without column list - BLOB data', () => {
       db.exec('CREATE TABLE blobs (id INTEGER, data BLOB)');
 
       // SQLite allows BLOB literals as X'...' hex strings
@@ -122,7 +113,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ id: 1 });
     });
 
-    it.fails('should accept INSERT without column list - mixed types', () => {
+    it('should accept INSERT without column list - mixed types', () => {
       db.exec('CREATE TABLE mixed (id INTEGER, name TEXT, value REAL, flag INTEGER)');
 
       db.exec("INSERT INTO mixed VALUES(1, 'item', 99.99, 1)");
@@ -138,7 +129,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
   // ===========================================================================
 
   describe('INSERT without column list - NULL Handling', () => {
-    it.fails('should accept INSERT with NULL as first value', () => {
+    it('should accept INSERT with NULL as first value', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       db.exec("INSERT INTO t1 VALUES(NULL, 'test')");
@@ -148,7 +139,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: null, b: 'test' });
     });
 
-    it.fails('should accept INSERT with NULL as last value', () => {
+    it('should accept INSERT with NULL as last value', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       db.exec('INSERT INTO t1 VALUES(42, NULL)');
@@ -158,7 +149,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 42, b: null });
     });
 
-    it.fails('should accept INSERT with all NULL values', () => {
+    it('should accept INSERT with all NULL values', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT, c REAL)');
 
       db.exec('INSERT INTO t1 VALUES(NULL, NULL, NULL)');
@@ -168,7 +159,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: null, b: null, c: null });
     });
 
-    it.fails('should accept INSERT with mixed NULL and non-NULL values', () => {
+    it('should accept INSERT with mixed NULL and non-NULL values', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT, c REAL, d INTEGER)');
 
       db.exec("INSERT INTO t1 VALUES(1, NULL, 3.14, NULL)");
@@ -184,7 +175,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
   // ===========================================================================
 
   describe('INSERT without column list - Parameter Binding', () => {
-    it.fails('should accept INSERT without column list using positional params', () => {
+    it('should accept INSERT without column list using positional params', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       // Prepared statement with positional parameters
@@ -196,7 +187,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 1, b: 'hello' });
     });
 
-    it.fails('should accept INSERT without column list using all params', () => {
+    it('should accept INSERT without column list using all params', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT, c REAL)');
 
       const stmt = db.prepare('INSERT INTO t1 VALUES(?, ?, ?)');
@@ -207,7 +198,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 42, b: 'test', c: 3.14 });
     });
 
-    it.fails('should accept INSERT without column list using named params', () => {
+    it('should accept INSERT without column list using named params', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       // Named parameters should also work
@@ -265,7 +256,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[1]).toEqual({ id: 2, name: 'second' });
     });
 
-    it.fails('should accept INSERT without column list with explicit ID', () => {
+    it('should accept INSERT without column list with explicit ID', () => {
       db.exec('CREATE TABLE t1 (id INTEGER PRIMARY KEY, name TEXT)');
 
       db.exec("INSERT INTO t1 VALUES(100, 'explicit id')");
@@ -402,7 +393,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
      * INSERT INTO t1 VALUES(0,'false')
      * INSERT INTO t1 VALUES(NULL,'NULL')
      */
-    it.fails('should handle the exact SQLLogicTest pattern', () => {
+    it('should handle the exact SQLLogicTest pattern', () => {
       // SQLite allows CREATE TABLE without column types
       db.exec('CREATE TABLE t1(a INTEGER, b TEXT)');
 
@@ -423,7 +414,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(trueRow).toEqual({ a: 1, b: 'true' });
     });
 
-    it.fails('should handle boolean-like integer values', () => {
+    it('should handle boolean-like integer values', () => {
       db.exec('CREATE TABLE bools (flag INTEGER, label TEXT)');
 
       db.exec("INSERT INTO bools VALUES(1, 'yes')");
@@ -434,7 +425,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ flag: 1, label: 'yes' });
     });
 
-    it.fails('should handle empty string values', () => {
+    it('should handle empty string values', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       db.exec("INSERT INTO t1 VALUES(1, '')");
@@ -455,7 +446,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 1, b: "it's a test" });
     });
 
-    it.fails('should handle numeric string values', () => {
+    it('should handle numeric string values', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       // String that looks like a number
@@ -517,7 +508,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(expected[0]).toEqual({ a: 1, b: 'test' });
     });
 
-    it.fails('INSERT without column list should match INSERT with column list', () => {
+    it('INSERT without column list should match INSERT with column list', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
       db.exec('CREATE TABLE t2 (a INTEGER, b TEXT)');
 

@@ -1,16 +1,19 @@
 /**
- * SQLLogicTest Arithmetic Expression Tests - RED Phase TDD
+ * SQLLogicTest Arithmetic Expression Tests - GREEN Phase TDD
  *
- * These tests document expected SQL arithmetic behavior that is currently
- * NOT implemented in the DoSQL InMemoryEngine. They are designed to FAIL
- * initially (RED phase of TDD) and serve as a specification for implementation.
+ * These tests document expected SQL arithmetic behavior that is NOW
+ * implemented in the DoSQL InMemoryEngine. Tests that previously failed
+ * (RED phase) are now passing (GREEN phase).
  *
- * SQLLogicTest failures that prompted these tests:
- * - SELECT a+b*2+c*3 FROM t1
- * - SELECT (a+b+c)/3 FROM t1
- * - SELECT a-b, b*c, c/d FROM t1
- * - SELECT abs(a-b), a%b FROM t1
- * - SELECT -a, +b FROM t1
+ * Implemented features:
+ * - Basic arithmetic operators: +, -, *, /, %
+ * - Operator precedence: * and / before + and -
+ * - Parentheses for grouping: (a+b)*c
+ * - Multiple arithmetic columns in SELECT
+ * - Unary operators: -a, +b
+ * - NULL propagation (NULL + 1 = NULL)
+ * - Column aliases with arithmetic expressions (expr AS alias)
+ * - Function calls in expressions (e.g., abs())
  *
  * Run with: npx vitest run src/__tests__/sqllogictest-arithmetic.test.ts
  */
@@ -58,7 +61,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * Expected: 15, 30, 45
      * Actual: Error or raw expression string
      */
-    it.fails('should evaluate addition in SELECT clause', () => {
+    it('should evaluate addition in SELECT clause', () => {
       const result = db.prepare('SELECT a+b FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -76,7 +79,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a-b FROM t1
      * Expected: 5, 10, 15
      */
-    it.fails('should evaluate subtraction in SELECT clause', () => {
+    it('should evaluate subtraction in SELECT clause', () => {
       const result = db.prepare('SELECT a-b FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -94,7 +97,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT b*c FROM t1
      * Expected: 15, 60, 135
      */
-    it.fails('should evaluate multiplication in SELECT clause', () => {
+    it('should evaluate multiplication in SELECT clause', () => {
       const result = db.prepare('SELECT b*c FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -112,7 +115,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a/b FROM t1
      * Expected: 2, 2, 2 (integer division)
      */
-    it.fails('should evaluate division in SELECT clause', () => {
+    it('should evaluate division in SELECT clause', () => {
       const result = db.prepare('SELECT a/b FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -129,7 +132,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a%b FROM t1
      * Expected: 0, 0, 0 (10%5=0, 20%10=0, 30%15=0)
      */
-    it.fails('should evaluate modulo operator in SELECT clause', () => {
+    it('should evaluate modulo operator in SELECT clause', () => {
       const result = db.prepare('SELECT a%b FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -146,7 +149,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT c%d FROM t1
      * Expected: 1, 2, 0 (3%2=1, 6%4=2, 9%3=0)
      */
-    it.fails('should evaluate modulo operator with remainder', () => {
+    it('should evaluate modulo operator with remainder', () => {
       const result = db.prepare('SELECT c%d FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -178,7 +181,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a+b*2 FROM t1
      * Expected: 20 (10+5*2=10+10=20), 26 (20+3*2=20+6=26)
      */
-    it.fails('should respect multiplication precedence over addition', () => {
+    it('should respect multiplication precedence over addition', () => {
       const result = db.prepare('SELECT a+b*2 FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -195,7 +198,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a+b*2+c*3 FROM t1
      * Expected: 26 (10+10+6=26), 38 (20+6+12=38)
      */
-    it.fails('should handle complex expression a+b*2+c*3', () => {
+    it('should handle complex expression a+b*2+c*3', () => {
       const result = db.prepare('SELECT a+b*2+c*3 FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -213,7 +216,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a-b/c FROM t1
      * Expected: 8 (10-5/2=10-2=8), 20 (20-3/4=20-0=20)
      */
-    it.fails('should respect division precedence over subtraction', () => {
+    it('should respect division precedence over subtraction', () => {
       const result = db.prepare('SELECT a-b/c FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -231,7 +234,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a*b/c FROM t1
      * Expected: 25 (10*5/2=50/2=25), 15 (20*3/4=60/4=15)
      */
-    it.fails('should evaluate multiplication and division left-to-right', () => {
+    it('should evaluate multiplication and division left-to-right', () => {
       const result = db.prepare('SELECT a*b/c FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -262,7 +265,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT (a+b)*c FROM t1
      * Expected: 54 ((12+6)*3=18*3=54), 128 ((24+8)*4=32*4=128)
      */
-    it.fails('should use parentheses to override precedence', () => {
+    it('should use parentheses to override precedence', () => {
       const result = db.prepare('SELECT (a+b)*c FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -279,7 +282,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT (a+b+c)/3 FROM t1
      * Expected: 7 ((12+6+3)/3=21/3=7), 12 ((24+8+4)/3=36/3=12)
      */
-    it.fails('should handle division of grouped sum (a+b+c)/3', () => {
+    it('should handle division of grouped sum (a+b+c)/3', () => {
       const result = db.prepare('SELECT (a+b+c)/3 FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -295,7 +298,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT ((a+b)*c)/2 FROM t1
      * Expected: 27 (((12+6)*3)/2=54/2=27), 64 (((24+8)*4)/2=128/2=64)
      */
-    it.fails('should handle nested parentheses', () => {
+    it('should handle nested parentheses', () => {
       const result = db.prepare('SELECT ((a+b)*c)/2 FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -311,7 +314,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a-(b-c) FROM t1
      * Expected: 9 (12-(6-3)=12-3=9), 20 (24-(8-4)=24-4=20)
      */
-    it.fails('should handle parentheses in subtraction', () => {
+    it('should handle parentheses in subtraction', () => {
       const result = db.prepare('SELECT a-(b-c) FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -341,7 +344,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a-b, b*c, c/d FROM t1
      * Expected: (5, 15, 1), (12, 48, 1)
      */
-    it.fails('should handle multiple arithmetic columns', () => {
+    it('should handle multiple arithmetic columns', () => {
       const result = db.prepare('SELECT a-b, b*c, c/d FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -365,7 +368,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT id, a, a+b, a*b FROM t1
      * Expected: (1, 10, 15, 50), (2, 20, 28, 160)
      */
-    it.fails('should mix regular columns with arithmetic expressions', () => {
+    it('should mix regular columns with arithmetic expressions', () => {
       const result = db.prepare('SELECT id, a, a+b, a*b FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -406,7 +409,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT -a FROM t1
      * Expected: -10, 20, 0
      */
-    it.fails('should evaluate unary minus operator', () => {
+    it('should evaluate unary minus operator', () => {
       const result = db.prepare('SELECT -a FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -423,7 +426,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT +b FROM t1
      * Expected: -5, 15, 0 (unary plus is a no-op)
      */
-    it.fails('should evaluate unary plus operator', () => {
+    it('should evaluate unary plus operator', () => {
       const result = db.prepare('SELECT +b FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -440,7 +443,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT -a, +b FROM t1
      * Expected: (-10, -5), (20, 15), (0, 0)
      */
-    it.fails('should handle multiple unary operators in SELECT', () => {
+    it('should handle multiple unary operators in SELECT', () => {
       const result = db.prepare('SELECT -a, +b FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -464,7 +467,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT --a FROM t1 (or SELECT -(-a) FROM t1)
      * Expected: 10, -20, 0
      */
-    it.fails('should handle double negative', () => {
+    it('should handle double negative', () => {
       const result = db.prepare('SELECT -(-a) FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -481,7 +484,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT -a + b FROM t1
      * Expected: -15, 35, 0
      */
-    it.fails('should combine unary minus with addition', () => {
+    it('should combine unary minus with addition', () => {
       const result = db.prepare('SELECT -a + b FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -515,7 +518,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a+b FROM nullable
      * Expected: 15, NULL, NULL, NULL
      */
-    it.fails('should propagate NULL in addition', () => {
+    it('should propagate NULL in addition', () => {
       const result = db.prepare('SELECT a+b FROM nullable ORDER BY id').all();
 
       expect(result.length).toBe(4);
@@ -533,7 +536,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a-b FROM nullable
      * Expected: 5, NULL, NULL, NULL
      */
-    it.fails('should propagate NULL in subtraction', () => {
+    it('should propagate NULL in subtraction', () => {
       const result = db.prepare('SELECT a-b FROM nullable ORDER BY id').all();
 
       expect(result.length).toBe(4);
@@ -551,7 +554,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a*b FROM nullable
      * Expected: 50, NULL, NULL, NULL
      */
-    it.fails('should propagate NULL in multiplication', () => {
+    it('should propagate NULL in multiplication', () => {
       const result = db.prepare('SELECT a*b FROM nullable ORDER BY id').all();
 
       expect(result.length).toBe(4);
@@ -569,7 +572,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a/b FROM nullable
      * Expected: 2, NULL, NULL, NULL
      */
-    it.fails('should propagate NULL in division', () => {
+    it('should propagate NULL in division', () => {
       const result = db.prepare('SELECT a/b FROM nullable ORDER BY id').all();
 
       expect(result.length).toBe(4);
@@ -587,7 +590,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a%b FROM nullable
      * Expected: 0, NULL, NULL, NULL
      */
-    it.fails('should propagate NULL in modulo', () => {
+    it('should propagate NULL in modulo', () => {
       const result = db.prepare('SELECT a%b FROM nullable ORDER BY id').all();
 
       expect(result.length).toBe(4);
@@ -605,7 +608,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT -a FROM nullable
      * Expected: -10, NULL, -10, NULL
      */
-    it.fails('should propagate NULL with unary minus', () => {
+    it('should propagate NULL with unary minus', () => {
       const result = db.prepare('SELECT -a FROM nullable ORDER BY id').all();
 
       expect(result.length).toBe(4);
@@ -638,7 +641,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT abs(a-b) FROM t1
      * Expected: 7, 27, 11
      */
-    it.fails('should evaluate abs() with arithmetic expression', () => {
+    it('should evaluate abs() with arithmetic expression', () => {
       const result = db.prepare('SELECT abs(a-b) FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -655,7 +658,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT abs(a-b), a%b FROM t1
      * Expected: (7, 1), (27, -6), (11, 3)
      */
-    it.fails('should handle abs() and modulo together', () => {
+    it('should handle abs() and modulo together', () => {
       const result = db.prepare('SELECT abs(a-b), a%b FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(3);
@@ -696,7 +699,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a/b FROM division_test WHERE b != 0
      * Expected: 3 (10/3=3.33->3), 3 (7/2=3.5->3)
      */
-    it.fails('should truncate integer division toward zero', () => {
+    it('should truncate integer division toward zero', () => {
       const result = db.prepare('SELECT a/b FROM division_test WHERE b != 0 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -758,7 +761,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a+b FROM floats
      * Expected: 13.7, 10.3
      */
-    it.fails('should handle float addition', () => {
+    it('should handle float addition', () => {
       const result = db.prepare('SELECT a+b FROM floats ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -774,7 +777,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a/b FROM floats
      * Expected: 3.28125, 3.12
      */
-    it.fails('should handle float division', () => {
+    it('should handle float division', () => {
       const result = db.prepare('SELECT a/b FROM floats ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -804,7 +807,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a+b AS total FROM t1
      * Expected: 15, 28 (with column named 'total')
      */
-    it.fails('should handle arithmetic with AS alias', () => {
+    it('should handle arithmetic with AS alias', () => {
       const result = db.prepare('SELECT a+b AS total FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -820,7 +823,7 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
      * SQLLogicTest: SELECT a+b AS sum, a*b AS product, a-b AS diff FROM t1
      * Expected: (15, 50, 5), (28, 160, 12)
      */
-    it.fails('should handle multiple arithmetic expressions with aliases', () => {
+    it('should handle multiple arithmetic expressions with aliases', () => {
       const result = db.prepare('SELECT a+b AS sum, a*b AS product, a-b AS diff FROM t1 ORDER BY id').all();
 
       expect(result.length).toBe(2);
@@ -861,7 +864,7 @@ describe('InMemoryEngine Direct Arithmetic Tests - RED Phase', () => {
    *
    * Bug: The execute method does not evaluate arithmetic in SELECT.
    */
-  it.fails('should execute SELECT with addition', () => {
+  it('should execute SELECT with addition', () => {
     const result = engine.execute('SELECT a+b FROM test WHERE id = 1', []);
 
     expect(result.rows.length).toBe(1);
@@ -871,7 +874,7 @@ describe('InMemoryEngine Direct Arithmetic Tests - RED Phase', () => {
   /**
    * KNOWN FAILURE: Engine execute with complex arithmetic
    */
-  it.fails('should execute SELECT with complex arithmetic expression', () => {
+  it('should execute SELECT with complex arithmetic expression', () => {
     const result = engine.execute('SELECT a+b*c FROM test WHERE id = 1', []);
 
     expect(result.rows.length).toBe(1);

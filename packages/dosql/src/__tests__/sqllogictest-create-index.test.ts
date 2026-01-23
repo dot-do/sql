@@ -60,7 +60,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Index t1i1 is created on column 'a' of table t1
      * Actual: Parser error or unsupported statement error
      */
-    it.fails('should create a basic index on a single column', () => {
+    it('should create a basic index on a single column', () => {
       // This should not throw
       expect(() => {
         db.exec('CREATE INDEX t1i1 ON t1(a)');
@@ -80,7 +80,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Composite index t1i2 is created on columns (a, b)
      * Actual: Parser error or unsupported statement error
      */
-    it.fails('should create a multi-column (composite) index', () => {
+    it('should create a multi-column (composite) index', () => {
       expect(() => {
         db.exec('CREATE INDEX t1i2 ON t1(a, b)');
       }).not.toThrow();
@@ -97,7 +97,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Composite index on (a, b, c) columns
      * Actual: Parser error or unsupported statement error
      */
-    it.fails('should create a three-column composite index', () => {
+    it('should create a three-column composite index', () => {
       expect(() => {
         db.exec('CREATE INDEX t1i_abc ON t1(a, b, c)');
       }).not.toThrow();
@@ -131,7 +131,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Index with a in descending order and b in ascending order
      * Actual: Parser error or unsupported statement error
      */
-    it.fails('should create an index with DESC and ASC sort orders', () => {
+    it('should create an index with DESC and ASC sort orders', () => {
       expect(() => {
         db.exec('CREATE INDEX t1i3 ON t1(a DESC, b ASC)');
       }).not.toThrow();
@@ -147,7 +147,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Index with column in descending order
      * Actual: Parser error or unsupported statement error
      */
-    it.fails('should create an index with single column DESC', () => {
+    it('should create an index with single column DESC', () => {
       expect(() => {
         db.exec('CREATE INDEX t1i_desc ON t1(a DESC)');
       }).not.toThrow();
@@ -163,7 +163,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Index with column in ascending order (explicit)
      * Actual: Parser error or unsupported statement error
      */
-    it.fails('should create an index with explicit ASC', () => {
+    it('should create an index with explicit ASC', () => {
       expect(() => {
         db.exec('CREATE INDEX t1i_asc ON t1(a ASC)');
       }).not.toThrow();
@@ -197,7 +197,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Unique index t1i4 is created, enforcing uniqueness on column a
      * Actual: Parser error or unsupported statement error
      */
-    it.fails('should create a unique index', () => {
+    it('should create a unique index', () => {
       expect(() => {
         db.exec('CREATE UNIQUE INDEX t1i4 ON t1(a)');
       }).not.toThrow();
@@ -213,7 +213,10 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * KNOWN FAILURE: UNIQUE constraint enforcement via index not working
      *
      * Expected: Inserting duplicate values should fail with constraint violation
-     * Actual: Either index creation fails or constraint is not enforced
+     * Actual: Index is created but constraint enforcement is not yet implemented
+     *
+     * Note: Implementing unique constraint enforcement requires modifying the
+     * INSERT execution path to check all unique indexes on the table.
      */
     it.fails('should enforce uniqueness on insert after creating unique index', () => {
       db.exec('CREATE UNIQUE INDEX t1i4 ON t1(a)');
@@ -233,7 +236,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Unique constraint on the combination of (a, b)
      * Actual: Parser error or unsupported statement error
      */
-    it.fails('should create a unique index on multiple columns', () => {
+    it('should create a unique index on multiple columns', () => {
       expect(() => {
         db.exec('CREATE UNIQUE INDEX t1i_unique_ab ON t1(a, b)');
       }).not.toThrow();
@@ -269,7 +272,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Index t1i1 is dropped from the database
      * Actual: Parser error or unsupported statement error
      */
-    it.fails('should drop an existing index', () => {
+    it('should drop an existing index', () => {
       // First create the index
       db.exec('CREATE INDEX t1i1 ON t1(a)');
 
@@ -294,7 +297,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      *           an index that doesn't exist
      * Actual: Throws "Unsupported SQL" error instead of proper validation error
      */
-    it.fails('should throw proper error when dropping non-existent index', () => {
+    it('should throw proper error when dropping non-existent index', () => {
       // The engine should support DROP INDEX syntax first, then validate
       // Currently throws "Unsupported SQL" instead of "no such index"
       let error: Error | null = null;
@@ -332,7 +335,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Creates index only if it doesn't already exist
      * Actual: Parser error or unsupported statement error
      */
-    it.fails('should create index only if it does not exist', () => {
+    it('should create index only if it does not exist', () => {
       // First creation should succeed
       expect(() => {
         db.exec('CREATE INDEX IF NOT EXISTS t1i1 ON t1(a)');
@@ -355,7 +358,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Drops index only if it exists, no error if it doesn't
      * Actual: Parser error or unsupported statement error
      */
-    it.fails('should drop index only if it exists', () => {
+    it('should drop index only if it exists', () => {
       // Should not throw even if index doesn't exist
       expect(() => {
         db.exec('DROP INDEX IF EXISTS nonexistent_index');
@@ -395,7 +398,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Query uses index for WHERE a = 500
      * Actual: Index not created or not used
      */
-    it.fails('should use index for equality queries', () => {
+    it('should use index for equality queries', () => {
       db.exec('CREATE INDEX t1i_a ON t1(a)');
 
       // This query should use the index
@@ -411,7 +414,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Query uses index for WHERE a > 900
      * Actual: Index not created or not used
      */
-    it.fails('should use index for range queries', () => {
+    it('should use index for range queries', () => {
       db.exec('CREATE INDEX t1i_a ON t1(a)');
 
       const result = db.prepare('SELECT id, a FROM t1 WHERE a > 900').all();
@@ -426,7 +429,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Query uses composite index for WHERE a = 500 AND b = 'value50'
      * Actual: Index not created or not used
      */
-    it.fails('should use composite index for multi-column queries', () => {
+    it('should use composite index for multi-column queries', () => {
       db.exec('CREATE INDEX t1i_ab ON t1(a, b)');
 
       const result = db.prepare("SELECT id FROM t1 WHERE a = 500 AND b = 'value50'").all();
@@ -458,7 +461,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: index_list pragma returns array of indexes for table
      * Actual: Returns empty array or fails
      */
-    it.fails('should list indexes via pragma index_list', () => {
+    it('should list indexes via pragma index_list', () => {
       db.exec('CREATE INDEX t1i1 ON t1(a)');
       db.exec('CREATE INDEX t1i2 ON t1(b)');
       db.exec('CREATE UNIQUE INDEX t1i3 ON t1(c)');
@@ -512,7 +515,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Error "no such table: nonexistent_table" when creating index
      * Actual: Throws "Unsupported SQL" error instead of proper validation error
      */
-    it.fails('should error with proper message when creating index on non-existent table', () => {
+    it('should error with proper message when creating index on non-existent table', () => {
       let error: Error | null = null;
       try {
         db.exec('CREATE INDEX idx ON nonexistent_table(a)');
@@ -532,7 +535,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Error "no such column: nonexistent_column" when creating index
      * Actual: Throws "Unsupported SQL" error instead of proper validation error
      */
-    it.fails('should error with proper message when creating index on non-existent column', () => {
+    it('should error with proper message when creating index on non-existent column', () => {
       let error: Error | null = null;
       try {
         db.exec('CREATE INDEX idx ON t1(nonexistent_column)');
@@ -552,7 +555,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: Error when creating index with same name as existing index
      * Actual: Parser error or no error
      */
-    it.fails('should error when creating duplicate index name', () => {
+    it('should error when creating duplicate index name', () => {
       db.exec('CREATE INDEX t1i1 ON t1(a)');
 
       expect(() => {
@@ -587,7 +590,7 @@ describe('InMemoryEngine CREATE INDEX Direct Tests', () => {
    * Expected: Engine parses and executes CREATE INDEX
    * Actual: Parse error or unsupported operation
    */
-  it.fails('should execute CREATE INDEX at engine level', () => {
+  it('should execute CREATE INDEX at engine level', () => {
     expect(() => {
       engine.execute('CREATE INDEX t1i1 ON t1(a)', []);
     }).not.toThrow();
@@ -599,7 +602,7 @@ describe('InMemoryEngine CREATE INDEX Direct Tests', () => {
    * Expected: Index metadata stored in storage
    * Actual: No index storage mechanism
    */
-  it.fails('should store index metadata in storage', () => {
+  it('should store index metadata in storage', () => {
     engine.execute('CREATE INDEX t1i1 ON t1(a)', []);
 
     // Check if storage has index information
@@ -614,7 +617,7 @@ describe('InMemoryEngine CREATE INDEX Direct Tests', () => {
    * Expected: Engine parses and executes DROP INDEX
    * Actual: Parse error or unsupported operation
    */
-  it.fails('should execute DROP INDEX at engine level', () => {
+  it('should execute DROP INDEX at engine level', () => {
     engine.execute('CREATE INDEX t1i1 ON t1(a)', []);
 
     expect(() => {
@@ -648,13 +651,16 @@ describe('Index Performance Tests', () => {
   });
 
   /**
-   * KNOWN FAILURE: Index should improve query performance
+   * KNOWN FAILURE: Index performance test
    *
-   * Expected: Queries on indexed column are faster than unindexed
-   * Actual: Index not created or not used
+   * Note: This test verifies that indexed queries don't perform significantly
+   * worse than unindexed queries. For small in-memory tables, the performance
+   * difference may be minimal since the index is not currently used for query
+   * optimization - it's just metadata storage.
    *
-   * Note: This is an optional performance test. The improvement may be
-   * small for in-memory tables with 1000 rows.
+   * This test is marked as failing because index-based query optimization
+   * is not yet implemented. The indexes are stored as metadata but are not
+   * used to speed up queries.
    */
   it.fails('should demonstrate improved query performance with index', () => {
     // Create index on indexed_col

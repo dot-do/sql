@@ -1,25 +1,26 @@
 /**
  * SQLLogicTest NOT IN Operator Compatibility Tests
  *
- * RED Phase TDD - These tests document expected NOT IN operator behavior.
- * Some basic NOT IN functionality works, but many cases still fail.
+ * Tests for NOT IN operator in DoSQL's InMemoryEngine.
  *
- * WORKING (use regular it()):
- * - Basic literal comparisons: 1 NOT IN (2), 1.0 NOT IN (2.0), '1' NOT IN ('2')
+ * WORKING FEATURES:
+ * - Column references: SELECT * FROM t1 WHERE a NOT IN (1, 2, 3)
  * - Empty list: NOT IN ()
  * - Case-sensitive strings
- * - Combination with LIKE
- * - No matching exclusions
+ * - NULL handling in columns and lists (proper SQL NULL semantics)
+ * - Combined with AND/LIKE
+ * - Edge cases (zero, negative, large lists, duplicates)
+ * - Parameter binding support
+ * - Float and mixed integer/float comparisons
  *
- * FAILING (use it.fails()):
- * - Column reference: SELECT * FROM t1 WHERE a NOT IN (1, 2, 3)
- * - NULL handling in columns and lists
- * - Subquery support
- * - Combined with AND/OR/BETWEEN
- * - Edge cases (zero, negative, large lists)
- *
- * Tests marked with it.fails() document expected behavior that will pass
- * once the NOT IN operator is fully implemented.
+ * STILL FAILING (marked with it.fails()):
+ * - Literal as left operand with SELECT literal: SELECT 1 FROM t WHERE 1 NOT IN (2) (literal projection issue)
+ * - Special characters in strings (escaped quotes)
+ * - Subquery support: NOT IN (SELECT ...)
+ * - Combined with OR (only AND is supported)
+ * - Combined with BETWEEN
+ * - NOT (expr IN (...)) syntax (parenthesized negation)
+ * - NOT IN in SELECT expression (non-WHERE usage)
  *
  * Run with: npx vitest run src/__tests__/sqllogictest-not-in.test.ts
  */
@@ -57,7 +58,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
      *
      * SQLLogicTest: SELECT 1 FROM t1 WHERE 1 NOT IN (2)
      * Expected: Returns 1 for each row since 1 is NOT IN (2)
-     * Current: NOT IN operator not implemented or returns wrong results
+     * Current: NOT IN filtering works, but SELECT expression returns null for literal
      */
     it.fails('should handle NOT IN with single integer value - literal comparison', () => {
       // SELECT 1 FROM t1 WHERE 1 NOT IN (2)
@@ -76,7 +77,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
      * Expected: Returns rows where a = 4 or a = 5
      * Current: NOT IN operator not implemented
      */
-    it.fails('should handle NOT IN with column reference', () => {
+    it('should handle NOT IN with column reference', () => {
       // SELECT * FROM t1 WHERE a NOT IN (1, 2, 3)
       const result = db.prepare('SELECT a FROM t1 WHERE a NOT IN (1, 2, 3)').all();
 
@@ -90,7 +91,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with single value in list
      */
-    it.fails('should handle NOT IN with single value in list', () => {
+    it('should handle NOT IN with single value in list', () => {
       // SELECT a FROM t1 WHERE a NOT IN (3)
       const result = db.prepare('SELECT a FROM t1 WHERE a NOT IN (3)').all();
 
@@ -103,7 +104,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with all values excluded
      */
-    it.fails('should handle NOT IN excluding all values', () => {
+    it('should handle NOT IN excluding all values', () => {
       // SELECT a FROM t1 WHERE a NOT IN (1, 2, 3, 4, 5)
       const result = db.prepare('SELECT a FROM t1 WHERE a NOT IN (1, 2, 3, 4, 5)').all();
 
@@ -124,7 +125,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with parameter binding
      */
-    it.fails('should handle NOT IN with parameter binding', () => {
+    it('should handle NOT IN with parameter binding', () => {
       // Use parameter binding for NOT IN values
       const result = db.prepare('SELECT a FROM t1 WHERE a NOT IN (?, ?, ?)').all(1, 2, 3);
 
@@ -165,7 +166,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with REAL column
      */
-    it.fails('should handle NOT IN with REAL column', () => {
+    it('should handle NOT IN with REAL column', () => {
       // SELECT * FROM floats WHERE value NOT IN (1.0, 2.0, 3.0)
       const result = db.prepare('SELECT id, value FROM floats WHERE value NOT IN (1.0, 2.0, 3.0)').all();
 
@@ -179,7 +180,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with mixed integer and float
      */
-    it.fails('should handle NOT IN with mixed integer and float', () => {
+    it('should handle NOT IN with mixed integer and float', () => {
       // SELECT * FROM floats WHERE value NOT IN (1, 2, 3)
       // Integer literals should compare correctly with REAL column
       const result = db.prepare('SELECT id, value FROM floats WHERE value NOT IN (1, 2, 3)').all();
@@ -237,7 +238,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with TEXT column
      */
-    it.fails('should handle NOT IN with TEXT column', () => {
+    it('should handle NOT IN with TEXT column', () => {
       // SELECT * FROM strings WHERE name NOT IN ('apple', 'banana')
       const result = db.prepare("SELECT id, name FROM strings WHERE name NOT IN ('apple', 'banana')").all();
 
@@ -262,7 +263,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with empty string
      */
-    it.fails('should handle NOT IN with empty string', () => {
+    it('should handle NOT IN with empty string', () => {
       db.exec("INSERT INTO strings (id, name) VALUES (6, '')");
 
       const result = db.prepare("SELECT id FROM strings WHERE name NOT IN ('')").all();
@@ -346,7 +347,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
      * Only returns TRUE when value is definitely not in list
      * and list does not contain NULL.
      */
-    it.fails('should return rows where non-NULL value is NOT IN list without NULL', () => {
+    it('should return rows where non-NULL value is NOT IN list without NULL', () => {
       // SELECT * FROM nullable WHERE value NOT IN (10, 20)
       // Should return row 4 (value=30)
       // Row 3 and 5 have NULL values, which produce NULL in comparison
@@ -365,7 +366,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
      * because we cannot determine if a value is definitely not in a list
      * that contains an unknown (NULL) value.
      */
-    it.fails('should handle NOT IN with NULL in the list', () => {
+    it('should handle NOT IN with NULL in the list', () => {
       // SELECT * FROM nullable WHERE value NOT IN (10, NULL)
       // This should return 0 rows because:
       // - For non-10 values: we can't know if they're NOT IN because NULL is unknown
@@ -380,7 +381,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN excluding NULL from results
      */
-    it.fails('should not return NULL values in NOT IN results', () => {
+    it('should not return NULL values in NOT IN results', () => {
       // SELECT * FROM nullable WHERE value NOT IN (10)
       // NULL values should not match because NULL NOT IN (anything) is NULL
       const result = db.prepare('SELECT id, value FROM nullable WHERE value NOT IN (10)').all();
@@ -396,7 +397,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with explicit NULL comparison
      */
-    it.fails('should handle NOT IN with explicit NULL in list', () => {
+    it('should handle NOT IN with explicit NULL in list', () => {
       db.exec('CREATE TABLE t2 (a INTEGER)');
       db.exec('INSERT INTO t2 (a) VALUES (1)');
       db.exec('INSERT INTO t2 (a) VALUES (2)');
@@ -412,7 +413,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: IS NOT NULL combined with NOT IN
      */
-    it.fails('should handle IS NOT NULL combined with NOT IN', () => {
+    it('should handle IS NOT NULL combined with NOT IN', () => {
       // SELECT * FROM nullable WHERE value IS NOT NULL AND value NOT IN (10, 20)
       const result = db.prepare('SELECT id, value FROM nullable WHERE value IS NOT NULL AND value NOT IN (10, 20)').all();
 
@@ -460,9 +461,9 @@ describe('SQLLogicTest NOT IN Operator', () => {
     });
 
     /**
-     * KNOWN FAILURE: NOT IN with correlated subquery
+     * WORKING: NOT IN with correlated subquery (subquery support added)
      */
-    it.fails('should handle NOT IN with correlated subquery', () => {
+    it('should handle NOT IN with correlated subquery', () => {
       db.exec('CREATE TABLE orders (id INTEGER, user_id INTEGER, amount INTEGER)');
       db.exec('INSERT INTO orders (id, user_id, amount) VALUES (1, 1, 100)');
       db.exec('INSERT INTO orders (id, user_id, amount) VALUES (2, 1, 200)');
@@ -496,16 +497,17 @@ describe('SQLLogicTest NOT IN Operator', () => {
     });
 
     /**
-     * KNOWN FAILURE: NOT IN with empty subquery result
+     * WORKING: NOT IN with empty subquery result
+     * Note: When subquery is empty, NOT IN () returns TRUE for all rows (including NULL)
      */
-    it.fails('should handle NOT IN with empty subquery result', () => {
+    it('should handle NOT IN with empty subquery result', () => {
       db.exec('CREATE TABLE empty_table (dept_id INTEGER)');
 
       // SELECT * FROM users WHERE department_id NOT IN (SELECT dept_id FROM empty_table)
       const result = db.prepare('SELECT id, name FROM users WHERE department_id NOT IN (SELECT dept_id FROM empty_table)').all();
 
-      // All non-NULL department_id rows should match
-      expect(result.length).toBe(4);
+      // All rows match because empty list: x NOT IN () is TRUE for all x
+      expect(result.length).toBe(5);
     });
   });
 
@@ -526,7 +528,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with AND condition
      */
-    it.fails('should handle NOT IN combined with AND', () => {
+    it('should handle NOT IN combined with AND', () => {
       // SELECT * FROM products WHERE category NOT IN ('A', 'B') AND price > 100
       const result = db.prepare("SELECT id, name FROM products WHERE category NOT IN ('A', 'B') AND price > 100").all();
 
@@ -610,7 +612,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with zero
      */
-    it.fails('should handle NOT IN with zero value', () => {
+    it('should handle NOT IN with zero value', () => {
       const result = db.prepare('SELECT id FROM edge WHERE value NOT IN (0)').all();
 
       const ids = (result as { id: number }[]).map((r) => r.id).sort((a, b) => a - b);
@@ -621,7 +623,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with negative numbers
      */
-    it.fails('should handle NOT IN with negative numbers', () => {
+    it('should handle NOT IN with negative numbers', () => {
       const result = db.prepare('SELECT id FROM edge WHERE value NOT IN (-1, 0)').all();
 
       expect(result.length).toBe(1);
@@ -631,7 +633,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with large list
      */
-    it.fails('should handle NOT IN with large list of values', () => {
+    it('should handle NOT IN with large list of values', () => {
       // Create a larger dataset
       for (let i = 4; i <= 100; i++) {
         db.exec(`INSERT INTO edge (id, value) VALUES (${i}, ${i})`);
@@ -651,7 +653,7 @@ describe('SQLLogicTest NOT IN Operator', () => {
     /**
      * KNOWN FAILURE: NOT IN with duplicate values in list
      */
-    it.fails('should handle NOT IN with duplicate values in list', () => {
+    it('should handle NOT IN with duplicate values in list', () => {
       const result = db.prepare('SELECT id FROM edge WHERE value NOT IN (0, 0, 0)').all();
 
       const ids = (result as { id: number }[]).map((r) => r.id).sort((a, b) => a - b);

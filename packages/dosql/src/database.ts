@@ -461,6 +461,27 @@ export class Database implements IDatabase {
       return [] as PragmaResult<N>;
     }
 
+    // Handle index_list specially
+    if (name === 'index_list' && value !== undefined) {
+      const tableName = String(value);
+      const indexes: { seq: number; name: string; unique: number; origin: string; partial: number }[] = [];
+      let seq = 0;
+
+      for (const index of this.storage.indexes.values()) {
+        if (index.tableName === tableName) {
+          indexes.push({
+            seq: seq++,
+            name: index.name,
+            unique: index.unique ? 1 : 0,
+            origin: 'c', // 'c' for created via CREATE INDEX
+            partial: 0,
+          });
+        }
+      }
+
+      return indexes as PragmaResult<N>;
+    }
+
     return (pragmaValues[name] ?? null) as PragmaResult<N>;
   }
 

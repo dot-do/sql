@@ -58,15 +58,12 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Scalar subquery in SELECT clause
+     * Scalar subquery in SELECT clause - Testing implementation
      *
      * SQLLogicTest: SELECT a, (SELECT max(b) FROM t1) FROM t1
      * Expected: Each row should have the max(b) value (50) as the second column
-     *
-     * Bug: The InMemoryEngine does not parse or execute scalar subqueries
-     * in the SELECT clause. This is a fundamental SQL feature.
      */
-    it.fails('should support scalar subquery returning max value in SELECT', () => {
+    it('should support scalar subquery returning max value in SELECT', () => {
       const result = db.prepare('SELECT a, (SELECT max(b) FROM t1) AS max_b FROM t1').all();
 
       expect(result.length).toBe(5);
@@ -82,7 +79,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Scalar subquery with min() in SELECT
      */
-    it.fails('should support scalar subquery returning min value in SELECT', () => {
+    it('should support scalar subquery returning min value in SELECT', () => {
       const result = db.prepare('SELECT a, (SELECT min(c) FROM t1) AS min_c FROM t1').all();
 
       expect(result.length).toBe(5);
@@ -95,7 +92,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Scalar subquery with count() in SELECT
      */
-    it.fails('should support scalar subquery returning count in SELECT', () => {
+    it('should support scalar subquery returning count in SELECT', () => {
       const result = db.prepare('SELECT a, (SELECT count(*) FROM t1) AS total FROM t1').all();
 
       expect(result.length).toBe(5);
@@ -108,7 +105,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Scalar subquery with avg() in SELECT
      */
-    it.fails('should support scalar subquery returning avg in SELECT', () => {
+    it('should support scalar subquery returning avg in SELECT', () => {
       const result = db.prepare('SELECT a, (SELECT avg(b) FROM t1) AS avg_b FROM t1').all();
 
       expect(result.length).toBe(5);
@@ -121,7 +118,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Scalar subquery with sum() in SELECT
      */
-    it.fails('should support scalar subquery returning sum in SELECT', () => {
+    it('should support scalar subquery returning sum in SELECT', () => {
       const result = db.prepare('SELECT a, (SELECT sum(b) FROM t1) AS sum_b FROM t1').all();
 
       expect(result.length).toBe(5);
@@ -134,7 +131,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Multiple scalar subqueries in SELECT
      */
-    it.fails('should support multiple scalar subqueries in SELECT', () => {
+    it('should support multiple scalar subqueries in SELECT', () => {
       const result = db.prepare(`
         SELECT
           a,
@@ -153,7 +150,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Scalar subquery from different table
      */
-    it.fails('should support scalar subquery from a different table', () => {
+    it('should support scalar subquery from a different table', () => {
       db.exec('CREATE TABLE t2 (x INTEGER)');
       db.exec('INSERT INTO t2 (x) VALUES (999)');
 
@@ -188,7 +185,7 @@ describe('SQLLogicTest Subqueries', () => {
      * SQLLogicTest: SELECT * FROM t1 WHERE a > (SELECT avg(a) FROM t1)
      * Expected: Rows where a > 3 (avg of 1,2,3,4,5 = 3)
      */
-    it.fails('should support subquery with avg() in WHERE clause', () => {
+    it('should support subquery with avg() in WHERE clause', () => {
       // avg(a) = (1 + 2 + 3 + 4 + 5) / 5 = 3
       // Rows with a > 3 are: a=4, a=5
       const result = db.prepare('SELECT * FROM t1 WHERE a > (SELECT avg(a) FROM t1)').all();
@@ -202,7 +199,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Subquery with max() in WHERE clause
      */
-    it.fails('should support subquery with max() in WHERE clause', () => {
+    it('should support subquery with max() in WHERE clause', () => {
       const result = db.prepare('SELECT * FROM t1 WHERE b = (SELECT max(b) FROM t1)').all();
 
       expect(result.length).toBe(1);
@@ -212,7 +209,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Subquery with min() in WHERE clause
      */
-    it.fails('should support subquery with min() in WHERE clause', () => {
+    it('should support subquery with min() in WHERE clause', () => {
       const result = db.prepare('SELECT * FROM t1 WHERE c = (SELECT min(c) FROM t1)').all();
 
       expect(result.length).toBe(1);
@@ -222,7 +219,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Subquery comparison with >= in WHERE clause
      */
-    it.fails('should support subquery with >= comparison in WHERE', () => {
+    it('should support subquery with >= comparison in WHERE', () => {
       // avg(b) = 30, so b >= 30 means rows with b = 30, 40, 50
       const result = db.prepare('SELECT * FROM t1 WHERE b >= (SELECT avg(b) FROM t1)').all();
 
@@ -234,7 +231,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Subquery comparison with <= in WHERE clause
      */
-    it.fails('should support subquery with <= comparison in WHERE', () => {
+    it('should support subquery with <= comparison in WHERE', () => {
       // avg(b) = 30, so b <= 30 means rows with b = 10, 20, 30
       const result = db.prepare('SELECT * FROM t1 WHERE b <= (SELECT avg(b) FROM t1)').all();
 
@@ -246,7 +243,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Subquery with count() in WHERE clause
      */
-    it.fails('should support subquery with count() in WHERE clause', () => {
+    it('should support subquery with count() in WHERE clause', () => {
       // count(*) = 5, so a < 5 means rows with a = 1, 2, 3, 4
       const result = db.prepare('SELECT * FROM t1 WHERE a < (SELECT count(*) FROM t1)').all();
 
@@ -256,7 +253,7 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Subquery from different table in WHERE
+     * KNOWN FAILURE: Subquery from different table in WHERE with compound conditions
      */
     it.fails('should support subquery from different table in WHERE', () => {
       db.exec('CREATE TABLE thresholds (min_val INTEGER, max_val INTEGER)');
@@ -489,7 +486,7 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Simple EXISTS subquery
+     * KNOWN FAILURE: EXISTS with correlated subquery
      */
     it.fails('should support EXISTS subquery', () => {
       // Select customers who have at least one order
@@ -507,7 +504,7 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: EXISTS with additional condition
+     * KNOWN FAILURE: EXISTS with correlated conditions
      */
     it.fails('should support EXISTS with additional conditions in subquery', () => {
       // Select customers who have orders over 100
@@ -525,7 +522,7 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: EXISTS with count condition
+     * KNOWN FAILURE: EXISTS with aggregate correlated condition
      */
     it.fails('should support EXISTS with aggregate in subquery', () => {
       // Select customers who have more than 1 order
@@ -564,7 +561,7 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Simple NOT EXISTS subquery
+     * KNOWN FAILURE: NOT EXISTS with correlated subquery
      */
     it.fails('should support NOT EXISTS subquery', () => {
       // Select customers who have NO orders
@@ -578,7 +575,7 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: NOT EXISTS with condition
+     * KNOWN FAILURE: NOT EXISTS with correlated condition
      */
     it.fails('should support NOT EXISTS with additional conditions', () => {
       // Select customers who have no orders over 175
@@ -596,7 +593,7 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: NOT EXISTS for anti-join pattern
+     * KNOWN FAILURE: NOT EXISTS for correlated anti-join pattern
      */
     it.fails('should support NOT EXISTS for anti-join pattern', () => {
       db.exec('CREATE TABLE premium_customers (customer_id INTEGER)');
@@ -636,9 +633,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Simple IN subquery
+     * IN subquery support - IMPLEMENTED
      */
-    it.fails('should support IN subquery', () => {
+    it('should support IN subquery', () => {
       // Select customers who have at least one order
       const result = db.prepare(`
         SELECT * FROM customers
@@ -654,9 +651,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: NOT IN subquery
+     * NOT IN subquery support - IMPLEMENTED
      */
-    it.fails('should support NOT IN subquery', () => {
+    it('should support NOT IN subquery', () => {
       // Select customers who have no orders
       const result = db.prepare(`
         SELECT * FROM customers
@@ -668,9 +665,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: IN subquery with condition
+     * IN subquery with condition - IMPLEMENTED
      */
-    it.fails('should support IN subquery with condition', () => {
+    it('should support IN subquery with condition', () => {
       // Select customers who have orders over 100
       const result = db.prepare(`
         SELECT * FROM customers
@@ -701,7 +698,7 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Subquery in arithmetic expression
+     * KNOWN FAILURE: Subquery in arithmetic expression (complex)
      */
     it.fails('should support subquery in arithmetic expression', () => {
       // Calculate each a as a percentage of the total
@@ -724,7 +721,7 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Subquery with subtraction
+     * KNOWN FAILURE: Subquery with subtraction (complex)
      */
     it.fails('should support subquery in subtraction expression', () => {
       // Calculate deviation from average
@@ -763,7 +760,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Nested subqueries
      */
-    it.fails('should support nested subqueries', () => {
+    it('should support nested subqueries', () => {
       // Select rows where a is greater than the count of rows where b < avg(b)
       // avg(b) = 30, rows with b < 30: 2 (b=10, b=20)
       // So select where a > 2: a=3, a=4, a=5
@@ -783,7 +780,7 @@ describe('SQLLogicTest Subqueries', () => {
     /**
      * KNOWN FAILURE: Deeply nested subqueries
      */
-    it.fails('should support deeply nested subqueries', () => {
+    it('should support deeply nested subqueries', () => {
       const result = db.prepare(`
         SELECT a FROM t1
         WHERE a = (
@@ -828,7 +825,7 @@ describe('InMemoryEngine Direct Subquery Tests', () => {
   /**
    * KNOWN FAILURE: Engine should parse scalar subquery
    */
-  it.fails('should parse and execute scalar subquery in SELECT', () => {
+  it('should parse and execute scalar subquery in SELECT', () => {
     const result = engine.execute('SELECT a, (SELECT max(b) FROM t1) AS max_b FROM t1', []);
 
     expect(result.rows.length).toBe(3);
@@ -838,7 +835,7 @@ describe('InMemoryEngine Direct Subquery Tests', () => {
   /**
    * KNOWN FAILURE: Engine should parse subquery in WHERE
    */
-  it.fails('should parse and execute subquery in WHERE clause', () => {
+  it('should parse and execute subquery in WHERE clause', () => {
     const result = engine.execute('SELECT * FROM t1 WHERE a > (SELECT avg(a) FROM t1)', []);
 
     // avg(a) = 2, so a > 2 means a = 3
@@ -847,7 +844,7 @@ describe('InMemoryEngine Direct Subquery Tests', () => {
   });
 
   /**
-   * KNOWN FAILURE: Engine should parse EXISTS subquery
+   * KNOWN FAILURE: Engine should parse correlated EXISTS subquery
    */
   it.fails('should parse and execute EXISTS subquery', () => {
     engine.execute('CREATE TABLE t2 (x INTEGER)', []);
@@ -863,9 +860,9 @@ describe('InMemoryEngine Direct Subquery Tests', () => {
   });
 
   /**
-   * KNOWN FAILURE: Engine should parse IN subquery
+   * IN subquery parsing - IMPLEMENTED
    */
-  it.fails('should parse and execute IN subquery', () => {
+  it('should parse and execute IN subquery', () => {
     engine.execute('CREATE TABLE t2 (x INTEGER)', []);
     engine.execute('INSERT INTO t2 (x) VALUES (?)', [1]);
     engine.execute('INSERT INTO t2 (x) VALUES (?)', [3]);

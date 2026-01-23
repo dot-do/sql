@@ -266,16 +266,12 @@ describe('SQLLogicTest Compatibility', () => {
     });
 
     /**
-     * KNOWN FAILURE: NULL handling in <= comparison
+     * WORKING: NULL handling in <= comparison
      *
-     * Bug: The InMemoryEngine incorrectly includes NULL values or extra rows
-     * when using <= comparison. Expected behavior is that NULL should never
-     * match any comparison operator (except IS NULL/IS NOT NULL).
-     *
-     * Expected: 1 row (id: 1, value: 10)
-     * Actual: 2 rows (incorrectly includes NULL row or other row)
+     * NULL values are correctly excluded from <= comparisons.
+     * NULL should never match any comparison operator (except IS NULL/IS NOT NULL).
      */
-    it.fails('should exclude NULL values from <= comparison', () => {
+    it('should exclude NULL values from <= comparison', () => {
       // SQLLogicTest: SELECT * FROM nullable WHERE value <= 15
       // Expected: only non-NULL values <= 15 (row 1)
       const result = db.prepare('SELECT id, value FROM nullable WHERE value <= 15').all();
