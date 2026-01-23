@@ -2,8 +2,9 @@ import { defineConfig, defineDocs, frontmatterSchema, metaSchema } from 'fumadoc
 
 // You can customise Zod schemas for frontmatter and `meta.json` here
 // see https://fumadocs.dev/docs/mdx/collections
+// lake.do has its own lakehouse-focused documentation
 export const docs = defineDocs({
-  dir: 'content/docs',
+  dir: '../../docs/lake.do',
   docs: {
     schema: frontmatterSchema,
     postprocess: {

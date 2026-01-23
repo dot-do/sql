@@ -1,0 +1,1712 @@
+# SvelteKit Integration Guide
+
+A comprehensive guide for using DoSQL with SvelteKit applications, covering server load functions, form actions, and real-time features on Cloudflare Workers.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Setup](#setup)
+- [Server Load Functions](#server-load-functions)
+- [Form Actions](#form-actions)
+- [API Routes](#api-routes)
+- [Real-Time Updates](#real-time-updates)
+- [Type Safety](#type-safety)
+- [Deployment](#deployment)
+
+---
+
+## Overview
+
+### Why DoSQL + SvelteKit
+
+SvelteKit and DoSQL are an excellent combination for building full-stack applications on Cloudflare Workers:
+
+| Feature | Benefit |
+|---------|---------|
+| **Edge-Native** | Both SvelteKit and DoSQL run on Cloudflare Workers for minimal latency |
+| **Server Load Functions** | Direct database queries in `+page.server.ts` with zero API overhead |
+| **Form Actions** | Type-safe mutations with built-in progressive enhancement |
+| **Streaming** | Stream database results with SvelteKit's streaming support |
+| **Real-Time** | WebSocket support for live database subscriptions |
+
+### Architecture
+
+```
++------------------------------------------------------------------+
+|                   SVELTEKIT + DOSQL ARCHITECTURE                  |
++------------------------------------------------------------------+
+
+                         Browser Request
+                              |
+                              v
++------------------------------------------------------------------+
+|                    Cloudflare Worker                              |
+|  +------------------------------------------------------------+  |
+|  |                   SvelteKit Server                          |  |
+|  |  +------------------+  +------------------+                 |  |
+|  |  |  Load Functions  |  |   Form Actions   |                 |  |
+|  |  |  (+page.server)  |  |  (+page.server)  |                 |  |
+|  |  +--------+---------+  +--------+---------+                 |  |
+|  |           |                     |                           |  |
+|  |           +----------+----------+                           |  |
+|  |                      |                                      |  |
+|  |                      v                                      |  |
+|  |            +------------------+                             |  |
+|  |            |   getDB(env)     |                             |  |
+|  |            +--------+---------+                             |  |
+|  +------------------------------------------------------------+  |
++------------------------------------------------------------------+
+                              |
+              +---------------+---------------+
+              |                               |
+              v                               v
++------------------------+     +------------------------+
+|    DoSQL Durable       |     |    DoSQL Durable       |
+|    Object (Tenant A)   |     |    Object (Tenant B)   |
+|  +------------------+  |     |  +------------------+  |
+|  |   SQLite DB      |  |     |  |   SQLite DB      |  |
+|  |   - users        |  |     |  |   - users        |  |
+|  |   - posts        |  |     |  |   - posts        |  |
+|  +------------------+  |     |  +------------------+  |
++------------------------+     +------------------------+
+```
+
+---
+
+## Setup
+
+### Installation
+
+```bash
+# Create a new SvelteKit project with Cloudflare adapter
+npx sv create my-sveltekit-app
+cd my-sveltekit-app
+
+# Select: Cloudflare adapter when prompted
+
+# Install DoSQL
+npm install @dotdo/dosql
+
+# Install dev dependencies
+npm install -D @cloudflare/workers-types wrangler
+```
+
+### Project Structure
+
+```
+my-sveltekit-app/
+├── .do/
+│   └── migrations/
+│       ├── 001_create_users.sql
+│       └── 002_create_posts.sql
+├── src/
+│   ├── lib/
+│   │   ├── server/
+│   │   │   └── db.ts           # Database utilities (server only)
+│   │   └── types.ts            # Shared type definitions
+│   ├── routes/
+│   │   ├── +layout.server.ts   # Root layout server load
+│   │   ├── +page.svelte
+│   │   ├── +page.server.ts
+│   │   ├── users/
+│   │   │   ├── +page.svelte
+│   │   │   ├── +page.server.ts
+│   │   │   └── [id]/
+│   │   │       ├── +page.svelte
+│   │   │       └── +page.server.ts
+│   │   └── api/
+│   │       └── users/
+│   │           └── +server.ts  # API endpoint
+│   ├── app.d.ts                # Type declarations
+│   └── hooks.server.ts         # Server hooks
+├── wrangler.toml
+├── svelte.config.js
+└── package.json
+```
+
+### Environment Configuration
+
+Update `src/app.d.ts` with your environment bindings:
+
+```typescript
+// src/app.d.ts
+declare global {
+  namespace App {
+    interface Platform {
+      env: {
+        DOSQL_DB: DurableObjectNamespace;
+        DATA_BUCKET?: R2Bucket;
+      };
+      context: ExecutionContext;
+      caches: CacheStorage;
+    }
+
+    interface Locals {
+      db: import('$lib/server/db').DatabaseClient;
+    }
+  }
+}
+
+export {};
+```
+
+### Worker Bindings
+
+Configure `wrangler.toml`:
+
+```toml
+name = "my-sveltekit-app"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Assets for SvelteKit
+[site]
+bucket = "./.svelte-kit/cloudflare"
+
+# DoSQL Durable Object
+[[durable_objects.bindings]]
+name = "DOSQL_DB"
+class_name = "DoSQLDatabase"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["DoSQLDatabase"]
+
+# Optional: R2 for cold storage
+[[r2_buckets]]
+binding = "DATA_BUCKET"
+bucket_name = "sveltekit-data"
+```
+
+### Database Server Module
+
+Create `src/lib/server/db.ts`:
+
+```typescript
+// src/lib/server/db.ts
+import { DB, type Database } from '@dotdo/dosql';
+
+export interface DatabaseClient {
+  query<T>(sql: string, params?: unknown[]): Promise<T[]>;
+  queryOne<T>(sql: string, params?: unknown[]): Promise<T | null>;
+  run(sql: string, params?: unknown[]): Promise<{ rowsAffected: number; lastInsertRowId: number }>;
+  transaction<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T>;
+}
+
+export interface TransactionClient {
+  query<T>(sql: string, params?: unknown[]): Promise<T[]>;
+  queryOne<T>(sql: string, params?: unknown[]): Promise<T | null>;
+  run(sql: string, params?: unknown[]): Promise<{ rowsAffected: number; lastInsertRowId: number }>;
+}
+
+export function getDB(platform: App.Platform, tenantId: string = 'default'): DatabaseClient {
+  const id = platform.env.DOSQL_DB.idFromName(tenantId);
+  const stub = platform.env.DOSQL_DB.get(id);
+
+  return createDBClient(stub);
+}
+
+function createDBClient(stub: DurableObjectStub): DatabaseClient {
+  return {
+    async query<T>(sql: string, params?: unknown[]): Promise<T[]> {
+      const response = await stub.fetch('http://internal/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql, params }),
+      });
+      const data = await response.json() as { rows: T[] };
+      return data.rows;
+    },
+
+    async queryOne<T>(sql: string, params?: unknown[]): Promise<T | null> {
+      const rows = await this.query<T>(sql, params);
+      return rows[0] ?? null;
+    },
+
+    async run(sql: string, params?: unknown[]) {
+      const response = await stub.fetch('http://internal/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql, params }),
+      });
+      return response.json() as Promise<{ rowsAffected: number; lastInsertRowId: number }>;
+    },
+
+    async transaction<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T> {
+      // Collect operations and send as batch
+      const operations: Array<{ type: 'query' | 'run'; sql: string; params?: unknown[] }> = [];
+      const txClient: TransactionClient = {
+        async query<R>(sql: string, params?: unknown[]): Promise<R[]> {
+          operations.push({ type: 'query', sql, params });
+          return [] as R[];
+        },
+        async queryOne<R>(sql: string, params?: unknown[]): Promise<R | null> {
+          operations.push({ type: 'query', sql, params });
+          return null;
+        },
+        async run(sql: string, params?: unknown[]) {
+          operations.push({ type: 'run', sql, params });
+          return { rowsAffected: 0, lastInsertRowId: 0 };
+        },
+      };
+
+      await fn(txClient);
+
+      const response = await stub.fetch('http://internal/transaction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operations }),
+      });
+      return response.json() as Promise<T>;
+    },
+  };
+}
+
+// Export the Durable Object class
+export class DoSQLDatabase implements DurableObject {
+  private db: Database | null = null;
+
+  constructor(
+    private state: DurableObjectState,
+    private env: App.Platform['env']
+  ) {}
+
+  private async getDB(): Promise<Database> {
+    if (!this.db) {
+      this.db = await DB('sveltekit-app', {
+        migrations: { folder: '.do/migrations' },
+        storage: {
+          hot: this.state.storage,
+          cold: this.env.DATA_BUCKET,
+        },
+      });
+    }
+    return this.db;
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const db = await this.getDB();
+
+    try {
+      if (url.pathname === '/query' && request.method === 'POST') {
+        const { sql, params } = await request.json() as { sql: string; params?: unknown[] };
+        const rows = await db.query(sql, params);
+        return Response.json({ rows });
+      }
+
+      if (url.pathname === '/run' && request.method === 'POST') {
+        const { sql, params } = await request.json() as { sql: string; params?: unknown[] };
+        const result = await db.run(sql, params);
+        return Response.json(result);
+      }
+
+      if (url.pathname === '/transaction' && request.method === 'POST') {
+        const { operations } = await request.json() as {
+          operations: Array<{ type: 'query' | 'run'; sql: string; params?: unknown[] }>;
+        };
+        const result = await db.transaction(async (tx) => {
+          let lastResult;
+          for (const op of operations) {
+            if (op.type === 'query') {
+              lastResult = await tx.query(op.sql, op.params);
+            } else {
+              lastResult = await tx.run(op.sql, op.params);
+            }
+          }
+          return lastResult;
+        });
+        return Response.json(result);
+      }
+
+      return new Response('Not Found', { status: 404 });
+    } catch (error) {
+      return Response.json(
+        { error: (error as Error).message },
+        { status: 500 }
+      );
+    }
+  }
+}
+```
+
+### Server Hooks
+
+Set up the database in server hooks for easy access:
+
+```typescript
+// src/hooks.server.ts
+import { getDB } from '$lib/server/db';
+import type { Handle } from '@sveltejs/kit';
+
+export const handle: Handle = async ({ event, resolve }) => {
+  // Make database available in all server-side code
+  if (event.platform) {
+    event.locals.db = getDB(event.platform);
+  }
+
+  return resolve(event);
+};
+```
+
+### SvelteKit Configuration
+
+Update `svelte.config.js` for Cloudflare:
+
+```javascript
+// svelte.config.js
+import adapter from '@sveltejs/adapter-cloudflare';
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+
+/** @type {import('@sveltejs/kit').Config} */
+const config = {
+  preprocess: vitePreprocess(),
+
+  kit: {
+    adapter: adapter({
+      routes: {
+        include: ['/*'],
+        exclude: ['<all>'],
+      },
+    }),
+  },
+};
+
+export default config;
+```
+
+---
+
+## Server Load Functions
+
+Server load functions run on the server and can directly query the database.
+
+### Basic Data Loading
+
+```typescript
+// src/routes/users/+page.server.ts
+import type { PageServerLoad } from './$types';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  created_at: string;
+}
+
+export const load: PageServerLoad = async ({ locals }) => {
+  const users = await locals.db.query<User>(`
+    SELECT id, name, email, created_at
+    FROM users
+    ORDER BY created_at DESC
+    LIMIT 50
+  `);
+
+  return { users };
+};
+```
+
+```svelte
+<!-- src/routes/users/+page.svelte -->
+<script lang="ts">
+  import type { PageData } from './$types';
+
+  export let data: PageData;
+</script>
+
+<h1>Users</h1>
+
+<ul>
+  {#each data.users as user (user.id)}
+    <li>
+      <a href="/users/{user.id}">{user.name}</a> - {user.email}
+    </li>
+  {/each}
+</ul>
+```
+
+### Loading with Parameters
+
+```typescript
+// src/routes/users/[id]/+page.server.ts
+import { error } from '@sveltejs/kit';
+import type { PageServerLoad } from './$types';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  bio: string | null;
+  created_at: string;
+}
+
+interface Post {
+  id: number;
+  title: string;
+  created_at: string;
+}
+
+export const load: PageServerLoad = async ({ params, locals }) => {
+  const userId = parseInt(params.id, 10);
+
+  if (isNaN(userId)) {
+    throw error(400, 'Invalid user ID');
+  }
+
+  const user = await locals.db.queryOne<User>(
+    'SELECT * FROM users WHERE id = ?',
+    [userId]
+  );
+
+  if (!user) {
+    throw error(404, 'User not found');
+  }
+
+  const posts = await locals.db.query<Post>(
+    `SELECT id, title, created_at
+     FROM posts
+     WHERE user_id = ?
+     ORDER BY created_at DESC
+     LIMIT 10`,
+    [userId]
+  );
+
+  return { user, posts };
+};
+```
+
+```svelte
+<!-- src/routes/users/[id]/+page.svelte -->
+<script lang="ts">
+  import type { PageData } from './$types';
+
+  export let data: PageData;
+</script>
+
+<article>
+  <h1>{data.user.name}</h1>
+  <p>{data.user.email}</p>
+  {#if data.user.bio}
+    <p>{data.user.bio}</p>
+  {/if}
+  <p>Joined: {new Date(data.user.created_at).toLocaleDateString()}</p>
+
+  <h2>Recent Posts</h2>
+  {#if data.posts.length > 0}
+    <ul>
+      {#each data.posts as post (post.id)}
+        <li>
+          <a href="/posts/{post.id}">{post.title}</a>
+        </li>
+      {/each}
+    </ul>
+  {:else}
+    <p>No posts yet.</p>
+  {/if}
+</article>
+```
+
+### Parallel Data Loading
+
+```typescript
+// src/routes/dashboard/+page.server.ts
+import type { PageServerLoad } from './$types';
+
+interface Stats {
+  totalUsers: number;
+  totalPosts: number;
+  recentActivity: number;
+}
+
+interface RecentUser {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+interface PopularPost {
+  id: number;
+  title: string;
+  likes: number;
+}
+
+export const load: PageServerLoad = async ({ locals }) => {
+  // Parallel data fetching for better performance
+  const [stats, recentUsers, popularPosts] = await Promise.all([
+    locals.db.queryOne<Stats>(`
+      SELECT
+        (SELECT COUNT(*) FROM users) as totalUsers,
+        (SELECT COUNT(*) FROM posts) as totalPosts,
+        (SELECT COUNT(*) FROM activity WHERE created_at > datetime('now', '-24 hours')) as recentActivity
+    `),
+    locals.db.query<RecentUser>(`
+      SELECT id, name, created_at
+      FROM users
+      ORDER BY created_at DESC
+      LIMIT 5
+    `),
+    locals.db.query<PopularPost>(`
+      SELECT p.id, p.title, COUNT(l.id) as likes
+      FROM posts p
+      LEFT JOIN likes l ON l.post_id = p.id
+      GROUP BY p.id
+      ORDER BY likes DESC
+      LIMIT 5
+    `),
+  ]);
+
+  return {
+    stats: stats ?? { totalUsers: 0, totalPosts: 0, recentActivity: 0 },
+    recentUsers,
+    popularPosts,
+  };
+};
+```
+
+### Pagination
+
+```typescript
+// src/routes/posts/+page.server.ts
+import type { PageServerLoad } from './$types';
+
+interface Post {
+  id: number;
+  title: string;
+  excerpt: string;
+  author_name: string;
+  created_at: string;
+}
+
+const PAGE_SIZE = 20;
+
+export const load: PageServerLoad = async ({ url, locals }) => {
+  const page = parseInt(url.searchParams.get('page') || '1', 10);
+  const offset = (page - 1) * PAGE_SIZE;
+
+  const [posts, countResult] = await Promise.all([
+    locals.db.query<Post>(`
+      SELECT p.id, p.title, SUBSTR(p.content, 1, 200) as excerpt,
+             u.name as author_name, p.created_at
+      FROM posts p
+      JOIN users u ON p.user_id = u.id
+      WHERE p.published = 1
+      ORDER BY p.created_at DESC
+      LIMIT ? OFFSET ?
+    `, [PAGE_SIZE, offset]),
+    locals.db.queryOne<{ total: number }>(
+      'SELECT COUNT(*) as total FROM posts WHERE published = 1'
+    ),
+  ]);
+
+  const total = countResult?.total ?? 0;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  return {
+    posts,
+    pagination: {
+      page,
+      pageSize: PAGE_SIZE,
+      total,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
+    },
+  };
+};
+```
+
+```svelte
+<!-- src/routes/posts/+page.svelte -->
+<script lang="ts">
+  import type { PageData } from './$types';
+
+  export let data: PageData;
+</script>
+
+<h1>Posts</h1>
+
+<div class="posts">
+  {#each data.posts as post (post.id)}
+    <article>
+      <h2><a href="/posts/{post.id}">{post.title}</a></h2>
+      <p>{post.excerpt}...</p>
+      <footer>
+        By {post.author_name} on {new Date(post.created_at).toLocaleDateString()}
+      </footer>
+    </article>
+  {/each}
+</div>
+
+<nav class="pagination">
+  {#if data.pagination.hasPrev}
+    <a href="?page={data.pagination.page - 1}">Previous</a>
+  {/if}
+
+  <span>Page {data.pagination.page} of {data.pagination.totalPages}</span>
+
+  {#if data.pagination.hasNext}
+    <a href="?page={data.pagination.page + 1}">Next</a>
+  {/if}
+</nav>
+```
+
+### Search with Query Parameters
+
+```typescript
+// src/routes/search/+page.server.ts
+import type { PageServerLoad } from './$types';
+
+interface SearchResult {
+  id: number;
+  title: string;
+  type: 'user' | 'post';
+  snippet: string;
+}
+
+export const load: PageServerLoad = async ({ url, locals }) => {
+  const query = url.searchParams.get('q')?.trim();
+
+  if (!query || query.length < 2) {
+    return { results: [], query: query ?? '' };
+  }
+
+  const searchPattern = `%${query}%`;
+
+  const results = await locals.db.query<SearchResult>(`
+    SELECT id, name as title, 'user' as type, email as snippet
+    FROM users
+    WHERE name LIKE ? OR email LIKE ?
+    UNION ALL
+    SELECT id, title, 'post' as type, SUBSTR(content, 1, 100) as snippet
+    FROM posts
+    WHERE title LIKE ? OR content LIKE ?
+    LIMIT 50
+  `, [searchPattern, searchPattern, searchPattern, searchPattern]);
+
+  return { results, query };
+};
+```
+
+---
+
+## Form Actions
+
+Form actions provide type-safe server-side mutations with progressive enhancement.
+
+### Basic Form Action
+
+```typescript
+// src/routes/users/new/+page.server.ts
+import { fail, redirect } from '@sveltejs/kit';
+import type { Actions, PageServerLoad } from './$types';
+
+export const load: PageServerLoad = async () => {
+  return {};
+};
+
+export const actions: Actions = {
+  default: async ({ request, locals }) => {
+    const formData = await request.formData();
+
+    const name = formData.get('name')?.toString().trim();
+    const email = formData.get('email')?.toString().trim();
+
+    // Validation
+    const errors: Record<string, string> = {};
+
+    if (!name || name.length < 2) {
+      errors.name = 'Name must be at least 2 characters';
+    }
+
+    if (!email || !email.includes('@')) {
+      errors.email = 'Valid email is required';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      return fail(400, { errors, name, email });
+    }
+
+    try {
+      const result = await locals.db.run(
+        'INSERT INTO users (name, email) VALUES (?, ?)',
+        [name, email]
+      );
+
+      throw redirect(303, `/users/${result.lastInsertRowId}`);
+    } catch (error) {
+      if ((error as Error).message.includes('UNIQUE constraint')) {
+        return fail(400, {
+          errors: { email: 'Email already exists' },
+          name,
+          email,
+        });
+      }
+      throw error;
+    }
+  },
+};
+```
+
+```svelte
+<!-- src/routes/users/new/+page.svelte -->
+<script lang="ts">
+  import { enhance } from '$app/forms';
+  import type { ActionData } from './$types';
+
+  export let form: ActionData;
+</script>
+
+<h1>Create User</h1>
+
+<form method="POST" use:enhance>
+  <div class="field">
+    <label for="name">Name</label>
+    <input
+      type="text"
+      id="name"
+      name="name"
+      value={form?.name ?? ''}
+      class:error={form?.errors?.name}
+      required
+    />
+    {#if form?.errors?.name}
+      <span class="error-message">{form.errors.name}</span>
+    {/if}
+  </div>
+
+  <div class="field">
+    <label for="email">Email</label>
+    <input
+      type="email"
+      id="email"
+      name="email"
+      value={form?.email ?? ''}
+      class:error={form?.errors?.email}
+      required
+    />
+    {#if form?.errors?.email}
+      <span class="error-message">{form.errors.email}</span>
+    {/if}
+  </div>
+
+  <button type="submit">Create User</button>
+</form>
+
+<style>
+  .error {
+    border-color: red;
+  }
+  .error-message {
+    color: red;
+    font-size: 0.875rem;
+  }
+</style>
+```
+
+### Multiple Actions
+
+```typescript
+// src/routes/posts/[id]/+page.server.ts
+import { fail, redirect } from '@sveltejs/kit';
+import type { Actions, PageServerLoad } from './$types';
+
+interface Post {
+  id: number;
+  title: string;
+  content: string;
+  published: boolean;
+  user_id: number;
+}
+
+export const load: PageServerLoad = async ({ params, locals }) => {
+  const post = await locals.db.queryOne<Post>(
+    'SELECT * FROM posts WHERE id = ?',
+    [params.id]
+  );
+
+  if (!post) {
+    throw redirect(303, '/posts');
+  }
+
+  return { post };
+};
+
+export const actions: Actions = {
+  update: async ({ request, params, locals }) => {
+    const formData = await request.formData();
+
+    const title = formData.get('title')?.toString().trim();
+    const content = formData.get('content')?.toString().trim();
+    const published = formData.get('published') === 'true';
+
+    if (!title || title.length < 1) {
+      return fail(400, { error: 'Title is required', title, content });
+    }
+
+    await locals.db.run(
+      `UPDATE posts
+       SET title = ?, content = ?, published = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [title, content, published, params.id]
+    );
+
+    return { success: true };
+  },
+
+  delete: async ({ params, locals }) => {
+    await locals.db.transaction(async (tx) => {
+      await tx.run('DELETE FROM comments WHERE post_id = ?', [params.id]);
+      await tx.run('DELETE FROM posts WHERE id = ?', [params.id]);
+    });
+
+    throw redirect(303, '/posts');
+  },
+
+  publish: async ({ params, locals }) => {
+    await locals.db.run(
+      'UPDATE posts SET published = 1, published_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [params.id]
+    );
+
+    return { success: true, message: 'Post published' };
+  },
+
+  unpublish: async ({ params, locals }) => {
+    await locals.db.run(
+      'UPDATE posts SET published = 0, published_at = NULL WHERE id = ?',
+      [params.id]
+    );
+
+    return { success: true, message: 'Post unpublished' };
+  },
+};
+```
+
+```svelte
+<!-- src/routes/posts/[id]/+page.svelte -->
+<script lang="ts">
+  import { enhance } from '$app/forms';
+  import type { PageData, ActionData } from './$types';
+
+  export let data: PageData;
+  export let form: ActionData;
+
+  let isDeleting = false;
+</script>
+
+<article>
+  <h1>Edit Post</h1>
+
+  {#if form?.success}
+    <div class="success">{form.message ?? 'Changes saved'}</div>
+  {/if}
+
+  {#if form?.error}
+    <div class="error">{form.error}</div>
+  {/if}
+
+  <form method="POST" action="?/update" use:enhance>
+    <div class="field">
+      <label for="title">Title</label>
+      <input
+        type="text"
+        id="title"
+        name="title"
+        value={form?.title ?? data.post.title}
+        required
+      />
+    </div>
+
+    <div class="field">
+      <label for="content">Content</label>
+      <textarea
+        id="content"
+        name="content"
+        rows="10"
+      >{form?.content ?? data.post.content}</textarea>
+    </div>
+
+    <div class="field">
+      <label>
+        <input
+          type="checkbox"
+          name="published"
+          value="true"
+          checked={data.post.published}
+        />
+        Published
+      </label>
+    </div>
+
+    <button type="submit">Save Changes</button>
+  </form>
+
+  <hr />
+
+  <div class="actions">
+    {#if data.post.published}
+      <form method="POST" action="?/unpublish" use:enhance>
+        <button type="submit">Unpublish</button>
+      </form>
+    {:else}
+      <form method="POST" action="?/publish" use:enhance>
+        <button type="submit">Publish</button>
+      </form>
+    {/if}
+
+    <form
+      method="POST"
+      action="?/delete"
+      use:enhance={() => {
+        if (!confirm('Are you sure you want to delete this post?')) {
+          return () => {};
+        }
+        isDeleting = true;
+        return async ({ update }) => {
+          await update();
+          isDeleting = false;
+        };
+      }}
+    >
+      <button type="submit" class="danger" disabled={isDeleting}>
+        {isDeleting ? 'Deleting...' : 'Delete Post'}
+      </button>
+    </form>
+  </div>
+</article>
+```
+
+### Transactions in Actions
+
+```typescript
+// src/routes/orders/+page.server.ts
+import { fail, redirect } from '@sveltejs/kit';
+import type { Actions, PageServerLoad } from './$types';
+
+interface CartItem {
+  product_id: number;
+  quantity: number;
+  price: number;
+}
+
+export const actions: Actions = {
+  checkout: async ({ request, locals }) => {
+    const formData = await request.formData();
+    const userId = formData.get('user_id')?.toString();
+    const cartJson = formData.get('cart')?.toString();
+
+    if (!userId || !cartJson) {
+      return fail(400, { error: 'Invalid request' });
+    }
+
+    const cart: CartItem[] = JSON.parse(cartJson);
+
+    if (cart.length === 0) {
+      return fail(400, { error: 'Cart is empty' });
+    }
+
+    try {
+      const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+      // Transaction ensures all-or-nothing
+      const orderId = await locals.db.transaction(async (tx) => {
+        // Create order
+        const orderResult = await tx.run(
+          `INSERT INTO orders (user_id, total, status, created_at)
+           VALUES (?, ?, 'pending', CURRENT_TIMESTAMP)`,
+          [userId, total]
+        );
+
+        const orderId = orderResult.lastInsertRowId;
+
+        // Add order items and update inventory
+        for (const item of cart) {
+          // Check stock
+          const product = await tx.queryOne<{ stock: number }>(
+            'SELECT stock FROM products WHERE id = ?',
+            [item.product_id]
+          );
+
+          if (!product || product.stock < item.quantity) {
+            throw new Error(`Insufficient stock for product ${item.product_id}`);
+          }
+
+          // Add order item
+          await tx.run(
+            `INSERT INTO order_items (order_id, product_id, quantity, price)
+             VALUES (?, ?, ?, ?)`,
+            [orderId, item.product_id, item.quantity, item.price]
+          );
+
+          // Decrement stock
+          await tx.run(
+            'UPDATE products SET stock = stock - ? WHERE id = ?',
+            [item.quantity, item.product_id]
+          );
+        }
+
+        return orderId;
+      });
+
+      throw redirect(303, `/orders/${orderId}/confirmation`);
+    } catch (error) {
+      if (error instanceof Response) throw error; // Re-throw redirects
+      return fail(400, { error: (error as Error).message });
+    }
+  },
+};
+```
+
+### Form Enhancement with Loading States
+
+```svelte
+<!-- src/routes/comments/+page.svelte -->
+<script lang="ts">
+  import { enhance } from '$app/forms';
+  import type { PageData, ActionData } from './$types';
+
+  export let data: PageData;
+  export let form: ActionData;
+
+  let isSubmitting = false;
+</script>
+
+<section>
+  <h2>Comments ({data.comments.length})</h2>
+
+  {#each data.comments as comment (comment.id)}
+    <div class="comment">
+      <strong>{comment.author_name}</strong>
+      <p>{comment.content}</p>
+      <time>{new Date(comment.created_at).toLocaleString()}</time>
+    </div>
+  {/each}
+
+  <form
+    method="POST"
+    action="?/addComment"
+    use:enhance={() => {
+      isSubmitting = true;
+      return async ({ update, result }) => {
+        await update();
+        isSubmitting = false;
+        if (result.type === 'success') {
+          // Clear the form on success
+          const form = document.querySelector('form');
+          form?.reset();
+        }
+      };
+    }}
+  >
+    <input type="hidden" name="post_id" value={data.postId} />
+
+    <div class="field">
+      <label for="content">Your comment</label>
+      <textarea
+        id="content"
+        name="content"
+        rows="3"
+        required
+        disabled={isSubmitting}
+      ></textarea>
+    </div>
+
+    {#if form?.error}
+      <p class="error">{form.error}</p>
+    {/if}
+
+    <button type="submit" disabled={isSubmitting}>
+      {isSubmitting ? 'Posting...' : 'Post Comment'}
+    </button>
+  </form>
+</section>
+```
+
+---
+
+## API Routes
+
+Create standalone API endpoints with `+server.ts` files.
+
+### REST API Endpoint
+
+```typescript
+// src/routes/api/users/+server.ts
+import { json, error } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  created_at: string;
+}
+
+// GET /api/users
+export const GET: RequestHandler = async ({ url, locals }) => {
+  const limit = parseInt(url.searchParams.get('limit') || '50', 10);
+  const offset = parseInt(url.searchParams.get('offset') || '0', 10);
+  const search = url.searchParams.get('q');
+
+  let sql = 'SELECT id, name, email, created_at FROM users';
+  const params: unknown[] = [];
+
+  if (search) {
+    sql += ' WHERE name LIKE ? OR email LIKE ?';
+    params.push(`%${search}%`, `%${search}%`);
+  }
+
+  sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+  params.push(limit, offset);
+
+  const users = await locals.db.query<User>(sql, params);
+
+  const countResult = await locals.db.queryOne<{ total: number }>(
+    'SELECT COUNT(*) as total FROM users' + (search ? ' WHERE name LIKE ? OR email LIKE ?' : ''),
+    search ? [`%${search}%`, `%${search}%`] : []
+  );
+
+  return json({
+    users,
+    total: countResult?.total ?? 0,
+    limit,
+    offset,
+  });
+};
+
+// POST /api/users
+export const POST: RequestHandler = async ({ request, locals }) => {
+  const body = await request.json() as { name: string; email: string };
+
+  if (!body.name || !body.email) {
+    throw error(400, 'Name and email are required');
+  }
+
+  try {
+    const result = await locals.db.run(
+      'INSERT INTO users (name, email) VALUES (?, ?)',
+      [body.name, body.email]
+    );
+
+    return json(
+      { id: result.lastInsertRowId, ...body },
+      { status: 201 }
+    );
+  } catch (err) {
+    if ((err as Error).message.includes('UNIQUE constraint')) {
+      throw error(409, 'Email already exists');
+    }
+    throw err;
+  }
+};
+```
+
+### Dynamic API Route
+
+```typescript
+// src/routes/api/users/[id]/+server.ts
+import { json, error } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  bio: string | null;
+  created_at: string;
+}
+
+// GET /api/users/:id
+export const GET: RequestHandler = async ({ params, locals }) => {
+  const user = await locals.db.queryOne<User>(
+    'SELECT * FROM users WHERE id = ?',
+    [params.id]
+  );
+
+  if (!user) {
+    throw error(404, 'User not found');
+  }
+
+  return json(user);
+};
+
+// PATCH /api/users/:id
+export const PATCH: RequestHandler = async ({ params, request, locals }) => {
+  const body = await request.json() as Partial<{ name: string; email: string; bio: string }>;
+
+  const updates: string[] = [];
+  const values: unknown[] = [];
+
+  if (body.name !== undefined) {
+    updates.push('name = ?');
+    values.push(body.name);
+  }
+  if (body.email !== undefined) {
+    updates.push('email = ?');
+    values.push(body.email);
+  }
+  if (body.bio !== undefined) {
+    updates.push('bio = ?');
+    values.push(body.bio);
+  }
+
+  if (updates.length === 0) {
+    throw error(400, 'No fields to update');
+  }
+
+  values.push(params.id);
+
+  const result = await locals.db.run(
+    `UPDATE users SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    values
+  );
+
+  if (result.rowsAffected === 0) {
+    throw error(404, 'User not found');
+  }
+
+  return json({ success: true });
+};
+
+// DELETE /api/users/:id
+export const DELETE: RequestHandler = async ({ params, locals }) => {
+  const result = await locals.db.run(
+    'DELETE FROM users WHERE id = ?',
+    [params.id]
+  );
+
+  if (result.rowsAffected === 0) {
+    throw error(404, 'User not found');
+  }
+
+  return json({ success: true });
+};
+```
+
+### Streaming Response
+
+```typescript
+// src/routes/api/export/users/+server.ts
+import type { RequestHandler } from './$types';
+
+export const GET: RequestHandler = async ({ locals }) => {
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+
+      // Write CSV header
+      controller.enqueue(encoder.encode('id,name,email,created_at\n'));
+
+      // Stream users
+      const users = await locals.db.query<{
+        id: number;
+        name: string;
+        email: string;
+        created_at: string;
+      }>('SELECT * FROM users ORDER BY id');
+
+      for (const user of users) {
+        const row = `${user.id},"${escapeCSV(user.name)}","${escapeCSV(user.email)}",${user.created_at}\n`;
+        controller.enqueue(encoder.encode(row));
+      }
+
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/csv',
+      'Content-Disposition': 'attachment; filename="users.csv"',
+    },
+  });
+};
+
+function escapeCSV(str: string): string {
+  return str.replace(/"/g, '""');
+}
+```
+
+---
+
+## Real-Time Updates
+
+### Server-Sent Events for CDC
+
+```typescript
+// src/routes/api/events/users/+server.ts
+import type { RequestHandler } from './$types';
+import { createCDCStream } from '@dotdo/dosql';
+
+export const GET: RequestHandler = async ({ platform, request }) => {
+  if (!platform) {
+    return new Response('Platform not available', { status: 500 });
+  }
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+
+      // Get database stub
+      const id = platform.env.DOSQL_DB.idFromName('default');
+      const stub = platform.env.DOSQL_DB.get(id);
+
+      // Subscribe to CDC
+      const response = await stub.fetch('http://internal/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tables: ['users'] }),
+      });
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        controller.close();
+        return;
+      }
+
+      // Handle client disconnect
+      request.signal.addEventListener('abort', () => {
+        reader.cancel();
+      });
+
+      // Stream changes to client
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = new TextDecoder().decode(value);
+        controller.enqueue(encoder.encode(`data: ${text}\n\n`));
+      }
+
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+};
+```
+
+### Client-Side SSE Hook
+
+```typescript
+// src/lib/hooks/useRealtimeUsers.ts
+import { writable, type Readable } from 'svelte/store';
+import { browser } from '$app/environment';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+interface CDCEvent {
+  type: 'insert' | 'update' | 'delete';
+  data: User;
+}
+
+export function useRealtimeUsers(initialUsers: User[]): Readable<User[]> {
+  const users = writable(initialUsers);
+
+  if (browser) {
+    const eventSource = new EventSource('/api/events/users');
+
+    eventSource.onmessage = (event) => {
+      const change: CDCEvent = JSON.parse(event.data);
+
+      users.update((current) => {
+        switch (change.type) {
+          case 'insert':
+            return [change.data, ...current];
+          case 'update':
+            return current.map((u) =>
+              u.id === change.data.id ? change.data : u
+            );
+          case 'delete':
+            return current.filter((u) => u.id !== change.data.id);
+          default:
+            return current;
+        }
+      });
+    };
+
+    eventSource.onerror = () => {
+      console.error('SSE connection error');
+    };
+
+    // Cleanup on component unmount
+    return {
+      subscribe: users.subscribe,
+      destroy: () => eventSource.close(),
+    } as Readable<User[]> & { destroy: () => void };
+  }
+
+  return users;
+}
+```
+
+```svelte
+<!-- src/routes/users/live/+page.svelte -->
+<script lang="ts">
+  import { onDestroy } from 'svelte';
+  import { useRealtimeUsers } from '$lib/hooks/useRealtimeUsers';
+  import type { PageData } from './$types';
+
+  export let data: PageData;
+
+  const users = useRealtimeUsers(data.users);
+
+  onDestroy(() => {
+    if ('destroy' in users) {
+      (users as any).destroy();
+    }
+  });
+</script>
+
+<h1>Live Users</h1>
+<p class="status">Updates in real-time</p>
+
+<ul>
+  {#each $users as user (user.id)}
+    <li>{user.name} - {user.email}</li>
+  {/each}
+</ul>
+```
+
+---
+
+## Type Safety
+
+### Database Type Definitions
+
+```typescript
+// src/lib/types.ts
+export interface User {
+  id: number;
+  name: string;
+  email: string;
+  bio: string | null;
+  avatar_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Post {
+  id: number;
+  user_id: number;
+  title: string;
+  content: string;
+  published: boolean;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Comment {
+  id: number;
+  post_id: number;
+  user_id: number;
+  content: string;
+  created_at: string;
+}
+
+// Joined types
+export interface PostWithAuthor extends Post {
+  author_name: string;
+  author_email: string;
+}
+
+export interface CommentWithUser extends Comment {
+  user_name: string;
+  user_avatar_url: string | null;
+}
+```
+
+### Zod Schema Validation
+
+```typescript
+// src/lib/schemas.ts
+import { z } from 'zod';
+
+export const createUserSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters').max(100),
+  email: z.string().email('Invalid email address'),
+  bio: z.string().max(500, 'Bio must be under 500 characters').optional(),
+});
+
+export const updateUserSchema = createUserSchema.partial();
+
+export const createPostSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(200),
+  content: z.string().min(1, 'Content is required'),
+  published: z.boolean().default(false),
+});
+
+export type CreateUserInput = z.infer<typeof createUserSchema>;
+export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+export type CreatePostInput = z.infer<typeof createPostSchema>;
+```
+
+### Type-Safe Actions with Validation
+
+```typescript
+// src/routes/users/new/+page.server.ts
+import { fail, redirect } from '@sveltejs/kit';
+import { createUserSchema } from '$lib/schemas';
+import type { Actions } from './$types';
+
+export const actions: Actions = {
+  default: async ({ request, locals }) => {
+    const formData = await request.formData();
+
+    const data = {
+      name: formData.get('name')?.toString(),
+      email: formData.get('email')?.toString(),
+      bio: formData.get('bio')?.toString() || undefined,
+    };
+
+    const result = createUserSchema.safeParse(data);
+
+    if (!result.success) {
+      const errors = result.error.flatten().fieldErrors;
+      return fail(400, {
+        errors: {
+          name: errors.name?.[0],
+          email: errors.email?.[0],
+          bio: errors.bio?.[0],
+        },
+        data,
+      });
+    }
+
+    try {
+      const insertResult = await locals.db.run(
+        'INSERT INTO users (name, email, bio) VALUES (?, ?, ?)',
+        [result.data.name, result.data.email, result.data.bio ?? null]
+      );
+
+      throw redirect(303, `/users/${insertResult.lastInsertRowId}`);
+    } catch (error) {
+      if (error instanceof Response) throw error;
+      if ((error as Error).message.includes('UNIQUE constraint')) {
+        return fail(400, {
+          errors: { email: 'Email already exists' },
+          data,
+        });
+      }
+      throw error;
+    }
+  },
+};
+```
+
+---
+
+## Deployment
+
+### Build Configuration
+
+```json
+// package.json
+{
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "wrangler pages dev .svelte-kit/cloudflare",
+    "deploy": "npm run build && wrangler pages deploy .svelte-kit/cloudflare",
+    "deploy:staging": "npm run build && wrangler pages deploy .svelte-kit/cloudflare --env staging",
+    "deploy:production": "npm run build && wrangler pages deploy .svelte-kit/cloudflare --env production",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+  }
+}
+```
+
+### Wrangler Configuration for Production
+
+```toml
+# wrangler.toml
+name = "my-sveltekit-app"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Durable Objects
+[[durable_objects.bindings]]
+name = "DOSQL_DB"
+class_name = "DoSQLDatabase"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["DoSQLDatabase"]
+
+# R2 for data
+[[r2_buckets]]
+binding = "DATA_BUCKET"
+bucket_name = "sveltekit-data"
+
+# Production environment
+[env.production]
+name = "my-sveltekit-app-prod"
+
+[[env.production.r2_buckets]]
+binding = "DATA_BUCKET"
+bucket_name = "sveltekit-data-prod"
+
+# Staging environment
+[env.staging]
+name = "my-sveltekit-app-staging"
+
+[[env.staging.r2_buckets]]
+binding = "DATA_BUCKET"
+bucket_name = "sveltekit-data-staging"
+```
+
+### Including Migrations in Build
+
+```typescript
+// vite.config.ts
+import { sveltekit } from '@sveltejs/kit/vite';
+import { defineConfig } from 'vite';
+import { copyFileSync, mkdirSync } from 'fs';
+import { glob } from 'glob';
+
+export default defineConfig({
+  plugins: [
+    sveltekit(),
+    {
+      name: 'copy-migrations',
+      buildEnd() {
+        // Copy SQL migrations to build output
+        mkdirSync('.svelte-kit/cloudflare/.do/migrations', { recursive: true });
+        const files = glob.sync('.do/migrations/*.sql');
+        files.forEach((file) => {
+          const dest = file.replace('.do', '.svelte-kit/cloudflare/.do');
+          copyFileSync(file, dest);
+        });
+      },
+    },
+  ],
+});
+```
+
+### Production Checklist
+
+1. **Environment bindings configured** - DOSQL_DB, DATA_BUCKET
+2. **Migrations bundled** - SQL files included in build output
+3. **Error handling** - Proper error boundaries in layouts
+4. **Rate limiting** - Consider adding rate limits for form actions and API routes
+5. **Monitoring** - Set up Cloudflare analytics and logging
+6. **CORS** - Configure CORS headers for API endpoints if needed
+
+---
+
+## Next Steps
+
+- [Getting Started](../getting-started.md) - DoSQL basics
+- [API Reference](../api-reference.md) - Complete API documentation
+- [Advanced Features](../advanced.md) - CDC, time travel, branching
+- [Architecture](../architecture.md) - Understanding DoSQL internals
