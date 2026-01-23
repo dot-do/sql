@@ -761,7 +761,7 @@ export class DOSqliteAdapter implements BenchmarkAdapter {
    * Execute multiple SQL statements in a single batch
    *
    * All statements are executed within a single transaction for atomicity.
-   * If any statement fails, all changes are rolled back.
+   * If any statement fails, all changes are rolled back but results are still returned.
    *
    * @param statements - Array of SQL statements to execute
    * @returns Array of results matching input order
@@ -774,89 +774,106 @@ export class DOSqliteAdapter implements BenchmarkAdapter {
       return [];
     }
 
-    // Execute all statements within a transaction for atomicity
-    return this.storage.transactionSync(() => {
-      const results: ExecManyResult[] = [];
+    // Results array that survives across transaction rollback
+    const results: ExecManyResult[] = [];
+    let failedAtIndex = -1;
 
-      for (const statement of statements) {
-        const startTime = performance.now();
-        const trimmed = statement.trim();
+    try {
+      // Execute all statements within a transaction for atomicity
+      this.storage.transactionSync(() => {
+        for (let i = 0; i < statements.length; i++) {
+          const statement = statements[i];
+          const startTime = performance.now();
+          const trimmed = statement.trim();
 
-        // Handle empty/whitespace-only statements
-        if (!trimmed) {
-          results.push({
-            success: true,
-            rowCount: 0,
-            durationMs: performance.now() - startTime,
-          });
-          continue;
-        }
-
-        // Handle comment-only statements
-        if (trimmed.startsWith('--') || (trimmed.startsWith('/*') && trimmed.endsWith('*/'))) {
-          results.push({
-            success: true,
-            rowCount: 0,
-            durationMs: performance.now() - startTime,
-          });
-          continue;
-        }
-
-        try {
-          const cursor = this.sql.exec(trimmed);
-          const durationMs = performance.now() - startTime;
-
-          // Determine if this is a SELECT query
-          const normalizedSql = trimmed.toUpperCase();
-          const isSelect = normalizedSql.startsWith('SELECT');
-
-          if (isSelect) {
-            const rows = cursor.toArray();
-            this.readOps += cursor.rowsRead;
-
+          // Handle empty/whitespace-only statements
+          if (!trimmed) {
             results.push({
               success: true,
-              rowCount: rows.length,
-              rows: rows as Record<string, unknown>[],
-              durationMs,
+              rowCount: 0,
+              durationMs: performance.now() - startTime,
             });
-          } else {
-            // For INSERT/UPDATE/DELETE/DDL, get actual rows affected
-            const changesCursor = this.sql.exec<{ changes: number }>('SELECT changes() as changes');
-            const changesResult = changesCursor.one();
-            const rowsAffected = changesResult?.changes ?? cursor.rowsWritten;
-
-            this.writeOps += cursor.rowsWritten;
-            this.readOps += cursor.rowsRead;
-
-            results.push({
-              success: true,
-              rowCount: rowsAffected,
-              durationMs,
-            });
+            continue;
           }
-        } catch (error) {
-          const durationMs = performance.now() - startTime;
-          results.push({
-            success: false,
-            rowCount: 0,
-            error: error instanceof Error ? error.message : String(error),
-            durationMs,
-          });
-          // Throw to trigger transaction rollback
-          throw error;
-        }
-      }
 
-      return results;
-    });
+          // Handle comment-only statements
+          if (trimmed.startsWith('--') || (trimmed.startsWith('/*') && trimmed.endsWith('*/'))) {
+            results.push({
+              success: true,
+              rowCount: 0,
+              durationMs: performance.now() - startTime,
+            });
+            continue;
+          }
+
+          try {
+            const cursor = this.sql.exec(trimmed);
+            const durationMs = performance.now() - startTime;
+
+            // Determine if this is a SELECT query
+            const normalizedSql = trimmed.toUpperCase();
+            const isSelect = normalizedSql.startsWith('SELECT');
+
+            if (isSelect) {
+              const rows = cursor.toArray();
+              this.readOps += cursor.rowsRead;
+
+              results.push({
+                success: true,
+                rowCount: rows.length,
+                rows: rows as Record<string, unknown>[],
+                durationMs,
+              });
+            } else {
+              // For INSERT/UPDATE/DELETE/DDL, get actual rows affected
+              const changesCursor = this.sql.exec<{ changes: number }>('SELECT changes() as changes');
+              const changesResult = changesCursor.one();
+              const rowsAffected = changesResult?.changes ?? cursor.rowsWritten;
+
+              this.writeOps += cursor.rowsWritten;
+              this.readOps += cursor.rowsRead;
+
+              results.push({
+                success: true,
+                rowCount: rowsAffected,
+                durationMs,
+              });
+            }
+          } catch (error) {
+            const durationMs = performance.now() - startTime;
+            failedAtIndex = i;
+            results.push({
+              success: false,
+              rowCount: 0,
+              error: error instanceof Error ? error.message : String(error),
+              durationMs,
+            });
+            // Throw to trigger transaction rollback
+            throw error;
+          }
+        }
+      });
+    } catch {
+      // Transaction was rolled back due to error
+      // Add placeholder results for remaining statements that weren't executed
+      for (let i = results.length; i < statements.length; i++) {
+        results.push({
+          success: false,
+          rowCount: 0,
+          error: 'Not executed due to earlier failure',
+          durationMs: 0,
+        });
+      }
+    }
+
+    return results;
   }
 
   /**
    * Execute multiple SQL statements with parameters in a single batch
    *
    * All statements are executed within a single transaction for atomicity.
-   * If any statement fails, all changes are rolled back.
+   * If any statement fails, all changes are rolled back but results are still returned.
    *
    * @param statements - Array of {sql, params} objects
    * @returns Array of results matching input order
@@ -869,73 +886,88 @@ export class DOSqliteAdapter implements BenchmarkAdapter {
       return [];
     }
 
-    // Execute all statements within a transaction for atomicity
-    return this.storage.transactionSync(() => {
-      const results: ExecManyResult[] = [];
+    // Results array that survives across transaction rollback
+    const results: ExecManyResult[] = [];
 
-      for (const { sql, params } of statements) {
-        const startTime = performance.now();
-        const trimmed = sql.trim();
+    try {
+      // Execute all statements within a transaction for atomicity
+      this.storage.transactionSync(() => {
+        for (let i = 0; i < statements.length; i++) {
+          const { sql, params } = statements[i];
+          const startTime = performance.now();
+          const trimmed = sql.trim();
 
-        // Handle empty/whitespace-only statements
-        if (!trimmed) {
-          results.push({
-            success: true,
-            rowCount: 0,
-            durationMs: performance.now() - startTime,
-          });
-          continue;
-        }
-
-        try {
-          const bindings = params ? Object.values(params) : [];
-          const cursor = this.sql.exec(trimmed, ...bindings);
-          const durationMs = performance.now() - startTime;
-
-          // Determine if this is a SELECT query
-          const normalizedSql = trimmed.toUpperCase();
-          const isSelect = normalizedSql.startsWith('SELECT');
-
-          if (isSelect) {
-            const rows = cursor.toArray();
-            this.readOps += cursor.rowsRead;
-
+          // Handle empty/whitespace-only statements
+          if (!trimmed) {
             results.push({
               success: true,
-              rowCount: rows.length,
-              rows: rows as Record<string, unknown>[],
-              durationMs,
+              rowCount: 0,
+              durationMs: performance.now() - startTime,
             });
-          } else {
-            // For INSERT/UPDATE/DELETE/DDL, get actual rows affected
-            const changesCursor = this.sql.exec<{ changes: number }>('SELECT changes() as changes');
-            const changesResult = changesCursor.one();
-            const rowsAffected = changesResult?.changes ?? cursor.rowsWritten;
-
-            this.writeOps += cursor.rowsWritten;
-            this.readOps += cursor.rowsRead;
-
-            results.push({
-              success: true,
-              rowCount: rowsAffected,
-              durationMs,
-            });
+            continue;
           }
-        } catch (error) {
-          const durationMs = performance.now() - startTime;
-          results.push({
-            success: false,
-            rowCount: 0,
-            error: error instanceof Error ? error.message : String(error),
-            durationMs,
-          });
-          // Throw to trigger transaction rollback
-          throw error;
-        }
-      }
 
-      return results;
-    });
+          try {
+            const bindings = params ? Object.values(params) : [];
+            const cursor = this.sql.exec(trimmed, ...bindings);
+            const durationMs = performance.now() - startTime;
+
+            // Determine if this is a SELECT query
+            const normalizedSql = trimmed.toUpperCase();
+            const isSelect = normalizedSql.startsWith('SELECT');
+
+            if (isSelect) {
+              const rows = cursor.toArray();
+              this.readOps += cursor.rowsRead;
+
+              results.push({
+                success: true,
+                rowCount: rows.length,
+                rows: rows as Record<string, unknown>[],
+                durationMs,
+              });
+            } else {
+              // For INSERT/UPDATE/DELETE/DDL, get actual rows affected
+              const changesCursor = this.sql.exec<{ changes: number }>('SELECT changes() as changes');
+              const changesResult = changesCursor.one();
+              const rowsAffected = changesResult?.changes ?? cursor.rowsWritten;
+
+              this.writeOps += cursor.rowsWritten;
+              this.readOps += cursor.rowsRead;
+
+              results.push({
+                success: true,
+                rowCount: rowsAffected,
+                durationMs,
+              });
+            }
+          } catch (error) {
+            const durationMs = performance.now() - startTime;
+            results.push({
+              success: false,
+              rowCount: 0,
+              error: error instanceof Error ? error.message : String(error),
+              durationMs,
+            });
+            // Throw to trigger transaction rollback
+            throw error;
+          }
+        }
+      });
+    } catch {
+      // Transaction was rolled back due to error
+      // Add placeholder results for remaining statements that weren't executed
+      for (let i = results.length; i < statements.length; i++) {
+        results.push({
+          success: false,
+          rowCount: 0,
+          error: 'Not executed due to earlier failure',
+          durationMs: 0,
+        });
+      }
+    }
+
+    return results;
   }
 }
 

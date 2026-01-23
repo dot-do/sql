@@ -56,7 +56,7 @@ import type {
   RPCError as ServerRPCError,
   ConnectionOptions as ServerConnectionOptions,
   ClientCapabilities as ServerClientCapabilities,
-} from '../rpc/types.js';
+} from '../rpc/types';
 
 import {
   RPCErrorCode,
@@ -65,7 +65,7 @@ import {
   isServerCDCEvent as serverIsServerCDCEvent,
   isClientCDCEvent as serverIsClientCDCEvent,
   serverToClientCDCEvent as serverServerToClientCDCEvent,
-} from '../rpc/types.js';
+} from '../rpc/types';
 
 // DoLake types (dolake) - now re-exports from lake.do which re-exports from sql.do
 import type {
@@ -96,7 +96,7 @@ import type {
   CDCEvent as DoSQLCDCEvent,
   ChangeEvent,
   TransactionEvent,
-} from '../cdc/types.js';
+} from '../cdc/types';
 
 // =============================================================================
 // QueryRequest Compatibility Tests

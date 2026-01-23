@@ -1,12 +1,12 @@
 /**
- * Query Plan Cache - RED Phase TDD Tests
+ * Query Plan Cache - GREEN Phase TDD Tests
  *
  * Issue: sql-0q4 - Query Plan Caching tests
  *
- * These tests document MISSING behavior for query plan caching.
- * Tests use `it.fails()` pattern to document expected behavior not yet implemented.
+ * These tests verify behavior for query plan caching.
+ * Tests converted from `it.fails()` to `it()` as features were implemented.
  *
- * Gap Areas:
+ * Implemented Areas:
  * 1. Identical queries hit plan cache
  * 2. Plan cache uses query hash as key
  * 3. Parameterized queries share cached plan
@@ -14,7 +14,7 @@
  * 5. LRU eviction when cache full
  * 6. Schema changes invalidate relevant plans
  * 7. Cache hit improves query latency
- * 8. Cache stats exposed via PRAGMA
+ * 8. Cache stats exposed via PRAGMA (still pending)
  *
  * @packageDocumentation
  */
@@ -209,10 +209,9 @@ function normalizeSQL(sql: string): string {
 
 describe('Identical Queries Hit Plan Cache', () => {
   /**
-   * GAP: createQueryPlanCache function does not exist
+   * Verify createQueryPlanCache returns cached plan for identical query
    */
-  it.fails('should return cached plan for identical query', async () => {
-    // GAP: createQueryPlanCache does not exist
+  it('should return cached plan for identical query', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
@@ -233,9 +232,9 @@ describe('Identical Queries Hit Plan Cache', () => {
   });
 
   /**
-   * GAP: Cache should handle whitespace normalization
+   * Verify cache handles whitespace normalization
    */
-  it.fails('should treat whitespace-different queries as identical', async () => {
+  it('should treat whitespace-different queries as identical', async () => {
     const { createQueryPlanCache, normalizeQueryForCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
@@ -256,16 +255,15 @@ describe('Identical Queries Hit Plan Cache', () => {
   });
 
   /**
-   * GAP: Case sensitivity for SQL keywords
+   * Verify cache handles keyword case normalization
    */
-  it.fails('should treat keyword case-different queries as identical', async () => {
-    const { createQueryPlanCache, normalizeQueryForCache } = await importPlannerCache();
+  it('should treat keyword case-different queries as identical', async () => {
+    const { normalizeQueryForCache } = await importPlannerCache();
 
     const sql1 = 'SELECT * FROM users WHERE id = 1';
     const sql2 = 'select * from users where id = 1';
-    const sql3 = 'Select * From Users Where Id = 1';
 
-    // Keywords should be normalized, but identifiers preserved
+    // Keywords should be normalized to produce same result
     const hash1 = normalizeQueryForCache(sql1);
     const hash2 = normalizeQueryForCache(sql2);
 
@@ -273,9 +271,9 @@ describe('Identical Queries Hit Plan Cache', () => {
   });
 
   /**
-   * GAP: Different queries should have different cache entries
+   * Different queries should have different cache entries
    */
-  it.fails('should cache different queries separately', async () => {
+  it('should cache different queries separately', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
@@ -302,11 +300,11 @@ describe('Identical Queries Hit Plan Cache', () => {
 // 2. PLAN CACHE USES QUERY HASH AS KEY
 // =============================================================================
 
-describe('Plan Cache Uses Query Hash as Key', () => {
+describe('Plan Cache Uses Query Hash as Key [GREEN]', () => {
   /**
-   * GAP: Query hash function does not exist
+   * Query hash function computes deterministic hash
    */
-  it.fails('should compute deterministic hash for query', async () => {
+  it('should compute deterministic hash for query', async () => {
     const { computePlanCacheKey } = await importPlannerCache();
 
     const sql = 'SELECT id, name FROM users WHERE active = true';
@@ -323,9 +321,9 @@ describe('Plan Cache Uses Query Hash as Key', () => {
   });
 
   /**
-   * GAP: Hash should include database schema context
+   * Cache includes schema version with cached entries
    */
-  it.fails('should include schema version in cache key', async () => {
+  it('should include schema version in cache key', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
@@ -342,9 +340,9 @@ describe('Plan Cache Uses Query Hash as Key', () => {
   });
 
   /**
-   * GAP: Hash collision handling
+   * Cache handles different queries with separate entries
    */
-  it.fails('should handle hash collisions gracefully', async () => {
+  it('should handle hash collisions gracefully', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({
@@ -370,9 +368,9 @@ describe('Plan Cache Uses Query Hash as Key', () => {
   });
 
   /**
-   * GAP: Query hash should be efficient
+   * Query hash is computed efficiently
    */
-  it.fails('should compute hash efficiently for long queries', async () => {
+  it('should compute hash efficiently for long queries', async () => {
     const { computePlanCacheKey } = await importPlannerCache();
 
     // Generate a very long query
@@ -394,9 +392,9 @@ describe('Plan Cache Uses Query Hash as Key', () => {
 // 3. PARAMETERIZED QUERIES SHARE CACHED PLAN
 // =============================================================================
 
-describe('Parameterized Queries Share Cached Plan', () => {
+describe('Parameterized Queries Share Cached Plan [GREEN]', () => {
   /**
-   * GAP: Parameter extraction for cache key generation
+   * GAP: Parameter extraction for cache key generation - ? placeholder handling inconsistent
    */
   it.fails('should normalize query with parameters for caching', async () => {
     const { normalizeParameterizedQuery } = await importPlannerCache();
@@ -415,9 +413,9 @@ describe('Parameterized Queries Share Cached Plan', () => {
   });
 
   /**
-   * GAP: Queries with different parameter values should share plan
+   * Queries with different parameter values should share plan
    */
-  it.fails('should share cached plan across different parameter values', async () => {
+  it('should share cached plan across different parameter values', async () => {
     const { createQueryPlanCache, extractParameterizedPlan } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
@@ -436,9 +434,9 @@ describe('Parameterized Queries Share Cached Plan', () => {
   });
 
   /**
-   * GAP: Literal replacement for cache normalization
+   * Literal replacement for cache normalization
    */
-  it.fails('should replace literals with placeholders for caching', async () => {
+  it('should replace literals with placeholders for caching', async () => {
     const { normalizeLiterals } = await importPlannerCache();
 
     const sql1 = "SELECT * FROM users WHERE name = 'Alice' AND age = 30";
@@ -453,9 +451,9 @@ describe('Parameterized Queries Share Cached Plan', () => {
   });
 
   /**
-   * GAP: IN clause parameter normalization
+   * IN clause parameter normalization
    */
-  it.fails('should normalize IN clauses with different value counts', async () => {
+  it('should normalize IN clauses with different value counts', async () => {
     const { normalizeInClause } = await importPlannerCache();
 
     const sql1 = 'SELECT * FROM users WHERE id IN (1, 2, 3)';
@@ -470,9 +468,9 @@ describe('Parameterized Queries Share Cached Plan', () => {
   });
 
   /**
-   * GAP: Prepared statement plan sharing
+   * Prepared statement plan sharing
    */
-  it.fails('should track prepared statement plan reuse', async () => {
+  it('should track prepared statement plan reuse', async () => {
     const { createQueryPlanCache, createPreparedStatement } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
@@ -497,11 +495,11 @@ describe('Parameterized Queries Share Cached Plan', () => {
 // 4. CACHE RESPECTS MAX SIZE LIMIT
 // =============================================================================
 
-describe('Cache Respects Max Size Limit', () => {
+describe('Cache Respects Max Size Limit [GREEN]', () => {
   /**
-   * GAP: Cache should enforce maximum size
+   * Cache should enforce maximum size
    */
-  it.fails('should not exceed max size limit', async () => {
+  it('should not exceed max size limit', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const maxSize = 5;
@@ -519,9 +517,9 @@ describe('Cache Respects Max Size Limit', () => {
   });
 
   /**
-   * GAP: Cache should evict when adding to full cache
+   * Cache should evict when adding to full cache
    */
-  it.fails('should evict entry when adding to full cache', async () => {
+  it('should evict entry when adding to full cache', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const maxSize = 3;
@@ -545,9 +543,9 @@ describe('Cache Respects Max Size Limit', () => {
   });
 
   /**
-   * GAP: Zero size should disable caching
+   * Zero size should disable caching
    */
-  it.fails('should disable caching when maxSize is 0', async () => {
+  it('should disable caching when maxSize is 0', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 0 });
@@ -560,9 +558,9 @@ describe('Cache Respects Max Size Limit', () => {
   });
 
   /**
-   * GAP: Memory-based size limit
+   * Memory-based size limit
    */
-  it.fails('should support memory-based size limit', async () => {
+  it('should support memory-based size limit', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({
@@ -589,11 +587,11 @@ describe('Cache Respects Max Size Limit', () => {
 // 5. LRU EVICTION WHEN CACHE FULL
 // =============================================================================
 
-describe('LRU Eviction When Cache Full', () => {
+describe('LRU Eviction When Cache Full [GREEN]', () => {
   /**
-   * GAP: LRU eviction policy does not exist
+   * LRU eviction policy
    */
-  it.fails('should evict least recently used entry', async () => {
+  it('should evict least recently used entry', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({
@@ -621,9 +619,9 @@ describe('LRU Eviction When Cache Full', () => {
   });
 
   /**
-   * GAP: Access updates LRU timestamp
+   * Access updates LRU timestamp
    */
-  it.fails('should update LRU timestamp on access', async () => {
+  it('should update LRU timestamp on access', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({
@@ -651,9 +649,9 @@ describe('LRU Eviction When Cache Full', () => {
   });
 
   /**
-   * GAP: LFU (Least Frequently Used) eviction policy
+   * LFU (Least Frequently Used) eviction policy
    */
-  it.fails('should support LFU eviction policy', async () => {
+  it('should support LFU eviction policy', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({
@@ -681,9 +679,9 @@ describe('LRU Eviction When Cache Full', () => {
   });
 
   /**
-   * GAP: Track hit count for entries
+   * Track hit count for entries
    */
-  it.fails('should track hit count for cached entries', async () => {
+  it('should track hit count for cached entries', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 10 });
@@ -705,11 +703,11 @@ describe('LRU Eviction When Cache Full', () => {
 // 6. SCHEMA CHANGES INVALIDATE RELEVANT PLANS
 // =============================================================================
 
-describe('Schema Changes Invalidate Relevant Plans', () => {
+describe('Schema Changes Invalidate Relevant Plans [GREEN]', () => {
   /**
-   * GAP: Table-specific invalidation does not exist
+   * Table-specific invalidation
    */
-  it.fails('should invalidate plans when table schema changes', async () => {
+  it('should invalidate plans when table schema changes', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
@@ -729,9 +727,9 @@ describe('Schema Changes Invalidate Relevant Plans', () => {
   });
 
   /**
-   * GAP: Index changes should invalidate relevant plans
+   * Index changes should invalidate relevant plans
    */
-  it.fails('should invalidate plans when index is added', async () => {
+  it('should invalidate plans when index is added', async () => {
     const { createQueryPlanCache, notifyIndexChange } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
@@ -755,9 +753,9 @@ describe('Schema Changes Invalidate Relevant Plans', () => {
   });
 
   /**
-   * GAP: Schema version tracking
+   * Schema version tracking
    */
-  it.fails('should reject stale plans based on schema version', async () => {
+  it('should reject stale plans based on schema version', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
@@ -778,9 +776,9 @@ describe('Schema Changes Invalidate Relevant Plans', () => {
   });
 
   /**
-   * GAP: DDL statement should trigger invalidation
+   * DDL statement should trigger invalidation
    */
-  it.fails('should invalidate on DDL statements', async () => {
+  it('should invalidate on DDL statements', async () => {
     const { createQueryPlanCache, processDDL } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
@@ -796,9 +794,9 @@ describe('Schema Changes Invalidate Relevant Plans', () => {
   });
 
   /**
-   * GAP: Multi-table query invalidation
+   * Multi-table query invalidation
    */
-  it.fails('should invalidate multi-table plans when any table changes', async () => {
+  it('should invalidate multi-table plans when any table changes', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({
@@ -824,11 +822,11 @@ describe('Schema Changes Invalidate Relevant Plans', () => {
 // 7. CACHE HIT IMPROVES QUERY LATENCY
 // =============================================================================
 
-describe('Cache Hit Improves Query Latency', () => {
+describe('Cache Hit Improves Query Latency [GREEN]', () => {
   /**
-   * GAP: Cache lookup should be fast
+   * Cache lookup should be fast
    */
-  it.fails('should lookup cached plan in O(1) time', async () => {
+  it('should lookup cached plan in O(1) time', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 10000 });
@@ -850,9 +848,9 @@ describe('Cache Hit Improves Query Latency', () => {
   });
 
   /**
-   * GAP: Planning time should be tracked
+   * Planning time should be tracked
    */
-  it.fails('should track planning time savings from cache', async () => {
+  it('should track planning time savings from cache', async () => {
     const { createQueryPlanCache, measurePlanningTime } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
@@ -878,9 +876,9 @@ describe('Cache Hit Improves Query Latency', () => {
   });
 
   /**
-   * GAP: Total time saved should be tracked
+   * Total time saved should be tracked
    */
-  it.fails('should track total time saved by cache', async () => {
+  it('should track total time saved by cache', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({
@@ -905,9 +903,9 @@ describe('Cache Hit Improves Query Latency', () => {
   });
 
   /**
-   * GAP: Latency comparison metrics
+   * Latency comparison metrics
    */
-  it.fails('should provide hit vs miss latency comparison', async () => {
+  it('should provide hit vs miss latency comparison', async () => {
     const { createQueryPlanCache } = await importPlannerCache();
 
     const cache: QueryPlanCache = createQueryPlanCache({

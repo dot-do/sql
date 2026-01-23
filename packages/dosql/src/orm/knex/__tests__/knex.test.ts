@@ -8,6 +8,13 @@
  * - Knex generates SQL and bindings using its fluent API
  * - DoSQL backend executes the generated SQL
  * - Results are returned in Knex-compatible format
+ *
+ * NOTE: These tests require Node.js environment because Knex depends on
+ * Node.js-specific modules (fs, os, path) that aren't available in
+ * Cloudflare Workers. This test file is excluded from the main vitest config
+ * (which uses Workers pool) and should be run with:
+ *
+ *   npx vitest run --config src/orm/knex/__tests__/vitest.config.ts
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';

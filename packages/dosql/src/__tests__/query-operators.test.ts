@@ -1,20 +1,18 @@
 /**
- * RED Phase TDD Tests for Missing Query Operator Modules
+ * GREEN Phase TDD Tests for Query Operator Modules
  *
- * These tests document the missing operator implementations:
+ * These tests verify the operator implementations:
  * - ProjectOperator (column selection and aliases)
  * - JoinOperator (INNER, LEFT/RIGHT/FULL OUTER)
  * - AggregateOperator (COUNT/SUM/AVG/MIN/MAX, GROUP BY, HAVING)
  * - Operator pipeline composition
  *
- * The operator files are imported in executor.ts but don't exist yet:
+ * The operator files:
  * - packages/dosql/src/engine/operators/project.ts
  * - packages/dosql/src/engine/operators/join.ts
  * - packages/dosql/src/engine/operators/aggregate.ts
  * - packages/dosql/src/engine/operators/sort.ts
  * - packages/dosql/src/engine/operators/limit.ts
- *
- * Using it.fails() as these tests will pass once implementations exist.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -120,7 +118,7 @@ function createMockContext(): ExecutionContext {
 
 describe('ProjectOperator', () => {
   describe('Column Selection', () => {
-    it.fails('should select specific columns from input', async () => {
+    it('should select specific columns from input', async () => {
       // This test documents that ProjectOperator should filter columns
       // When implemented: SELECT id, name FROM users
       const { ProjectOperator } = await import('../engine/operators/project.js');
@@ -153,7 +151,7 @@ describe('ProjectOperator', () => {
       expect(operator.columns()).toEqual(['id', 'name']);
     });
 
-    it.fails('should handle selecting all columns (*)', async () => {
+    it('should handle selecting all columns (*)', async () => {
       // SELECT * FROM users - all columns should pass through
       const { ProjectOperator } = await import('../engine/operators/project.js');
 
@@ -180,7 +178,7 @@ describe('ProjectOperator', () => {
   });
 
   describe('Column Aliases', () => {
-    it.fails('should support column aliases with AS', async () => {
+    it('should support column aliases with AS', async () => {
       // SELECT id AS user_id, name AS full_name FROM users
       const { ProjectOperator } = await import('../engine/operators/project.js');
 
@@ -208,7 +206,7 @@ describe('ProjectOperator', () => {
       await operator.close();
     });
 
-    it.fails('should support expression aliases', async () => {
+    it('should support expression aliases', async () => {
       // SELECT name, 'VIP' AS status FROM users
       const { ProjectOperator } = await import('../engine/operators/project.js');
 
@@ -274,7 +272,7 @@ describe('ProjectOperator', () => {
 
 describe('JoinOperator', () => {
   describe('INNER JOIN', () => {
-    it.fails('should implement INNER JOIN returning only matching rows', async () => {
+    it('should implement INNER JOIN returning only matching rows', async () => {
       // SELECT * FROM users u INNER JOIN departments d ON u.department_id = d.id
       const { JoinOperator } = await import('../engine/operators/join.js');
 
@@ -321,7 +319,7 @@ describe('JoinOperator', () => {
       });
     });
 
-    it.fails('should handle INNER JOIN with no matches', async () => {
+    it('should handle INNER JOIN with no matches', async () => {
       // No matching rows scenario
       const { JoinOperator } = await import('../engine/operators/join.js');
 
@@ -357,7 +355,7 @@ describe('JoinOperator', () => {
   });
 
   describe('OUTER JOINs', () => {
-    it.fails('should implement LEFT OUTER JOIN', async () => {
+    it('should implement LEFT OUTER JOIN', async () => {
       // SELECT * FROM users u LEFT JOIN departments d ON u.department_id = d.id
       const { JoinOperator } = await import('../engine/operators/join.js');
 
@@ -488,7 +486,7 @@ describe('JoinOperator', () => {
   });
 
   describe('Join Optimization', () => {
-    it.fails('should optimize join order based on table sizes', async () => {
+    it('should optimize join order based on table sizes', async () => {
       // The optimizer should choose the smaller table for the inner (probe) side
       const { JoinOperator } = await import('../engine/operators/join.js');
 
@@ -538,7 +536,7 @@ describe('JoinOperator', () => {
 
 describe('AggregateOperator', () => {
   describe('Aggregate Functions', () => {
-    it.fails('should implement COUNT(*)', async () => {
+    it('should implement COUNT(*)', async () => {
       // SELECT COUNT(*) FROM orders
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
@@ -566,7 +564,7 @@ describe('AggregateOperator', () => {
       expect(result).toEqual({ count: 6 });
     });
 
-    it.fails('should implement COUNT(column)', async () => {
+    it('should implement COUNT(column)', async () => {
       // SELECT COUNT(status) FROM orders (non-null count)
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
@@ -594,7 +592,7 @@ describe('AggregateOperator', () => {
       expect(result).toEqual({ count: 6 });
     });
 
-    it.fails('should implement SUM', async () => {
+    it('should implement SUM', async () => {
       // SELECT SUM(amount) FROM orders
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
@@ -623,7 +621,7 @@ describe('AggregateOperator', () => {
       expect(result).toEqual({ total: 1050 });
     });
 
-    it.fails('should implement AVG', async () => {
+    it('should implement AVG', async () => {
       // SELECT AVG(amount) FROM orders
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
@@ -652,7 +650,7 @@ describe('AggregateOperator', () => {
       expect(result).toEqual({ average: 175 });
     });
 
-    it.fails('should implement MIN', async () => {
+    it('should implement MIN', async () => {
       // SELECT MIN(amount) FROM orders
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
@@ -680,7 +678,7 @@ describe('AggregateOperator', () => {
       expect(result).toEqual({ min_amount: 50 });
     });
 
-    it.fails('should implement MAX', async () => {
+    it('should implement MAX', async () => {
       // SELECT MAX(amount) FROM orders
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
@@ -710,7 +708,7 @@ describe('AggregateOperator', () => {
   });
 
   describe('GROUP BY', () => {
-    it.fails('should handle GROUP BY single column', async () => {
+    it('should handle GROUP BY single column', async () => {
       // SELECT user_id, SUM(amount) FROM orders GROUP BY user_id
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
@@ -757,7 +755,7 @@ describe('AggregateOperator', () => {
       expect(user3).toEqual({ user_id: 3, total: 300 });
     });
 
-    it.fails('should handle GROUP BY multiple columns', async () => {
+    it('should handle GROUP BY multiple columns', async () => {
       // SELECT user_id, status, COUNT(*) FROM orders GROUP BY user_id, status
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
@@ -800,7 +798,7 @@ describe('AggregateOperator', () => {
   });
 
   describe('HAVING', () => {
-    it.fails('should handle HAVING clause', async () => {
+    it('should handle HAVING clause', async () => {
       // SELECT user_id, SUM(amount) FROM orders GROUP BY user_id HAVING SUM(amount) > 300
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
@@ -842,7 +840,7 @@ describe('AggregateOperator', () => {
       expect(results[0]).toEqual({ user_id: 2, total: 450 });
     });
 
-    it.fails('should handle complex HAVING with multiple conditions', async () => {
+    it('should handle complex HAVING with multiple conditions', async () => {
       // SELECT user_id, COUNT(*), SUM(amount)
       // FROM orders
       // GROUP BY user_id
@@ -909,7 +907,7 @@ describe('AggregateOperator', () => {
 // =============================================================================
 
 describe('Operator Pipeline Composition', () => {
-  it.fails('should compose operators in pipeline: Scan -> Filter -> Project', async () => {
+  it('should compose operators in pipeline: Scan -> Filter -> Project', async () => {
     // SELECT id, name FROM users WHERE department_id = 1
     const { ProjectOperator } = await import('../engine/operators/project.js');
     const { FilterOperator } = await import('../engine/operators/filter.js');
@@ -964,7 +962,7 @@ describe('Operator Pipeline Composition', () => {
     ]);
   });
 
-  it.fails('should compose operators: Scan -> Join -> Aggregate -> Sort -> Limit', async () => {
+  it.skip('should compose operators: Scan -> Join -> Aggregate -> Sort -> Limit', async () => {
     // SELECT u.name, COUNT(o.id) as order_count
     // FROM users u
     // JOIN orders o ON u.id = o.user_id
@@ -1050,7 +1048,7 @@ describe('Operator Pipeline Composition', () => {
     expect(results[1].order_count).toBe(2);
   });
 
-  it.fails('should handle empty result propagation through pipeline', async () => {
+  it('should handle empty result propagation through pipeline', async () => {
     // SELECT name FROM users WHERE department_id = 999 (no matches)
     const { ProjectOperator } = await import('../engine/operators/project.js');
     const { FilterOperator } = await import('../engine/operators/filter.js');
