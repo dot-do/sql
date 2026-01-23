@@ -1,6 +1,6 @@
 # Vector Search Guide
 
-Build semantic search, recommendations, and RAG pipelines with DoSQL's native vector search capabilities. This guide covers everything you need to integrate AI/ML-powered features into your Cloudflare Workers applications.
+Build semantic search, recommendation systems, and RAG pipelines with DoSQL's native vector search capabilities. This guide covers everything you need to integrate AI/ML-powered features into your Cloudflare Workers applications.
 
 ## Why Vector Search?
 
@@ -19,7 +19,7 @@ Vector search solves this by converting text, images, and other data into high-d
 |---------|-------------|
 | Native vector storage | Store vectors as BLOB columns with automatic serialization |
 | HNSW indexing | Sub-millisecond approximate nearest neighbor search |
-| Multiple distance metrics | Cosine, Euclidean (L2), dot product |
+| Multiple distance metrics | Cosine, Euclidean (L2), dot product, Hamming |
 | Hybrid queries | Combine vector similarity with SQL filters |
 | Quantization | 4x memory reduction with minimal accuracy loss |
 | Edge-native | Low-latency queries running in Cloudflare Workers |
@@ -67,7 +67,7 @@ An **embedding** is a numerical representation of data (text, images, audio) as 
 ```typescript
 // A text embedding from OpenAI (1536 dimensions)
 const embedding = new Float32Array([
-  0.0231, -0.0142, 0.0089, ..., 0.0156  // 1536 values
+  0.0231, -0.0142, 0.0089, /* ... 1533 more values ... */, 0.0156
 ]);
 
 // Similar texts produce similar vectors
@@ -87,16 +87,16 @@ const query3 = await getEmbedding("chocolate cake recipe");   // Far from query1
 
 ### Distance Metrics
 
-Distance metrics measure how far apart two vectors are. DoSQL supports three metrics:
+Distance metrics measure how far apart two vectors are. DoSQL supports four metrics:
 
 **Cosine Distance** (recommended for text)
 
 Measures the angle between vectors, ignoring magnitude. Best for text embeddings where document length varies.
 
 ```sql
--- Range: [0, 2] where 0 = identical direction
+-- Range: [0, 2] where 0 = identical direction, 1 = orthogonal, 2 = opposite
 SELECT id, title,
-       vector_distance_cos(embedding, :query_vector) as distance
+       vector_distance_cos(embedding, ?) as distance
 FROM documents
 ORDER BY distance ASC
 LIMIT 10;
@@ -109,20 +109,33 @@ Measures straight-line distance in vector space. Sensitive to vector magnitude.
 ```sql
 -- Range: [0, infinity) where 0 = identical
 SELECT id, title,
-       vector_distance_l2(embedding, :query_vector) as distance
+       vector_distance_l2(embedding, ?) as distance
 FROM documents
 ORDER BY distance ASC
 LIMIT 10;
 ```
 
-**Dot Product (Inner Product)**
+**Dot Product**
 
 For normalized vectors, negative dot product serves as a distance metric. Fastest to compute.
 
 ```sql
 -- More negative = more similar (for normalized vectors)
 SELECT id, title,
-       vector_distance_dot(embedding, :query_vector) as distance
+       vector_distance_dot(embedding, ?) as distance
+FROM documents
+ORDER BY distance ASC
+LIMIT 10;
+```
+
+**Hamming Distance** (for binary vectors)
+
+Counts the number of positions with different values. Used with binary embeddings.
+
+```sql
+-- Range: [0, dimensions] where 0 = identical
+SELECT id, title,
+       vector_distance_hamming(embedding, ?) as distance
 FROM documents
 ORDER BY distance ASC
 LIMIT 10;
@@ -131,9 +144,18 @@ LIMIT 10;
 **Note:** For dot product, ensure your vectors are normalized (unit length). If not, normalize them before storage:
 
 ```typescript
+import { vector_normalize } from '@dotdo/dosql/vector';
+
+// Normalize before storing
+const normalized = vector_normalize(embedding);
+```
+
+Or manually:
+
+```typescript
 function normalize(vec: Float32Array): Float32Array {
   const norm = Math.sqrt(vec.reduce((sum, v) => sum + v * v, 0));
-  return vec.map(v => v / norm);
+  return new Float32Array(vec.map(v => v / norm));
 }
 ```
 
@@ -203,7 +225,7 @@ CREATE INDEX idx_products_embedding ON products
 USING VECTOR (embedding)
 WITH (
   dimensions = 1536,       -- Must match your embedding model
-  metric = 'cosine',       -- or 'l2', 'dot'
+  metric = 'cosine',       -- or 'l2', 'dot', 'hamming'
   m = 16,                  -- Connections per node (8-64)
   ef_construction = 200    -- Build quality (64-512)
 );
@@ -225,19 +247,19 @@ const index = new HnswIndex({
 });
 
 // Insert vectors with their row IDs
-index.insert(1n, new Float32Array([0.1, 0.2, 0.3, ...]));
-index.insert(2n, new Float32Array([0.4, 0.5, 0.6, ...]));
+index.insert(1n, new Float32Array([0.1, 0.2, 0.3, /* ... */]));
+index.insert(2n, new Float32Array([0.4, 0.5, 0.6, /* ... */]));
 
 // Search for k nearest neighbors
 const results = index.search(
-  new Float32Array([0.15, 0.25, 0.35, ...]),
+  new Float32Array([0.15, 0.25, 0.35, /* ... */]),
   10,     // k: number of results
   150,    // efSearch: search quality (optional override)
 );
 
 // Results include rowId, distance, and similarity score
 for (const result of results) {
-  console.log(`Row ${result.rowId}: distance=${result.distance}`);
+  console.log(`Row ${result.rowId}: distance=${result.distance}, score=${result.score}`);
 }
 
 // Get index statistics
@@ -246,7 +268,7 @@ console.log({
   nodeCount: stats.nodeCount,
   dimensions: stats.dimensions,
   maxLevel: stats.maxLevel,
-  memoryUsageBytes: stats.memoryUsageBytes,
+  avgConnectionsLevel0: stats.avgConnectionsLevel0,
 });
 ```
 
@@ -271,6 +293,8 @@ HNSW parameters control the trade-off between recall (accuracy), speed, and memo
 | > 1M | 32 | 400 | 200 |
 
 ```typescript
+import { HnswIndex, DistanceMetric } from '@dotdo/dosql/vector';
+
 // High recall configuration
 const highRecallIndex = new HnswIndex({
   M: 32,
@@ -298,7 +322,7 @@ Find the k most similar vectors to a query:
 
 ```sql
 SELECT id, title, content,
-       vector_distance_cos(embedding, :query_embedding) as distance
+       vector_distance_cos(embedding, ?) as distance
 FROM documents
 ORDER BY distance ASC
 LIMIT 10;
@@ -335,7 +359,7 @@ Combine semantic similarity with traditional SQL filters:
 ```sql
 -- Filter by category and date
 SELECT id, title, content,
-       vector_distance_cos(embedding, :query_embedding) as distance
+       vector_distance_cos(embedding, ?) as distance
 FROM documents
 WHERE category = 'technology'
   AND published_at > '2024-01-01'
@@ -346,7 +370,7 @@ LIMIT 10;
 ```sql
 -- Multi-table join with filters
 SELECT d.id, d.title, d.content, u.name as author,
-       vector_distance_cos(d.embedding, :query) as distance
+       vector_distance_cos(d.embedding, ?) as distance
 FROM documents d
 JOIN users u ON d.author_id = u.id
 WHERE d.status = 'published'
@@ -355,17 +379,27 @@ ORDER BY distance ASC
 LIMIT 10;
 ```
 
-**Pre-filter pattern for large datasets:**
+**Programmatic hybrid search with VectorColumn:**
 
 ```typescript
-import { hybridSearch } from '@dotdo/dosql/vector';
+import { VectorColumn, hybridSearch, DistanceMetric, VectorType } from '@dotdo/dosql/vector';
 
 // First, get candidate IDs from scalar query (uses B-tree index)
-const categoryIds = await db.query(
+const categoryResults = await db.query(
   'SELECT id FROM products WHERE category = ?',
   ['electronics']
 );
-const filterIds = new Set(categoryIds.map(r => BigInt(r.id)));
+const filterIds = new Set(categoryResults.map(r => BigInt(r.id)));
+
+// Create or retrieve your vector column
+const vectorColumn = new VectorColumn({
+  columnDef: {
+    name: 'embedding',
+    dimensions: 1536,
+    type: VectorType.F32,
+    distanceMetric: DistanceMetric.Cosine,
+  },
+});
 
 // Then, search only within those candidates
 const results = hybridSearch(vectorColumn, queryVector, {
@@ -379,10 +413,10 @@ const results = hybridSearch(vectorColumn, queryVector, {
 
 ```sql
 SELECT id, title, content,
-  (0.4 * bm25_score(content, :keyword_query)) +
-  (0.6 * (1 - vector_distance_cos(embedding, :vector_query))) as combined_score
+  (0.4 * bm25_score(content, ?)) +
+  (0.6 * (1 - vector_distance_cos(embedding, ?))) as combined_score
 FROM documents
-WHERE content MATCH :keyword_query
+WHERE content MATCH ?
 ORDER BY combined_score DESC
 LIMIT 10;
 ```
@@ -394,7 +428,7 @@ LIMIT 10;
 ```sql
 -- Page 3, 20 items per page
 SELECT id, title,
-       vector_distance_cos(embedding, :query_embedding) as distance
+       vector_distance_cos(embedding, ?) as distance
 FROM documents
 ORDER BY distance ASC
 LIMIT 20 OFFSET 40;
@@ -405,9 +439,9 @@ LIMIT 20 OFFSET 40;
 ```sql
 -- Only return results within a similarity threshold
 SELECT id, title, content,
-       vector_distance_cos(embedding, :query_embedding) as distance
+       vector_distance_cos(embedding, ?) as distance
 FROM documents
-WHERE vector_distance_cos(embedding, :query_embedding) < 0.5
+WHERE vector_distance_cos(embedding, ?) < 0.5
 ORDER BY distance ASC
 LIMIT 100;
 ```
@@ -568,6 +602,8 @@ async function indexLargeDataset(documents: Document[]) {
 Start with defaults and adjust based on recall requirements:
 
 ```typescript
+import { HnswIndex, DistanceMetric } from '@dotdo/dosql/vector';
+
 // Step 1: Create index with balanced defaults
 const index = new HnswIndex({
   M: 16,
@@ -582,6 +618,11 @@ for (const [id, vector] of yourData) {
 }
 
 // Step 3: Evaluate recall with test queries
+interface TestQuery {
+  query: Float32Array;
+  expectedIds: bigint[];
+}
+
 function evaluateRecall(testQueries: TestQuery[]): number {
   let correct = 0;
   let total = 0;
@@ -603,6 +644,7 @@ const recall = evaluateRecall(testQueries);
 console.log(`Recall@10: ${(recall * 100).toFixed(1)}%`);
 
 // Step 4: Adjust efSearch until recall meets requirements
+// Higher efSearch = better recall but slower queries
 ```
 
 ### Quantization for Memory Efficiency
@@ -610,7 +652,7 @@ console.log(`Recall@10: ${(recall * 100).toFixed(1)}%`);
 Quantization reduces vector storage by 4x with minimal accuracy loss:
 
 ```typescript
-import { VectorColumn, VectorType } from '@dotdo/dosql/vector';
+import { VectorColumn, VectorType, DistanceMetric } from '@dotdo/dosql/vector';
 
 // Enable quantization to reduce memory usage
 const column = new VectorColumn({
@@ -624,6 +666,9 @@ const column = new VectorColumn({
     targetType: VectorType.I8,  // 4x memory reduction
   },
 });
+
+// After bulk inserts, recompute quantization for optimal accuracy
+column.recomputeQuantization();
 ```
 
 **Memory comparison:**
@@ -652,7 +697,9 @@ const bestResults = column.search(query, 10, 300);
 **2. Pre-filter to reduce search space:**
 
 ```typescript
-const filtered = hybridSearch(column, query, {
+import { hybridSearch } from '@dotdo/dosql/vector';
+
+const results = hybridSearch(column, query, {
   filterIds: categoryIds,
   k: 10,
 });
@@ -663,6 +710,7 @@ const filtered = hybridSearch(column, query, {
 - **Cosine**: Best for text (handles variable-length documents)
 - **L2**: Best for images (often pre-normalized)
 - **Dot**: Fastest when vectors are already normalized
+- **Hamming**: Best for binary embeddings
 
 **4. Batch operations for bulk inserts:**
 
@@ -706,6 +754,12 @@ WITH (dimensions = 1536, metric = 'cosine', m = 16);
 **Search API:**
 
 ```typescript
+import OpenAI from 'openai';
+import { DB } from '@dotdo/dosql';
+
+const openai = new OpenAI();
+const db = await DB('docs');
+
 interface SearchResult {
   slug: string;
   title: string;
@@ -747,7 +801,7 @@ async function searchDocs(query: string, options?: {
 
 ### Example: Recommendation System
 
-Product recommendations combining content-based filtering.
+Product recommendations using content-based filtering.
 
 **Schema:**
 
@@ -817,13 +871,17 @@ async function getPersonalizedRecommendations(userId: number, limit = 10) {
   }
 
   // Weight embeddings by interaction type
-  const weights = { 'purchase': 3.0, 'cart': 2.0, 'view': 1.0 };
+  const weights: Record<string, number> = { 'purchase': 3.0, 'cart': 2.0, 'view': 1.0 };
   const dims = 1536;
   const userProfile = new Float32Array(dims);
   let totalWeight = 0;
 
   for (const interaction of interactions) {
-    const embedding = new Float32Array(interaction.content_embedding.buffer);
+    const embedding = new Float32Array(
+      interaction.content_embedding.buffer,
+      interaction.content_embedding.byteOffset,
+      dims
+    );
     const weight = weights[interaction.interaction_type] || 1.0;
 
     for (let i = 0; i < dims; i++) {
@@ -832,7 +890,7 @@ async function getPersonalizedRecommendations(userId: number, limit = 10) {
     totalWeight += weight;
   }
 
-  // Normalize
+  // Normalize the user profile
   for (let i = 0; i < dims; i++) {
     userProfile[i] /= totalWeight;
   }
@@ -886,6 +944,7 @@ function chunkDocument(content: string, chunkSize = 500, overlap = 50): string[]
   for (const para of paragraphs) {
     if (currentChunk.length + para.length > chunkSize && currentChunk.length > 0) {
       chunks.push(currentChunk.trim());
+      // Keep last N words for overlap
       const words = currentChunk.split(/\s+/);
       currentChunk = words.slice(-overlap).join(' ') + ' ' + para;
     } else {
@@ -946,7 +1005,7 @@ async function answerQuestion(question: string) {
     messages: [
       {
         role: 'system',
-        content: `Answer questions based on the provided context. Cite sources using [1], [2], etc.`,
+        content: `Answer questions based on the provided context. Cite sources using [1], [2], etc. If the context doesn't contain enough information, say so.`,
       },
       {
         role: 'user',
@@ -980,26 +1039,91 @@ const wrong = await get768DimEmbedding(query);  // 768 dims
 const correct = await get1536DimEmbedding(query);  // 1536 dims
 ```
 
+**Solution:** Always use the same embedding model for both indexing and querying. If you need to change models, you must re-embed all documents.
+
 ### Slow query performance
 
-1. Verify the vector index exists and is being used
-2. Reduce `efSearch` for faster queries
-3. Use pre-filtering to reduce search space
-4. Consider quantization for memory-bound workloads
+1. **Verify the vector index exists and is being used**
+   ```sql
+   EXPLAIN QUERY PLAN SELECT ... ORDER BY vector_distance_cos(...);
+   ```
+
+2. **Reduce `efSearch` for faster queries** (at the cost of recall)
+   ```typescript
+   const results = column.search(query, 10, 50);  // Lower efSearch
+   ```
+
+3. **Use pre-filtering to reduce search space**
+   ```typescript
+   const results = hybridSearch(column, query, { filterIds, k: 10 });
+   ```
+
+4. **Consider quantization for memory-bound workloads**
 
 ### Out of memory
 
-1. Enable I8 quantization (4x memory reduction)
-2. Use smaller dimensions if model supports it
-3. Shard data across multiple Durable Objects
-4. Reduce `M` parameter (fewer connections = less memory)
+1. **Enable I8 quantization** (4x memory reduction)
+   ```typescript
+   const column = new VectorColumn({
+     columnDef: { ... },
+     quantization: { targetType: VectorType.I8 },
+   });
+   ```
+
+2. **Use smaller dimensions** if your model supports it
+   - OpenAI text-embedding-3-small: 1536 dims
+   - BGE-base-en-v1.5: 768 dims
+   - all-MiniLM-L6-v2: 384 dims
+
+3. **Shard data across multiple Durable Objects**
+
+4. **Reduce `M` parameter** (fewer connections = less memory)
 
 ### Low recall (missing relevant results)
 
-1. Increase `efSearch` for better query accuracy
-2. Rebuild index with higher `efConstruction`
-3. Verify your query embedding uses the same model as indexed embeddings
-4. Check if distance threshold is too strict
+1. **Increase `efSearch`** for better query accuracy
+   ```typescript
+   const results = index.search(query, 10, 300);  // Higher efSearch
+   ```
+
+2. **Rebuild index with higher `efConstruction`**
+   ```typescript
+   const index = new HnswIndex({
+     M: 24,
+     efConstruction: 400,  // Higher = better index quality
+     efSearch: 150,
+     distanceMetric: DistanceMetric.Cosine,
+   });
+   ```
+
+3. **Verify your query embedding uses the same model** as indexed embeddings
+
+4. **Check if distance threshold is too strict**
+   ```sql
+   -- Too strict: < 0.3
+   WHERE vector_distance_cos(embedding, ?) < 0.3
+
+   -- More permissive: < 0.5
+   WHERE vector_distance_cos(embedding, ?) < 0.5
+   ```
+
+### Empty search results
+
+1. **Check that vectors were inserted correctly**
+   ```typescript
+   console.log(`Index size: ${index.size}`);  // Should be > 0
+   ```
+
+2. **Verify the query vector is valid** (not all zeros)
+   ```typescript
+   const norm = Math.sqrt(queryVec.reduce((s, v) => s + v * v, 0));
+   console.log(`Query vector norm: ${norm}`);  // Should be > 0
+   ```
+
+3. **Check for dimension mismatch**
+   ```typescript
+   console.log(`Query dims: ${queryVec.length}, Index dims: ${index.dim}`);
+   ```
 
 ---
 
