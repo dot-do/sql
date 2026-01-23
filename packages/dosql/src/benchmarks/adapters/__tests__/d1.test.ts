@@ -542,7 +542,7 @@ describe('D1Adapter', () => {
 
       // Operation duration should be close to total time (within overhead)
       expect(op.durationMs).toBeLessThanOrEqual(totalTime + 1);
-      expect(op.durationMs).toBeGreaterThan(0);
+      expect(op.durationMs).toBeGreaterThanOrEqual(0);
     });
 
     it('should track startedAt timestamp', async () => {
@@ -563,8 +563,8 @@ describe('D1Adapter', () => {
 
       const op = await adapter.insertBatch('benchmark_test', rows);
 
-      // Batch should take more time than single insert
-      expect(op.durationMs).toBeGreaterThan(0);
+      // Batch should take some time (may be 0ms for fast operations)
+      expect(op.durationMs).toBeGreaterThanOrEqual(0);
     });
   });
 

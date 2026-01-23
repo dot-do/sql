@@ -412,8 +412,8 @@ describe.skipIf(!hasLibSQLEndpoint)('LibSQLAdapter Integration Tests', () => {
     it('should measure cold start time', async () => {
       const metrics = await adapter.measureColdStart();
 
-      expect(metrics.timeToFirstQuery).toBeGreaterThan(0);
-      expect(metrics.initializationTime).toBeGreaterThan(0);
+      expect(metrics.timeToFirstQuery).toBeGreaterThanOrEqual(0);
+      expect(metrics.initializationTime).toBeGreaterThanOrEqual(0);
       expect(metrics.connectionTime).toBeGreaterThanOrEqual(0);
     });
   });

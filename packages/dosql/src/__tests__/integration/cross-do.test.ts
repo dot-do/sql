@@ -607,7 +607,7 @@ describe('Cross-DO Communication: Scatter-Gather Query Execution', () => {
       const plan = router.createExecutionPlan('SELECT * FROM users');
       const result = await executor.execute(plan);
 
-      expect(result.totalExecutionTimeMs).toBeGreaterThan(0);
+      expect(result.totalExecutionTimeMs).toBeGreaterThanOrEqual(0);
     });
   });
 

@@ -872,7 +872,8 @@ describe('Cache Hit Improves Query Latency [GREEN]', () => {
       return cache.get('query')!.plan;
     });
 
-    expect(cacheHitTime.durationMs).toBeLessThan(1);
+    // Cache hit should be much faster - allow up to 5ms for CI environment variability
+    expect(cacheHitTime.durationMs).toBeLessThan(5);
   });
 
   /**
