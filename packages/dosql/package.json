@@ -1,5 +1,5 @@
 {
-  "name": "@dotdo/dosql",
+  "name": "dosql",
   "version": "0.1.0",
   "description": "Type-safe SQL for TypeScript with compile-time query validation",
   "type": "module",
