@@ -3362,16 +3362,29 @@ const result = await executor.execute('createUser', {
 
 ### Observability
 
+> **Note:** The observability module provides OpenTelemetry tracing and Prometheus metrics. It is available internally but not currently exported via the package subpaths. For production use, integrate directly with your observability platform.
+
 ```typescript
-import {
-  createObservability,
-  createDoSQLMetrics,
-  instrumentQuery,
-  instrumentTransaction,
-  type Observability,
-  type TracingConfig,
-  type MetricsConfig,
-} from 'dosql';
+// Internal module - not in package exports
+// import { createObservability, createDoSQLMetrics, instrumentQuery } from 'dosql/observability';
+
+// Types for reference
+type Observability = {
+  tracer: Tracer;
+  metrics: MetricsRegistry;
+  sanitizer: SQLSanitizer;
+  config: ObservabilityConfig;
+};
+
+type TracingConfig = {
+  enabled: boolean;
+  serviceName: string;
+};
+
+type MetricsConfig = {
+  enabled: boolean;
+  prefix: string;
+};
 
 // Create observability instance
 const { tracer, metrics, sanitizer } = createObservability({
@@ -3434,6 +3447,8 @@ return new Response(metrics.getMetrics(), {
 ## Columnar Storage
 
 DoSQL includes a columnar OLAP storage engine optimized for analytics queries. It supports multiple encoding strategies, zone map filtering for predicate pushdown, and projection pushdown for efficient data access.
+
+> **Note:** The columnar storage module is available internally but not currently exported via the main package subpaths. For analytics workloads, consider using the lakehouse integration or contact the team for access.
 
 ### Encoding Types
 
