@@ -1,6 +1,6 @@
 # SvelteKit Integration Guide
 
-A comprehensive guide for using DoSQL with SvelteKit applications, covering server load functions, form actions, and real-time features on Cloudflare Workers.
+A comprehensive guide for using DoSQL with SvelteKit applications, covering server load functions, form actions, API routes, and real-time features on Cloudflare Workers.
 
 ## Table of Contents
 
@@ -31,7 +31,7 @@ SvelteKit and DoSQL are an excellent combination for building full-stack applica
 | **Server Load Functions** | Direct database queries in `+page.server.ts` with zero API overhead |
 | **Form Actions** | Type-safe mutations with built-in progressive enhancement |
 | **Streaming** | Stream database results with SvelteKit's streaming support |
-| **Real-Time** | WebSocket support for live database subscriptions |
+| **Real-Time** | WebSocket and SSE support for live database subscriptions |
 
 ### Architecture
 
@@ -56,7 +56,7 @@ SvelteKit and DoSQL are an excellent combination for building full-stack applica
 |  |                      |                                      |  |
 |  |                      v                                      |  |
 |  |            +------------------+                             |  |
-|  |            |   getDB(env)     |                             |  |
+|  |            |   getDB(platform)|                             |  |
 |  |            +--------+---------+                             |  |
 |  +------------------------------------------------------------+  |
 +------------------------------------------------------------------+
@@ -74,6 +74,15 @@ SvelteKit and DoSQL are an excellent combination for building full-stack applica
 |  +------------------+  |     |  +------------------+  |
 +------------------------+     +------------------------+
 ```
+
+**Data flow:**
+
+1. Browser requests a page
+2. SvelteKit load function runs on Cloudflare Worker
+3. Load function accesses DoSQL via Durable Object binding
+4. DoSQL executes queries against SQLite
+5. SvelteKit renders the page with data
+6. Browser receives fully-rendered HTML
 
 ---
 
@@ -98,7 +107,7 @@ npm install @dotdo/dosql
 npm install -D @cloudflare/workers-types wrangler
 ```
 
-If you didn't select the Cloudflare adapter during setup:
+If you did not select the Cloudflare adapter during setup:
 
 ```bash
 npm install @sveltejs/adapter-cloudflare
@@ -161,6 +170,7 @@ declare global {
 
     interface Locals {
       db: DatabaseClient;
+      tenantId: string;
       user?: {
         id: number;
         name: string;
@@ -168,7 +178,6 @@ declare global {
       };
     }
 
-    // Add error types if needed
     interface Error {
       message: string;
       code?: string;
@@ -385,6 +394,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   // Make database available in all server-side code
   if (event.platform) {
     event.locals.db = getDB(event.platform);
+    event.locals.tenantId = 'default';
   }
 
   return resolve(event);
@@ -554,6 +564,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 
 ### Parallel Data Loading
 
+Fetch multiple data sources in parallel for better performance:
+
 ```typescript
 // src/routes/dashboard/+page.server.ts
 import type { PageServerLoad } from './$types';
@@ -626,7 +638,7 @@ interface Post {
 const PAGE_SIZE = 20;
 
 export const load: PageServerLoad = async ({ url, locals }) => {
-  const page = parseInt(url.searchParams.get('page') || '1', 10);
+  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const offset = (page - 1) * PAGE_SIZE;
 
   const [posts, countResult] = await Promise.all([
@@ -849,7 +861,7 @@ export const actions: Actions = {
 </style>
 ```
 
-### Multiple Actions
+### Multiple Named Actions
 
 ```typescript
 // src/routes/posts/[id]/+page.server.ts
@@ -1025,7 +1037,7 @@ export const actions: Actions = {
 ```typescript
 // src/routes/orders/+page.server.ts
 import { fail, redirect } from '@sveltejs/kit';
-import type { Actions, PageServerLoad } from './$types';
+import type { Actions } from './$types';
 
 interface CartItem {
   product_id: number;
@@ -1186,8 +1198,8 @@ interface User {
 
 // GET /api/users
 export const GET: RequestHandler = async ({ url, locals }) => {
-  const limit = parseInt(url.searchParams.get('limit') || '50', 10);
-  const offset = parseInt(url.searchParams.get('offset') || '0', 10);
+  const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '50', 10)));
+  const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10));
   const search = url.searchParams.get('q');
 
   let sql = 'SELECT id, name, email, created_at FROM users';
@@ -1325,7 +1337,7 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
 };
 ```
 
-### Streaming Response
+### Streaming Response (CSV Export)
 
 ```typescript
 // src/routes/api/export/users/+server.ts
@@ -1452,12 +1464,17 @@ interface CDCEvent {
 
 export function createRealtimeUsers(initialUsers: User[]) {
   let users = $state<User[]>(initialUsers);
+  let connected = $state(false);
   let eventSource: EventSource | null = null;
 
   function connect() {
-    if (!browser) return;
+    if (!browser || eventSource) return;
 
     eventSource = new EventSource('/api/events/users');
+
+    eventSource.onopen = () => {
+      connected = true;
+    };
 
     eventSource.onmessage = (event) => {
       const change: CDCEvent = JSON.parse(event.data);
@@ -1478,18 +1495,26 @@ export function createRealtimeUsers(initialUsers: User[]) {
     };
 
     eventSource.onerror = () => {
-      console.error('SSE connection error');
+      connected = false;
+      eventSource?.close();
+      eventSource = null;
+      // Reconnect after 5 seconds
+      setTimeout(connect, 5000);
     };
   }
 
   function disconnect() {
     eventSource?.close();
     eventSource = null;
+    connected = false;
   }
 
   return {
     get users() {
       return users;
+    },
+    get connected() {
+      return connected;
     },
     connect,
     disconnect,
@@ -1518,7 +1543,9 @@ export function createRealtimeUsers(initialUsers: User[]) {
 </script>
 
 <h1>Live Users</h1>
-<p class="status">Updates in real-time</p>
+<p class="status">
+  {store.connected ? 'Connected - Updates in real-time' : 'Connecting...'}
+</p>
 
 <ul>
   {#each store.users as user (user.id)}
@@ -1548,6 +1575,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 
   // Each tenant gets their own isolated database
   event.locals.db = getDB(event.platform, tenantId);
+  event.locals.tenantId = tenantId;
 
   return resolve(event);
 };
@@ -1591,7 +1619,7 @@ interface Tenant {
 }
 
 export const load: LayoutServerLoad = async ({ params, locals }) => {
-  // Verify tenant exists
+  // Verify tenant exists and user has access
   const tenant = await locals.db.queryOne<Tenant>(
     'SELECT id, name, plan FROM tenants WHERE id = ?',
     [params.tenant]
@@ -1641,7 +1669,6 @@ export const handle: Handle = async ({ event, resolve }) => {
 ```typescript
 // src/lib/server/auth.ts
 import type { DatabaseClient } from './db';
-import { randomBytes, createHash } from 'crypto';
 
 interface User {
   id: number;
@@ -1674,7 +1701,7 @@ export async function createSession(
   db: DatabaseClient,
   userId: number
 ): Promise<string> {
-  const token = randomBytes(32).toString('hex');
+  const token = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
   await db.run(
@@ -1686,8 +1713,13 @@ export async function createSession(
   return token;
 }
 
-export function hashPassword(password: string): string {
-  return createHash('sha256').update(password).digest('hex');
+export async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 ```
 
@@ -1710,6 +1742,50 @@ export const load: PageServerLoad = async ({ locals }) => {
   );
 
   return { user: locals.user, data };
+};
+```
+
+### Login Action
+
+```typescript
+// src/routes/login/+page.server.ts
+import { fail, redirect } from '@sveltejs/kit';
+import { createSession, hashPassword } from '$lib/server/auth';
+import type { Actions } from './$types';
+
+export const actions: Actions = {
+  default: async ({ request, cookies, locals }) => {
+    const formData = await request.formData();
+    const email = formData.get('email')?.toString();
+    const password = formData.get('password')?.toString();
+
+    if (!email || !password) {
+      return fail(400, { error: 'Email and password are required' });
+    }
+
+    const hashedPassword = await hashPassword(password);
+
+    const user = await locals.db.queryOne<{ id: number }>(
+      'SELECT id FROM users WHERE email = ? AND password_hash = ?',
+      [email, hashedPassword]
+    );
+
+    if (!user) {
+      return fail(401, { error: 'Invalid email or password' });
+    }
+
+    const sessionToken = await createSession(locals.db, user.id);
+
+    cookies.set('session', sessionToken, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: true,
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+    });
+
+    redirect(303, '/dashboard');
+  },
 };
 ```
 
@@ -1750,7 +1826,7 @@ export interface Comment {
   created_at: string;
 }
 
-// Joined types
+// Joined types for queries with JOINs
 export interface PostWithAuthor extends Post {
   author_name: string;
   author_email: string;
@@ -1852,7 +1928,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getDB, type DatabaseClient } from './db';
 
 describe('DatabaseClient', () => {
-  let mockStub: any;
+  let mockStub: { fetch: ReturnType<typeof vi.fn> };
   let db: DatabaseClient;
 
   beforeEach(() => {
@@ -1944,6 +2020,7 @@ test.describe('Users', () => {
 
 ```typescript
 // tests/helpers/mockDb.ts
+import { vi } from 'vitest';
 import type { DatabaseClient } from '$lib/server/db';
 
 export function createMockDb(overrides: Partial<DatabaseClient> = {}): DatabaseClient {
@@ -2058,12 +2135,15 @@ export default defineConfig({
 
 ### Production Checklist
 
-1. **Environment bindings configured** - DOSQL_DB, DATA_BUCKET
+Before deploying to production, ensure you have:
+
+1. **Environment bindings configured** - DOSQL_DB, DATA_BUCKET in wrangler.toml
 2. **Migrations bundled** - SQL files included in build output
 3. **Error handling** - Proper error boundaries in layouts
 4. **Rate limiting** - Consider adding rate limits for form actions and API routes
-5. **Monitoring** - Set up Cloudflare analytics and logging
-6. **CORS** - Configure CORS headers for API endpoints if needed
+5. **CORS headers** - Configure CORS for API endpoints if accessed from other domains
+6. **Monitoring** - Set up Cloudflare analytics and logging
+7. **Session security** - Secure cookie settings (httpOnly, secure, sameSite)
 
 ---
 
@@ -2087,11 +2167,11 @@ adapter: adapter({
 
 #### "Durable Objects require a Workers Paid plan"
 
-Upgrade to the Workers Paid plan ($5/month) at [dash.cloudflare.com](https://dash.cloudflare.com).
+Durable Objects require the Workers Paid plan ($5/month). Upgrade at [dash.cloudflare.com](https://dash.cloudflare.com) under Workers & Pages > Plans.
 
 #### "class_name 'DoSQLDatabase' not found in exports"
 
-Ensure you export the Durable Object class from your worker entry point:
+Ensure the Durable Object class is exported from your entry point:
 
 ```typescript
 // src/lib/server/db.ts
@@ -2100,7 +2180,7 @@ export class DoSQLDatabase implements DurableObject {
 }
 ```
 
-And configure wrangler.toml to use it:
+And verify the `class_name` in `wrangler.toml` matches exactly (case-sensitive):
 
 ```toml
 [[durable_objects.bindings]]
@@ -2110,7 +2190,7 @@ class_name = "DoSQLDatabase"
 
 #### "Migration folder not found"
 
-Create the migrations directory and ensure it's copied to the build output:
+Create the migrations directory and ensure it contains at least one `.sql` file:
 
 ```bash
 mkdir -p .do/migrations
@@ -2118,7 +2198,7 @@ mkdir -p .do/migrations
 
 #### "form?.errors is undefined in template"
 
-When using Svelte 5 runes, make sure you're using the correct props syntax:
+When using Svelte 5 runes, ensure you use the correct props syntax and optional chaining:
 
 ```svelte
 <script lang="ts">
@@ -2135,7 +2215,7 @@ When using Svelte 5 runes, make sure you're using the correct props syntax:
 
 #### Local Development Database Persistence
 
-Data persists between restarts when using the platform proxy with persist option:
+Data persists between restarts when using the platform proxy with the persist option:
 
 ```javascript
 platformProxy: {
@@ -2154,7 +2234,7 @@ rm -rf .wrangler/state
 1. **Use parallel queries** - Fetch independent data with `Promise.all()`
 2. **Limit result sets** - Always use `LIMIT` in queries
 3. **Create indexes** - Add indexes for frequently queried columns
-4. **Use pagination** - Don't load all data at once
+4. **Use pagination** - Avoid loading all data at once
 5. **Cache where appropriate** - Use SvelteKit's caching for static content
 
 ---

@@ -1,71 +1,86 @@
 # DoSQL Deployment Guide
 
-This guide provides step-by-step instructions for deploying DoSQL to Cloudflare Workers in production environments.
+Deploy DoSQL to Cloudflare Workers with confidence. This guide covers everything from initial setup to production-ready deployments, including environment management, rollback procedures, and operational best practices.
 
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
-- [Step-by-Step Deployment Process](#step-by-step-deployment-process)
+- [Deployment Process](#deployment-process)
 - [Wrangler Configuration](#wrangler-configuration)
-- [R2 Bucket Setup](#r2-bucket-setup)
+- [R2 Storage Setup](#r2-storage-setup)
+- [Environment Management](#environment-management)
 - [Production Checklist](#production-checklist)
-- [Environment-Specific Deployments](#environment-specific-deployments)
+- [Monitoring and Health Checks](#monitoring-and-health-checks)
 - [Rollback Procedures](#rollback-procedures)
+- [Troubleshooting](#troubleshooting)
+- [Resource Limits Reference](#resource-limits-reference)
 
 ---
 
 ## Prerequisites
 
-Before deploying, ensure you have the following:
-
 ### Account Requirements
 
 | Requirement | Details |
 |-------------|---------|
-| Cloudflare Account | Sign up at [dash.cloudflare.com](https://dash.cloudflare.com) |
-| Workers Paid Plan | Required for Durable Objects (starts at $5/month) |
-| Account ID | Found in Workers & Pages > Overview |
+| Cloudflare Account | [Sign up](https://dash.cloudflare.com) if you do not have one |
+| Workers Paid Plan | Required for Durable Objects ($5/month minimum) |
+| Account ID | Found in Workers & Pages > Overview in the dashboard |
 
 ### Development Tools
 
 | Tool | Minimum Version | Installation |
 |------|-----------------|--------------|
-| Node.js | 18.0.0+ | [nodejs.org](https://nodejs.org) |
-| npm | 9.0.0+ | Included with Node.js |
+| Node.js | 20.0.0+ | [nodejs.org](https://nodejs.org) |
+| npm | 10.0.0+ | Included with Node.js |
 | Wrangler CLI | 3.0.0+ | `npm install -g wrangler` |
 
-### Verify Your Setup
+### Verify Your Environment
+
+Run these commands to confirm your setup:
 
 ```bash
-# Check Node.js version
-node --version  # Should be >= 18.0.0
+# Check Node.js version (must be 20+)
+node --version
 
-# Check Wrangler version
-wrangler --version  # Should be >= 3.0.0
+# Check Wrangler version (must be 3+)
+wrangler --version
 
 # Authenticate with Cloudflare
 wrangler login
 
-# Verify authentication
+# Verify authentication succeeded
 wrangler whoami
+```
+
+Expected output from `wrangler whoami`:
+
+```
+ wrangler 3.x.x
+--------------------
+Getting User settings...
+You are logged in with an OAuth Token, associated with the email: you@example.com!
 ```
 
 ---
 
-## Step-by-Step Deployment Process
+## Deployment Process
 
 ### Step 1: Install Dependencies
 
 ```bash
-# Navigate to your project directory
 cd your-dosql-project
 
-# Install DoSQL and development dependencies
-npm install @dotdo/dosql
-npm install wrangler @cloudflare/workers-types typescript --save-dev
+# Install DoSQL
+npm install dosql
+
+# Install development dependencies
+npm install -D wrangler @cloudflare/workers-types typescript
 ```
 
 ### Step 2: Create Project Structure
+
+Your project should follow this structure:
 
 ```
 your-dosql-project/
@@ -91,24 +106,30 @@ Create `tsconfig.json`:
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
+    "skipLibCheck": true,
     "types": ["@cloudflare/workers-types"],
     "lib": ["ES2022"],
-    "outDir": "./dist",
-    "skipLibCheck": true
+    "outDir": "./dist"
   },
   "include": ["src/**/*"]
 }
 ```
 
-### Step 4: Create Migration Files
+### Step 4: Create Your First Migration
+
+Create the migrations directory and your initial schema:
+
+```bash
+mkdir -p .do/migrations
+```
 
 Create `.do/migrations/001_init.sql`:
 
 ```sql
 CREATE TABLE users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
-  email TEXT UNIQUE,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -120,7 +141,7 @@ CREATE INDEX idx_users_email ON users(email);
 Create `src/database.ts`:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export interface Env {
   DOSQL_DB: DurableObjectNamespace;
@@ -155,6 +176,18 @@ export class DoSQLDatabase implements DurableObject {
     const url = new URL(request.url);
 
     try {
+      // Health check endpoint
+      if (url.pathname === '/health') {
+        const start = Date.now();
+        await db.query('SELECT 1');
+        return Response.json({
+          status: 'healthy',
+          latency_ms: Date.now() - start,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Query endpoint
       if (url.pathname === '/query' && request.method === 'POST') {
         const { sql, params } = await request.json() as {
           sql: string;
@@ -162,11 +195,6 @@ export class DoSQLDatabase implements DurableObject {
         };
         const result = await db.query(sql, params);
         return Response.json(result);
-      }
-
-      if (url.pathname === '/health') {
-        await db.query('SELECT 1');
-        return Response.json({ status: 'healthy', timestamp: new Date().toISOString() });
       }
 
       return new Response('Not Found', { status: 404 });
@@ -196,26 +224,53 @@ export default {
 };
 ```
 
-### Step 6: Deploy
+### Step 6: Configure Wrangler
+
+Create `wrangler.toml`:
+
+```toml
+name = "my-dosql-app"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[durable_objects]
+bindings = [
+  { name = "DOSQL_DB", class_name = "DoSQLDatabase" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DoSQLDatabase"]
+```
+
+### Step 7: Deploy
 
 ```bash
 # Deploy to Cloudflare
 wrangler deploy
 
 # Verify deployment
-curl https://your-worker.your-subdomain.workers.dev/health
+curl https://my-dosql-app.<your-subdomain>.workers.dev/health
+```
+
+Expected response:
+
+```json
+{"status":"healthy","latency_ms":1,"timestamp":"2024-01-15T10:30:00.000Z"}
 ```
 
 ---
 
 ## Wrangler Configuration
 
-### Basic Configuration (wrangler.toml)
+### TOML Configuration (Recommended)
 
 ```toml
+# wrangler.toml
 name = "my-dosql-app"
 main = "src/index.ts"
-compatibility_date = "2026-01-01"
+compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
 # Durable Objects bindings
@@ -224,20 +279,27 @@ bindings = [
   { name = "DOSQL_DB", class_name = "DoSQLDatabase" }
 ]
 
-# Durable Object migrations (required for new DO classes)
+# Durable Object migrations (required for SQLite storage)
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["DoSQLDatabase"]
+
+# Environment variables
+[vars]
+ENVIRONMENT = "development"
+LOG_LEVEL = "debug"
 ```
 
-### Alternative: JSON Configuration (wrangler.jsonc)
+### JSON Configuration (Alternative)
+
+Create `wrangler.jsonc`:
 
 ```jsonc
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "my-dosql-app",
   "main": "src/index.ts",
-  "compatibility_date": "2026-01-01",
+  "compatibility_date": "2024-12-01",
   "compatibility_flags": ["nodejs_compat"],
 
   "durable_objects": {
@@ -252,13 +314,104 @@ new_sqlite_classes = ["DoSQLDatabase"]
 }
 ```
 
+### Configuration Reference
+
+| Setting | Required | Description |
+|---------|----------|-------------|
+| `name` | Yes | Worker name (used in deployment URL) |
+| `main` | Yes | Entry point file |
+| `compatibility_date` | Yes | Workers runtime version date |
+| `compatibility_flags` | Recommended | Enable `nodejs_compat` for Node.js APIs |
+| `durable_objects.bindings` | Yes | Durable Object namespace bindings |
+| `migrations` | Yes | DO class migrations with `new_sqlite_classes` |
+| `r2_buckets` | Optional | R2 bucket bindings for cold storage |
+| `vars` | Optional | Environment variables |
+
+### Adding New Durable Object Classes
+
+When you add a new Durable Object class, create a new migration tag:
+
+```toml
+# Initial migration
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DoSQLDatabase"]
+
+# Adding another class later
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["AnotherDatabase"]
+```
+
+Migrations are applied in order based on tags. Never modify existing migration entries.
+
+---
+
+## R2 Storage Setup
+
+R2 provides cold storage for DoSQL's tiered architecture. While optional for development, it is recommended for production.
+
+### Step 1: Create R2 Buckets
+
+```bash
+# Create buckets for each environment
+wrangler r2 bucket create dosql-staging
+wrangler r2 bucket create dosql-production
+
+# Verify creation
+wrangler r2 bucket list
+```
+
+### Step 2: Add R2 Binding to Wrangler
+
+```toml
+# Add to wrangler.toml
+[[r2_buckets]]
+binding = "R2_STORAGE"
+bucket_name = "dosql-production"
+```
+
+### Step 3: Update Your Environment Interface
+
+```typescript
+export interface Env {
+  DOSQL_DB: DurableObjectNamespace;
+  R2_STORAGE: R2Bucket;  // Now required
+}
+```
+
+### Step 4: Configure Tiered Storage
+
+```typescript
+const db = await DB('app', {
+  migrations: { folder: '.do/migrations' },
+  storage: {
+    hot: this.state.storage,   // DO storage (~1ms latency)
+    cold: this.env.R2_STORAGE, // R2 storage (~50-100ms latency)
+  },
+});
+```
+
+### R2 Best Practices
+
+| Practice | Rationale |
+|----------|-----------|
+| Separate buckets per environment | Prevents data leakage between staging and production |
+| Enable lifecycle rules | Automatically expire old temporary data |
+| Monitor storage usage | Set up alerts before hitting quotas |
+| Use regional hints | Choose regions closest to your users |
+
+---
+
+## Environment Management
+
 ### Multi-Environment Configuration
 
 ```toml
 # wrangler.toml
 name = "dosql-app"
 main = "src/index.ts"
-compatibility_date = "2026-01-01"
+compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
 [durable_objects]
@@ -270,7 +423,7 @@ bindings = [
 tag = "v1"
 new_sqlite_classes = ["DoSQLDatabase"]
 
-# Development (default)
+# Default (development)
 [vars]
 ENVIRONMENT = "development"
 LOG_LEVEL = "debug"
@@ -282,7 +435,7 @@ vars = { ENVIRONMENT = "staging", LOG_LEVEL = "info" }
 
 [[env.staging.r2_buckets]]
 binding = "R2_STORAGE"
-bucket_name = "dosql-staging-bucket"
+bucket_name = "dosql-staging"
 
 # Production environment
 [env.production]
@@ -291,107 +444,55 @@ vars = { ENVIRONMENT = "production", LOG_LEVEL = "warn" }
 
 [[env.production.r2_buckets]]
 binding = "R2_STORAGE"
-bucket_name = "dosql-production-bucket"
+bucket_name = "dosql-production"
 ```
 
-### Configuration Reference
-
-| Setting | Required | Description |
-|---------|----------|-------------|
-| `name` | Yes | Worker name (appears in dashboard and deployment URL) |
-| `main` | Yes | Entry point TypeScript/JavaScript file |
-| `compatibility_date` | Yes | Workers runtime compatibility date |
-| `compatibility_flags` | Recommended | Enable features like `nodejs_compat` |
-| `durable_objects.bindings` | Yes | Durable Object namespace bindings |
-| `migrations` | Yes | DO class migrations for SQLite storage |
-| `r2_buckets` | Optional | R2 bucket bindings for cold storage |
-| `vars` | Optional | Environment variables |
-
-### Adding New Durable Object Classes
-
-When adding a new Durable Object class, you must add a new migration:
-
-```toml
-# Initial migration
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["DoSQLDatabase"]
-
-# Adding a new class later
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["AnotherDatabase"]
-```
-
----
-
-## R2 Bucket Setup
-
-R2 provides cold storage for DoSQL's tiered storage architecture. This is optional but recommended for production deployments.
-
-### Step 1: Create R2 Bucket
+### Deploy to Each Environment
 
 ```bash
-# Create bucket for staging
-wrangler r2 bucket create dosql-staging-bucket
+# Development (default)
+wrangler deploy
 
-# Create bucket for production
-wrangler r2 bucket create dosql-production-bucket
+# Staging
+wrangler deploy --env staging
 
-# Verify buckets were created
-wrangler r2 bucket list
+# Production
+wrangler deploy --env production
 ```
 
-### Step 2: Configure R2 Binding
+### Manage Secrets
 
-Add to `wrangler.toml`:
+Secrets are encrypted environment variables that never appear in logs or the dashboard.
 
-```toml
-[[r2_buckets]]
-binding = "R2_STORAGE"
-bucket_name = "dosql-production-bucket"
+```bash
+# Add secrets
+wrangler secret put API_KEY --env production
+wrangler secret put JWT_SECRET --env production
 
-# Optional: Preview bucket for local development
-# preview_bucket_name = "dosql-dev-bucket"
+# List secrets (shows names only, not values)
+wrangler secret list --env production
+
+# Delete a secret
+wrangler secret delete OLD_SECRET --env production
 ```
 
-### Step 3: Update Environment Interface
+### Package.json Scripts
 
-```typescript
-export interface Env {
-  DOSQL_DB: DurableObjectNamespace;
-  R2_STORAGE: R2Bucket;  // Now required
+Add these scripts for convenience:
+
+```json
+{
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production",
+    "logs": "wrangler tail --format pretty",
+    "logs:staging": "wrangler tail --env staging --format pretty",
+    "logs:production": "wrangler tail --env production --format pretty"
+  }
 }
 ```
-
-### Step 4: Configure Storage Tiers
-
-```typescript
-const db = await DB('app', {
-  migrations: { folder: '.do/migrations' },
-  storage: {
-    hot: this.state.storage,  // Durable Object storage (~1ms latency)
-    cold: this.env.R2_STORAGE, // R2 bucket (50-100ms latency)
-  },
-});
-```
-
-### R2 Best Practices
-
-| Practice | Description |
-|----------|-------------|
-| Separate buckets per environment | Prevents data leakage between staging and production |
-| Enable lifecycle rules | Automatically clean up old data |
-| Monitor storage usage | Set up alerts for quota warnings |
-| Use regional buckets | Choose region closest to your users |
-
-### R2 Lifecycle Rules (via Dashboard)
-
-1. Navigate to R2 > Your Bucket > Settings > Object Lifecycle Rules
-2. Create rules for:
-   - Delete incomplete multipart uploads after 7 days
-   - Transition old data to Infrequent Access after 30 days
-   - Delete expired backups after retention period
 
 ---
 
@@ -399,190 +500,119 @@ const db = await DB('app', {
 
 Complete this checklist before deploying to production.
 
-### Pre-Deployment
+### Configuration
 
-- [ ] **Wrangler Configuration**
-  - [ ] `compatibility_date` is set to a recent date
-  - [ ] `nodejs_compat` flag is enabled if using Node.js APIs
-  - [ ] All Durable Object classes are exported from entry point
-  - [ ] Migrations are correctly defined for all DO classes
-
-- [ ] **Environment Setup**
-  - [ ] Production environment is configured in wrangler.toml
-  - [ ] Environment variables are set (not hardcoded)
-  - [ ] Secrets are configured via `wrangler secret put`
-
-- [ ] **R2 Storage**
-  - [ ] Production R2 bucket is created
-  - [ ] R2 binding is configured in wrangler.toml
-  - [ ] Lifecycle rules are set up
-
-- [ ] **Database Migrations**
-  - [ ] All migration files are in `.do/migrations/`
-  - [ ] Migrations follow naming convention (`NNN_description.sql`)
-  - [ ] Migrations have been tested in staging
+- [ ] `compatibility_date` is set to a recent stable date
+- [ ] `nodejs_compat` flag is enabled (if using Node.js APIs)
+- [ ] All Durable Object classes are exported from the entry point
+- [ ] Migrations are correctly defined with `new_sqlite_classes`
+- [ ] Production environment is configured in `wrangler.toml`
+- [ ] R2 bucket is created and bound for cold storage
 
 ### Security
 
-- [ ] **Authentication**
-  - [ ] API authentication is implemented
-  - [ ] API keys or JWT tokens are validated
-  - [ ] Secrets are stored via `wrangler secret`
+- [ ] API authentication is implemented (API keys, JWT, or OAuth)
+- [ ] Secrets are stored via `wrangler secret put` (never hardcoded)
+- [ ] Input validation is implemented for all endpoints
+- [ ] SQL queries use parameterized statements (never string interpolation)
+- [ ] Error responses do not leak internal details
+- [ ] CORS headers are properly configured
+- [ ] Rate limiting is implemented
 
-- [ ] **Input Validation**
-  - [ ] SQL parameters are properly sanitized
-  - [ ] Request body validation is implemented
-  - [ ] Error messages don't leak internal details
+### Database
 
-- [ ] **Access Control**
-  - [ ] Tenant isolation is enforced
-  - [ ] Rate limiting is configured
-  - [ ] CORS headers are properly set
-
-### Secrets Management
-
-```bash
-# Add secrets for production
-wrangler secret put API_KEY --env production
-wrangler secret put JWT_SECRET --env production
-wrangler secret put ENCRYPTION_KEY --env production
-
-# List secrets (names only)
-wrangler secret list --env production
-
-# Delete a secret
-wrangler secret delete OLD_SECRET --env production
-```
+- [ ] All migration files are in `.do/migrations/`
+- [ ] Migrations follow naming convention (`NNN_description.sql`)
+- [ ] Migrations have been tested in staging
+- [ ] Indexes are created for frequently queried columns
+- [ ] Large result sets use pagination
 
 ### Monitoring
 
-- [ ] **Health Checks**
-  - [ ] `/health` endpoint is implemented
-  - [ ] Health check queries the database
-  - [ ] External uptime monitoring is configured
-
-- [ ] **Logging**
-  - [ ] Structured logging is implemented
-  - [ ] Log level is appropriate for production (`warn` or `error`)
-  - [ ] Request IDs are included in logs
-
-- [ ] **Alerting**
-  - [ ] Error rate alerts are configured
-  - [ ] Latency alerts are configured
-  - [ ] Storage usage alerts are configured
-
-### Health Check Implementation
-
-```typescript
-async fetch(request: Request): Promise<Response> {
-  const url = new URL(request.url);
-
-  if (url.pathname === '/health') {
-    try {
-      const db = await this.getDB();
-      const start = Date.now();
-      await db.query('SELECT 1');
-      const latency = Date.now() - start;
-
-      return Response.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        latency_ms: latency,
-        id: this.state.id.toString(),
-      });
-    } catch (error) {
-      return Response.json({
-        status: 'unhealthy',
-        timestamp: new Date().toISOString(),
-        error: error instanceof Error ? error.message : 'Unknown error',
-      }, { status: 503 });
-    }
-  }
-
-  // ... rest of handler
-}
-```
-
-### Performance
-
-- [ ] **Database Optimization**
-  - [ ] Indexes are created for frequently queried columns
-  - [ ] Queries use parameterized statements
-  - [ ] Large result sets use pagination
-
-- [ ] **Resource Limits**
-  - [ ] Query timeouts are configured
-  - [ ] Connection limits are appropriate
-  - [ ] Bundle size is under 25MB (paid plans)
+- [ ] `/health` endpoint is implemented and tested
+- [ ] External uptime monitoring is configured (e.g., Cloudflare Health Checks)
+- [ ] Log level is set to `warn` or `error` for production
+- [ ] Error alerting is configured
 
 ### Testing
 
-- [ ] **Pre-Production Testing**
-  - [ ] All migrations run successfully in staging
-  - [ ] API endpoints are tested
-  - [ ] Error handling is verified
-  - [ ] Load testing has been performed
+- [ ] All migrations run successfully in staging
+- [ ] API endpoints are tested with representative data
+- [ ] Error handling paths are verified
+- [ ] Load testing has been performed (if expecting high traffic)
 
 ### Deployment Verification
 
+After deploying, verify with these commands:
+
 ```bash
-# Deploy to production
+# Deploy
 wrangler deploy --env production
 
-# Verify deployment
-curl https://dosql-app-production.your-subdomain.workers.dev/health
+# Verify health
+curl https://dosql-app-production.<subdomain>.workers.dev/health
 
 # Check deployment status
 wrangler deployments list --env production
 
-# Tail production logs
-wrangler tail --env production --format pretty
+# Monitor logs (filter for errors)
+wrangler tail --env production --format pretty --status error
 ```
 
 ---
 
-## Environment-Specific Deployments
+## Monitoring and Health Checks
 
-### Deploy to Staging
+### Health Check Implementation
 
-```bash
-# Deploy to staging
-wrangler deploy --env staging
+A robust health check should verify database connectivity:
 
-# Tail staging logs
-wrangler tail --env staging
+```typescript
+if (url.pathname === '/health') {
+  try {
+    const db = await this.getDB();
+    const start = Date.now();
+    await db.query('SELECT 1');
+    const latency = Date.now() - start;
 
-# Add staging secret
-wrangler secret put API_KEY --env staging
-```
-
-### Deploy to Production
-
-```bash
-# Deploy to production
-wrangler deploy --env production
-
-# Tail production logs (filtered)
-wrangler tail --env production --format pretty --status error
-
-# View deployment history
-wrangler deployments list --env production
-```
-
-### Package.json Scripts
-
-```json
-{
-  "scripts": {
-    "dev": "wrangler dev",
-    "deploy:staging": "wrangler deploy --env staging",
-    "deploy:production": "wrangler deploy --env production",
-    "logs:staging": "wrangler tail --env staging --format pretty",
-    "logs:production": "wrangler tail --env production --format pretty",
-    "health:staging": "curl https://dosql-app-staging.your-subdomain.workers.dev/health",
-    "health:production": "curl https://dosql-app-production.your-subdomain.workers.dev/health"
+    return Response.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      latency_ms: latency,
+      instance_id: this.state.id.toString(),
+    });
+  } catch (error) {
+    return Response.json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, { status: 503 });
   }
 }
+```
+
+### Setting Up Cloudflare Health Checks
+
+1. Go to the Cloudflare dashboard
+2. Navigate to Traffic > Health Checks
+3. Create a new health check:
+   - **URL**: `https://your-worker.workers.dev/health`
+   - **Method**: GET
+   - **Expected response codes**: 200
+   - **Interval**: 60 seconds
+   - **Retries**: 2
+
+### Viewing Logs
+
+```bash
+# Real-time logs
+wrangler tail --env production --format pretty
+
+# Filter by status
+wrangler tail --env production --format pretty --status error
+
+# Filter by search term
+wrangler tail --env production --format pretty --search "database"
 ```
 
 ---
@@ -592,78 +622,135 @@ wrangler deployments list --env production
 ### View Deployment History
 
 ```bash
-# List recent deployments
 wrangler deployments list --env production
 ```
 
 Output:
+
 ```
 Deployment ID                          Created                    Source
-12345678-abcd-1234-efgh-123456789abc   2026-01-23T10:00:00.000Z   Upload
-87654321-dcba-4321-hgfe-987654321cba   2026-01-22T15:30:00.000Z   Upload
+12345678-abcd-1234-efgh-123456789abc   2024-01-15T10:00:00.000Z   Upload
+87654321-dcba-4321-hgfe-987654321cba   2024-01-14T15:30:00.000Z   Upload
 ```
 
 ### Rollback to Previous Version
 
 ```bash
-# Rollback to a specific deployment ID
+# Rollback to the most recent previous deployment
+wrangler rollback --env production
+
+# Rollback to a specific deployment
 wrangler rollback --deployment-id 87654321-dcba-4321-hgfe-987654321cba --env production
 ```
 
-### Emergency Rollback
+### Emergency Rollback Procedure
 
 If a deployment causes issues:
 
-1. **Immediate Rollback**
+1. **Rollback immediately**:
    ```bash
    wrangler rollback --env production
    ```
 
-2. **Verify Health**
+2. **Verify recovery**:
    ```bash
    curl https://your-worker.workers.dev/health
    ```
 
-3. **Check Logs**
+3. **Check error logs**:
    ```bash
    wrangler tail --env production --format pretty --status error
    ```
 
-### Blue-Green Deployment Pattern
+4. **Investigate** the failed deployment before redeploying.
 
-For zero-downtime deployments:
+### Blue-Green Deployments
+
+For zero-downtime deployments with additional safety:
 
 1. Deploy to a new worker name:
    ```bash
    wrangler deploy --name dosql-app-production-v2 --env production
    ```
 
-2. Test the new deployment:
+2. Test the new deployment thoroughly:
    ```bash
    curl https://dosql-app-production-v2.workers.dev/health
    ```
 
-3. Update DNS/routes to point to new worker
+3. Update your DNS or route configuration to point to the new worker.
 
-4. Keep old worker running until verified
+4. Keep the old worker running until you are confident in the new deployment.
 
-5. Delete old worker when confident:
+5. Delete the old worker when ready:
    ```bash
    wrangler delete --name dosql-app-production-v1
    ```
 
 ---
 
-## Resource Limits
+## Troubleshooting
+
+### "Durable Object class not found"
+
+The Durable Object class must be exported from your entry point:
+
+```typescript
+// src/index.ts
+export { DoSQLDatabase } from './database';  // This export is required
+```
+
+### "Migration required"
+
+Add a migration tag in `wrangler.toml` for new DO classes:
+
+```toml
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["NewDOClass"]
+```
+
+### "R2 bucket not found"
+
+Create the bucket before deploying:
+
+```bash
+wrangler r2 bucket create my-bucket
+```
+
+### "Script too large"
+
+Analyze your bundle to identify large dependencies:
+
+```bash
+wrangler deploy --dry-run --outdir dist
+ls -lh dist/
+```
+
+Consider removing unused dependencies or using dynamic imports.
+
+### Debug Deployment Issues
+
+```bash
+# Dry run to check for errors without deploying
+wrangler deploy --dry-run --env production
+
+# Enable verbose logging
+WRANGLER_LOG=debug wrangler deploy --env production
+```
+
+---
+
+## Resource Limits Reference
 
 ### Cloudflare Workers Limits
 
 | Resource | Free Plan | Paid Plan |
 |----------|-----------|-----------|
-| Worker CPU time | 10ms | 50ms |
-| Worker memory | 128 MB | 128 MB |
-| Bundle size | 1 MB | 10 MB (25 MB with compression) |
-| Subrequests | 50 | 1000 |
+| CPU time per request | 10ms | 50ms |
+| Memory | 128 MB | 128 MB |
+| Bundle size | 1 MB | 10 MB (25 MB compressed) |
+| Subrequests per request | 50 | 1,000 |
 | Environment variables | 64 | 128 |
 
 ### Durable Objects Limits
@@ -675,62 +762,16 @@ For zero-downtime deployments:
 | Storage key size | 2 KB |
 | Storage value size | 128 KB |
 | SQLite database size | Unlimited (paid) |
-| Concurrent connections | 32,768 |
+| Concurrent WebSocket connections | 32,768 |
 
 ### R2 Limits
 
 | Resource | Limit |
 |----------|-------|
-| Object size | 5 GB (single PUT) |
+| Object size (single PUT) | 5 GB |
 | Object size (multipart) | 5 TB |
-| Bucket count | 1000 per account |
-| Operations | 10,000,000/month (free tier) |
-
----
-
-## Troubleshooting Deployment Issues
-
-### Common Errors
-
-**"Durable Object class not found"**
-```typescript
-// Solution: Export the DO class from entry point
-export { DoSQLDatabase } from './database';
-```
-
-**"Migration required"**
-```toml
-# Solution: Add migration tag in wrangler.toml
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["NewDOClass"]
-```
-
-**"R2 bucket not found"**
-```bash
-# Solution: Create the bucket first
-wrangler r2 bucket create my-bucket
-```
-
-**"Script too large"**
-```bash
-# Solution: Analyze and reduce bundle size
-npx wrangler deploy --dry-run --outdir dist
-ls -lh dist/
-```
-
-### Debug Deployment
-
-```bash
-# Dry run to check for issues
-wrangler deploy --dry-run --env production
-
-# Check configuration
-wrangler config
-
-# Verbose logging
-WRANGLER_LOG=debug wrangler deploy --env production
-```
+| Buckets per account | 1,000 |
+| Free tier operations | 10,000,000/month |
 
 ---
 
@@ -739,5 +780,5 @@ WRANGLER_LOG=debug wrangler deploy --env production
 - [Getting Started Guide](./getting-started.md) - Basic usage and CRUD operations
 - [Architecture Overview](./architecture.md) - System design and components
 - [API Reference](./api-reference.md) - Complete API documentation
-- [Security Guide](./SECURITY.md) - Security best practices
+- [Security Guide](./SECURITY.md) - Authentication and authorization patterns
 - [Troubleshooting Guide](./TROUBLESHOOTING.md) - Detailed error resolution
