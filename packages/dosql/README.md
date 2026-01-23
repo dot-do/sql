@@ -1,136 +1,161 @@
-> ![Developer Preview](https://img.shields.io/badge/Status-Developer%20Preview-orange)
->
-> **Developer Preview** - This package is under active development. APIs may change before the stable 1.0 release. Not recommended for production use without thorough testing.
-
 # DoSQL
+
+> The database engine built for Cloudflare Durable Objects
 
 [![npm version](https://img.shields.io/npm/v/@dotdo/dosql.svg)](https://www.npmjs.com/package/@dotdo/dosql)
 [![Bundle Size](https://img.shields.io/badge/bundle-7.4KB_gzip-brightgreen)](./docs/architecture.md#bundle-size)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-orange.svg)](https://workers.cloudflare.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> Type-safe SQL for TypeScript with Cloudflare Durable Objects
+---
 
-DoSQL is a database engine purpose-built for Cloudflare Workers and Durable Objects. It provides type-safe SQL queries with compile-time validation, automatic schema migrations, and advanced features like time travel, branching, and CDC streaming.
+**You're building stateful applications on Cloudflare.** You need a database that lives inside your Durable Objects, survives hibernation, and scales without managing infrastructure. DoSQL gives you exactly that: a type-safe SQL database engine purpose-built for the DO runtime.
 
-## Status
+```
+Client --> Worker --> Durable Object (DoSQL) --> R2/Lakehouse
+                            |
+                      SQLite Storage
+                      Hibernation-Safe
+                      Auto-Compaction
+```
 
-| Property | Value |
-|----------|-------|
-| Current version | 0.1.0 |
-| Stability | Developer Preview |
-| Breaking changes | Expected before 1.0 |
-| Expected GA | Q3 2026 (Target) |
+## The Durable Object Database
 
-### Graduation Timeline
+DoSQL runs **inside** your Durable Object. Not as a separate service. Not as an external database. Your data lives where your compute lives.
 
-| Phase | Target | Description |
-|-------|--------|-------------|
-| Developer Preview | Current | Core APIs stabilizing, gathering feedback |
-| Beta | Q2 2026 | API freeze for core features, focus on stability |
-| Release Candidate | Q3 2026 | Production-ready, final testing |
-| General Availability (1.0) | Q3 2026 | Stable release with LTS support |
+```typescript
+import { DurableObject } from 'cloudflare:workers';
+import { DB, type Database } from '@dotdo/dosql';
 
-**Note:** Timeline is subject to change based on community feedback and testing results.
+export class UserDatabase extends DurableObject<Env> {
+  private db: Database | null = null;
 
-## Stability
+  private async getDB(): Promise<Database> {
+    if (!this.db) {
+      this.db = await DB('users', {
+        migrations: { folder: '.do/migrations' },
+        storage: {
+          hot: this.ctx.storage,      // DO's built-in SQLite
+          cold: this.env.R2_BUCKET,   // Overflow to R2
+        },
+      });
+    }
+    return this.db;
+  }
 
-### Stable APIs
+  async createUser(name: string, email: string): Promise<User> {
+    const db = await this.getDB();
+    const result = await db.run(
+      'INSERT INTO users (name, email) VALUES (?, ?) RETURNING *',
+      [name, email]
+    );
+    return result.rows[0] as User;
+  }
 
-- Core database operations (`DB`, `query`, `run`, `transaction`)
-- Basic SQL execution (SELECT, INSERT, UPDATE, DELETE)
-- Schema migrations (`.do/migrations/*.sql` convention)
-- Transaction management
-- Error handling
+  async getUser(id: number): Promise<User | null> {
+    const db = await this.getDB();
+    const result = await db.query<User>(
+      'SELECT * FROM users WHERE id = ?',
+      [id]
+    );
+    return result.rows[0] ?? null;
+  }
+}
+```
 
-### Experimental APIs
+## Why DoSQL for Durable Objects?
 
-- Time travel queries (`FOR SYSTEM_TIME AS OF`)
-- Database branching (`branch`, `checkout`, `merge`)
-- CDC streaming to lakehouse
-- Virtual tables (URL, R2, external APIs)
-- CapnWeb RPC protocol
-- Sharding and query routing
-- Stored procedures
+| Feature | DoSQL | DO SQLite (raw) | D1 | Turso |
+|---------|-------|-----------------|----|----|
+| **Runs in DO** | Yes | Yes | No (external) | No (external) |
+| **Hibernation-safe** | Yes | Manual | N/A | N/A |
+| **Type-safe queries** | Yes | No | No | No |
+| **Auto-migrations** | Yes | No | Yes | Yes |
+| **Time travel** | Yes | No | No | Yes |
+| **CDC streaming** | Yes | No | No | No |
+| **Cross-DO queries** | Yes | No | No | No |
+| **Lakehouse sync** | Yes | No | No | No |
+| **Bundle size** | 7KB | 0KB | N/A | ~50KB |
 
-## Version Compatibility
-
-| Dependency | Minimum | Tested |
-|------------|---------|--------|
-| Node.js | 20.0.0 | 22.21.1 |
-| TypeScript | 5.3.0 | 5.9.3 |
-| Cloudflare Workers (compatibility_date) | 2024-01-01 | 2026-01-01 |
-| @cloudflare/workers-types | 4.0.0 | 4.20260122.0 |
-| Wrangler | 4.0.0 | 4.59.3 |
-| workerd | 1.20240101.0 | 1.20260116.0 |
-
-## Features
-
-- **Type-Safe SQL** - Compile-time query validation with TypeScript
-- **Zero Dependencies** - Pure TypeScript, ~7KB gzipped
-- **Auto Migrations** - Simple `.do/migrations/*.sql` convention
-- **Time Travel** - Query data at any point in time
-- **Branch/Merge** - Git-like branching for databases
-- **CDC Streaming** - Real-time change capture to lakehouse
-- **Virtual Tables** - Query URLs, R2, and APIs directly
-- **CapnWeb RPC** - Efficient DO-to-DO communication
+D1 and Turso are great databases. But they're external services. Every query is a network hop. DoSQL eliminates that latency by running inside your Durable Object.
 
 ## Quick Start
+
+### 1. Install
 
 ```bash
 npm install @dotdo/dosql
 ```
 
+### 2. Create your Durable Object
+
 ```typescript
-import { DB } from '@dotdo/dosql';
+// src/database.ts
+import { DurableObject } from 'cloudflare:workers';
+import { DB, type Database } from '@dotdo/dosql';
 
-// Create a database with auto-migrations
-const db = await DB('my-tenant', {
-  migrations: { folder: '.do/migrations' },
-});
-
-// Type-safe queries
-interface User {
-  id: number;
-  name: string;
-  active: boolean;
-  order_count: number;
+interface Env {
+  R2_BUCKET: R2Bucket;
 }
 
-const users = await db.query<User>('SELECT * FROM users WHERE active = ?', [true]);
+export class TenantDatabase extends DurableObject<Env> {
+  private db: Database | null = null;
 
-// Transactions
-await db.transaction(async (tx: TransactionContext) => {
-  await tx.run('INSERT INTO orders (user_id) VALUES (?)', [1]);
-  await tx.run('UPDATE users SET order_count = order_count + 1 WHERE id = ?', [1]);
-});
+  private async getDB(): Promise<Database> {
+    if (!this.db) {
+      this.db = await DB('tenant', {
+        migrations: { folder: '.do/migrations' },
+        storage: {
+          hot: this.ctx.storage,
+          cold: this.env.R2_BUCKET,
+        },
+      });
+    }
+    return this.db;
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const db = await this.getDB();
+    const url = new URL(request.url);
+
+    if (url.pathname === '/query' && request.method === 'POST') {
+      const { sql, params } = await request.json();
+      const result = await db.query(sql, params);
+      return Response.json(result);
+    }
+
+    return new Response('Not found', { status: 404 });
+  }
+}
 ```
 
-## Bundle Size
+### 3. Configure wrangler.toml
 
-| Bundle | Gzipped | CF Free (1MB) |
-|--------|---------|---------------|
-| Worker | **7.36 KB** | 0.7% |
-| Full Library | **34.26 KB** | 3.3% |
+```toml
+name = "my-app"
+compatibility_date = "2026-01-01"
 
-## Documentation
+[durable_objects]
+bindings = [
+  { name = "TENANT_DB", class_name = "TenantDatabase" }
+]
 
-| Document | Description |
-|----------|-------------|
-| [Getting Started](./docs/getting-started.md) | Installation, usage, CRUD, migrations |
-| [API Reference](./docs/api-reference.md) | Complete API documentation |
-| [Advanced Features](./docs/advanced.md) | Time travel, branching, CDC, vector search |
-| [Architecture](./docs/architecture.md) | Storage tiers, bundle optimization, internals |
+[[migrations]]
+tag = "v1"
+new_classes = ["TenantDatabase"]
 
-## Example: Migrations
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "my-lakehouse"
+```
+
+### 4. Create migrations
 
 ```
 .do/
 └── migrations/
     ├── 001_create_users.sql
-    ├── 002_add_posts.sql
-    └── 003_add_indexes.sql
+    └── 002_create_orders.sql
 ```
 
 ```sql
@@ -143,447 +168,383 @@ CREATE TABLE users (
 );
 ```
 
-## Example: Time Travel
+### 5. Route to your DO
 
 ```typescript
-// Query current data
-const current = await db.query('SELECT * FROM metrics');
+// src/index.ts
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const tenantId = url.searchParams.get('tenant') ?? 'default';
 
-// Query data as of 1 hour ago
-const historical = await db.query(`
-  SELECT * FROM metrics
+    // Each tenant gets their own DO instance with isolated data
+    const id = env.TENANT_DB.idFromName(tenantId);
+    const stub = env.TENANT_DB.get(id);
+
+    return stub.fetch(request);
+  }
+};
+```
+
+## DO-Specific Features
+
+### Hibernation Support
+
+Durable Objects hibernate when idle. DoSQL handles this gracefully:
+
+```typescript
+export class HibernatingDatabase extends DurableObject<Env> {
+  private db: Database | null = null;
+
+  // Called when DO wakes from hibernation
+  async webSocketMessage(ws: WebSocket, message: string) {
+    // DB reconnects automatically on first use
+    const db = await this.getDB();
+    const result = await db.query(message);
+    ws.send(JSON.stringify(result));
+  }
+
+  // State survives hibernation - SQLite is durable
+  async webSocketClose(ws: WebSocket) {
+    // Optional: flush pending writes before hibernate
+    await this.db?.flush();
+  }
+}
+```
+
+### Alarm-Based Compaction
+
+Schedule background maintenance without blocking requests:
+
+```typescript
+export class CompactingDatabase extends DurableObject<Env> {
+  private db: Database | null = null;
+
+  async alarm() {
+    const db = await this.getDB();
+
+    // Compact WAL, archive old data to R2
+    await db.maintenance({
+      compact: true,
+      archiveOlderThan: '7d',
+    });
+
+    // Schedule next compaction
+    await this.ctx.storage.setAlarm(Date.now() + 3600_000); // 1 hour
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    // Ensure alarm is scheduled
+    const alarm = await this.ctx.storage.getAlarm();
+    if (!alarm) {
+      await this.ctx.storage.setAlarm(Date.now() + 3600_000);
+    }
+
+    // Handle request...
+  }
+}
+```
+
+### Cross-DO Queries
+
+Query data across multiple Durable Objects:
+
+```typescript
+import { createShardRouter } from '@dotdo/dosql/sharding';
+
+export class CoordinatorDatabase extends DurableObject<Env> {
+  async aggregateUsers(): Promise<UserStats> {
+    const router = createShardRouter(this.env.USER_SHARDS);
+
+    // Fan-out query to all shards, combine results
+    const result = await router.query(`
+      SELECT
+        COUNT(*) as total_users,
+        SUM(CASE WHEN active THEN 1 ELSE 0 END) as active_users
+      FROM users
+    `);
+
+    return result.rows[0];
+  }
+}
+```
+
+### CDC Streaming to Lakehouse
+
+Capture every change and stream to R2/Iceberg:
+
+```typescript
+import { createCDC } from '@dotdo/dosql/cdc';
+
+export class StreamingDatabase extends DurableObject<Env> {
+  private cdc = createCDC();
+
+  async insert(table: string, data: Record<string, unknown>) {
+    const db = await this.getDB();
+
+    await db.transaction(async (tx) => {
+      await tx.run(`INSERT INTO ${table} VALUES (?)`, [data]);
+
+      // CDC event captured in same transaction
+      this.cdc.emit({
+        op: 'INSERT',
+        table,
+        data,
+        timestamp: Date.now(),
+      });
+    });
+  }
+
+  async alarm() {
+    // Flush CDC events to R2 lakehouse
+    const events = this.cdc.drain();
+    if (events.length > 0) {
+      await this.env.R2_BUCKET.put(
+        `cdc/${Date.now()}.json`,
+        JSON.stringify(events)
+      );
+    }
+  }
+}
+```
+
+### Tiered Storage (Hot/Cold)
+
+Keep recent data in DO SQLite, archive historical data to R2:
+
+```typescript
+import { createTieredBackend } from '@dotdo/dosql/fsx';
+
+export class TieredDatabase extends DurableObject<Env> {
+  private async getDB(): Promise<Database> {
+    const storage = createTieredBackend({
+      hot: this.ctx.storage,           // Fast: DO SQLite
+      warm: this.env.KV_CACHE,         // Medium: KV
+      cold: this.env.R2_BUCKET,        // Archive: R2 Parquet
+      hotThreshold: '24h',
+      warmThreshold: '7d',
+    });
+
+    return DB('tiered', { storage });
+  }
+}
+```
+
+## Architecture
+
+```
+                    +-----------------+
+                    |     Client      |
+                    +--------+--------+
+                             |
+                             v
+                    +--------+--------+
+                    |     Worker      |
+                    |  (Routing Only) |
+                    +--------+--------+
+                             |
+           +-----------------+-----------------+
+           |                 |                 |
+           v                 v                 v
+    +------+------+   +------+------+   +------+------+
+    | Durable Obj |   | Durable Obj |   | Durable Obj |
+    |  (Tenant A) |   |  (Tenant B) |   |  (Tenant C) |
+    +------+------+   +------+------+   +------+------+
+           |                 |                 |
+           +-----------------+-----------------+
+                             |
+                    +--------+--------+
+                    |       R2        |
+                    |   (Lakehouse)   |
+                    +-----------------+
+```
+
+Each Durable Object contains:
+- **DoSQL Engine** - Query parsing, optimization, execution
+- **SQLite Storage** - Cloudflare's native DO storage
+- **WAL Buffer** - Write-ahead log for durability
+- **CDC Capture** - Change tracking for streaming
+
+## Connecting from Clients
+
+While DoSQL runs in Durable Objects, clients connect through your Worker:
+
+```typescript
+// Client-side (browser, Node.js, etc.)
+const response = await fetch('https://my-app.workers.dev/query', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    tenant: 'acme-corp',
+    sql: 'SELECT * FROM users WHERE active = ?',
+    params: [true],
+  }),
+});
+
+const { rows } = await response.json();
+```
+
+For real-time updates, use WebSocket connections:
+
+```typescript
+// Worker routes WebSocket to DO
+export class RealtimeDatabase extends DurableObject<Env> {
+  async fetch(request: Request): Promise<Response> {
+    if (request.headers.get('Upgrade') === 'websocket') {
+      const [client, server] = Object.values(new WebSocketPair());
+      this.ctx.acceptWebSocket(server);
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    // ...
+  }
+
+  async webSocketMessage(ws: WebSocket, message: string) {
+    const { sql, params } = JSON.parse(message);
+    const db = await this.getDB();
+    const result = await db.query(sql, params);
+    ws.send(JSON.stringify(result));
+  }
+}
+```
+
+## Advanced Features
+
+### Time Travel Queries
+
+Query your data at any point in time:
+
+```typescript
+// Current state
+const now = await db.query('SELECT * FROM inventory');
+
+// State from 1 hour ago
+const hourAgo = await db.query(`
+  SELECT * FROM inventory
   FOR SYSTEM_TIME AS OF TIMESTAMP '2026-01-22 10:00:00'
+`);
+
+// Diff between two points
+const changes = await db.query(`
+  SELECT * FROM inventory
+  FOR SYSTEM_TIME BETWEEN
+    TIMESTAMP '2026-01-22 09:00:00' AND
+    TIMESTAMP '2026-01-22 10:00:00'
 `);
 ```
 
-## Example: Branching
+### Database Branching
+
+Create isolated copies for testing or A/B scenarios:
 
 ```typescript
-// Create a branch for testing
-await db.branch('feature-x');
-await db.checkout('feature-x');
+// Create a branch
+await db.branch('experiment-pricing');
+await db.checkout('experiment-pricing');
 
 // Make changes on branch
-await db.run('ALTER TABLE users ADD COLUMN role TEXT');
+await db.run('UPDATE products SET price = price * 1.1');
 
-// Merge back to main
+// Test the changes...
+const results = await db.query('SELECT * FROM products');
+
+// Merge back or discard
 await db.checkout('main');
-await db.merge('feature-x');
+await db.merge('experiment-pricing'); // or db.deleteBranch()
 ```
 
-## Example: Virtual Tables
+### Virtual Tables
+
+Query external data sources as SQL tables:
 
 ```typescript
-// Query JSON API directly
+// Query JSON API
 const users = await db.query(`
   SELECT id, name
   FROM 'https://api.example.com/users.json'
   WHERE role = 'admin'
 `);
 
-// Query Parquet from R2
+// Query Parquet in R2
 const sales = await db.query(`
   SELECT SUM(amount) as total
-  FROM 'r2://mybucket/data/sales.parquet'
-  WHERE year = 2024
+  FROM 'r2://mybucket/sales/2026/*.parquet'
+  WHERE region = 'US'
+`);
+
+// Join DO data with external data
+const enriched = await db.query(`
+  SELECT u.*, o.total_orders
+  FROM users u
+  JOIN 'r2://analytics/order_counts.parquet' o ON u.id = o.user_id
 `);
 ```
 
-## Example: CDC Streaming
+## Migrations
 
-```typescript
-import { createCDC, type CDCEvent } from '@dotdo/dosql/cdc';
-
-const cdc = createCDC(backend);
-
-for await (const event: CDCEvent of cdc.subscribe(0n)) {
-  console.log('Change:', event.op, event.table);
-  await syncToLakehouse(event);
-}
+```
+.do/
+└── migrations/
+    ├── 001_create_users.sql
+    ├── 002_add_orders.sql
+    └── 003_add_indexes.sql
 ```
 
-## Cloudflare Workers Deployment
+Migrations run automatically on first DB access. Each migration runs once and is tracked.
 
-```typescript
-// src/database.ts
-import { DB } from '@dotdo/dosql';
+## Bundle Size
 
-export class TenantDatabase implements DurableObject {
-  private db: Database | null = null;
+DoSQL is designed for Workers' 1MB limit:
 
-  constructor(private state: DurableObjectState, private env: Env) {}
-
-  private async getDB(): Promise<Database> {
-    if (!this.db) {
-      this.db = await DB('tenant', {
-        migrations: { folder: '.do/migrations' },
-        storage: { hot: this.state.storage, cold: this.env.R2_BUCKET },
-      });
-    }
-    return this.db;
-  }
-
-  async fetch(request: Request): Promise<Response> {
-    const db = await this.getDB();
-    // Handle requests...
-  }
-}
-```
-
-## HTTP Endpoints
-
-DoSQL exposes HTTP endpoints for health checks and database operations.
-
-### Worker-Level Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/` | Health check (alias for `/health`) |
-| GET | `/health` | Health check |
-| GET | `/api` | API documentation |
-| ALL | `/db/:name/*` | Route to database Durable Object |
-
-#### /health Endpoint
-
-Returns the health status of the DoSQL worker.
-
-**Request:**
-```bash
-curl https://your-worker.workers.dev/health
-```
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "service": "dosql",
-  "version": "0.1.0"
-}
-```
-
-### Database-Level Endpoints
-
-These endpoints are available within each database Durable Object (accessed via `/db/:name/...`).
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Database health check |
-| GET | `/tables` | List all tables |
-| POST | `/query` | Execute SELECT query |
-| POST | `/execute` | Execute INSERT/UPDATE/DELETE |
-
-#### /db/:name/health Endpoint
-
-Returns the health status of a specific database instance.
-
-**Request:**
-```bash
-curl https://your-worker.workers.dev/db/mydb/health
-```
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "initialized": true
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `status` | string | Always `"ok"` when healthy |
-| `initialized` | boolean | Whether the database has been initialized |
-
-#### /db/:name/tables Endpoint
-
-Lists all tables in the database.
-
-**Request:**
-```bash
-curl https://your-worker.workers.dev/db/mydb/tables
-```
-
-**Response:**
-```json
-{
-  "tables": ["users", "posts", "comments"]
-}
-```
-
-#### /db/:name/query Endpoint
-
-Executes a SELECT query.
-
-**Request:**
-```bash
-curl -X POST https://your-worker.workers.dev/db/mydb/query \
-  -H "Content-Type: application/json" \
-  -d '{"sql": "SELECT * FROM users WHERE active = ?", "params": [true]}'
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "rows": [
-    {"id": 1, "name": "Alice", "active": true},
-    {"id": 2, "name": "Bob", "active": true}
-  ],
-  "stats": {
-    "rowsAffected": 2,
-    "executionTimeMs": 1.5
-  }
-}
-```
-
-#### /db/:name/execute Endpoint
-
-Executes INSERT, UPDATE, or DELETE statements.
-
-**Request:**
-```bash
-curl -X POST https://your-worker.workers.dev/db/mydb/execute \
-  -H "Content-Type: application/json" \
-  -d '{"sql": "INSERT INTO users (name, email) VALUES (?, ?)", "params": ["Charlie", "charlie@example.com"]}'
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "stats": {
-    "rowsAffected": 1,
-    "executionTimeMs": 2.3
-  }
-}
-```
-
-## Comparison
-
-| Feature | DoSQL | SQLite-WASM | PGLite | DuckDB-WASM |
-|---------|-------|-------------|--------|-------------|
-| Bundle Size | **7KB** | ~500KB | ~3MB | ~4MB |
-| Type Safety | Yes | No | No | No |
-| Time Travel | Yes | No | No | No |
-| Branching | Yes | No | No | No |
-| CDC | Yes | No | No | No |
-| Workers Native | Yes | Partial | No | Partial |
+| Bundle | Gzipped | % of Free Tier |
+|--------|---------|----------------|
+| Core | **7.36 KB** | 0.7% |
+| With CDC | **12.1 KB** | 1.2% |
+| Full Library | **34.26 KB** | 3.3% |
 
 ## Module Exports
 
-### Stability Legend
-
-- :green_circle: **Stable** - API is stable and unlikely to change
-- :yellow_circle: **Beta** - API is mostly stable but may have minor changes
-- :red_circle: **Experimental** - API may change significantly
-
-| Module | Exports | Stability |
-|--------|---------|-----------|
-| `@dotdo/dosql` | `DB`, `createDatabase` | :yellow_circle: Beta |
-| `@dotdo/dosql/transaction` | `TransactionManager` | :yellow_circle: Beta |
-| `@dotdo/dosql/wal` | `createWALWriter`, `createWALReader` | :yellow_circle: Beta |
-| `@dotdo/dosql/cdc` | `createCDC`, `createCDCSubscription` | :red_circle: Experimental |
-| `@dotdo/dosql/rpc` | `createWebSocketClient`, `DoSQLTarget` | :yellow_circle: Beta |
-| `@dotdo/dosql/errors` | `DoSQLError`, `DatabaseError`, `SQLSyntaxError` | :green_circle: Stable |
-| `@dotdo/dosql/fsx` | `createDOBackend`, `createR2Backend`, `createTieredBackend` | :red_circle: Experimental |
-| `@dotdo/dosql/sharding` | `createShardRouter`, `createShardExecutor` | :red_circle: Experimental |
-| `@dotdo/dosql/proc` | `procedure`, `createProcedureRegistry` | :red_circle: Experimental |
-| `@dotdo/dosql/virtual` | `createVirtualTableRegistry` | :red_circle: Experimental |
-| `@dotdo/dosql/columnar` | `ColumnarWriter`, `ColumnarReader` | :red_circle: Experimental |
-| `@dotdo/dosql/orm/drizzle` | `drizzleAdapter` | :yellow_circle: Beta |
-| `@dotdo/dosql/orm/kysely` | `kyselyAdapter` | :yellow_circle: Beta |
-| `@dotdo/dosql/orm/knex` | `knexAdapter` | :yellow_circle: Beta |
-| `@dotdo/dosql/orm/prisma` | `prismaAdapter` | :yellow_circle: Beta |
-
-### Import Examples
-
-```typescript
-// Core - Beta
-import { DB, createDatabase } from '@dotdo/dosql';
-
-// Transactions - Beta
-import { TransactionManager } from '@dotdo/dosql/transaction';
-
-// WAL - Beta
-import { createWALWriter, createWALReader } from '@dotdo/dosql/wal';
-
-// CDC - Experimental
-import { createCDC, createCDCSubscription } from '@dotdo/dosql/cdc';
-
-// RPC - Beta
-import { createWebSocketClient, DoSQLTarget } from '@dotdo/dosql/rpc';
-
-// Errors - Stable
-import { DoSQLError, DatabaseError, SQLSyntaxError } from '@dotdo/dosql/errors';
-
-// FSX (Storage) - Experimental
-import { createDOBackend, createR2Backend, createTieredBackend } from '@dotdo/dosql/fsx';
-
-// Sharding - Experimental
-import { createShardRouter, createShardExecutor } from '@dotdo/dosql/sharding';
-
-// Procedures - Experimental
-import { procedure, createProcedureRegistry } from '@dotdo/dosql/proc';
-
-// Virtual Tables - Experimental
-import { createVirtualTableRegistry } from '@dotdo/dosql/virtual';
-
-// Columnar (OLAP storage) - Experimental
-import { ColumnarWriter, ColumnarReader } from '@dotdo/dosql/columnar';
-
-// ORM Adapters - Beta
-import { drizzleAdapter } from '@dotdo/dosql/orm/drizzle';
-import { kyselyAdapter } from '@dotdo/dosql/orm/kysely';
-import { knexAdapter } from '@dotdo/dosql/orm/knex';
-import { prismaAdapter } from '@dotdo/dosql/orm/prisma';
-```
-
-## Troubleshooting
-
-### Connection Errors
-
-**Symptoms**: `ConnectionError` with code `CONNECTION_FAILED` or `CONNECTION_CLOSED`
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `Connection failed` | Network issue or invalid endpoint | Verify your Durable Object binding is correct in `wrangler.toml` |
-| `WebSocket connection closed` | Connection dropped unexpectedly | Enable automatic reconnection with retry logic |
-| `Connection timeout` | Server not responding | Increase timeout in configuration or check DO health |
-
-```typescript
-// Retry pattern for connection errors
-import { ConnectionError } from '@dotdo/dosql/errors';
-
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (error instanceof ConnectionError && i < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, 100 * Math.pow(2, i)));
-        continue;
-      }
-      throw error;
-    }
-  }
-  throw new Error('Max retries exceeded');
-}
-```
-
-### Transaction Errors
-
-**Symptoms**: Transaction operations fail or produce unexpected results
-
-| Error Code | Cause | Solution |
-|------------|-------|----------|
-| `DEADLOCK_DETECTED` | Two transactions waiting on each other | Retry the transaction; use consistent lock ordering |
-| `SERIALIZATION_FAILURE` | Concurrent modification conflict | Retry with exponential backoff |
-| `TRANSACTION_TIMEOUT` | Transaction exceeded time limit | Break into smaller transactions or increase timeout |
-| `TRANSACTION_ABORTED` | Transaction was rolled back | Check for constraint violations; retry if transient |
-
-```typescript
-// Handle transaction conflicts with retry
-async function safeTransaction<T>(
-  db: Database,
-  fn: (tx: TransactionContext) => Promise<T>
-): Promise<T> {
-  const maxRetries = 3;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await db.transaction(fn);
-    } catch (error) {
-      if (error instanceof DoSQLError) {
-        const retryable = ['DEADLOCK_DETECTED', 'SERIALIZATION_FAILURE'];
-        if (retryable.includes(error.code) && i < maxRetries - 1) {
-          await new Promise(r => setTimeout(r, 50 * Math.pow(2, i)));
-          continue;
-        }
-      }
-      throw error;
-    }
-  }
-  throw new Error('Transaction failed after retries');
-}
-```
-
-### SQL Syntax Errors
-
-**Symptoms**: `SQLSyntaxError` or `UnexpectedTokenError`
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `Unexpected token` | Invalid SQL syntax | Check SQL statement for typos; use parameterized queries |
-| `Missing keyword` | Incomplete SQL statement | Ensure all required clauses are present (e.g., `FROM` in `SELECT`) |
-| `Invalid identifier` | Reserved word used as identifier | Quote identifiers with double quotes: `"table"` |
-
-```typescript
-// Common mistake: string interpolation (SQL injection risk!)
-// BAD:
-const bad = db.query(`SELECT * FROM users WHERE name = '${name}'`);
-
-// GOOD: Use parameterized queries
-const good = db.query('SELECT * FROM users WHERE name = ?', [name]);
-```
-
-### Common Configuration Mistakes
-
-| Issue | Symptom | Fix |
-|-------|---------|-----|
-| Missing R2 binding | `R2_BUCKET is undefined` | Add `r2_buckets` to `wrangler.toml` |
-| Wrong migrations path | Tables not created | Ensure `.do/migrations/*.sql` exists and path is correct |
-| Missing DO binding | `DOSQL is undefined` | Add durable object binding to `wrangler.toml` |
-| TypeScript version | Type errors | Upgrade to TypeScript 5.3+ |
-
-```toml
-# Example wrangler.toml configuration
-[durable_objects]
-bindings = [
-  { name = "DOSQL", class_name = "TenantDatabase" }
-]
-
-[[r2_buckets]]
-binding = "R2_BUCKET"
-bucket_name = "my-bucket"
-```
-
-### Performance Issues
-
-| Symptom | Cause | Solution |
-|---------|-------|----------|
-| Slow queries | Missing indexes | Add indexes on frequently queried columns |
-| High memory usage | Large result sets | Use pagination with `LIMIT` and `OFFSET` |
-| Transaction timeouts | Long-running operations | Break into smaller batches |
-
-```typescript
-// Paginated query pattern
-async function* paginate<T>(db: Database, sql: string, pageSize = 1000) {
-  let offset = 0;
-  while (true) {
-    const result = await db.query<T>(`${sql} LIMIT ? OFFSET ?`, [pageSize, offset]);
-    if (result.rows.length === 0) break;
-    yield result.rows;
-    offset += pageSize;
-    if (result.rows.length < pageSize) break;
-  }
-}
-```
+| Module | Use Case | Stability |
+|--------|----------|-----------|
+| `@dotdo/dosql` | Core DB operations | Beta |
+| `@dotdo/dosql/fsx` | Storage backends | Experimental |
+| `@dotdo/dosql/cdc` | Change data capture | Experimental |
+| `@dotdo/dosql/sharding` | Cross-DO queries | Experimental |
+| `@dotdo/dosql/wal` | Write-ahead log | Beta |
+| `@dotdo/dosql/rpc` | DO-to-DO communication | Beta |
+| `@dotdo/dosql/errors` | Error types | Stable |
 
 ## Requirements
 
-- Cloudflare Workers / Durable Objects (compatibility_date 2024-01-01+)
-- TypeScript 5.3+
-- Node.js 20+ (for development)
+- Cloudflare Workers with Durable Objects
+- `compatibility_date` 2024-01-01 or later
+- TypeScript 5.3+ (for type safety)
+- R2 bucket (for lakehouse features)
+
+## Status
+
+> **Developer Preview** - APIs may change before 1.0
+
+| Phase | Target | Status |
+|-------|--------|--------|
+| Developer Preview | Current | Active |
+| Beta | Q2 2026 | Planned |
+| GA | Q3 2026 | Target |
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Getting Started](./docs/getting-started.md) | Full setup guide |
+| [API Reference](./docs/api-reference.md) | Complete API docs |
+| [Advanced Features](./docs/advanced.md) | Time travel, branching, CDC |
+| [Architecture](./docs/architecture.md) | Internals and optimization |
 
 ## License
 
 MIT
 
-## Changelog
-
-See [CHANGELOG.md](./CHANGELOG.md) for a detailed history of changes.
-
 ## Links
 
 - [GitHub](https://github.com/dotdo/sql)
 - [npm](https://www.npmjs.com/package/@dotdo/dosql)
-- [Documentation](./docs/README.md)
+- [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)

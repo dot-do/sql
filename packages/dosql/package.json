@@ -68,6 +68,11 @@
     "test:e2e:cleanup": "npx tsx e2e/setup.ts cleanup",
     "test:e2e:ci": "E2E_AUTO_DEPLOY=1 vitest run --config e2e/vitest.config.ts",
     "test:e2e:watch": "vitest --config e2e/vitest.config.ts",
+    "benchmark": "npx tsx benchmarks/src/cli.ts",
+    "benchmark:quick": "npx tsx benchmarks/src/cli.ts --quick",
+    "benchmark:all": "npx tsx benchmarks/src/cli.ts --all -v",
+    "benchmark:json": "npx tsx benchmarks/src/cli.ts -f json -o benchmarks/results.json",
+    "benchmark:report": "npx tsx benchmarks/src/cli.ts -f markdown -o benchmarks/RESULTS.md",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

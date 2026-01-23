@@ -1,0 +1,78 @@
+{
+  "name": "@dosql/benchmarks",
+  "version": "0.1.0",
+  "description": "Comprehensive benchmark suite comparing DoSQL against SQLite implementations",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "dosql-benchmark": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js"
+    },
+    "./scenarios": {
+      "types": "./dist/scenarios/index.d.ts",
+      "import": "./dist/scenarios/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bench": "npx tsx src/cli.ts",
+    "benchmark": "npx tsx src/cli.ts",
+    "benchmark:quick": "npx tsx src/cli.ts --quick",
+    "benchmark:all": "npx tsx src/cli.ts --all -v",
+    "benchmark:json": "npx tsx src/cli.ts -f json -o results.json",
+    "benchmark:report": "npx tsx src/cli.ts -f markdown -o RESULTS.md",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "benchmark",
+    "dosql",
+    "sqlite",
+    "better-sqlite3",
+    "libsql",
+    "turso",
+    "d1",
+    "durable-objects",
+    "cloudflare",
+    "workers",
+    "performance"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "better-sqlite3": "^12.6.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^2.1.9"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@cloudflare/workers-types": {
+      "optional": true
+    }
+  }
+}
