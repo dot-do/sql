@@ -130,6 +130,88 @@ export interface CacheStats {
 }
 
 /**
+ * Partition specification for identifying a partition
+ */
+export interface PartitionSpec {
+  /** Partition field values (e.g., { year: 2024, month: 1 }) */
+  values: Record<string, string | number | boolean | null>;
+}
+
+/**
+ * Partition-level statistics
+ */
+export interface PartitionStats {
+  /** Record count in this partition */
+  recordCount: number;
+  /** Number of data files in this partition */
+  fileCount: number;
+  /** Total size in bytes of all files in this partition */
+  sizeBytes: number;
+  /** Last modified timestamp (ms since epoch) */
+  lastModifiedMs: number;
+  /** Timestamp when stats were collected */
+  collectedAt: number;
+}
+
+/**
+ * Partition cache entry with statistics and access tracking
+ */
+export interface PartitionCacheEntry {
+  /** Partition specification */
+  spec: PartitionSpec;
+  /** Partition statistics */
+  stats: PartitionStats;
+  /** Timestamp when cached */
+  cachedAt: number;
+  /** Expiration timestamp */
+  expiresAt: number;
+  /** Number of times this partition was accessed */
+  accessCount: number;
+  /** Last access timestamp */
+  lastAccessedAt: number;
+  /** Custom partition data */
+  data?: unknown;
+}
+
+/**
+ * Partition access metrics for hot partition identification
+ */
+export interface PartitionAccessMetrics {
+  /** Table ID */
+  tableId: string;
+  /** Partition key */
+  partitionKey: string;
+  /** Total access count */
+  accessCount: number;
+  /** Access rate (accesses per second over measurement window) */
+  accessRate: number;
+  /** Last access timestamp */
+  lastAccessedAt: number;
+  /** Is this partition considered hot */
+  isHot: boolean;
+}
+
+/**
+ * Partition statistics summary for a table
+ */
+export interface TablePartitionSummary {
+  /** Table ID */
+  tableId: string;
+  /** Total number of partitions */
+  partitionCount: number;
+  /** Total record count across all partitions */
+  totalRecordCount: number;
+  /** Total file count across all partitions */
+  totalFileCount: number;
+  /** Total size in bytes across all partitions */
+  totalSizeBytes: number;
+  /** Number of hot partitions */
+  hotPartitionCount: number;
+  /** List of hot partitions (by access rate) */
+  hotPartitions: PartitionAccessMetrics[];
+}
+
+/**
  * Latency statistics
  */
 export interface LatencyStats {
@@ -256,6 +338,17 @@ export class MetadataCache {
   private cache: Map<string, MetadataCacheEntry> = new Map();
   private auxiliary: Map<string, Map<string, unknown>> = new Map();
   private partitionCache: Map<string, Map<string, unknown>> = new Map();
+  /** Partition statistics storage: tableId -> partitionKey -> PartitionCacheEntry */
+  private partitionStats: Map<string, Map<string, PartitionCacheEntry>> = new Map();
+  /** Partition access tracking for hot partition identification */
+  private partitionAccessHistory: Map<string, { timestamps: number[]; accessCount: number }> =
+    new Map();
+  /** TTL for partition statistics (default 5 minutes) */
+  private partitionStatsTtlMs: number = 300_000;
+  /** Window size for access rate calculation (default 60 seconds) */
+  private accessRateWindowMs: number = 60_000;
+  /** Threshold for hot partition identification (accesses per second) */
+  private hotPartitionThreshold: number = 10;
   private storage: StorageInterface | null = null;
   private latencies: number[] = [];
   private accessSequence: number = 0; // Monotonically increasing for LRU ordering
@@ -392,6 +485,14 @@ export class MetadataCache {
     this.auxiliary.delete(tableId);
     // Clear partition data for this table
     this.partitionCache.delete(tableId);
+    // Clear partition statistics for this table
+    this.partitionStats.delete(tableId);
+    // Clear partition access history for this table
+    for (const key of this.partitionAccessHistory.keys()) {
+      if (key.startsWith(`${tableId}:`)) {
+        this.partitionAccessHistory.delete(key);
+      }
+    }
 
     // Notify coherence manager if enabled
     if (this.coherenceManager) {
@@ -478,6 +579,23 @@ export class MetadataCache {
 
     this.storage.set('__metadata_cache__', serialized);
     this.storage.set('__metadata_cache_stats__', { ...this.stats });
+
+    // Flush partition statistics
+    const partitionStatsData: Record<string, Record<string, PartitionCacheEntry>> = {};
+    for (const [tableId, tableStats] of this.partitionStats.entries()) {
+      partitionStatsData[tableId] = {};
+      for (const [partitionKey, entry] of tableStats.entries()) {
+        partitionStatsData[tableId][partitionKey] = entry;
+      }
+    }
+    this.storage.set('__partition_stats__', partitionStatsData);
+
+    // Flush partition access history
+    const accessHistoryData: Record<string, { timestamps: number[]; accessCount: number }> = {};
+    for (const [key, history] of this.partitionAccessHistory.entries()) {
+      accessHistoryData[key] = history;
+    }
+    this.storage.set('__partition_access_history__', accessHistoryData);
   }
 
   /**
@@ -502,6 +620,45 @@ export class MetadataCache {
     const savedStats = this.storage.get('__metadata_cache_stats__') as typeof this.stats | undefined;
     if (savedStats) {
       this.stats = { ...savedStats };
+    }
+
+    // Restore partition statistics
+    const partitionStatsData = this.storage.get('__partition_stats__') as
+      | Record<string, Record<string, PartitionCacheEntry>>
+      | undefined;
+    if (partitionStatsData) {
+      const now = Date.now();
+      for (const [tableId, tableStats] of Object.entries(partitionStatsData)) {
+        const tableMap = new Map<string, PartitionCacheEntry>();
+        for (const [partitionKey, entry] of Object.entries(tableStats)) {
+          // Only restore non-expired entries
+          if (now < entry.expiresAt) {
+            tableMap.set(partitionKey, entry);
+          }
+        }
+        if (tableMap.size > 0) {
+          this.partitionStats.set(tableId, tableMap);
+        }
+      }
+    }
+
+    // Restore partition access history
+    const accessHistoryData = this.storage.get('__partition_access_history__') as
+      | Record<string, { timestamps: number[]; accessCount: number }>
+      | undefined;
+    if (accessHistoryData) {
+      const now = Date.now();
+      const windowStart = now - this.accessRateWindowMs;
+      for (const [key, history] of Object.entries(accessHistoryData)) {
+        // Filter out old timestamps
+        const recentTimestamps = history.timestamps.filter((ts) => ts >= windowStart);
+        if (recentTimestamps.length > 0 || history.accessCount > 0) {
+          this.partitionAccessHistory.set(key, {
+            timestamps: recentTimestamps,
+            accessCount: history.accessCount,
+          });
+        }
+      }
     }
   }
 
@@ -583,6 +740,14 @@ export class MetadataCache {
     this.cache.delete(tableId);
     this.auxiliary.delete(tableId);
     this.partitionCache.delete(tableId);
+    // Clear partition statistics
+    this.partitionStats.delete(tableId);
+    // Clear partition access history
+    for (const key of this.partitionAccessHistory.keys()) {
+      if (key.startsWith(`${tableId}:`)) {
+        this.partitionAccessHistory.delete(key);
+      }
+    }
   }
 
   /**
@@ -592,6 +757,349 @@ export class MetadataCache {
     const tablePartitions = this.partitionCache.get(tableId);
     if (tablePartitions) {
       tablePartitions.delete(partitionKey);
+    }
+    // Also invalidate partition stats
+    const tableStats = this.partitionStats.get(tableId);
+    if (tableStats) {
+      tableStats.delete(partitionKey);
+    }
+  }
+
+  // =============================================================================
+  // Partition Statistics Methods
+  // =============================================================================
+
+  /**
+   * Convert partition spec to a consistent key string
+   */
+  private partitionSpecToKey(partitionSpec: PartitionSpec): string {
+    const sortedKeys = Object.keys(partitionSpec.values).sort();
+    const parts = sortedKeys.map((k) => `${k}=${partitionSpec.values[k]}`);
+    return parts.join('/');
+  }
+
+  /**
+   * Parse partition key back to spec
+   */
+  private keyToPartitionSpec(partitionKey: string): PartitionSpec {
+    const values: Record<string, string | number | boolean | null> = {};
+    if (!partitionKey) return { values };
+
+    const parts = partitionKey.split('/');
+    for (const part of parts) {
+      const [key, value] = part.split('=');
+      if (key) {
+        // Try to parse as number or boolean
+        if (value === 'null') {
+          values[key] = null;
+        } else if (value === 'true') {
+          values[key] = true;
+        } else if (value === 'false') {
+          values[key] = false;
+        } else if (value !== undefined && !isNaN(Number(value))) {
+          values[key] = Number(value);
+        } else {
+          values[key] = value ?? '';
+        }
+      }
+    }
+    return { values };
+  }
+
+  /**
+   * Get partition statistics
+   * @param tableName - The table name/ID
+   * @param partitionSpec - The partition specification
+   * @returns Partition statistics or null if not found/expired
+   */
+  async getPartitionStats(
+    tableName: string,
+    partitionSpec: PartitionSpec
+  ): Promise<PartitionStats | null> {
+    const tableStats = this.partitionStats.get(tableName);
+    if (!tableStats) {
+      return null;
+    }
+
+    const partitionKey = this.partitionSpecToKey(partitionSpec);
+    const entry = tableStats.get(partitionKey);
+
+    if (!entry) {
+      return null;
+    }
+
+    const now = Date.now();
+
+    // Check expiration
+    if (now >= entry.expiresAt) {
+      tableStats.delete(partitionKey);
+      return null;
+    }
+
+    // Track access for hot partition identification
+    this.trackPartitionAccess(tableName, partitionKey);
+
+    // Update access stats
+    entry.accessCount++;
+    entry.lastAccessedAt = now;
+
+    return entry.stats;
+  }
+
+  /**
+   * Update partition statistics
+   * @param tableName - The table name/ID
+   * @param partitionSpec - The partition specification
+   * @param stats - The partition statistics to store
+   */
+  async updatePartitionStats(
+    tableName: string,
+    partitionSpec: PartitionSpec,
+    stats: PartitionStats
+  ): Promise<void> {
+    let tableStats = this.partitionStats.get(tableName);
+    if (!tableStats) {
+      tableStats = new Map();
+      this.partitionStats.set(tableName, tableStats);
+    }
+
+    const partitionKey = this.partitionSpecToKey(partitionSpec);
+    const now = Date.now();
+
+    const entry: PartitionCacheEntry = {
+      spec: partitionSpec,
+      stats: {
+        ...stats,
+        collectedAt: stats.collectedAt || now,
+      },
+      cachedAt: now,
+      expiresAt: now + this.partitionStatsTtlMs,
+      accessCount: 0,
+      lastAccessedAt: now,
+    };
+
+    tableStats.set(partitionKey, entry);
+
+    // Also notify coherence manager if enabled
+    if (this.coherenceManager) {
+      // Partition stats update doesn't require invalidation on other DOs
+      // but we could emit an event for monitoring
+    }
+  }
+
+  /**
+   * List all partitions for a table
+   * @param tableName - The table name/ID
+   * @returns Array of partition specifications with their stats
+   */
+  async listPartitions(
+    tableName: string
+  ): Promise<Array<{ spec: PartitionSpec; stats: PartitionStats }>> {
+    const tableStats = this.partitionStats.get(tableName);
+    if (!tableStats) {
+      return [];
+    }
+
+    const now = Date.now();
+    const result: Array<{ spec: PartitionSpec; stats: PartitionStats }> = [];
+
+    for (const [partitionKey, entry] of tableStats.entries()) {
+      // Skip expired entries
+      if (now >= entry.expiresAt) {
+        tableStats.delete(partitionKey);
+        continue;
+      }
+
+      result.push({
+        spec: entry.spec,
+        stats: entry.stats,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Invalidate partition statistics for a specific partition
+   */
+  async invalidatePartitionStats(tableName: string, partitionSpec: PartitionSpec): Promise<void> {
+    const tableStats = this.partitionStats.get(tableName);
+    if (!tableStats) {
+      return;
+    }
+
+    const partitionKey = this.partitionSpecToKey(partitionSpec);
+    tableStats.delete(partitionKey);
+
+    // Also clear access history
+    const accessKey = `${tableName}:${partitionKey}`;
+    this.partitionAccessHistory.delete(accessKey);
+  }
+
+  /**
+   * Invalidate all partition statistics for a table
+   */
+  async invalidateAllPartitionStats(tableName: string): Promise<void> {
+    this.partitionStats.delete(tableName);
+
+    // Clear access history for this table
+    for (const key of this.partitionAccessHistory.keys()) {
+      if (key.startsWith(`${tableName}:`)) {
+        this.partitionAccessHistory.delete(key);
+      }
+    }
+  }
+
+  // =============================================================================
+  // Partition Access Tracking & Hot Partition Identification
+  // =============================================================================
+
+  /**
+   * Track partition access for hot partition identification
+   */
+  private trackPartitionAccess(tableName: string, partitionKey: string): void {
+    const accessKey = `${tableName}:${partitionKey}`;
+    const now = Date.now();
+
+    let history = this.partitionAccessHistory.get(accessKey);
+    if (!history) {
+      history = { timestamps: [], accessCount: 0 };
+      this.partitionAccessHistory.set(accessKey, history);
+    }
+
+    history.timestamps.push(now);
+    history.accessCount++;
+
+    // Clean up old timestamps outside the window
+    const windowStart = now - this.accessRateWindowMs;
+    history.timestamps = history.timestamps.filter((ts) => ts >= windowStart);
+  }
+
+  /**
+   * Calculate access rate for a partition (accesses per second)
+   */
+  private getPartitionAccessRate(tableName: string, partitionKey: string): number {
+    const accessKey = `${tableName}:${partitionKey}`;
+    const history = this.partitionAccessHistory.get(accessKey);
+
+    if (!history || history.timestamps.length === 0) {
+      return 0;
+    }
+
+    const now = Date.now();
+    const windowStart = now - this.accessRateWindowMs;
+    const recentAccesses = history.timestamps.filter((ts) => ts >= windowStart).length;
+
+    // Convert to accesses per second
+    return recentAccesses / (this.accessRateWindowMs / 1000);
+  }
+
+  /**
+   * Check if a partition is considered "hot" based on access patterns
+   */
+  isHotPartition(tableName: string, partitionSpec: PartitionSpec): boolean {
+    const partitionKey = this.partitionSpecToKey(partitionSpec);
+    const accessRate = this.getPartitionAccessRate(tableName, partitionKey);
+    return accessRate >= this.hotPartitionThreshold;
+  }
+
+  /**
+   * Get partition access metrics
+   */
+  getPartitionAccessMetrics(
+    tableName: string,
+    partitionSpec: PartitionSpec
+  ): PartitionAccessMetrics | null {
+    const partitionKey = this.partitionSpecToKey(partitionSpec);
+    const accessKey = `${tableName}:${partitionKey}`;
+    const history = this.partitionAccessHistory.get(accessKey);
+
+    if (!history) {
+      return null;
+    }
+
+    const accessRate = this.getPartitionAccessRate(tableName, partitionKey);
+    const lastTimestamp = history.timestamps[history.timestamps.length - 1] || 0;
+
+    return {
+      tableId: tableName,
+      partitionKey,
+      accessCount: history.accessCount,
+      accessRate,
+      lastAccessedAt: lastTimestamp,
+      isHot: accessRate >= this.hotPartitionThreshold,
+    };
+  }
+
+  /**
+   * Get all hot partitions for a table
+   */
+  getHotPartitions(tableName: string): PartitionAccessMetrics[] {
+    const hotPartitions: PartitionAccessMetrics[] = [];
+    const prefix = `${tableName}:`;
+
+    for (const accessKey of this.partitionAccessHistory.keys()) {
+      if (accessKey.startsWith(prefix)) {
+        const partitionKey = accessKey.slice(prefix.length);
+        const spec = this.keyToPartitionSpec(partitionKey);
+        const metrics = this.getPartitionAccessMetrics(tableName, spec);
+
+        if (metrics && metrics.isHot) {
+          hotPartitions.push(metrics);
+        }
+      }
+    }
+
+    // Sort by access rate descending
+    hotPartitions.sort((a, b) => b.accessRate - a.accessRate);
+
+    return hotPartitions;
+  }
+
+  /**
+   * Get partition summary for a table
+   */
+  async getTablePartitionSummary(tableName: string): Promise<TablePartitionSummary> {
+    const partitions = await this.listPartitions(tableName);
+    const hotPartitions = this.getHotPartitions(tableName);
+
+    let totalRecordCount = 0;
+    let totalFileCount = 0;
+    let totalSizeBytes = 0;
+
+    for (const partition of partitions) {
+      totalRecordCount += partition.stats.recordCount;
+      totalFileCount += partition.stats.fileCount;
+      totalSizeBytes += partition.stats.sizeBytes;
+    }
+
+    return {
+      tableId: tableName,
+      partitionCount: partitions.length,
+      totalRecordCount,
+      totalFileCount,
+      totalSizeBytes,
+      hotPartitionCount: hotPartitions.length,
+      hotPartitions,
+    };
+  }
+
+  /**
+   * Configure partition statistics tracking
+   */
+  configurePartitionStats(config: {
+    ttlMs?: number;
+    accessRateWindowMs?: number;
+    hotPartitionThreshold?: number;
+  }): void {
+    if (config.ttlMs !== undefined) {
+      this.partitionStatsTtlMs = config.ttlMs;
+    }
+    if (config.accessRateWindowMs !== undefined) {
+      this.accessRateWindowMs = config.accessRateWindowMs;
+    }
+    if (config.hotPartitionThreshold !== undefined) {
+      this.hotPartitionThreshold = config.hotPartitionThreshold;
     }
   }
 
@@ -646,7 +1154,8 @@ export class MetadataCache {
    */
   private percentile(sorted: number[], p: number): number {
     const index = Math.ceil(p * sorted.length) - 1;
-    return sorted[Math.max(0, index)];
+    const value = sorted[Math.max(0, index)];
+    return value !== undefined ? value : 0;
   }
 
   /**
@@ -678,13 +1187,12 @@ export class MetadataCache {
    */
   private deserializeEntry(data: Record<string, unknown>): MetadataCacheEntry {
     const metadata = data.metadata as Record<string, unknown>;
-    return {
+    const entry: MetadataCacheEntry = {
       cachedAt: data.cachedAt as number,
       expiresAt: data.expiresAt as number,
       version: data.version as number,
       hitCount: data.hitCount as number,
       lastAccessedAt: data.lastAccessedAt as number,
-      pendingInvalidation: data.pendingInvalidation as boolean | undefined,
       metadata: {
         ...metadata,
         'last-sequence-number': BigInt(metadata['last-sequence-number'] as string),
@@ -704,6 +1212,11 @@ export class MetadataCache {
         })),
       } as IcebergMetadata,
     };
+    // Only set pendingInvalidation if it's true (respecting exactOptionalPropertyTypes)
+    if (data.pendingInvalidation === true) {
+      entry.pendingInvalidation = true;
+    }
+    return entry;
   }
 }
 

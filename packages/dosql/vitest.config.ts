@@ -10,6 +10,8 @@ export default defineWorkersConfig({
       'src/orm/knex/__tests__/**',
       // SQLite file compat tests require Node.js fs/os/path modules and better-sqlite3
       'src/__tests__/sqlite-file-compat.test.ts',
+      // SQLite CLI compat tests require Node.js child_process and sqlite3 CLI
+      'src/__tests__/sqlite-cli-compat.test.ts',
     ],
     // Disable isolated storage to avoid known issues with DO storage cleanup
     // See: https://developers.cloudflare.com/workers/testing/vitest-integration/known-issues/#isolated-storage

@@ -1150,9 +1150,15 @@ export class BunREPL {
   private outputFn: (msg: string) => void;
   private _interrupted: boolean = false;
   private _currentPromise: Promise<string> | null = null;
+  private _remoteUrl: string | null = null;
 
   /** Current connection mode */
-  readonly connectionMode: 'local' | 'http' | 'websocket';
+  private _connectionMode: 'local' | 'http' | 'websocket';
+
+  /** Get current connection mode */
+  get connectionMode(): 'local' | 'http' | 'websocket' {
+    return this._connectionMode;
+  }
 
   /** Current prompt string */
   prompt: string;
@@ -1170,7 +1176,7 @@ export class BunREPL {
 
   constructor(config: REPLConfig) {
     this.config = config;
-    this.connectionMode = config.mode;
+    this._connectionMode = config.mode;
     this.prompt = config.prompt ?? 'dosql> ';
     this.multilinePrompt = config.multilinePrompt ?? '   ...> ';
     this.format = config.format ?? 'table';
@@ -1304,6 +1310,29 @@ export class BunREPL {
           this.format = replState.format;
         }
 
+        // Handle .connect command
+        if (cmd === '.connect') {
+          const url = input.trim().split(/\s+/)[1];
+          if (!url) {
+            return 'Error: .connect requires a URL';
+          }
+          try {
+            return await this.connectRemote(url);
+          } catch (err) {
+            return `Error: ${err instanceof Error ? err.message : 'Unknown error'}`;
+          }
+        }
+
+        // Handle .disconnect command
+        if (cmd === '.disconnect') {
+          return await this.disconnect();
+        }
+
+        // Handle .status command
+        if (cmd === '.status') {
+          return this.getStatus();
+        }
+
         return result.output ?? '';
       }
     }
@@ -1351,6 +1380,107 @@ export class BunREPL {
    */
   interrupt(): void {
     this._interrupted = true;
+  }
+
+  /**
+   * Connect to a remote DoSQL endpoint
+   *
+   * @param url - The URL to connect to (http/https or ws/wss)
+   * @returns Status message
+   */
+  async connectRemote(url: string): Promise<string> {
+    // Close existing connection if any
+    if (this.connection) {
+      await this.connection.close();
+      this.connection = null;
+    }
+
+    // Determine connection type from URL
+    const isWebSocket = url.startsWith('ws://') || url.startsWith('wss://');
+    const isHTTP = url.startsWith('http://') || url.startsWith('https://');
+
+    if (!isWebSocket && !isHTTP) {
+      throw new Error('URL must start with http://, https://, ws://, or wss://');
+    }
+
+    try {
+      if (isWebSocket) {
+        this._connectionMode = 'websocket';
+        this.connection = await createWebSocketConnection({
+          url,
+          autoReconnect: true,
+        });
+      } else {
+        this._connectionMode = 'http';
+        this.connection = await createHTTPConnection({
+          url,
+        });
+      }
+
+      this._remoteUrl = url;
+      return `Connected to ${url} (${this._connectionMode} mode)`;
+    } catch (error) {
+      this._connectionMode = 'local';
+      this._remoteUrl = null;
+      throw error;
+    }
+  }
+
+  /**
+   * Disconnect from remote endpoint and optionally reconnect to local
+   *
+   * @returns Status message
+   */
+  async disconnect(): Promise<string> {
+    if (!this.connection) {
+      return 'Not connected';
+    }
+
+    const previousUrl = this._remoteUrl;
+    const previousMode = this._connectionMode;
+
+    await this.connection.close();
+    this.connection = null;
+    this._remoteUrl = null;
+
+    // Reconnect to local if we were on a remote connection
+    if (previousMode !== 'local' && this.config.database) {
+      this._connectionMode = 'local';
+      this.connection = await createLocalConnection({
+        database: this.config.database,
+      });
+      return `Disconnected from ${previousUrl}. Reconnected to local database.`;
+    }
+
+    this._connectionMode = 'local';
+    return previousUrl
+      ? `Disconnected from ${previousUrl}`
+      : 'Disconnected';
+  }
+
+  /**
+   * Get connection status information
+   *
+   * @returns Status string
+   */
+  getStatus(): string {
+    const lines: string[] = [];
+
+    lines.push(`Mode: ${this._connectionMode}`);
+
+    if (this._connectionMode === 'local') {
+      lines.push(`Database: ${this.config.database ?? ':memory:'}`);
+    } else if (this._remoteUrl) {
+      lines.push(`URL: ${this._remoteUrl}`);
+    }
+
+    lines.push(`Connected: ${this.connection ? 'yes' : 'no'}`);
+
+    if (this.connection && 'reconnect' in this.connection) {
+      lines.push('Auto-reconnect: enabled');
+    }
+
+    return lines.join('\n');
   }
 
   /**

@@ -14,6 +14,8 @@ export default defineConfig({
     include: [
       // Tests requiring Node.js file system access
       'src/__tests__/sqlite-file-compat.test.ts',
+      // SQLite CLI compatibility tests (requires sqlite3 CLI and child_process)
+      'src/__tests__/sqlite-cli-compat.test.ts',
       // Knex tests require node:os, node:fs, node:path
       'src/orm/knex/__tests__/**/*.test.ts',
     ],
