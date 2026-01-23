@@ -556,14 +556,20 @@ export class AttachmentManager implements DatabaseManager {
         const connection = this._connections.get(dbAlias);
         const database = this._databases.get(dbAlias);
 
-        if (!connection || !database) {
+        if (!database) {
           prepareResults.push({ db: dbAlias, ready: false });
           continue;
         }
 
-        // Check connection health
-        const isHealthy = await connection.ping().catch(() => false);
-        prepareResults.push({ db: dbAlias, ready: isHealthy && database.isConnected });
+        // If there's an explicit connection, check its health
+        if (connection) {
+          const isHealthy = await connection.ping().catch(() => false);
+          prepareResults.push({ db: dbAlias, ready: isHealthy && database.isConnected });
+        } else {
+          // For databases without explicit connections (e.g., main, temp),
+          // use the database's isConnected flag
+          prepareResults.push({ db: dbAlias, ready: database.isConnected });
+        }
       }
 
       // Check if all databases are ready

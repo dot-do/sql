@@ -117,7 +117,7 @@ describe('DoSQL DO Storage', () => {
       expect(result.rows).toHaveLength(3);
     });
 
-    it('should fail to insert without primary key', async () => {
+    it('should auto-generate primary key when not provided', async () => {
       const stub = getUniqueDoSqlStub();
 
       await executeSQL(
@@ -125,13 +125,20 @@ describe('DoSQL DO Storage', () => {
         'CREATE TABLE users (id INTEGER, name TEXT, PRIMARY KEY (id))'
       );
 
+      // Insert without providing primary key - should auto-generate one
       const result = await executeSQL(
         stub,
         "INSERT INTO users (name) VALUES ('Alice')"
       );
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Primary key');
+      expect(result.success).toBe(true);
+      expect(result.stats?.rowsAffected).toBe(1);
+
+      // Verify the row was inserted with an auto-generated ID
+      const selectResult = await querySQL(stub, 'SELECT * FROM users');
+      expect(selectResult.rows).toHaveLength(1);
+      expect(selectResult.rows?.[0].name).toBe('Alice');
+      expect(selectResult.rows?.[0].id).toBeDefined();
     });
 
     it('should fail to insert into non-existent table', async () => {

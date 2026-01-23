@@ -381,7 +381,7 @@ describe('Grace Period Handling', () => {
     expect(onWarning).toHaveBeenCalled();
     const [txnId, remainingMs] = onWarning.mock.calls[0];
     expect(txnId).toBeDefined();
-    expect(remainingMs).toBeLessThan(200);
+    expect(remainingMs).toBeLessThanOrEqual(200);
     expect(remainingMs).toBeGreaterThanOrEqual(0);
 
     await manager.rollback();

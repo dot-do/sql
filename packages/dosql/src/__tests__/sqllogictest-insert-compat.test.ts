@@ -360,7 +360,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
   // ===========================================================================
 
   describe('INSERT without column list - Quoted Identifiers', () => {
-    it.fails('should accept INSERT into table with quoted name', () => {
+    it('should accept INSERT into table with quoted name', () => {
       db.exec('CREATE TABLE "my table" (a INTEGER, b TEXT)');
 
       db.exec('INSERT INTO "my table" VALUES(1, \'test\')');
@@ -370,7 +370,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 1, b: 'test' });
     });
 
-    it.fails('should accept INSERT into table with reserved word name', () => {
+    it('should accept INSERT into table with reserved word name', () => {
       db.exec('CREATE TABLE "select" (a INTEGER, b TEXT)');
 
       db.exec('INSERT INTO "select" VALUES(1, \'reserved\')');
@@ -435,7 +435,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 1, b: '' });
     });
 
-    it.fails('should handle special characters in string values', () => {
+    it('should handle special characters in string values', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       // Single quotes escaped by doubling

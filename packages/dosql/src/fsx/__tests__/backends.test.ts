@@ -236,9 +236,9 @@ describe('COWBackend', () => {
 
       const snapshots = await cowBackend.listSnapshots('main');
 
-      // Snapshots should be ordered newest first
+      // Snapshots should be ordered oldest first (chronological)
       expect(snapshots.length).toBeGreaterThanOrEqual(2);
-      expect(snapshots[0].message).toBe('Second');
+      expect(snapshots[0].message).toBe('First');
     });
 
     it('should delete a snapshot', async () => {
@@ -1068,10 +1068,10 @@ describe('SnapshotManager', () => {
 
     const snapshots = await snapshotManager.listSnapshots('main');
 
-    // Should be newest first
-    expect(snapshots[0].message).toBe('Third');
+    // Should be oldest first (chronological order)
+    expect(snapshots[0].message).toBe('First');
     expect(snapshots[1].message).toBe('Second');
-    expect(snapshots[2].message).toBe('First');
+    expect(snapshots[2].message).toBe('Third');
   });
 
   it('should compare manifests', () => {

@@ -770,10 +770,10 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     });
 
     /**
-     * KNOWN FAILURE: CASE with aggregate functions
-     * Requires GROUP BY support (not implemented in InMemoryEngine)
+     * CASE with aggregate functions
+     * Requires GROUP BY support
      */
-    it.fails('should handle CASE inside aggregate functions', () => {
+    it('should handle CASE inside aggregate functions', () => {
       const result = db.prepare(`
         SELECT customer,
           SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END) as completed_total,
@@ -791,10 +791,10 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
     });
 
     /**
-     * KNOWN FAILURE: COUNT with CASE (conditional counting)
-     * Requires GROUP BY support (not implemented in InMemoryEngine)
+     * COUNT with CASE (conditional counting)
+     * Requires GROUP BY support
      */
-    it.fails('should handle COUNT with CASE for conditional counting', () => {
+    it('should handle COUNT with CASE for conditional counting', () => {
       const result = db.prepare(`
         SELECT customer,
           COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_count,
