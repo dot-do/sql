@@ -134,6 +134,7 @@ DoSQL operates within Cloudflare's edge infrastructure. Understanding the trust 
 | **Data at Rest Exposure** | Strong | Cloudflare R2 encryption | AES-256 server-side encryption |
 | **DoS via Query Complexity** | Configurable | Query timeouts, statement limits | Configure based on workload |
 | **Memory Exhaustion** | Configurable | Result row limits, batch size limits | Set appropriate limits |
+| **Replay Attacks** | Configurable | Token expiration, nonce validation | Implement short-lived tokens |
 
 #### What Requires Your Implementation
 
@@ -276,7 +277,7 @@ Sometimes you need dynamic table or column names. Use allow-lists:
 
 ```typescript
 // SAFE: Allow-list for table names
-const ALLOWED_TABLES = new Set(['users', 'orders', 'products']);
+const ALLOWED_TABLES: ReadonlySet<string> = new Set(['users', 'orders', 'products']);
 
 function validateTableName(name: string): string {
   if (!ALLOWED_TABLES.has(name)) {
@@ -290,7 +291,7 @@ const stmt = db.prepare(`SELECT * FROM ${table} WHERE id = ?`);
 const result = stmt.get(id);
 
 // SAFE: Map user input to allowed columns
-const SORT_COLUMNS: Record<string, string> = {
+const SORT_COLUMNS: Readonly<Record<string, string>> = {
   'name': 'name',
   'date': 'created_at',
   'email': 'email',
@@ -303,7 +304,7 @@ if (!sortColumn) {
 const sql = `SELECT * FROM users ORDER BY ${sortColumn}`;
 
 // SAFE: Allow-list for sort direction
-const SORT_DIRECTIONS = new Set(['ASC', 'DESC']);
+const SORT_DIRECTIONS: ReadonlySet<string> = new Set(['ASC', 'DESC']);
 const direction = SORT_DIRECTIONS.has(request.query.dir?.toUpperCase())
   ? request.query.dir.toUpperCase()
   : 'ASC';
@@ -421,24 +422,24 @@ Row-Level Filtering (WEAK):              DO-Level Isolation (STRONG):
 ```typescript
 // WRONG: Shared DO for multiple tenants
 const doId = env.DOSQL_DO.idFromName('shared-database');
-// This puts all tenants in the same database - NO ISOLATION
+// SECURITY ISSUE: All tenants share the same database - NO ISOLATION
 
 // WRONG: Tenant ID in query instead of DO routing
 const result = db.query(
   `SELECT * FROM users WHERE tenant_id = ?`,
   [tenantId]
 );
-// Bug: if you forget the WHERE clause, you leak data
+// SECURITY ISSUE: Forgetting the WHERE clause leaks all tenant data
 
 // WRONG: Trusting tenant ID from user input
 const tenantId = request.headers.get('X-Tenant-Id');
 const doId = env.DOSQL_DO.idFromName(`tenant:${tenantId}`);
-// Attacker can specify any tenant ID in the header!
+// SECURITY ISSUE: Attacker can specify any tenant ID in the header!
 
 // WRONG: Trusting tenant ID from URL parameter
 const tenantId = new URL(request.url).searchParams.get('tenant');
 const doId = env.DOSQL_DO.idFromName(`tenant:${tenantId}`);
-// Attacker can specify any tenant ID in the URL!
+// SECURITY ISSUE: Attacker can specify any tenant ID in the URL!
 
 // CORRECT: Derive tenant ID from verified authentication token
 const token = await verifyJWT(request.headers.get('Authorization'), env.JWT_SECRET);

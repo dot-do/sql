@@ -1,10 +1,10 @@
 # sql.do
 
-**You deserve a database that keeps up with you.**
+**Your database is the slowest part of your stack.**
 
-You have shipped code to the edge. Your Workers run in 300+ cities. Your users get sub-50ms responses worldwide. But every time you query your database, you watch that latency spike. The centralized database becomes the bottleneck. The edge becomes a lie.
+You shipped to the edge. Your Workers run in 300+ cities. Your users expect sub-50ms responses. But every database query crawls back to a single region, and your edge advantage vanishes.
 
-**DoSQL changes that.**
+**DoSQL puts SQL where your code runs.**
 
 ```typescript
 import { DB } from '@dotdo/dosql'
@@ -23,19 +23,19 @@ const dashboard = await db.query<Metrics>(`
 `, [tenantId])
 ```
 
-## The Problem You Know Too Well
+## The Tradeoff That Should Not Exist
 
-You have been here before. You chose the edge because latency matters. Because your users deserve fast. But traditional databases force a painful choice:
+Every edge developer faces the same impossible choice:
 
-- **Centralized SQL**: Powerful queries, but every request crawls back to us-east-1
-- **Edge KV stores**: Fast reads, but no joins, no transactions, no SQL
-- **Distributed SQL**: Complex setup, operational nightmares, unpredictable costs
+- **Centralized SQL**: Full power, but 200ms+ roundtrips kill your UX
+- **Edge KV**: Fast reads, but no joins, no transactions, no queries
+- **Distributed SQL**: Complex ops, unpredictable costs, months to set up
 
-You are stuck choosing between the power of SQL and the speed of the edge.
+You should not have to choose between SQL and speed.
 
-## Your Path Forward
+## SQL at the Edge. For Real.
 
-DoSQL is a complete SQL database that runs inside Cloudflare Durable Objects. Not a proxy. Not a cache. A real database engine with transactions, migrations, and type safety that deploys with your Worker.
+DoSQL is a complete SQL database inside Cloudflare Durable Objects. Not a proxy. Not a cache. A real database engine with ACID transactions, migrations, and type safety that deploys with your Worker.
 
 ### Step 1: Install
 
@@ -93,9 +93,9 @@ export class TenantDatabase implements DurableObject {
 
 ## What You Get
 
-### Type-Safe SQL
+### Type-Safe Queries
 
-Your queries are validated at compile time. Typos become build errors, not runtime surprises.
+Typos become build errors, not 3am pages.
 
 ```typescript
 interface User {
@@ -116,9 +116,9 @@ users[0].email  // string
 users[0].actve  // Error: Property 'actve' does not exist
 ```
 
-### Transactions That Actually Work
+### Real Transactions
 
-ACID transactions at the edge. No compromises.
+ACID at the edge. No eventual consistency. No compromises.
 
 ```typescript
 await db.transaction(async (tx) => {
@@ -137,12 +137,12 @@ await db.transaction(async (tx) => {
     [userId]
   )
 })
-// All or nothing. Isolation guaranteed.
+// All or nothing. Always.
 ```
 
 ### Time Travel
 
-Made a mistake? Query the past.
+Deleted the wrong rows? Query the past.
 
 ```typescript
 // Current data
@@ -161,9 +161,9 @@ const history = await db.query(`
 `)
 ```
 
-### Git-Style Branching
+### Database Branching
 
-Test schema changes without fear.
+Test schema changes without touching production.
 
 ```typescript
 // Create a branch for your experiment
@@ -182,9 +182,9 @@ await db.merge('feature-new-pricing')
 await db.deleteBranch('feature-new-pricing')
 ```
 
-### Virtual Tables
+### Query Anything
 
-Query anything with SQL. APIs, files, the web itself.
+APIs, Parquet files, the web. If it has data, SQL can query it.
 
 ```typescript
 // Query a JSON API like a table
@@ -212,38 +212,35 @@ const enriched = await db.query(`
 `)
 ```
 
-### CDC Streaming
+### Change Data Capture
 
-Stream changes to your data warehouse in real-time.
+Stream every INSERT, UPDATE, DELETE to your lakehouse.
 
 ```typescript
 import { createCDC } from '@dotdo/dosql/cdc'
 
 const cdc = createCDC(db)
 
-for await (const event of cdc.subscribe()) {
-  // Every INSERT, UPDATE, DELETE as it happens
-  console.log(event.op, event.table, event.data)
-
-  // Stream to your lakehouse
-  await lakehouse.append(event)
+for await (const change of cdc.subscribe()) {
+  console.log(change.op, change.table, change.data)
+  await lakehouse.append(change)
 }
 ```
 
-## The Numbers
+## Performance
 
-| Metric | DoSQL | Traditional Edge |
-|--------|-------|------------------|
+| Metric | DoSQL | Centralized DB |
+|--------|-------|----------------|
 | Bundle Size | **7.4 KB** gzipped | N/A |
-| Query Latency | **< 1ms** local | 50-200ms roundtrip |
-| Cold Start | **< 10ms** | Varies |
-| Transactions | **Full ACID** | Eventually consistent |
+| Query Latency | **< 1ms** | 50-200ms |
+| Cold Start | **< 10ms** | N/A |
+| Transactions | **Full ACID** | Full ACID |
 
-## What Happens If You Do Nothing
+## The Cost of Waiting
 
-The gap between your edge compute and your centralized database will only grow. Your users will feel it in every slow dashboard load, every laggy form submission, every timeout error. Your competitors who solve this will ship faster features with better UX.
+Every day you run centralized queries from the edge, your users feel it. Slow dashboards. Laggy forms. Timeout errors. Your competitors who solve this first will ship faster and win.
 
-## Start Today
+## Get Started in 60 Seconds
 
 ```bash
 npm install @dotdo/dosql
@@ -252,17 +249,16 @@ npm install @dotdo/dosql
 ```typescript
 import { DB } from '@dotdo/dosql'
 
-// Five lines to a database at the edge
 const db = await DB('my-app')
-await db.run('CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT)')
+await db.run('CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)')
 await db.run('INSERT INTO items (name) VALUES (?)', ['Hello, Edge'])
 const items = await db.query('SELECT * FROM items')
-console.log(items) // [{ id: 1, name: 'Hello, Edge' }]
+// [{ id: 1, name: 'Hello, Edge' }]
 ```
 
-Your users deserve fast. Your code deserves type safety. Your operations deserve simplicity.
+Fast for your users. Type-safe for your team. Simple to operate.
 
-**DoSQL gives you all three.**
+**Stop choosing. Start shipping.**
 
 ---
 
@@ -290,6 +286,6 @@ MIT
 
 ---
 
-Built for developers who believe the edge should be more than a CDN.
+**Built for developers who refuse to compromise.**
 
-[Get Started](https://sql.do/docs) | [GitHub](https://github.com/dotdo/sql) | [npm](https://www.npmjs.com/package/@dotdo/dosql)
+[Get Started](https://sql.do/docs) | [View on GitHub](https://github.com/dotdo/sql) | [npm](https://www.npmjs.com/package/@dotdo/dosql)

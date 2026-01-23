@@ -70,9 +70,9 @@ Astro's content-focused architecture pairs excellently with DoSQL's edge-native 
 |    DoSQL Durable       |     |    DoSQL Durable       |
 |    Object (Tenant A)   |     |    Object (Tenant B)   |
 |  +------------------+  |     |  +------------------+  |
-|  |   SQLite DB      |  |     |   SQLite DB      |    |
-|  |   - posts        |  |     |   - posts        |    |
-|  |   - comments     |  |     |   - comments     |    |
+|  |   SQLite DB      |  |     |  |   SQLite DB      |  |
+|  |   - posts        |  |     |  |   - posts        |  |
+|  |   - comments     |  |     |  |   - comments     |  |
 |  +------------------+  |     |  +------------------+  |
 +------------------------+     +------------------------+
 ```

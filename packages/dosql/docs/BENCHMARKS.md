@@ -34,7 +34,7 @@ DoSQL is a native TypeScript SQL engine built for Cloudflare Workers and Durable
 
 1. **Zero Network Hops**: Unlike external databases, DoSQL runs inside your Durable Object. Queries execute in-process with no network roundtrip.
 
-2. **Native TypeScript**: No WASM overhead. The query engine is pure TypeScript optimized for V8.
+2. **Native TypeScript**: No WebAssembly overhead. The query engine is pure TypeScript optimized for V8.
 
 3. **Tiered Storage**: Hot data stays in Durable Object storage (~1ms), while cold data migrates to R2.
 
@@ -51,7 +51,7 @@ DoSQL is a native TypeScript SQL engine built for Cloudflare Workers and Durable
 
 | Trade-off | Impact | Mitigation |
 |-----------|--------|------------|
-| Cold start overhead | ~50-100ms on first request to hibernated DO | Use WebSocket connections to keep DO warm |
+| Cold start overhead | ~50-100ms on first request to hibernated DO | Use WebSocket connections or alarms to keep DO warm |
 | No read replicas | All reads route to single DO | Application-level caching with Cache API |
 | Write throughput ceiling | ~5,000 ops/sec per DO | Shard across multiple DOs by tenant/partition key |
 | Hot tier capacity | ~100MB per DO | Tiered storage auto-migrates old data to R2 |
@@ -522,7 +522,7 @@ LIMIT 100 OFFSET 0;
 Prepared statements cache the query plan, avoiding repeated parsing.
 
 ```typescript
-// Bad: Parse query each time
+// Bad: Parse query each time (also vulnerable to SQL injection)
 for (const id of userIds) {
   db.prepare(`SELECT * FROM users WHERE id = ${id}`).get();
 }

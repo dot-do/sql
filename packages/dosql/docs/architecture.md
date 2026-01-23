@@ -1,12 +1,12 @@
 # DoSQL Architecture Overview
 
-This guide explains how DoSQL works under the hood. Whether you're evaluating DoSQL for your project, debugging an issue, or contributing to the codebase, this document will help you understand the key design decisions and how the pieces fit together.
+This guide explains how DoSQL works under the hood. Whether you are evaluating DoSQL for your project, debugging an issue, or contributing to the codebase, this document will help you understand the key design decisions and how the pieces fit together.
 
 ## What is DoSQL?
 
 DoSQL is a SQL database engine built from scratch for Cloudflare Workers. Unlike traditional databases that rely on WebAssembly ports (like SQLite-WASM or PGLite), DoSQL is written entirely in TypeScript and designed specifically for Cloudflare's Durable Objects platform.
 
-**Key insight**: By building natively for Durable Objects instead of porting an existing database, DoSQL achieves a 7KB bundle size versus 500KB-4MB for WASM alternatives.
+**Key insight**: By building natively for Durable Objects instead of porting an existing database, DoSQL achieves a 7 KB bundle size versus 500 KB to 4 MB for WASM alternatives.
 
 ## High-Level Architecture
 
@@ -109,7 +109,7 @@ SQL: "SELECT * FROM users WHERE active = ?"
    [*]     "users"    active = ?
 ```
 
-**Key files**: `src/parser/unified.ts`, `src/parser/shared/tokenizer.ts`
+**Key files**: `src/parser/unified.ts`, `src/parser/shared/tokenizer.ts`, `src/parser.ts`
 
 ### Stage 2: Planning
 
@@ -134,7 +134,7 @@ flowchart TD
     G --> H
 ```
 
-**Key files**: `src/planner/index.ts`, `src/planner/stats.ts`
+**Key files**: `src/planner/`, `src/planner/stats.ts`, `src/planner/optimizer.ts`, `src/planner/cost.ts`
 
 ### Stage 3: Execution
 
@@ -155,13 +155,13 @@ Each operator follows a **pull-based** model:
 
 This approach is memory-efficient because it processes one row at a time rather than materializing entire result sets.
 
-**Key files**: `src/engine/executor.ts`, `src/engine/operators/`
+**Key files**: `src/engine/executor.ts`, `src/engine/operators/`, `src/engine/planner.ts`
 
 ## Core Components
 
 ### B-tree Index
 
-The B-tree is DoSQL's primary data structure for OLTP workloads. It's a B+ tree implementation optimized for Durable Object storage:
+The B-tree is DoSQL's primary data structure for OLTP workloads. It is a B+ tree implementation optimized for Durable Object storage:
 
 ```mermaid
 flowchart TD
@@ -187,7 +187,7 @@ flowchart TD
 - Linked leaf nodes enable efficient range scans
 - Custom key/value codecs support any data type
 
-**Key files**: `src/btree/`
+**Key files**: `src/btree/`, `src/index/`
 
 ### Columnar Storage
 
@@ -212,7 +212,7 @@ Columnar storage is faster for analytics because:
 
 ### Storage Layer (FSX)
 
-The FSX abstraction provides a unified interface over different storage backends:
+The FSX (File System Abstraction) layer provides a unified interface over different storage backends. This abstraction enables transparent tiered storage with automatic data migration:
 
 ```mermaid
 flowchart TD
@@ -221,27 +221,30 @@ flowchart TD
         A --> B[DOBackend<br/>Hot Tier]
         A --> C[R2Backend<br/>Cold Tier]
         A --> D[TieredBackend<br/>Auto-migration]
+        A --> E[COWBackend<br/>Copy-on-Write]
     end
 
-    B --> E[Durable Object Storage<br/>~1ms latency<br/>2MB max value]
-    C --> F[R2 Object Storage<br/>~50-100ms latency<br/>Unlimited capacity]
+    B --> F[Durable Object Storage<br/>~1ms latency<br/>2MB max value]
+    C --> G[R2 Object Storage<br/>~50-100ms latency<br/>Unlimited capacity]
     D --> B
     D --> C
+    E --> B
 ```
 
 **Tiered Storage Flow**:
 
 1. **Writes** go to hot tier (DO storage) for low latency
-2. **Background migration** moves old/large data to cold tier (R2)
+2. **Background migration** moves old or large data to cold tier (R2)
 3. **Reads** check hot tier first, then cold tier
+4. **Copy-on-Write** enables time-travel and branching functionality
 
 This gives you fast access to recent data while supporting unlimited storage capacity.
 
-**Key files**: `src/fsx/`
+**Key files**: `src/fsx/`, `src/fsx/tiered.ts`, `src/fsx/do-backend.ts`, `src/fsx/r2-backend.ts`, `src/fsx/cow-backend.ts`
 
 ### Write-Ahead Log (WAL)
 
-The WAL ensures durability by recording all changes before they're applied:
+The WAL ensures durability by recording all changes before they are applied:
 
 ```mermaid
 sequenceDiagram
@@ -262,20 +265,29 @@ sequenceDiagram
     TxManager-->>App: Success
 ```
 
-**WAL Entry Format**:
-```
-+--------+--------+--------+--------+--------+--------+
-| LSN    | TxnId  |  Op    | Table  | Key    | Value  |
-| bigint | string | enum   | string | bytes  | bytes  |
-+--------+--------+--------+--------+--------+--------+
+**WAL Entry Structure**:
+
+```typescript
+interface WALEntry {
+  lsn: LSN;              // Log Sequence Number (branded bigint)
+  timestamp: number;     // Unix timestamp (ms)
+  txnId: TransactionId;  // Transaction ID (branded string)
+  op: WALOperation;      // 'INSERT' | 'UPDATE' | 'DELETE' | 'BEGIN' | 'COMMIT' | 'ROLLBACK'
+  table: string;         // Target table name
+  key?: Uint8Array;      // Primary key for UPDATE/DELETE
+  before?: Uint8Array;   // Previous value (enables rollback)
+  after?: Uint8Array;    // New value for INSERT/UPDATE
+  hlc?: HLCTimestamp;    // Hybrid Logical Clock for causal ordering
+}
 ```
 
 The WAL enables:
-- **Crash recovery**: Replay uncommitted transactions
+- **Crash recovery**: Replay uncommitted transactions from checkpoints
 - **Point-in-time recovery**: Restore to any LSN
 - **CDC streaming**: Derive change events from WAL entries
+- **Causal ordering**: HLC timestamps enable correct ordering in distributed scenarios
 
-**Key files**: `src/wal/`
+**Key files**: `src/wal/`, `src/wal/writer.ts`, `src/wal/reader.ts`, `src/wal/checkpoint.ts`, `src/wal/types.ts`
 
 ### Transaction Manager
 
@@ -294,11 +306,21 @@ stateDiagram-v2
     RolledBack --> [*]
 ```
 
-**Isolation Levels**:
-- **SERIALIZABLE** (default): Full isolation, no anomalies
-- **SNAPSHOT**: Read from consistent snapshot, write conflicts detected
+**Transaction Modes** (SQLite-compatible):
+- **DEFERRED** (default): Locks acquired only when needed
+- **IMMEDIATE**: Acquires write lock immediately
+- **EXCLUSIVE**: Acquires exclusive lock, preventing all other access
 
-**Key files**: `src/transaction/`
+**Isolation Levels**:
+| Level | Description |
+|-------|-------------|
+| READ_UNCOMMITTED | Dirty reads allowed (lowest isolation) |
+| READ_COMMITTED | Only committed data visible |
+| REPEATABLE_READ | Repeatable reads within transaction |
+| SNAPSHOT | MVCC-based snapshot isolation |
+| SERIALIZABLE | Full serialization (default, highest isolation) |
+
+**Key files**: `src/transaction/`, `src/transaction/manager.ts`, `src/transaction/types.ts`
 
 ## Change Data Capture (CDC)
 

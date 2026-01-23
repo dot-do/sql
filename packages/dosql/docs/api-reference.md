@@ -81,26 +81,20 @@ Complete API documentation for DoSQL - a type-safe SQL database for Cloudflare W
 DoSQL provides multiple subpath exports for importing specific functionality:
 
 ```typescript
-// Main entry point - Database, Statement, types, errors
-import { Database, createDatabase, DatabaseError } from '@dotdo/dosql';
+// Main entry point - types, factories, errors
+import { createDatabase, createQuery, DoSQLError, IsolationLevel } from 'dosql';
 
 // RPC client/server for remote database access
-import { createWebSocketClient, createHttpClient, DoSQLTarget } from '@dotdo/dosql/rpc';
+import { createWebSocketClient, createHttpClient, DoSQLTarget } from 'dosql/rpc';
 
 // Write-Ahead Log for durability
-import { createWALWriter, createWALReader, createCheckpointManager } from '@dotdo/dosql/wal';
+import { createWALWriter, createWALReader, createCheckpointManager } from 'dosql/wal';
 
 // Change Data Capture for real-time streaming
-import { createCDC, createCDCSubscription, createReplicationSlotManager } from '@dotdo/dosql/cdc';
+import { createCDC, createCDCSubscription, createReplicationSlotManager } from 'dosql/cdc';
 
 // Transaction utilities
-import { createTransactionManager, executeInTransaction, IsolationLevel } from '@dotdo/dosql/transaction';
-
-// Branching for git-like database versioning
-import { createBranchManager, DOBranchManager } from '@dotdo/dosql/branch';
-
-// Migrations
-import { createMigrationRunner, createSchemaTracker, initializeWithMigrations } from '@dotdo/dosql/migrations';
+import { createTransactionManager, executeInTransaction, IsolationLevel } from 'dosql/transaction';
 
 // FSX - File System Abstraction for tiered storage
 import {
@@ -109,33 +103,33 @@ import {
   createTieredBackend,
   createCOWBackend,
   MemoryFSXBackend,
-} from '@dotdo/dosql/fsx';
-
-// Observability - tracing and metrics
-import { createObservability, createDoSQLMetrics, instrumentQuery } from '@dotdo/dosql/observability';
+} from 'dosql/fsx';
 
 // ORM adapters
-import { createPrismaAdapter } from '@dotdo/dosql/orm/prisma';
-import { createKyselyAdapter } from '@dotdo/dosql/orm/kysely';
-import { createKnexAdapter } from '@dotdo/dosql/orm/knex';
-import { createDrizzleAdapter } from '@dotdo/dosql/orm/drizzle';
+import { createPrismaAdapter } from 'dosql/orm/prisma';
+import { createKyselyAdapter } from 'dosql/orm/kysely';
+import { createKnexAdapter } from 'dosql/orm/knex';
+import { createDrizzleAdapter } from 'dosql/orm/drizzle';
+
+// Stored procedures
+import { createProcedureRegistry, createProcedureExecutor, procedure } from 'dosql/proc';
 ```
 
 | Subpath | Description |
 |---------|-------------|
-| `@dotdo/dosql` | Main entry point with Database class, types, and errors |
-| `@dotdo/dosql/rpc` | RPC client/server for remote database operations |
-| `@dotdo/dosql/wal` | Write-Ahead Log for durability and recovery |
-| `@dotdo/dosql/cdc` | Change Data Capture for real-time change streaming |
-| `@dotdo/dosql/transaction` | Transaction management utilities |
-| `@dotdo/dosql/branch` | Git-like branching for database versioning |
-| `@dotdo/dosql/migrations` | Schema migrations with Drizzle compatibility |
-| `@dotdo/dosql/fsx` | File System Abstraction with tiered storage backends |
-| `@dotdo/dosql/observability` | OpenTelemetry tracing and Prometheus metrics |
-| `@dotdo/dosql/orm/prisma` | Prisma ORM adapter |
-| `@dotdo/dosql/orm/kysely` | Kysely query builder adapter |
-| `@dotdo/dosql/orm/knex` | Knex.js query builder adapter |
-| `@dotdo/dosql/orm/drizzle` | Drizzle ORM adapter |
+| `dosql` | Main entry point with type-safe SQL parser, factories, and errors |
+| `dosql/rpc` | RPC client/server for remote database operations |
+| `dosql/wal` | Write-Ahead Log for durability and recovery |
+| `dosql/cdc` | Change Data Capture for real-time change streaming |
+| `dosql/transaction` | Transaction management utilities |
+| `dosql/fsx` | File System Abstraction with tiered storage backends |
+| `dosql/proc` | Stored procedures with ESM module support |
+| `dosql/orm/prisma` | Prisma ORM adapter |
+| `dosql/orm/kysely` | Kysely query builder adapter |
+| `dosql/orm/knex` | Knex.js query builder adapter |
+| `dosql/orm/drizzle` | Drizzle ORM adapter |
+
+**Note:** Branching, migrations, and observability are available via the main entry point re-exports. See the relevant sections below for usage.
 
 ---
 
@@ -197,31 +191,28 @@ interface DatabaseOptions {
 #### Examples
 
 ```typescript
-import { Database, createDatabase } from '@dotdo/dosql';
+import { createDatabase } from 'dosql';
 
 // Example 1: In-memory database (default)
-const db = new Database();
-
-// Example 2: Using factory function
 const db = createDatabase();
 
-// Example 3: Named in-memory database
-const db = new Database(':memory:');
+// Example 2: Named in-memory database
+const db = createDatabase(':memory:');
 
-// Example 4: With options
-const db = new Database(':memory:', {
+// Example 3: With options
+const db = createDatabase(':memory:', {
   readonly: false,
   timeout: 10000,
   statementCacheSize: 200,
 });
 
-// Example 5: With verbose logging
-const db = new Database(':memory:', {
+// Example 4: With verbose logging
+const db = createDatabase(':memory:', {
   verbose: console.log,
 });
 
-// Example 6: Read-only mode
-const db = new Database(':memory:', {
+// Example 5: Read-only mode
+const db = createDatabase(':memory:', {
   readonly: true,
 });
 ```
@@ -255,7 +246,7 @@ class Database {
 #### Example: Checking Database State
 
 ```typescript
-const db = new Database();
+const db = createDatabase();
 
 console.log(db.name);           // ':memory:'
 console.log(db.readonly);       // false
@@ -342,7 +333,7 @@ const guests = stmt.all('guest');
 ##### Error Handling
 
 ```typescript
-import { DatabaseError, DatabaseErrorCode } from '@dotdo/dosql';
+import { DatabaseError, DatabaseErrorCode } from 'dosql';
 
 try {
   const stmt = db.prepare('SELECT * FROM nonexistent_table');
@@ -432,10 +423,10 @@ db.exec(`
 ##### Error Handling
 
 ```typescript
-import { DatabaseError, ReadOnlyError } from '@dotdo/dosql';
+import { DatabaseError, ReadOnlyError } from 'dosql';
 
 // Read-only database error
-const readOnlyDb = new Database(':memory:', { readonly: true });
+const readOnlyDb = createDatabase(':memory:', { readonly: true });
 try {
   readOnlyDb.exec('CREATE TABLE test (id INTEGER)');
 } catch (error) {
@@ -473,12 +464,12 @@ close(): this
 
 ```typescript
 // Example 1: Basic usage
-const db = new Database();
+const db = createDatabase();
 // ... use database
 db.close();
 
 // Example 2: Try-finally pattern
-const db = new Database();
+const db = createDatabase();
 try {
   db.exec('CREATE TABLE test (id INTEGER)');
   db.prepare('INSERT INTO test VALUES (?)').run(1);

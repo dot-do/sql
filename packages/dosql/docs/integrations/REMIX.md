@@ -63,9 +63,9 @@ Remix and DoSQL are a natural fit for Cloudflare Workers:
 |    DoSQL Durable       |     |    DoSQL Durable       |
 |    Object (Tenant A)   |     |    Object (Tenant B)   |
 |  +------------------+  |     |  +------------------+  |
-|  |   SQLite DB      |  |     |   SQLite DB      |    |
-|  |   - users        |  |     |   - users        |    |
-|  |   - posts        |  |     |   - posts        |    |
+|  |   SQLite DB      |  |     |  |   SQLite DB      |  |
+|  |   - users        |  |     |  |   - users        |  |
+|  |   - posts        |  |     |  |   - posts        |  |
 |  +------------------+  |     |  +------------------+  |
 +------------------------+     +------------------------+
 ```

@@ -336,8 +336,9 @@ const getComments = unstable_cache(
   }
 );
 
-export default async function PostPage({ params }: { params: { id: string } }) {
-  const postId = parseInt(params.id, 10);
+export default async function PostPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const postId = parseInt(id, 10);
 
   const [post, comments] = await Promise.all([
     getPost(postId),
@@ -447,7 +448,7 @@ export async function createPost(formData: FormData) {
   const result = await db.run(
     `INSERT INTO posts (title, content, published, user_id, created_at, updated_at)
      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-    [validated.title, validated.content, validated.published, getUserId()]
+    [validated.title, validated.content, validated.published, 1] // Replace with actual user ID from session
   );
 
   // Revalidate cached data
@@ -635,7 +636,7 @@ export async function createPost(formData: FormData): Promise<ActionResult<{ id:
     const result = await db.run(
       `INSERT INTO posts (title, content, user_id, created_at)
        VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
-      [title, content, getUserId()]
+      [title, content, 1] // Replace with actual user ID from session
     );
 
     revalidateTag('posts');
