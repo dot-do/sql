@@ -55,7 +55,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * The DISTINCT modifier inside aggregate functions is a standard SQL feature
      * that should be supported for counting unique values.
      */
-    it.fails('should count distinct values in a column', () => {
+    it('should count distinct values in a column', () => {
       const result = db.prepare('SELECT COUNT(DISTINCT category) AS cnt FROM t1').all();
 
       expect(result.length).toBe(1);
@@ -68,7 +68,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT COUNT(DISTINCT value) FROM t1
      * Expected: 6 (all values are unique: 10, 20, 30, 40, 50, 60)
      */
-    it.fails('should count all distinct values when all are unique', () => {
+    it('should count all distinct values when all are unique', () => {
       const result = db.prepare('SELECT COUNT(DISTINCT value) AS cnt FROM t1').all();
 
       expect(result.length).toBe(1);
@@ -81,7 +81,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT category, COUNT(DISTINCT value) FROM t1 GROUP BY category
      * Expected: A->3, B->2, C->1
      */
-    it.fails('should count distinct values per group', () => {
+    it('should count distinct values per group', () => {
       const result = db.prepare(
         'SELECT category, COUNT(DISTINCT value) AS cnt FROM t1 GROUP BY category'
       ).all();
@@ -119,7 +119,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Aggregate functions should accept arbitrary expressions, not just column names.
      */
-    it.fails('should sum an arithmetic expression', () => {
+    it('should sum an arithmetic expression', () => {
       const result = db.prepare('SELECT SUM(a+b) AS total FROM t2').all();
 
       expect(result.length).toBe(1);
@@ -132,7 +132,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT AVG(a*b) FROM t2
      * Expected: (50 + 200 + 450 + 800) / 4 = 1500 / 4 = 375
      */
-    it.fails('should average a multiplication expression', () => {
+    it('should average a multiplication expression', () => {
       const result = db.prepare('SELECT AVG(a*b) AS avg_val FROM t2').all();
 
       expect(result.length).toBe(1);
@@ -145,7 +145,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT MIN(a-b) FROM t2
      * Expected: min(5, 10, 15, 20) = 5
      */
-    it.fails('should find minimum of subtraction expression', () => {
+    it('should find minimum of subtraction expression', () => {
       const result = db.prepare('SELECT MIN(a-b) AS min_val FROM t2').all();
 
       expect(result.length).toBe(1);
@@ -158,7 +158,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT MAX(a/b) FROM t2
      * Expected: max(2, 2, 2, 2) = 2 (integer division)
      */
-    it.fails('should find maximum of division expression', () => {
+    it('should find maximum of division expression', () => {
       const result = db.prepare('SELECT MAX(a/b) AS max_val FROM t2').all();
 
       expect(result.length).toBe(1);
@@ -171,7 +171,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT COUNT(a+b) FROM t2
      * Expected: 4 (counts non-null results of the expression)
      */
-    it.fails('should count results of expression', () => {
+    it('should count results of expression', () => {
       const result = db.prepare('SELECT COUNT(a+b) AS cnt FROM t2').all();
 
       expect(result.length).toBe(1);
@@ -205,7 +205,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * The CASE WHEN should return NULL for non-matching rows,
      * and AVG should exclude NULLs from calculation.
      */
-    it.fails('should average only positive values using CASE WHEN', () => {
+    it('should average only positive values using CASE WHEN', () => {
       const result = db.prepare(
         'SELECT AVG(CASE WHEN value > 0 THEN value END) AS avg_positive FROM t3'
       ).all();
@@ -220,7 +220,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT SUM(CASE WHEN value >= 0 THEN value ELSE 0 END) FROM t3
      * Expected: 0 + 0 + 20 + 30 + 0 + 40 = 90
      */
-    it.fails('should sum non-negative values with CASE WHEN ELSE', () => {
+    it('should sum non-negative values with CASE WHEN ELSE', () => {
       const result = db.prepare(
         'SELECT SUM(CASE WHEN value >= 0 THEN value ELSE 0 END) AS sum_nonneg FROM t3'
       ).all();
@@ -235,7 +235,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT COUNT(CASE WHEN value > 0 THEN 1 END) FROM t3
      * Expected: 3 (counts non-null results: rows with positive values)
      */
-    it.fails('should count matching rows using CASE WHEN', () => {
+    it('should count matching rows using CASE WHEN', () => {
       const result = db.prepare(
         'SELECT COUNT(CASE WHEN value > 0 THEN 1 END) AS cnt FROM t3'
       ).all();
@@ -250,7 +250,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT MAX(CASE WHEN status = 'positive' THEN value END) FROM t3
      * Expected: 40
      */
-    it.fails('should find max of filtered values using CASE WHEN', () => {
+    it('should find max of filtered values using CASE WHEN', () => {
       const result = db.prepare(
         "SELECT MAX(CASE WHEN status = 'positive' THEN value END) AS max_pos FROM t3"
       ).all();
@@ -284,7 +284,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * GROUP_CONCAT concatenates values from multiple rows into a single string.
      */
-    it.fails('should concatenate all values into a comma-separated string', () => {
+    it('should concatenate all values into a comma-separated string', () => {
       const result = db.prepare('SELECT GROUP_CONCAT(name) AS names FROM t4').all();
 
       expect(result.length).toBe(1);
@@ -306,7 +306,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *   fruit -> 'apple,banana,cherry'
      *   vegetable -> 'carrot,potato'
      */
-    it.fails('should concatenate values within each group', () => {
+    it('should concatenate values within each group', () => {
       const result = db.prepare(
         'SELECT category, GROUP_CONCAT(name) AS names FROM t4 GROUP BY category'
       ).all();
@@ -327,7 +327,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT GROUP_CONCAT(name, ' | ') FROM t4 WHERE category = 'fruit'
      * Expected: 'apple | banana | cherry' (or similar, order may vary)
      */
-    it.fails('should use custom separator in GROUP_CONCAT', () => {
+    it('should use custom separator in GROUP_CONCAT', () => {
       const result = db.prepare(
         "SELECT GROUP_CONCAT(name, ' | ') AS names FROM t4 WHERE category = 'fruit'"
       ).all();
@@ -343,7 +343,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT GROUP_CONCAT(DISTINCT category) FROM t4
      * Expected: 'fruit,vegetable' (or 'vegetable,fruit')
      */
-    it.fails('should concatenate distinct values only', () => {
+    it('should concatenate distinct values only', () => {
       const result = db.prepare('SELECT GROUP_CONCAT(DISTINCT category) AS cats FROM t4').all();
 
       expect(result.length).toBe(1);
@@ -375,7 +375,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * TOTAL is a SQLite-specific function that always returns a floating point
      * value (0.0 for empty sets), unlike SUM which can return NULL or integer.
      */
-    it.fails('should return total as floating point', () => {
+    it('should return total as floating point', () => {
       const result = db.prepare('SELECT TOTAL(amount) AS total FROM t5').all();
 
       expect(result.length).toBe(1);
@@ -388,7 +388,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT TOTAL(amount), SUM(amount) FROM empty_table
      * Expected: TOTAL returns 0.0, SUM returns NULL
      */
-    it.fails('should return 0.0 for empty table (unlike SUM which returns NULL)', () => {
+    it('should return 0.0 for empty table (unlike SUM which returns NULL)', () => {
       db.exec('CREATE TABLE empty_t5 (id INTEGER, amount REAL)');
 
       const result = db.prepare('SELECT TOTAL(amount) AS total FROM empty_t5').all();
@@ -403,7 +403,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * SQLLogicTest: SELECT TOTAL(id) FROM t5
      * Expected: 6.0 (1 + 2 + 3 as float)
      */
-    it.fails('should return floating point even for integer column', () => {
+    it('should return floating point even for integer column', () => {
       const result = db.prepare('SELECT TOTAL(id) AS total FROM t5').all();
 
       expect(result.length).toBe(1);
@@ -435,7 +435,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Standard behavior: COUNT(*) counts all rows including NULLs
      * Expected: single row with cnt=5
      */
-    it.fails('should count all rows with COUNT(*)', () => {
+    it('should count all rows with COUNT(*)', () => {
       const result = db.prepare('SELECT COUNT(*) AS cnt FROM t6').all();
 
       expect(result.length).toBe(1);
@@ -449,7 +449,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Standard behavior: COUNT(column) excludes NULL values
      * Expected: single row with cnt=3
      */
-    it.fails('should exclude NULL values with COUNT(column)', () => {
+    it('should exclude NULL values with COUNT(column)', () => {
       const result = db.prepare('SELECT COUNT(value) AS cnt FROM t6').all();
 
       expect(result.length).toBe(1);
@@ -463,7 +463,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Standard behavior: SUM excludes NULL values
      * Expected: single row with total=90 (10 + 30 + 50)
      */
-    it.fails('should exclude NULL values in SUM', () => {
+    it('should exclude NULL values in SUM', () => {
       const result = db.prepare('SELECT SUM(value) AS total FROM t6').all();
 
       expect(result.length).toBe(1);
@@ -477,7 +477,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Standard behavior: AVG excludes NULL values from both sum and count
      * Expected: single row with avg_val=30 ((10 + 30 + 50) / 3)
      */
-    it.fails('should exclude NULL values in AVG calculation', () => {
+    it('should exclude NULL values in AVG calculation', () => {
       const result = db.prepare('SELECT AVG(value) AS avg_val FROM t6').all();
 
       expect(result.length).toBe(1);
@@ -491,7 +491,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Standard behavior: MIN excludes NULL values
      * Expected: single row with min_val=10
      */
-    it.fails('should exclude NULL values in MIN', () => {
+    it('should exclude NULL values in MIN', () => {
       const result = db.prepare('SELECT MIN(value) AS min_val FROM t6').all();
 
       expect(result.length).toBe(1);
@@ -505,7 +505,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Standard behavior: MAX excludes NULL values
      * Expected: single row with max_val=50
      */
-    it.fails('should exclude NULL values in MAX', () => {
+    it('should exclude NULL values in MAX', () => {
       const result = db.prepare('SELECT MAX(value) AS max_val FROM t6').all();
 
       expect(result.length).toBe(1);
@@ -518,7 +518,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Bug: The engine returns multiple rows instead of a single aggregated result.
      * Standard behavior: SUM of only NULL values returns NULL (not 0)
      */
-    it.fails('should return NULL when SUM of all NULL values', () => {
+    it('should return NULL when SUM of all NULL values', () => {
       db.exec('CREATE TABLE all_nulls (id INTEGER, value INTEGER)');
       db.exec('INSERT INTO all_nulls (id, value) VALUES (1, NULL)');
       db.exec('INSERT INTO all_nulls (id, value) VALUES (2, NULL)');
@@ -535,7 +535,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Bug: The engine returns multiple rows instead of a single aggregated result.
      * Standard behavior: AVG of only NULL values returns NULL
      */
-    it.fails('should return NULL when AVG of all NULL values', () => {
+    it('should return NULL when AVG of all NULL values', () => {
       db.exec('CREATE TABLE all_nulls_avg (id INTEGER, value INTEGER)');
       db.exec('INSERT INTO all_nulls_avg (id, value) VALUES (1, NULL)');
       db.exec('INSERT INTO all_nulls_avg (id, value) VALUES (2, NULL)');
@@ -564,7 +564,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Empty table returns 0 rows, but aggregate should return 1 row with cnt=0
      */
-    it.fails('should return 0 for COUNT(*) on empty table', () => {
+    it('should return 0 for COUNT(*) on empty table', () => {
       const result = db.prepare('SELECT COUNT(*) AS cnt FROM empty_table').all();
 
       expect(result.length).toBe(1);
@@ -576,7 +576,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Empty table returns 0 rows, but aggregate should return 1 row with cnt=0
      */
-    it.fails('should return 0 for COUNT(column) on empty table', () => {
+    it('should return 0 for COUNT(column) on empty table', () => {
       const result = db.prepare('SELECT COUNT(value) AS cnt FROM empty_table').all();
 
       expect(result.length).toBe(1);
@@ -588,7 +588,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Empty table returns 0 rows, but aggregate should return 1 row with NULL
      */
-    it.fails('should return NULL for SUM on empty table', () => {
+    it('should return NULL for SUM on empty table', () => {
       const result = db.prepare('SELECT SUM(value) AS total FROM empty_table').all();
 
       expect(result.length).toBe(1);
@@ -600,7 +600,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Empty table returns 0 rows, but aggregate should return 1 row with NULL
      */
-    it.fails('should return NULL for AVG on empty table', () => {
+    it('should return NULL for AVG on empty table', () => {
       const result = db.prepare('SELECT AVG(value) AS avg_val FROM empty_table').all();
 
       expect(result.length).toBe(1);
@@ -612,7 +612,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Empty table returns 0 rows, but aggregate should return 1 row with NULL
      */
-    it.fails('should return NULL for MIN on empty table', () => {
+    it('should return NULL for MIN on empty table', () => {
       const result = db.prepare('SELECT MIN(value) AS min_val FROM empty_table').all();
 
       expect(result.length).toBe(1);
@@ -624,7 +624,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Empty table returns 0 rows, but aggregate should return 1 row with NULL
      */
-    it.fails('should return NULL for MAX on empty table', () => {
+    it('should return NULL for MAX on empty table', () => {
       const result = db.prepare('SELECT MAX(value) AS max_val FROM empty_table').all();
 
       expect(result.length).toBe(1);
@@ -637,7 +637,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Bug: Parser does not support multiple aggregates in single SELECT
      * Standard behavior: Should return single row with all aggregate results
      */
-    it.fails('should return correct values for multiple aggregates on empty table', () => {
+    it('should return correct values for multiple aggregates on empty table', () => {
       const result = db.prepare(`
         SELECT
           COUNT(*) AS cnt_all,
@@ -673,7 +673,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Bug: Parser does not support GROUP BY properly
      * Standard behavior: GROUP BY on empty table returns 0 rows (no groups)
      */
-    it.fails('should return no rows for GROUP BY on empty table', () => {
+    it('should return no rows for GROUP BY on empty table', () => {
       const result = db.prepare(
         'SELECT name, COUNT(*) AS cnt FROM empty_table GROUP BY name'
       ).all();
@@ -705,7 +705,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Bug: Parser throws "Invalid SELECT syntax" for multiple aggregates
      * Standard behavior: Multiple aggregates without GROUP BY should return single row
      */
-    it.fails('should compute multiple aggregates in single query', () => {
+    it('should compute multiple aggregates in single query', () => {
       const result = db.prepare(`
         SELECT
           COUNT(*) AS cnt,
@@ -738,7 +738,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      * Bug: Parser throws "Invalid SELECT syntax" for multiple aggregates
      * Standard behavior: Should compute all aggregates per group
      */
-    it.fails('should compute multiple aggregates per group', () => {
+    it('should compute multiple aggregates per group', () => {
       const result = db.prepare(`
         SELECT
           category,
@@ -797,7 +797,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Returns null instead of aggregated count
      */
-    it.fails('should handle COUNT(*) on single row', () => {
+    it('should handle COUNT(*) on single row', () => {
       const result = db.prepare('SELECT COUNT(*) AS cnt FROM single_row').all();
       expect(result.length).toBe(1);
       expect((result[0] as { cnt: number }).cnt).toBe(1);
@@ -808,7 +808,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Returns null instead of aggregated sum
      */
-    it.fails('should handle SUM on single row', () => {
+    it('should handle SUM on single row', () => {
       const result = db.prepare('SELECT SUM(value) AS total FROM single_row').all();
       expect(result.length).toBe(1);
       expect((result[0] as { total: number }).total).toBe(42);
@@ -819,7 +819,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Returns null instead of aggregated average
      */
-    it.fails('should handle AVG on single row', () => {
+    it('should handle AVG on single row', () => {
       const result = db.prepare('SELECT AVG(value) AS avg_val FROM single_row').all();
       expect(result.length).toBe(1);
       expect((result[0] as { avg_val: number }).avg_val).toBe(42);
@@ -830,7 +830,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Returns null instead of aggregated minimum
      */
-    it.fails('should handle MIN on single row', () => {
+    it('should handle MIN on single row', () => {
       const result = db.prepare('SELECT MIN(value) AS min_val FROM single_row').all();
       expect(result.length).toBe(1);
       expect((result[0] as { min_val: number }).min_val).toBe(42);
@@ -841,7 +841,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Returns null instead of aggregated maximum
      */
-    it.fails('should handle MAX on single row', () => {
+    it('should handle MAX on single row', () => {
       const result = db.prepare('SELECT MAX(value) AS max_val FROM single_row').all();
       expect(result.length).toBe(1);
       expect((result[0] as { max_val: number }).max_val).toBe(42);
@@ -868,7 +868,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Returns null instead of aggregated sum
      */
-    it.fails('should handle SUM of large numbers', () => {
+    it('should handle SUM of large numbers', () => {
       const result = db.prepare('SELECT SUM(value) AS total FROM large_nums').all();
       expect(result.length).toBe(1);
       expect((result[0] as { total: number }).total).toBe(6000000000);
@@ -879,7 +879,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Returns null instead of aggregated average
      */
-    it.fails('should handle AVG of large numbers', () => {
+    it('should handle AVG of large numbers', () => {
       const result = db.prepare('SELECT AVG(value) AS avg_val FROM large_nums').all();
       expect(result.length).toBe(1);
       expect((result[0] as { avg_val: number }).avg_val).toBe(2000000000);
@@ -905,7 +905,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Returns null instead of aggregated sum
      */
-    it.fails('should handle SUM of floating point numbers', () => {
+    it('should handle SUM of floating point numbers', () => {
       const result = db.prepare('SELECT SUM(value) AS total FROM floats').all();
       expect(result.length).toBe(1);
       // 0.1 + 0.2 + 0.3 should be close to 0.6 (floating point imprecision possible)
@@ -918,7 +918,7 @@ describe('SQLLogicTest Aggregate Function Edge Cases', () => {
      *
      * Bug: Returns null instead of aggregated average
      */
-    it.fails('should handle AVG of floating point numbers', () => {
+    it('should handle AVG of floating point numbers', () => {
       const result = db.prepare('SELECT AVG(value) AS avg_val FROM floats').all();
       expect(result.length).toBe(1);
       const avg = (result[0] as { avg_val: number }).avg_val;
