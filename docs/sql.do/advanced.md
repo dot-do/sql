@@ -38,7 +38,7 @@ This guide covers advanced patterns for experienced developers building complex 
 CTEs provide readable, modular queries for complex data transformations.
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const db = await DB('analytics');
 
@@ -293,7 +293,7 @@ const bomExplosion = await db.query(`
 Combine full-text search with vector similarity for semantic search applications.
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const db = await DB('documents');
 
@@ -408,14 +408,14 @@ async function searchWithFilters(
 Query data at any point in time using DoSQL's time travel capabilities.
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 import {
   createTimeTravelSession,
   lsn,
   timestamp,
   snapshot,
   relative
-} from '@dotdo/dosql/timetravel';
+} from 'dosql/timetravel';
 
 const db = await DB('analytics');
 
@@ -512,8 +512,8 @@ async function comparePeriods(
 Query external data sources directly using SQL.
 
 ```typescript
-import { DB } from '@dotdo/dosql';
-import { createVirtualTableRegistry, createURLVirtualTable } from '@dotdo/dosql/virtual';
+import { DB } from 'dosql';
+import { createVirtualTableRegistry, createURLVirtualTable } from 'dosql/virtual';
 
 const db = await DB('federation');
 const registry = createVirtualTableRegistry();
@@ -595,7 +595,7 @@ import {
   procedure,
   defineProcedures,
   type ProcedureContext
-} from '@dotdo/dosql/proc';
+} from 'dosql/proc';
 
 // Define a procedure using the builder pattern
 const transferFunds = procedure('transfer_funds')
@@ -696,7 +696,7 @@ console.log(result);
 For simpler syntax, use the functional API:
 
 ```typescript
-import { defineProcedures, withValidation, withRetry } from '@dotdo/dosql/proc';
+import { defineProcedures, withValidation, withRetry } from 'dosql/proc';
 
 const procedures = defineProcedures({
   // Simple procedure
@@ -803,7 +803,7 @@ CALL calculate_customer_stats(customerId => 42);
 DoSQL supports SQLite-compatible CREATE TRIGGER syntax.
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const db = await DB('app');
 
@@ -897,7 +897,7 @@ import {
   createTriggerExecutor,
   type TriggerDefinition,
   type TriggerContext
-} from '@dotdo/dosql/triggers';
+} from 'dosql/triggers';
 
 // Define a trigger
 const auditTrigger: TriggerDefinition<{ id: number; name: string; email: string }> = {
@@ -979,7 +979,7 @@ console.log(beforeResult.row);
 Understanding trigger execution order is critical for complex applications:
 
 ```typescript
-import { createTriggerRegistry, type TriggerDefinition } from '@dotdo/dosql/triggers';
+import { createTriggerRegistry, type TriggerDefinition } from 'dosql/triggers';
 
 const registry = createTriggerRegistry();
 
@@ -1046,7 +1046,7 @@ triggers.forEach(t => registry.register(t));
 Change Data Capture (CDC) enables real-time streaming of database changes.
 
 ```typescript
-import { createCDC, createCDCSubscription } from '@dotdo/dosql/cdc';
+import { createCDC, createCDCSubscription } from 'dosql/cdc';
 
 const db = await DB('app', { wal: true });
 const cdc = createCDC(db.backend);
@@ -1084,7 +1084,7 @@ for await (const event of subscription.subscribeChanges<User>(0n, undefined, JSO
 Filter CDC events by table, operation, or custom predicates:
 
 ```typescript
-import { createCDCSubscription, type CDCFilter } from '@dotdo/dosql/cdc';
+import { createCDCSubscription, type CDCFilter } from 'dosql/cdc';
 
 // Filter by tables and operations
 const subscription = createCDCSubscription(db.backend, {
@@ -1142,7 +1142,7 @@ async function startCDCConsumers(backend: Backend) {
 Replication slots provide durable position tracking for reliable CDC consumption:
 
 ```typescript
-import { createCDC, createReplicationSlotManager } from '@dotdo/dosql/cdc';
+import { createCDC, createReplicationSlotManager } from 'dosql/cdc';
 
 const cdc = createCDC(db.backend);
 
@@ -1194,7 +1194,7 @@ import {
   createLakehouseStreamer,
   type LakehouseStreamConfig,
   type CDCBatch
-} from '@dotdo/dosql/cdc';
+} from 'dosql/cdc';
 
 const streamerConfig: LakehouseStreamConfig = {
   lakehouseUrl: 'wss://lakehouse.example.com/ingest',
@@ -1265,7 +1265,7 @@ import {
   CDCError,
   CDCErrorCode,
   type ChangeEvent
-} from '@dotdo/dosql/cdc';
+} from 'dosql/cdc';
 
 // Retry with exponential backoff
 interface RetryConfig {
@@ -1481,7 +1481,7 @@ import {
   createShardId,
   type VSchema,
   type ShardConfig,
-} from '@dotdo/dosql/sharding';
+} from 'dosql/sharding';
 
 // Define sharding configuration
 const vschema: VSchema = createVSchema(
@@ -1552,7 +1552,7 @@ import {
   rangeVindex,
   createShardId,
   type VindexConfig,
-} from '@dotdo/dosql/sharding';
+} from 'dosql/sharding';
 
 // Hash vindex - uniform distribution via FNV-1a or xxhash
 const userVindex = hashVindex('fnv1a');
@@ -1591,7 +1591,7 @@ import {
   createShardExecutor,
   type RoutingDecision,
   type ExecutionPlan,
-} from '@dotdo/dosql/sharding';
+} from 'dosql/sharding';
 
 const router = createShardRouter(vschema);
 const executor = createShardExecutor(router, {
@@ -1675,7 +1675,7 @@ console.log(plan);
 DoSQL supports distributed transactions across shards using two-phase commit:
 
 ```typescript
-import { createShardExecutor, type ShardId } from '@dotdo/dosql/sharding';
+import { createShardExecutor, type ShardId } from 'dosql/sharding';
 
 const executor = createShardExecutor(router, {
   getDO: (shardId) => env.DOSQL_DB.get(env.DOSQL_DB.idFromName(shardId)),
@@ -1758,7 +1758,7 @@ import {
   createShardExecutor,
   type ReadPreference,
   type ReplicaRole,
-} from '@dotdo/dosql/sharding';
+} from 'dosql/sharding';
 
 const executor = createShardExecutor(router, {
   getDO: (shardId) => env.DOSQL_DB.get(env.DOSQL_DB.idFromName(shardId)),

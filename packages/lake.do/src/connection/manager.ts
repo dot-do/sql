@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - WebSocket Connection Manager
+ * lake.do - WebSocket Connection Manager
  *
  * This module provides WebSocket connection management with automatic
  * reconnection and event handling.

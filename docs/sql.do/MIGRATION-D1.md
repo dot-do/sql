@@ -102,7 +102,7 @@ export default {
 
 ```typescript
 // DoSQL: Durable Object pattern
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export interface Env {
   DOSQL_DB: DurableObjectNamespace;
@@ -400,7 +400,7 @@ try {
 
 ```typescript
 // DoSQL: Typed error handling
-import { DatabaseError } from '@dotdo/dosql';
+import { DatabaseError } from 'dosql';
 
 try {
   const users = db.prepare('SELECT * FROM users').all();
@@ -488,7 +488,7 @@ const users = db
 ### Step 1: Install DoSQL
 
 ```bash
-npm install @dotdo/dosql
+npm install dosql
 ```
 
 ### Step 2: Create Durable Object Database Class
@@ -496,7 +496,7 @@ npm install @dotdo/dosql
 Create `src/database.ts`:
 
 ```typescript
-import { DB, type Database } from '@dotdo/dosql';
+import { DB, type Database } from 'dosql';
 
 export interface Env {
   // Keep D1 binding during migration (optional)
@@ -607,7 +607,7 @@ During migration, you can create a wrapper that works with both D1 and DoSQL:
 
 ```typescript
 // src/db-wrapper.ts
-import type { Database } from '@dotdo/dosql';
+import type { Database } from 'dosql';
 
 interface QueryResult<T> {
   results: T[];
@@ -674,7 +674,7 @@ If you have existing data in D1, migrate it to DoSQL:
 ```typescript
 // src/migrate-data.ts
 import type { D1Database } from '@cloudflare/workers-types';
-import type { Database } from '@dotdo/dosql';
+import type { Database } from 'dosql';
 
 interface MigrationOptions {
   tables: string[];
@@ -1158,7 +1158,7 @@ if (!result.success) {
 
 **DoSQL:**
 ```typescript
-import { DatabaseError } from '@dotdo/dosql';
+import { DatabaseError } from 'dosql';
 
 try {
   const result = db.prepare('...').all();

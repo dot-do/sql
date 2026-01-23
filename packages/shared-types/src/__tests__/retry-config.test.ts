@@ -4,12 +4,12 @@
  * These tests verify the consolidated RetryConfig API in shared-types.
  *
  * Implementation State:
- * - RetryConfig interface is exported from @dotdo/shared-types
- * - DEFAULT_RETRY_CONFIG constant is exported from @dotdo/shared-types
- * - isRetryConfig type guard is exported from @dotdo/shared-types
- * - createRetryConfig factory is exported from @dotdo/shared-types
- * - sql.do imports and re-exports RetryConfig from @dotdo/shared-types
- * - lake.do imports and re-exports RetryConfig from @dotdo/shared-types
+ * - RetryConfig interface is exported from @dotdo/sql-types
+ * - DEFAULT_RETRY_CONFIG constant is exported from @dotdo/sql-types
+ * - isRetryConfig type guard is exported from @dotdo/sql-types
+ * - createRetryConfig factory is exported from @dotdo/sql-types
+ * - sql.do imports and re-exports RetryConfig from @dotdo/sql-types
+ * - lake.do imports and re-exports RetryConfig from @dotdo/sql-types
  * - Type compatibility is maintained across all packages
  *
  * Note: Cross-package integration tests (verifying sql.do and lake.do re-exports)

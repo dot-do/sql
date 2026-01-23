@@ -96,7 +96,7 @@ AND created_at > 1705840000000;
 #### Programmatic EXPLAIN
 
 ```typescript
-import { DoSQLClient } from '@dotdo/sql.do';
+import { DoSQLClient } from 'sql.do';
 
 const client = new DoSQLClient(env.DOSQL);
 
@@ -2255,7 +2255,7 @@ npm run benchmark -- --env=production
 
 ```typescript
 // benchmark.config.ts
-import { BenchmarkConfig } from '@dotdo/dosql/benchmarks';
+import { BenchmarkConfig } from 'dosql/benchmarks';
 
 export const config: BenchmarkConfig = {
   // Iteration settings
@@ -2294,7 +2294,7 @@ export const config: BenchmarkConfig = {
 import {
   createPerformanceBenchmarkRunner,
   DoSQLAdapter,
-} from '@dotdo/dosql/benchmarks';
+} from 'dosql/benchmarks';
 
 async function runBenchmarks(env: Env) {
   // Create adapter
@@ -2477,7 +2477,7 @@ import {
   DoSQLAdapter,
   D1Adapter,
   TursoAdapter,
-} from '@dotdo/dosql/benchmarks';
+} from 'dosql/benchmarks';
 
 async function runComparisonBenchmarks(env: Env) {
   const adapters = [

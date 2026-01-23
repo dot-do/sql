@@ -41,7 +41,7 @@ wrangler whoami
 ```bash
 mkdir my-dosql-app && cd my-dosql-app
 npm init -y
-npm install @dotdo/dosql
+npm install dosql
 npm install -D wrangler @cloudflare/workers-types typescript
 ```
 
@@ -87,7 +87,7 @@ CREATE TABLE tasks (
 Create `src/index.ts`:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export interface Env {
   TASKS_DB: DurableObjectNamespace;
@@ -222,7 +222,7 @@ You should see output like:
 `DB()` is the main entry point for DoSQL. It creates or connects to a database with automatic migration support.
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const db = await DB('my-database', {
   migrations: { folder: '.do/migrations' },  // Path to SQL migrations

@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Queue Metrics Tracking
+ * lake.do - Queue Metrics Tracking
  *
  * This module provides metrics collection and water mark event handling
  * for queue monitoring.

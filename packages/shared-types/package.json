@@ -1,5 +1,5 @@
 {
-  "name": "@dotdo/shared-types",
+  "name": "@dotdo/sql-types",
   "version": "0.1.0",
   "description": "Shared types for DoSQL client/server ecosystem",
   "type": "module",

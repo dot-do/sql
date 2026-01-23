@@ -51,7 +51,7 @@ DoSQL works with both routing paradigms, but the App Router unlocks additional c
 
 ```bash
 # Install DoSQL
-npm install @dotdo/dosql
+npm install dosql
 
 # Install peer dependencies
 npm install @cloudflare/workers-types --save-dev
@@ -90,7 +90,7 @@ const nextConfig = {
   },
 
   // External packages that should not be bundled
-  serverExternalPackages: ['@dotdo/dosql'],
+  serverExternalPackages: ['dosql'],
 
   // Headers for CORS if needed
   async headers() {
@@ -138,7 +138,7 @@ Create a reusable database client:
 
 ```typescript
 // lib/db.ts
-import { createHttpClient, createWebSocketClient } from '@dotdo/dosql/rpc';
+import { createHttpClient, createWebSocketClient } from 'dosql/rpc';
 
 // HTTP client for Server Components and Server Actions
 export function getDB() {
@@ -931,7 +931,7 @@ Integrate DoSQL with client-side data fetching and real-time updates.
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { createWebSocketClient } from '@dotdo/dosql/rpc';
+import { createWebSocketClient } from 'dosql/rpc';
 
 interface UseRealtimeOptions {
   url?: string;
@@ -991,7 +991,7 @@ Subscribe to real-time database changes:
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { createWebSocketClient, type ChangeEvent } from '@dotdo/dosql/rpc';
+import { createWebSocketClient, type ChangeEvent } from 'dosql/rpc';
 
 interface CDCOptions {
   tables?: string[];
@@ -1267,7 +1267,7 @@ Configure routes to run on the Edge Runtime:
 
 ```typescript
 // app/api/edge/posts/route.ts
-import { createHttpClient } from '@dotdo/dosql/rpc';
+import { createHttpClient } from 'dosql/rpc';
 import { NextRequest, NextResponse } from 'next/server';
 
 // Force Edge Runtime
@@ -1293,7 +1293,7 @@ Deploy DoSQL-powered Edge Functions to Vercel:
 
 ```typescript
 // app/api/geo-posts/route.ts
-import { createHttpClient } from '@dotdo/dosql/rpc';
+import { createHttpClient } from 'dosql/rpc';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'edge';
@@ -1333,7 +1333,7 @@ When deploying to Cloudflare Pages, you can access Durable Objects directly:
 
 ```typescript
 // functions/api/posts/[[route]].ts (Cloudflare Pages Function)
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 interface Env {
   DOSQL_DB: DurableObjectNamespace;
@@ -1357,7 +1357,7 @@ Use edge for reads, origin for writes:
 
 ```typescript
 // app/api/posts/route.ts
-import { createHttpClient } from '@dotdo/dosql/rpc';
+import { createHttpClient } from 'dosql/rpc';
 import { NextRequest, NextResponse } from 'next/server';
 
 // Edge for fast reads
@@ -1571,7 +1571,7 @@ When self-hosting, use a connection pooling proxy:
 
 ```typescript
 // lib/db-pool.ts
-import { createHttpClient } from '@dotdo/dosql/rpc';
+import { createHttpClient } from 'dosql/rpc';
 
 // Singleton connection pool
 let dbPool: ReturnType<typeof createHttpClient> | null = null;
@@ -1602,7 +1602,7 @@ Batch multiple queries in a single request:
 
 ```typescript
 // lib/batch.ts
-import { createHttpClient } from '@dotdo/dosql/rpc';
+import { createHttpClient } from 'dosql/rpc';
 
 const db = createHttpClient({
   url: process.env.DOSQL_URL!,

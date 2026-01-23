@@ -18,7 +18,7 @@
  * LIMIT 10
  * ```
  *
- * @module @dotdo/dosql/functions/vector
+ * @module dosql/functions/vector
  */
 
 import type { SqlValue } from '../engine/types.js';

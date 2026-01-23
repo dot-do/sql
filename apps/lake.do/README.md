@@ -28,7 +28,7 @@ lake.do runs where your application already lives: Cloudflare's edge. No cluster
 Every change flows from DoSQL to lake.do in real-time. Written as Parquet to R2. Wrapped in proper Iceberg metadata. Query with DuckDB, Spark, Trino, or the built-in engine.
 
 ```typescript
-import { Lake } from '@dotdo/lake.do'
+import { Lake } from 'lake.do'
 
 const lake = new Lake({
   endpoint: 'https://lake.example.com',
@@ -118,7 +118,7 @@ SELECT * FROM lake.orders WHERE created_at > DATE '2025-01-01';
 ## Real Code for Real Problems
 
 ```typescript
-import { Lake } from '@dotdo/lake.do'
+import { Lake } from 'lake.do'
 
 const lake = new Lake({
   endpoint: 'https://lake.example.com',
@@ -180,11 +180,11 @@ async function investigate(orderId: string, reportedAt: Date) {
 ## Start in 60 Seconds
 
 ```bash
-npm install @dotdo/lake.do
+npm install lake.do
 ```
 
 ```typescript
-import { Lake } from '@dotdo/lake.do'
+import { Lake } from 'lake.do'
 
 const lake = new Lake({
   endpoint: 'https://your-lakehouse.workers.dev',
@@ -241,7 +241,7 @@ DoSQL handles transactions and emits CDC events. lake.do batches events, writes 
 Your data is flowing. Your analysts are waiting.
 
 ```bash
-npm install @dotdo/lake.do
+npm install lake.do
 ```
 
 [Get Started](https://lake.do/docs) | [Examples](https://github.com/dotdo/lake.do/examples) | [Discord](https://discord.gg/dotdo)

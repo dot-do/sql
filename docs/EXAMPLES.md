@@ -49,7 +49,7 @@ Fundamental database operations with DoSQL.
 #### Create (INSERT)
 
 ```typescript
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 const client = createSQLClient({
   url: 'https://sql.example.com',
@@ -215,7 +215,7 @@ Atomic operations that maintain data consistency.
 #### Basic Transaction
 
 ```typescript
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 const client = createSQLClient({ url: 'https://sql.example.com' });
 
@@ -369,7 +369,7 @@ console.log(`Daily Revenue: $${dailyRevenue.rows[0].revenue}`);
 Complete multi-tenant architecture with tenant isolation.
 
 ```typescript
-import { createSQLClient, SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, SQLClient } from 'sql.do';
 
 // Tenant-aware client wrapper
 class TenantDatabase {
@@ -482,7 +482,7 @@ CREATE INDEX idx_audit_tenant_time ON audit_log(tenant_id, timestamp DESC);
 Products, orders, and inventory management.
 
 ```typescript
-import { createSQLClient, SQLClient, SQLError, RPCErrorCode } from '@dotdo/sql.do';
+import { createSQLClient, SQLClient, SQLError, RPCErrorCode } from 'sql.do';
 
 interface Product {
   id: string;
@@ -724,7 +724,7 @@ CREATE TABLE order_items (
 Posts, comments, likes, and feed generation.
 
 ```typescript
-import { createSQLClient, SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, SQLClient } from 'sql.do';
 
 interface Post {
   id: string;
@@ -988,8 +988,8 @@ CREATE INDEX idx_follows_followed ON follows(followed_id);
 Aggregations, time-series data, and reporting.
 
 ```typescript
-import { createSQLClient, SQLClient } from '@dotdo/sql.do';
-import { createLakeClient, LakeClient } from '@dotdo/lake.do';
+import { createSQLClient, SQLClient } from 'sql.do';
+import { createLakeClient, LakeClient } from 'lake.do';
 
 interface DailyMetrics {
   date: string;
@@ -1192,8 +1192,8 @@ const topProducts = await dashboard.getTopProducts(30, 10);
 Change Data Capture for real-time data pipelines.
 
 ```typescript
-import { createSQLClient } from '@dotdo/sql.do';
-import { createLakeClient, CDCEvent } from '@dotdo/lake.do';
+import { createSQLClient } from 'sql.do';
+import { createLakeClient, CDCEvent } from 'lake.do';
 
 interface User {
   id: string;
@@ -1311,7 +1311,7 @@ export default {
 Live document editing with conflict resolution.
 
 ```typescript
-import { createSQLClient, SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, SQLClient } from 'sql.do';
 
 interface Document {
   id: string;
@@ -1534,7 +1534,7 @@ CREATE INDEX idx_ops_doc_version ON operations(document_id, version);
 Store events as the source of truth, derive state.
 
 ```typescript
-import { createSQLClient, SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, SQLClient } from 'sql.do';
 
 // Domain events
 type AccountEvent =
@@ -1746,8 +1746,8 @@ CREATE TABLE snapshots (
 Command Query Responsibility Segregation using both databases.
 
 ```typescript
-import { createSQLClient, SQLClient } from '@dotdo/sql.do';
-import { createLakeClient, LakeClient } from '@dotdo/lake.do';
+import { createSQLClient, SQLClient } from 'sql.do';
+import { createLakeClient, LakeClient } from 'lake.do';
 
 // Write model (DoSQL) - Commands
 class OrderCommandHandler {
@@ -1972,7 +1972,7 @@ Full-stack Remix application with DoSQL.
 
 ```typescript
 // app/db.server.ts
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 let client: ReturnType<typeof createSQLClient>;
 
@@ -2114,7 +2114,7 @@ Next.js App Router with DoSQL.
 
 ```typescript
 // lib/db.ts
-import { createSQLClient, SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, SQLClient } from 'sql.do';
 
 declare global {
   var _db: SQLClient | undefined;
@@ -2260,7 +2260,7 @@ Lightweight API with Hono framework.
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { createSQLClient, SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, SQLClient } from 'sql.do';
 
 type Env = {
   DOSQL_URL: string;
@@ -2421,7 +2421,7 @@ export default app;
 Direct Cloudflare Workers without frameworks.
 
 ```typescript
-import { createSQLClient, SQLClient, SQLError, RPCErrorCode } from '@dotdo/sql.do';
+import { createSQLClient, SQLClient, SQLError, RPCErrorCode } from 'sql.do';
 
 interface Env {
   DOSQL_URL: string;
@@ -2588,7 +2588,7 @@ Testing business logic in isolation.
 
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createMockSQLClient, MockSQLClient } from '@dotdo/sql.do/testing';
+import { createMockSQLClient, MockSQLClient } from 'sql.do/testing';
 
 // The service we're testing
 class UserService {
@@ -2686,7 +2686,7 @@ Testing with real database connections.
 
 ```typescript
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { createSQLClient, SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, SQLClient } from 'sql.do';
 
 describe('User Integration Tests', () => {
   let client: SQLClient;
@@ -2958,7 +2958,7 @@ describe('API E2E Tests', () => {
 Techniques for faster queries.
 
 ```typescript
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 const client = createSQLClient({ url: 'https://sql.example.com' });
 
@@ -3065,7 +3065,7 @@ async function getUsersPaginated(
 Efficient connection management.
 
 ```typescript
-import { createSQLClient, SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, SQLClient } from 'sql.do';
 
 // Connection pool for Workers (simple approach)
 class ConnectionPool {
@@ -3176,7 +3176,7 @@ export default {
 Reduce database load with intelligent caching.
 
 ```typescript
-import { createSQLClient, SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, SQLClient } from 'sql.do';
 
 interface CacheEntry<T> {
   data: T;

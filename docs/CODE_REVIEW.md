@@ -3,10 +3,10 @@
 **Date:** 2026-01-22
 **Reviewer:** Claude Opus 4.5
 **Packages Reviewed:**
-- `@dotdo/sql.do` - Client SDK for DoSQL
-- `@dotdo/lake.do` - Client SDK for DoLake
-- `@dotdo/dosql` - Server (Durable Object) SQL database engine
-- `@dotdo/dolake` - Server (Durable Object) Lakehouse
+- `sql.do` - Client SDK for DoSQL
+- `lake.do` - Client SDK for DoLake
+- `dosql` - Server (Durable Object) SQL database engine
+- `dolake` - Server (Durable Object) Lakehouse
 
 ---
 

@@ -81,14 +81,14 @@ Get a Hono + DoSQL API running in under 5 minutes.
 ```bash
 npm create hono@latest my-api -- --template cloudflare-workers
 cd my-api
-npm install @dotdo/dosql
+npm install dosql
 ```
 
 Create `src/index.ts`:
 
 ```typescript
 import { Hono } from 'hono';
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 interface Env {
   DOSQL_DB: DurableObjectNamespace;
@@ -187,7 +187,7 @@ cd my-hono-app
 
 # Select "cloudflare-workers" template
 
-npm install @dotdo/dosql
+npm install dosql
 npm install -D @cloudflare/workers-types wrangler
 ```
 
@@ -280,7 +280,7 @@ declare module 'hono' {
 
 ```typescript
 // src/db/durable-object.ts
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export class DoSQLDatabase implements DurableObject {
   private db: Awaited<ReturnType<typeof DB>> | null = null;
@@ -1300,7 +1300,7 @@ export const eventsRouter = new Hono<{ Variables: { db: DBClient } }>()
 
 ```typescript
 // src/durable-objects/websocket-hub.ts
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export class WebSocketHub implements DurableObject {
   private db: Awaited<ReturnType<typeof DB>> | null = null;

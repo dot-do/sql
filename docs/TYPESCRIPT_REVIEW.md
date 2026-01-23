@@ -268,7 +268,7 @@ export {
 **lake.do** (`/packages/lake.do/src/types.ts`):
 ```typescript
 // Re-exports common types from sql.do for consistency
-export type { TransactionId, LSN, SQLValue, CDCOperation, CDCEvent } from '@dotdo/sql.do';
+export type { TransactionId, LSN, SQLValue, CDCOperation, CDCEvent } from 'sql.do';
 ```
 
 **dolake** (`/packages/dolake/src/index.ts`):

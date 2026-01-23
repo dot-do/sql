@@ -308,7 +308,7 @@ WITH (dimensions = 1536, metric = 'cosine');
 **Option 2: Inline Migrations**
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const d1Schema = `
   CREATE TABLE users (
@@ -381,7 +381,7 @@ async function migrate(d1: D1Database, dosql: Database): Promise<void> {
 **Strategy 2: Incremental Sync (For Large Datasets)**
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 interface SyncState {
   table: string;
@@ -589,7 +589,7 @@ export default {
 };
 
 // database.ts
-import { DB, Database } from '@dotdo/dosql';
+import { DB, Database } from 'dosql';
 
 export class TenantDatabase implements DurableObject {
   private db: Database | null = null;
@@ -749,7 +749,7 @@ try {
 **DoSQL Error Handling:**
 
 ```typescript
-import { TransactionError, TransactionErrorCode } from '@dotdo/dosql/transaction';
+import { TransactionError, TransactionErrorCode } from 'dosql/transaction';
 
 // DoSQL with typed errors
 try {
@@ -812,7 +812,7 @@ export default {
 
 ```typescript
 // DoSQL - Client connecting to DO via RPC
-import { createHttpClient, createWebSocketClient } from '@dotdo/dosql/rpc';
+import { createHttpClient, createWebSocketClient } from 'dosql/rpc';
 
 // HTTP client (stateless, good for simple queries)
 const httpClient = createHttpClient({
@@ -888,7 +888,7 @@ const result: RunResult = await db.run(
 console.log(result.lastInsertRowId);
 
 // Type-safe queries with schema
-import { createDatabase, type DatabaseSchema } from '@dotdo/dosql';
+import { createDatabase, type DatabaseSchema } from 'dosql';
 
 interface MySchema extends DatabaseSchema {
   users: {
@@ -1004,7 +1004,7 @@ const d1Db = new Kysely<Database>({
 });
 
 // DoSQL with Kysely
-import { DoSQLDialect } from '@dotdo/dosql/kysely';
+import { DoSQLDialect } from 'dosql/kysely';
 
 const dosqlDb = new Kysely<Database>({
   dialect: new DoSQLDialect({ database: db }),
@@ -1349,7 +1349,7 @@ class RollbackEnabledDatabase {
 
 ```typescript
 // Replay CDC events to D1
-import { createCDC } from '@dotdo/dosql/cdc';
+import { createCDC } from 'dosql/cdc';
 
 async function syncDoSQLToD1(
   dosql: Database,

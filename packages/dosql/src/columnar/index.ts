@@ -11,7 +11,7 @@
  *   ColumnarReader,
  *   type ColumnarTableSchema,
  *   type ReadRequest,
- * } from '@dotdo/dosql/columnar';
+ * } from 'dosql/columnar';
  *
  * // Define schema for sales analytics
  * const schema: ColumnarTableSchema = {

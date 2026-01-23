@@ -5,8 +5,8 @@
  *
  * @example
  * ```typescript
- * import { createBTree, StringKeyCodec, JsonValueCodec } from '@dotdo/dosql/btree';
- * import { MemoryFSXBackend } from '@dotdo/dosql/fsx';
+ * import { createBTree, StringKeyCodec, JsonValueCodec } from 'dosql/btree';
+ * import { MemoryFSXBackend } from 'dosql/fsx';
  *
  * // Create storage backend
  * const fsx = new MemoryFSXBackend();

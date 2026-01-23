@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Constants
+ * lake.do - Constants
  *
  * This module provides named constants for the lake.do client.
  *

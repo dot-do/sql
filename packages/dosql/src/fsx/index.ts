@@ -8,7 +8,7 @@
  *
  * @example
  * ```typescript
- * import { createDOBackend, createR2Backend, createTieredBackend } from '@dotdo/dosql/fsx';
+ * import { createDOBackend, createR2Backend, createTieredBackend } from 'dosql/fsx';
  *
  * // In a Durable Object
  * export class MyDO {

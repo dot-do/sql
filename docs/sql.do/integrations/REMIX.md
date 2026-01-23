@@ -90,7 +90,7 @@ Remix and DoSQL are a natural fit for Cloudflare Workers:
 npx create-remix@latest --template remix-run/remix/templates/cloudflare
 
 # Install DoSQL
-npm install @dotdo/dosql
+npm install dosql
 
 # Install dev dependencies
 npm install -D @cloudflare/workers-types wrangler
@@ -186,7 +186,7 @@ Create `app/db.server.ts`:
 
 ```typescript
 // app/db.server.ts
-import { DB, type Database } from '@dotdo/dosql';
+import { DB, type Database } from 'dosql';
 import type { Env } from '../load-context';
 
 // Cache database connection per request

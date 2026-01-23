@@ -280,7 +280,7 @@ describe('PrismaDoSQLAdapter', () => {
 
       expect(adapter).toBeDefined();
       expect(adapter.provider).toBe('sqlite');
-      expect(adapter.adapterName).toBe('@dotdo/dosql-prisma');
+      expect(adapter.adapterName).toBe('dosql-prisma');
     });
 
     it('should create adapter with logging enabled', () => {
@@ -299,7 +299,7 @@ describe('PrismaDoSQLAdapter', () => {
 
       expect(adapter).toBeDefined();
       expect(adapter.provider).toBe('sqlite');
-      expect(adapter.adapterName).toBe('@dotdo/dosql-prisma');
+      expect(adapter.adapterName).toBe('dosql-prisma');
     });
   });
 

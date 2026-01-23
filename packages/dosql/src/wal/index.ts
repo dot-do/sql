@@ -9,7 +9,7 @@
  *
  * @example
  * ```typescript
- * import { createWALWriter, createWALReader, createCheckpointManager } from '@dotdo/dosql/wal';
+ * import { createWALWriter, createWALReader, createCheckpointManager } from 'dosql/wal';
  *
  * // Create writer
  * const writer = createWALWriter(backend);

@@ -4,7 +4,7 @@
  * Defines the message types for CapnWeb RPC communication between
  * DoSQL clients and Durable Objects.
  *
- * This module re-exports unified types from @dotdo/shared-types via @dotdo/sql.do
+ * This module re-exports unified types from @dotdo/sql-types via sql.do
  * and provides server-specific types.
  *
  * @packageDocumentation
@@ -22,14 +22,14 @@ import type {
   TransactionHandle as BaseTransactionHandle,
   ServerIsolationLevel as BaseServerIsolationLevel,
   ConnectionStats as BaseConnectionStats,
-} from '@dotdo/sql.do';
+} from 'sql.do';
 
 // =============================================================================
 // Re-export Unified Types from shared-types
 // =============================================================================
 
 /**
- * Re-exported types from `@dotdo/sql.do` (which re-exports from `@dotdo/shared-types`).
+ * Re-exported types from `sql.do` (which re-exports from `@dotdo/sql-types`).
  *
  * These types are re-exported for server-side RPC implementation. Using the same
  * type definitions ensures wire-level compatibility between clients and servers.
@@ -103,8 +103,8 @@ import type {
  * - `serverToClientCDCEvent()` / `clientToServerCDCEvent()` - CDC format conversion
  * - `responseToResult()` / `resultToResponse()` - Query result conversion
  *
- * @see {@link https://github.com/dotdo/sql.do | @dotdo/sql.do} for client types
- * @see {@link https://github.com/dotdo/shared-types | @dotdo/shared-types} for canonical definitions
+ * @see {@link https://github.com/dotdo/sql.do | sql.do} for client types
+ * @see {@link https://github.com/dotdo/shared-types | @dotdo/sql-types} for canonical definitions
  *
  * @public
  * @stability stable
@@ -163,7 +163,7 @@ export {
   clientToServerCDCEvent,
   responseToResult,
   resultToResponse,
-} from '@dotdo/sql.do';
+} from 'sql.do';
 
 // =============================================================================
 // Streaming Types (Server-specific)

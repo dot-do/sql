@@ -62,11 +62,11 @@ mkdir my-tasks-api && cd my-tasks-api
 npm init -y
 
 # Install dependencies
-npm install @dotdo/dosql
+npm install dosql
 npm install -D wrangler @cloudflare/workers-types typescript
 ```
 
-Your `package.json` should now include `@dotdo/dosql` in dependencies.
+Your `package.json` should now include `dosql` in dependencies.
 
 ---
 
@@ -129,7 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completed);
 Create `src/index.ts` with the following code:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 // Environment bindings
 export interface Env {

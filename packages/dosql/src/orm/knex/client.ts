@@ -29,7 +29,7 @@ import type { SqlValue, Row } from '../../engine/types.js';
  *
  * @example
  * ```typescript
- * import { createKnex } from '@dotdo/dosql/orm/knex';
+ * import { createKnex } from 'dosql/orm/knex';
  *
  * const knex = createKnex({ backend: dosqlBackend });
  *

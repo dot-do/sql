@@ -85,7 +85,7 @@ cd my-sveltekit-app
 # Select: Cloudflare adapter when prompted
 
 # Install DoSQL
-npm install @dotdo/dosql
+npm install dosql
 
 # Install dev dependencies
 npm install -D @cloudflare/workers-types wrangler
@@ -184,7 +184,7 @@ Create `src/lib/server/db.ts`:
 
 ```typescript
 // src/lib/server/db.ts
-import { DB, type Database } from '@dotdo/dosql';
+import { DB, type Database } from 'dosql';
 
 export interface DatabaseClient {
   query<T>(sql: string, params?: unknown[]): Promise<T[]>;
@@ -1336,7 +1336,7 @@ function escapeCSV(str: string): string {
 ```typescript
 // src/routes/api/events/users/+server.ts
 import type { RequestHandler } from './$types';
-import { createCDCStream } from '@dotdo/dosql';
+import { createCDCStream } from 'dosql';
 
 export const GET: RequestHandler = async ({ platform, request }) => {
   if (!platform) {

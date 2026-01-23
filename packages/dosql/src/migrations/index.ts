@@ -13,7 +13,7 @@
  *   createMigrations,
  *   createSchemaTracker,
  *   initializeWithMigrations,
- * } from '@dotdo/dosql/migrations';
+ * } from 'dosql/migrations';
  *
  * // Define migrations
  * const migrations = createMigrations([

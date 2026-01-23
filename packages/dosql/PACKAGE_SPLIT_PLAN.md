@@ -78,7 +78,7 @@ The package.json already defines these exports:
 
 ### Tier 1: Core Packages (No Internal Dependencies)
 
-#### 1. `@dotdo/dosql-core` - Core Types & Utilities
+#### 1. `dosql-core` - Core Types & Utilities
 **Files: ~25**
 
 ```
@@ -101,7 +101,7 @@ src/core/
 
 ---
 
-#### 2. `@dotdo/dosql-parser` - SQL Parser
+#### 2. `dosql-parser` - SQL Parser
 **Files: ~20**
 
 ```
@@ -118,7 +118,7 @@ src/parser/
   virtual.ts       # Virtual table parsing
 ```
 
-**Dependencies:** `@dotdo/dosql-core`
+**Dependencies:** `dosql-core`
 
 **Exports:**
 ```json
@@ -133,7 +133,7 @@ src/parser/
 
 ### Tier 2: Storage Packages
 
-#### 3. `@dotdo/dosql-fsx` - File System Abstraction
+#### 3. `dosql-fsx` - File System Abstraction
 **Files: ~15**
 
 ```
@@ -151,7 +151,7 @@ src/fsx/
   gc.ts            # Garbage collection
 ```
 
-**Dependencies:** `@dotdo/dosql-core`
+**Dependencies:** `dosql-core`
 
 **Exports:**
 ```json
@@ -166,7 +166,7 @@ src/fsx/
 
 ---
 
-#### 4. `@dotdo/dosql-wal` - Write-Ahead Log
+#### 4. `dosql-wal` - Write-Ahead Log
 **Files: ~10**
 
 ```
@@ -179,7 +179,7 @@ src/wal/
   retention-types.ts
 ```
 
-**Dependencies:** `@dotdo/dosql-core`, `@dotdo/dosql-fsx`
+**Dependencies:** `dosql-core`, `dosql-fsx`
 
 **Exports:**
 ```json
@@ -193,7 +193,7 @@ src/wal/
 
 ---
 
-#### 5. `@dotdo/dosql-btree` - B-Tree Index
+#### 5. `dosql-btree` - B-Tree Index
 **Files: ~6**
 
 ```
@@ -204,13 +204,13 @@ src/btree/
   lru-cache.ts     # LRU cache for pages
 ```
 
-**Dependencies:** `@dotdo/dosql-core`, `@dotdo/dosql-fsx`
+**Dependencies:** `dosql-core`, `dosql-fsx`
 
 ---
 
 ### Tier 3: Transaction & CDC Packages
 
-#### 6. `@dotdo/dosql-transaction` - Transaction Management
+#### 6. `dosql-transaction` - Transaction Management
 **Files: ~10**
 
 ```
@@ -226,11 +226,11 @@ src/transaction/
   deadlock-detector.ts
 ```
 
-**Dependencies:** `@dotdo/dosql-core`, `@dotdo/dosql-wal`
+**Dependencies:** `dosql-core`, `dosql-wal`
 
 ---
 
-#### 7. `@dotdo/dosql-cdc` - Change Data Capture
+#### 7. `dosql-cdc` - Change Data Capture
 **Files: ~8**
 
 ```
@@ -240,13 +240,13 @@ src/cdc/
   capture.ts       # WAL capture
 ```
 
-**Dependencies:** `@dotdo/dosql-core`, `@dotdo/dosql-wal`, `@dotdo/dosql-fsx`
+**Dependencies:** `dosql-core`, `dosql-wal`, `dosql-fsx`
 
 ---
 
 ### Tier 4: Query Engine Packages
 
-#### 8. `@dotdo/dosql-engine` - Query Execution Engine
+#### 8. `dosql-engine` - Query Execution Engine
 **Files: ~30**
 
 ```
@@ -276,11 +276,11 @@ src/functions/     # SQL functions
   registry.ts
 ```
 
-**Dependencies:** `@dotdo/dosql-core`, `@dotdo/dosql-parser`
+**Dependencies:** `dosql-core`, `dosql-parser`
 
 ---
 
-#### 9. `@dotdo/dosql-rpc` - CapnWeb RPC
+#### 9. `dosql-rpc` - CapnWeb RPC
 **Files: ~6**
 
 ```
@@ -290,13 +290,13 @@ src/rpc/
   server.ts        # RPC server (DoSQLTarget)
 ```
 
-**Dependencies:** `@dotdo/dosql-core`, `capnweb`
+**Dependencies:** `dosql-core`, `capnweb`
 
 ---
 
 ### Tier 5: Feature Packages
 
-#### 10. `@dotdo/dosql-sharding` - Native Sharding
+#### 10. `dosql-sharding` - Native Sharding
 **Files: ~10**
 
 ```
@@ -309,11 +309,11 @@ src/sharding/
   sql-tokenizer.ts # SQL tokenizer for sharding
 ```
 
-**Dependencies:** `@dotdo/dosql-core`, `@dotdo/dosql-engine`, `@dotdo/dosql-rpc`
+**Dependencies:** `dosql-core`, `dosql-engine`, `dosql-rpc`
 
 ---
 
-#### 11. `@dotdo/dosql-proc` - ESM Stored Procedures
+#### 11. `dosql-proc` - ESM Stored Procedures
 **Files: ~12**
 
 ```
@@ -332,11 +332,11 @@ src/triggers/      # Database triggers
   definition.ts
 ```
 
-**Dependencies:** `@dotdo/dosql-core`, `@dotdo/dosql-parser`, `ai-evaluate`
+**Dependencies:** `dosql-core`, `dosql-parser`, `ai-evaluate`
 
 ---
 
-#### 12. `@dotdo/dosql-orm` - ORM Adapters
+#### 12. `dosql-orm` - ORM Adapters
 **Files: ~16**
 
 ```
@@ -347,27 +347,27 @@ src/orm/
   drizzle/         # Drizzle adapter
 ```
 
-**Dependencies:** `@dotdo/dosql-core` + respective ORM packages as peer deps
+**Dependencies:** `dosql-core` + respective ORM packages as peer deps
 
 ---
 
 ### Tier 6: Main Package (Facade)
 
-#### `@dotdo/dosql` - Main Package (Re-exports)
+#### `dosql` - Main Package (Re-exports)
 **Files: ~15**
 
 The main package becomes a facade that re-exports from sub-packages:
 
 ```typescript
 // index.ts
-export * from '@dotdo/dosql-core';
-export * from '@dotdo/dosql-parser';
-export * from '@dotdo/dosql-fsx';
-export * from '@dotdo/dosql-wal';
-export * from '@dotdo/dosql-cdc';
-export * from '@dotdo/dosql-transaction';
-export * from '@dotdo/dosql-engine';
-export * from '@dotdo/dosql-rpc';
+export * from 'dosql-core';
+export * from 'dosql-parser';
+export * from 'dosql-fsx';
+export * from 'dosql-wal';
+export * from 'dosql-cdc';
+export * from 'dosql-transaction';
+export * from 'dosql-engine';
+export * from 'dosql-rpc';
 // ... selective exports to avoid conflicts
 ```
 
@@ -406,35 +406,35 @@ src/
 ## Dependency Graph
 
 ```
-                              @dotdo/dosql-core
+                              dosql-core
                                      |
                     +----------------+----------------+
                     |                |                |
-              @dotdo/dosql-parser  @dotdo/dosql-fsx  (capnweb)
+              dosql-parser  dosql-fsx  (capnweb)
                     |                |                |
                     |      +---------+--------+       |
                     |      |                  |       |
-                    |  @dotdo/dosql-wal  @dotdo/dosql-btree
+                    |  dosql-wal  dosql-btree
                     |      |
               +-----+------+------+
               |                   |
-    @dotdo/dosql-transaction  @dotdo/dosql-cdc
+    dosql-transaction  dosql-cdc
               |
               +------+------+
                      |
-           @dotdo/dosql-engine
+           dosql-engine
                      |
          +-----------+-----------+
          |           |           |
-  @dotdo/dosql-rpc   |    @dotdo/dosql-proc
+  dosql-rpc   |    dosql-proc
          |           |           |
          +-----------+-----------+
                      |
-           @dotdo/dosql-sharding
+           dosql-sharding
                      |
-              @dotdo/dosql (main facade)
+              dosql (main facade)
                      |
-              @dotdo/dosql-orm
+              dosql-orm
 ```
 
 ---
@@ -443,75 +443,75 @@ src/
 
 ```json
 {
-  "name": "@dotdo/dosql",
+  "name": "dosql",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./core": {
-      "types": "./node_modules/@dotdo/dosql-core/dist/index.d.ts",
-      "import": "@dotdo/dosql-core"
+      "types": "./node_modules/dosql-core/dist/index.d.ts",
+      "import": "dosql-core"
     },
     "./parser": {
-      "types": "./node_modules/@dotdo/dosql-parser/dist/index.d.ts",
-      "import": "@dotdo/dosql-parser"
+      "types": "./node_modules/dosql-parser/dist/index.d.ts",
+      "import": "dosql-parser"
     },
     "./fsx": {
-      "types": "./node_modules/@dotdo/dosql-fsx/dist/index.d.ts",
-      "import": "@dotdo/dosql-fsx"
+      "types": "./node_modules/dosql-fsx/dist/index.d.ts",
+      "import": "dosql-fsx"
     },
     "./fsx/do": {
-      "types": "./node_modules/@dotdo/dosql-fsx/dist/do-backend.d.ts",
-      "import": "@dotdo/dosql-fsx/do"
+      "types": "./node_modules/dosql-fsx/dist/do-backend.d.ts",
+      "import": "dosql-fsx/do"
     },
     "./fsx/r2": {
-      "types": "./node_modules/@dotdo/dosql-fsx/dist/r2-backend.d.ts",
-      "import": "@dotdo/dosql-fsx/r2"
+      "types": "./node_modules/dosql-fsx/dist/r2-backend.d.ts",
+      "import": "dosql-fsx/r2"
     },
     "./wal": {
-      "types": "./node_modules/@dotdo/dosql-wal/dist/index.d.ts",
-      "import": "@dotdo/dosql-wal"
+      "types": "./node_modules/dosql-wal/dist/index.d.ts",
+      "import": "dosql-wal"
     },
     "./cdc": {
-      "types": "./node_modules/@dotdo/dosql-cdc/dist/index.d.ts",
-      "import": "@dotdo/dosql-cdc"
+      "types": "./node_modules/dosql-cdc/dist/index.d.ts",
+      "import": "dosql-cdc"
     },
     "./transaction": {
-      "types": "./node_modules/@dotdo/dosql-transaction/dist/index.d.ts",
-      "import": "@dotdo/dosql-transaction"
+      "types": "./node_modules/dosql-transaction/dist/index.d.ts",
+      "import": "dosql-transaction"
     },
     "./engine": {
-      "types": "./node_modules/@dotdo/dosql-engine/dist/index.d.ts",
-      "import": "@dotdo/dosql-engine"
+      "types": "./node_modules/dosql-engine/dist/index.d.ts",
+      "import": "dosql-engine"
     },
     "./rpc": {
-      "types": "./node_modules/@dotdo/dosql-rpc/dist/index.d.ts",
-      "import": "@dotdo/dosql-rpc"
+      "types": "./node_modules/dosql-rpc/dist/index.d.ts",
+      "import": "dosql-rpc"
     },
     "./sharding": {
-      "types": "./node_modules/@dotdo/dosql-sharding/dist/index.d.ts",
-      "import": "@dotdo/dosql-sharding"
+      "types": "./node_modules/dosql-sharding/dist/index.d.ts",
+      "import": "dosql-sharding"
     },
     "./proc": {
-      "types": "./node_modules/@dotdo/dosql-proc/dist/index.d.ts",
-      "import": "@dotdo/dosql-proc"
+      "types": "./node_modules/dosql-proc/dist/index.d.ts",
+      "import": "dosql-proc"
     },
     "./orm/prisma": {
-      "types": "./node_modules/@dotdo/dosql-orm/dist/prisma/index.d.ts",
-      "import": "@dotdo/dosql-orm/prisma"
+      "types": "./node_modules/dosql-orm/dist/prisma/index.d.ts",
+      "import": "dosql-orm/prisma"
     },
     "./orm/kysely": {
-      "types": "./node_modules/@dotdo/dosql-orm/dist/kysely/index.d.ts",
-      "import": "@dotdo/dosql-orm/kysely"
+      "types": "./node_modules/dosql-orm/dist/kysely/index.d.ts",
+      "import": "dosql-orm/kysely"
     },
     "./orm/knex": {
-      "types": "./node_modules/@dotdo/dosql-orm/dist/knex/index.d.ts",
-      "import": "@dotdo/dosql-orm/knex"
+      "types": "./node_modules/dosql-orm/dist/knex/index.d.ts",
+      "import": "dosql-orm/knex"
     },
     "./orm/drizzle": {
-      "types": "./node_modules/@dotdo/dosql-orm/dist/drizzle/index.d.ts",
-      "import": "@dotdo/dosql-orm/drizzle"
+      "types": "./node_modules/dosql-orm/dist/drizzle/index.d.ts",
+      "import": "dosql-orm/drizzle"
     },
     "./schema": {
       "types": "./dist/schema/index.d.ts",
@@ -580,7 +580,7 @@ src/
 ### Phase 1: Create Core Package (Week 1)
 1. Create `packages/dosql-core/` directory structure
 2. Move `errors/`, `utils/`, `types/`, `hlc.ts`, `constants.ts`
-3. Update all internal imports to use `@dotdo/dosql-core`
+3. Update all internal imports to use `dosql-core`
 4. Set up workspace linking
 
 ### Phase 2: Extract Storage Packages (Week 2)
@@ -616,7 +616,7 @@ src/
 ## Migration Strategy
 
 ### For Internal Code
-- Use path aliases during migration: `"@dotdo/dosql-core": ["./packages/dosql-core/src"]`
+- Use path aliases during migration: `"dosql-core": ["./packages/dosql-core/src"]`
 - Gradually update imports file-by-file
 - Run tests after each module extraction
 

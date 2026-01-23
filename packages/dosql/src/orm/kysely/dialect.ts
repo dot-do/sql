@@ -34,7 +34,7 @@ import type { DoSQLDialectConfig, DoSQLBackend } from './types.js';
  * @example
  * ```typescript
  * import { Kysely } from 'kysely';
- * import { DoSQLDialect } from '@dotdo/dosql/orm/kysely';
+ * import { DoSQLDialect } from 'dosql/orm/kysely';
  *
  * interface Database {
  *   users: { id: number; name: string; email: string };

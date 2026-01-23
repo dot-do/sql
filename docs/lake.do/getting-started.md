@@ -14,7 +14,7 @@ DoLake is a real-time Iceberg lakehouse that runs on Cloudflare's edge. Stream y
 ### 1. Install
 
 ```bash
-npm install @dotdo/lake.do
+npm install lake.do
 ```
 
 ### 2. Configure CDC Source
@@ -22,7 +22,7 @@ npm install @dotdo/lake.do
 Connect your database to stream changes:
 
 ```typescript
-import { DoLake } from '@dotdo/lake.do'
+import { DoLake } from 'lake.do'
 
 const lake = new DoLake({
   catalog: env.LAKE_CATALOG,

@@ -2,7 +2,7 @@
 
 **Review Date:** 2026-01-22
 **Reviewer:** Product Review Analysis
-**Packages:** `@dotdo/dosql`, `@dotdo/dolake`
+**Packages:** `dosql`, `dolake`
 **Status:** Updated comprehensive review
 
 ---

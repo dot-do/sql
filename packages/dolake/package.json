@@ -1,5 +1,5 @@
 {
-  "name": "@dotdo/dolake",
+  "name": "dolake",
   "version": "0.1.0",
   "description": "DoLake - Lakehouse worker for CDC streaming to Iceberg/Parquet on R2",
   "type": "module",
@@ -33,7 +33,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@dotdo/lake.do": "workspace:*",
+    "lake.do": "workspace:*",
     "hyparquet": "^1.9.0",
     "zod": "^4.3.5"
   },

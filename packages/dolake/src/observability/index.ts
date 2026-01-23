@@ -6,7 +6,7 @@
  *
  * @example Basic Usage
  * ```typescript
- * import { createObservability, createDoLakeMetrics } from '@dotdo/dolake/observability';
+ * import { createObservability, createDoLakeMetrics } from 'dolake/observability';
  *
  * const { tracer, metrics } = createObservability();
  * const dolakeMetrics = createDoLakeMetrics(metrics);

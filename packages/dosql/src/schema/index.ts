@@ -15,7 +15,7 @@
  *
  * @example
  * ```typescript
- * import { defineSchema, type InferTable } from '@dotdo/dosql/schema';
+ * import { defineSchema, type InferTable } from 'dosql/schema';
  *
  * const schema = defineSchema({
  *   users: {

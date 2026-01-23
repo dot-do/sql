@@ -1,5 +1,5 @@
 {
-  "name": "@dotdo/sql.do",
+  "name": "sql.do",
   "version": "0.1.0",
   "description": "Client SDK for DoSQL - SQL database on Cloudflare Workers",
   "type": "module",
@@ -47,7 +47,7 @@
     "directory": "packages/sql.do"
   },
   "dependencies": {
-    "@dotdo/shared-types": "workspace:*"
+    "@dotdo/sql-types": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.0.0",

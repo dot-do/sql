@@ -72,10 +72,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - ESM-based procedure execution
 
 - **ORM Adapters**
-  - Drizzle ORM adapter (`@dotdo/dosql/orm/drizzle`)
-  - Kysely adapter (`@dotdo/dosql/orm/kysely`)
-  - Knex adapter (`@dotdo/dosql/orm/knex`)
-  - Prisma adapter (`@dotdo/dosql/orm/prisma`)
+  - Drizzle ORM adapter (`dosql/orm/drizzle`)
+  - Kysely adapter (`dosql/orm/kysely`)
+  - Knex adapter (`dosql/orm/knex`)
+  - Prisma adapter (`dosql/orm/prisma`)
 
 - **Storage Backends** (Experimental)
   - `createDOBackend` for Durable Object storage

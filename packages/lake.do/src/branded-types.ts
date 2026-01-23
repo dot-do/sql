@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Branded Type Factory Pattern
+ * lake.do - Branded Type Factory Pattern
  *
  * This module provides a generic factory pattern for creating branded types,
  * eliminating repetitive validation logic across multiple branded type factories.
@@ -9,7 +9,7 @@
  * @since 0.1.0
  */
 
-import { isDevMode } from '@dotdo/sql.do';
+import { isDevMode } from 'sql.do';
 
 // =============================================================================
 // Branded Type Factory

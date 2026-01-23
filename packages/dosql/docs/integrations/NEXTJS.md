@@ -49,7 +49,7 @@ The Pages Router is supported but requires API routes for all database operation
 ### Installation
 
 ```bash
-npm install @dotdo/dosql
+npm install dosql
 
 # Optional: Client-side data fetching libraries
 npm install swr
@@ -90,7 +90,7 @@ const nextConfig = {
   },
 
   // Exclude DoSQL from server bundling
-  serverExternalPackages: ['@dotdo/dosql'],
+  serverExternalPackages: ['dosql'],
 };
 
 module.exports = nextConfig;
@@ -102,7 +102,7 @@ Create a reusable database client:
 
 ```typescript
 // lib/db.ts
-import { createHttpClient } from '@dotdo/dosql/rpc';
+import { createHttpClient } from 'dosql/rpc';
 
 export function getDB() {
   if (!process.env.DOSQL_URL) {
@@ -1000,7 +1000,7 @@ Create a hook for real-time database connections:
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { createWebSocketClient } from '@dotdo/dosql/rpc';
+import { createWebSocketClient } from 'dosql/rpc';
 
 export function useDoSQLRealtime() {
   const [isConnected, setIsConnected] = useState(false);
@@ -1043,7 +1043,7 @@ Subscribe to real-time database changes:
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createWebSocketClient, type ChangeEvent } from '@dotdo/dosql/rpc';
+import { createWebSocketClient, type ChangeEvent } from 'dosql/rpc';
 
 interface CDCOptions {
   tables?: string[];
@@ -1156,7 +1156,7 @@ Run DoSQL queries at the edge for minimal latency.
 
 ```typescript
 // app/api/edge/posts/route.ts
-import { createHttpClient } from '@dotdo/dosql/rpc';
+import { createHttpClient } from 'dosql/rpc';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'edge';
@@ -1184,7 +1184,7 @@ Use edge geolocation for personalized content:
 
 ```typescript
 // app/api/nearby/route.ts
-import { createHttpClient } from '@dotdo/dosql/rpc';
+import { createHttpClient } from 'dosql/rpc';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'edge';
@@ -1217,7 +1217,7 @@ Access Durable Objects directly when deployed to Cloudflare Pages:
 
 ```typescript
 // functions/api/posts/[[route]].ts
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 interface Env {
   DOSQL_DB: DurableObjectNamespace;

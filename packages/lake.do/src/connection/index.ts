@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Connection Management Module
+ * lake.do - Connection Management Module
  *
  * This module provides WebSocket connection management with:
  * - Event emission for connection lifecycle

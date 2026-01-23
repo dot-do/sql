@@ -11,7 +11,7 @@
  *
  * @example Basic Usage
  * ```typescript
- * import { createObservability } from '@dotdo/dosql/observability';
+ * import { createObservability } from 'dosql/observability';
  *
  * const { tracer, metrics, sanitizer } = createObservability({
  *   tracing: { enabled: true, serviceName: 'my-service' },

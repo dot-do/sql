@@ -1,5 +1,5 @@
 {
-  "name": "@dotdo/dosql-cli",
+  "name": "dosql-cli",
   "version": "0.1.0",
   "description": "CLI tool for DoSQL - scaffold projects, run migrations, generate types",
   "type": "module",

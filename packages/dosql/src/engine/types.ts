@@ -10,11 +10,11 @@ import type { ColumnarReader, Predicate as ColumnarPredicate } from '../columnar
 import { PlanningContext, getDefaultPlanningContext, resetDefaultPlanningContext } from '../planner/planning-context.js';
 
 // =============================================================================
-// BRANDED TYPES - Imported from @dotdo/shared-types (via @dotdo/sql.do)
+// BRANDED TYPES - Imported from @dotdo/sql-types (via sql.do)
 // =============================================================================
 
 /**
- * Re-exported branded types from `@dotdo/shared-types` (via `@dotdo/sql.do`).
+ * Re-exported branded types from `@dotdo/sql-types` (via `sql.do`).
  *
  * These types provide type-safe identifiers using TypeScript's branded types pattern.
  * Branded types prevent accidental assignment from raw primitives, catching type
@@ -70,13 +70,13 @@ import { PlanningContext, getDefaultPlanningContext, resetDefaultPlanningContext
  * }
  * ```
  *
- * @see {@link https://github.com/dotdo/shared-types | @dotdo/shared-types} for canonical definitions
+ * @see {@link https://github.com/dotdo/shared-types | @dotdo/sql-types} for canonical definitions
  *
  * @public
  * @stability stable
  * @since 0.1.0
  */
-export type { LSN, TransactionId, ShardId } from '@dotdo/sql.do';
+export type { LSN, TransactionId, ShardId } from 'sql.do';
 export {
   createLSN,
   createTransactionId,
@@ -89,10 +89,10 @@ export {
   isValidLSN,
   isValidTransactionId,
   isValidShardId,
-} from '@dotdo/sql.do';
+} from 'sql.do';
 
 // Import for local use
-import type { LSN, TransactionId, ShardId } from '@dotdo/sql.do';
+import type { LSN, TransactionId, ShardId } from 'sql.do';
 
 // =============================================================================
 // PAGE ID - Engine-specific branded type

@@ -105,7 +105,7 @@ export function createCLI(): Command {
         // actually applying them to a database. To run migrations, use the
         // programmatic API with a custom executor:
         //
-        //   import { findMigrations, runMigrations } from '@dotdo/dosql-cli';
+        //   import { findMigrations, runMigrations } from 'dosql-cli';
         //
         //   const migrations = await findMigrations('./migrations');
         //   const result = await runMigrations({

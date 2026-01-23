@@ -131,7 +131,7 @@ Throughput:
 ## Programmatic Usage
 
 ```typescript
-import { BenchmarkRunner, DoSQLAdapter, createSimpleSelectScenario } from '@dotdo/dosql-benchmark';
+import { BenchmarkRunner, DoSQLAdapter, createSimpleSelectScenario } from 'dosql-benchmark';
 
 // Create adapter and runner
 const adapter = new DoSQLAdapter();
@@ -158,7 +158,7 @@ console.log(`Throughput: ${result.throughput.opsPerSecond.toFixed(2)} ops/sec`);
 In-memory SQL engine for testing and development.
 
 ```typescript
-import { DoSQLAdapter } from '@dotdo/dosql-benchmark';
+import { DoSQLAdapter } from 'dosql-benchmark';
 
 const adapter = new DoSQLAdapter();
 ```
@@ -168,7 +168,7 @@ const adapter = new DoSQLAdapter();
 Cloudflare D1 database (requires Worker environment).
 
 ```typescript
-import { D1Adapter } from '@dotdo/dosql-benchmark';
+import { D1Adapter } from 'dosql-benchmark';
 
 // In a Worker
 const adapter = new D1Adapter({ db: env.DB });
@@ -179,7 +179,7 @@ const adapter = new D1Adapter({ db: env.DB });
 Durable Object SQLite (requires Worker environment).
 
 ```typescript
-import { DOSqliteAdapter } from '@dotdo/dosql-benchmark';
+import { DOSqliteAdapter } from 'dosql-benchmark';
 
 // In a Durable Object
 const adapter = new DOSqliteAdapter({ storage: ctx.storage });
@@ -196,7 +196,7 @@ import {
   D1Adapter,
   DOSqliteAdapter,
   DEFAULT_SCENARIOS,
-} from '@dotdo/dosql-benchmark';
+} from 'dosql-benchmark';
 
 const runner = new BenchmarkRunner({ verbose: true });
 

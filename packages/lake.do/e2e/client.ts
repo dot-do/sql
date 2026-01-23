@@ -53,14 +53,14 @@ export interface CDCWriteResult {
 /**
  * E2E-specific CDCEvent type for DoLake testing.
  *
- * NOTE: This differs from the canonical CDCEvent in @dotdo/sql.do:
+ * NOTE: This differs from the canonical CDCEvent in sql.do:
  * - Includes `id` field (E2E-specific event identifier for test assertions)
  * - Operation is a simple union rather than the CDCOperation branded type
  * - Missing optional fields like `transactionId`, `sequence`, `metadata`
  * This is intentional - E2E tests work with the external API contract which
  * exposes a simplified event structure for testing purposes.
  *
- * @see @dotdo/sql.do for the canonical CDCEvent interface
+ * @see sql.do for the canonical CDCEvent interface
  */
 export interface CDCEvent {
   id: string;

@@ -1,5 +1,5 @@
 /**
- * @dotdo/sql.do - Client SDK for DoSQL
+ * sql.do - Client SDK for DoSQL
  *
  * SQL database client for Cloudflare Workers using CapnWeb RPC.
  *
@@ -14,7 +14,7 @@
  *
  * @example
  * ```typescript
- * import { createSQLClient } from '@dotdo/sql.do';
+ * import { createSQLClient } from 'sql.do';
  *
  * const client = createSQLClient({
  *   url: 'https://sql.example.com',

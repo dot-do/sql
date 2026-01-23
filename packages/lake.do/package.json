@@ -1,5 +1,5 @@
 {
-  "name": "@dotdo/lake.do",
+  "name": "lake.do",
   "version": "0.1.0",
   "description": "Client SDK for DoLake - Lakehouse on Cloudflare Workers",
   "type": "module",
@@ -48,7 +48,7 @@
     "directory": "packages/lake.do"
   },
   "dependencies": {
-    "@dotdo/sql.do": "workspace:*"
+    "sql.do": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.0.0",

@@ -69,13 +69,13 @@ npx sv create my-app
 cd my-app
 
 # Install DoSQL client SDK
-npm install @dotdo/sql.do
+npm install sql.do
 
 # For Cloudflare deployment
 npm install -D @sveltejs/adapter-cloudflare wrangler
 
 # For real-time features
-npm install @dotdo/lake.do
+npm install lake.do
 ```
 
 ### Environment Configuration
@@ -99,7 +99,7 @@ Define environment types in `src/app.d.ts`:
 declare global {
   namespace App {
     interface Locals {
-      db: import('@dotdo/sql.do').DoSQLClient;
+      db: import('sql.do').DoSQLClient;
     }
 
     interface Platform {
@@ -128,7 +128,7 @@ Create a reusable database client module:
 
 ```typescript
 // src/lib/server/db.ts
-import { createSQLClient, type DoSQLClient, type SQLClientConfig } from '@dotdo/sql.do';
+import { createSQLClient, type DoSQLClient, type SQLClientConfig } from 'sql.do';
 import { building } from '$app/environment';
 import { env } from '$env/dynamic/private';
 
@@ -205,7 +205,7 @@ Load data in `+page.server.ts` files:
 // src/routes/users/+page.server.ts
 import type { PageServerLoad } from './$types';
 import { error } from '@sveltejs/kit';
-import { SQLError, RPCErrorCode } from '@dotdo/sql.do';
+import { SQLError, RPCErrorCode } from 'sql.do';
 
 interface User {
   id: string;
@@ -349,7 +349,7 @@ Create a reusable error handler:
 ```typescript
 // src/lib/server/errors.ts
 import { error } from '@sveltejs/kit';
-import { SQLError, RPCErrorCode } from '@dotdo/sql.do';
+import { SQLError, RPCErrorCode } from 'sql.do';
 
 export function handleDBError(err: unknown, context: string): never {
   if (err instanceof SQLError) {
@@ -479,7 +479,7 @@ Handle form submissions with type safety:
 // src/routes/users/new/+page.server.ts
 import type { Actions, PageServerLoad } from './$types';
 import { fail, redirect } from '@sveltejs/kit';
-import { SQLError, RPCErrorCode } from '@dotdo/sql.do';
+import { SQLError, RPCErrorCode } from 'sql.do';
 
 export const load: PageServerLoad = async () => {
   return {};
@@ -917,7 +917,7 @@ Create API routes in `+server.ts` files:
 import type { RequestHandler } from './$types';
 import { json, error } from '@sveltejs/kit';
 import { getDB } from '$lib/server/db';
-import { SQLError, RPCErrorCode } from '@dotdo/sql.do';
+import { SQLError, RPCErrorCode } from 'sql.do';
 
 interface User {
   id: string;
@@ -1264,7 +1264,7 @@ Access Cloudflare bindings in your app:
 
 ```typescript
 // src/lib/server/db.ts
-import { createSQLClient, type DoSQLClient, type SQLClientConfig } from '@dotdo/sql.do';
+import { createSQLClient, type DoSQLClient, type SQLClientConfig } from 'sql.do';
 
 export function createDBFromPlatform(platform: App.Platform | undefined): DoSQLClient {
   // In production, use Cloudflare environment bindings
@@ -1426,7 +1426,7 @@ Create type-safe query builders:
 
 ```typescript
 // src/lib/server/queries.ts
-import type { DoSQLClient, QueryResult } from '@dotdo/sql.do';
+import type { DoSQLClient, QueryResult } from 'sql.do';
 import type { User, Post, PostWithAuthor, UserStats } from '$lib/types/database';
 
 // Type-safe repository pattern
@@ -1556,7 +1556,7 @@ Create generic helpers for common patterns:
 
 ```typescript
 // src/lib/server/db-helpers.ts
-import type { DoSQLClient, QueryResult } from '@dotdo/sql.do';
+import type { DoSQLClient, QueryResult } from 'sql.do';
 
 // Paginated query helper
 export interface PaginatedResult<T> {
@@ -1645,7 +1645,7 @@ Create a CDC subscription service:
 
 ```typescript
 // src/lib/server/cdc.ts
-import { createLakeClient, type CDCEvent, type LakeClient } from '@dotdo/lake.do';
+import { createLakeClient, type CDCEvent, type LakeClient } from 'lake.do';
 import type { RequestEvent } from '@sveltejs/kit';
 
 let lakeClient: LakeClient | null = null;
@@ -2908,7 +2908,7 @@ Reuse database connections efficiently:
 
 ```typescript
 // src/lib/server/db-pool.ts
-import { createSQLClient, type DoSQLClient } from '@dotdo/sql.do';
+import { createSQLClient, type DoSQLClient } from 'sql.do';
 
 class ConnectionPool {
   private static instance: ConnectionPool;
@@ -3186,7 +3186,7 @@ export const actions: Actions = {
 
 This guide covered the essential patterns for integrating DoSQL with SvelteKit:
 
-1. **Setup**: Install `@dotdo/sql.do`, configure environment variables, create a database client module
+1. **Setup**: Install `sql.do`, configure environment variables, create a database client module
 2. **Load Functions**: Use `+page.server.ts` for server-side data loading with type safety
 3. **Form Actions**: Handle mutations with progressive enhancement and optimistic updates
 4. **API Routes**: Build RESTful endpoints with proper validation and error handling

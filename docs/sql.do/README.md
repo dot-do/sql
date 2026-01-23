@@ -34,11 +34,11 @@ DoSQL is a database engine purpose-built for Cloudflare Workers and Durable Obje
 ## Quick Start
 
 ```bash
-npm install @dotdo/dosql
+npm install dosql
 ```
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 // Create a database with auto-migrations
 const db = await DB('my-tenant', {
@@ -97,7 +97,7 @@ DoSQL is extremely compact, designed for Cloudflare's bundle limits:
 ## Example: Complete CRUD
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 // Initialize database
 const db = await DB('tenants', {
@@ -138,7 +138,7 @@ await db.transaction(async (tx) => {
 ## Example: Time Travel
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const db = await DB('analytics');
 
@@ -159,7 +159,7 @@ const snapshot = await db.query(
 ## Example: Virtual Tables
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const db = await DB('analytics');
 

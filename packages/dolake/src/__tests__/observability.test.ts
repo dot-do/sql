@@ -140,7 +140,7 @@ interface CDCBatchMessage {
 /**
  * Test-specific CDCEvent mock.
  *
- * NOTE: This differs from the canonical CDCEvent in @dotdo/sql.do and lake.do:
+ * NOTE: This differs from the canonical CDCEvent in sql.do and lake.do:
  * - Uses `operation: string` instead of the stricter CDCOperation union type
  * - Includes `rowId` field which is specific to observability span attributes
  * This is intentional - observability tests need a simplified mock that focuses

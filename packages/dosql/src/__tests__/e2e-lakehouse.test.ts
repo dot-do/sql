@@ -213,14 +213,14 @@ interface CDCSubscription {
 /**
  * Test-specific CDCEvent type for E2E lakehouse integration tests.
  *
- * NOTE: This differs from the canonical CDCEvent in @dotdo/sql.do:
+ * NOTE: This differs from the canonical CDCEvent in sql.do:
  * - Uses `txnId` instead of `transactionId` (test-specific field naming)
  * - Operation is a simple union rather than the CDCOperation branded type
  * - Simplified structure without optional fields like `sequence`, `metadata`
  * This is intentional - these integration tests focus on the lakehouse data flow
  * and use a minimal event representation for test clarity.
  *
- * @see @dotdo/sql.do for the canonical CDCEvent interface
+ * @see sql.do for the canonical CDCEvent interface
  */
 interface CDCEvent {
   lsn: bigint;

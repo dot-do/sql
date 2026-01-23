@@ -49,7 +49,7 @@ ROLLBACK;
 #### TypeScript API
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const db = await DB('my-database');
 
@@ -86,7 +86,7 @@ DoSQL supports three transaction modes, matching SQLite's behavior:
 | `EXCLUSIVE` | Acquires exclusive lock, preventing all other access. | Full isolation from other transactions |
 
 ```typescript
-import { TransactionMode } from '@dotdo/dosql';
+import { TransactionMode } from 'dosql';
 
 // Begin with immediate mode for guaranteed write access
 const context = await txnManager.begin({
@@ -104,7 +104,7 @@ const context = await txnManager.begin({
 The `executeInTransaction` helper provides automatic commit/rollback handling:
 
 ```typescript
-import { executeInTransaction } from '@dotdo/dosql';
+import { executeInTransaction } from 'dosql';
 
 const result = await executeInTransaction(txnManager, async (ctx) => {
   // All operations within the transaction
@@ -130,7 +130,7 @@ if (result.committed) {
 Read-only transactions provide optimized performance and prevent accidental writes:
 
 ```typescript
-import { executeReadOnly } from '@dotdo/dosql';
+import { executeReadOnly } from 'dosql';
 
 const users = await executeReadOnly(txnManager, async (ctx) => {
   // Only read operations allowed
@@ -177,7 +177,7 @@ COMMIT;
 #### TypeScript API
 
 ```typescript
-import { IsolationLevel } from '@dotdo/dosql';
+import { IsolationLevel } from 'dosql';
 
 // Set default isolation level for the manager
 const txnManager = createTransactionManager({
@@ -262,7 +262,7 @@ DoSQL enforces transaction timeouts to prevent resource exhaustion from long-run
 ### Timeout Configuration
 
 ```typescript
-import { createTransactionManager, DEFAULT_TIMEOUT_CONFIG } from '@dotdo/dosql';
+import { createTransactionManager, DEFAULT_TIMEOUT_CONFIG } from 'dosql';
 
 const txnManager = createTransactionManager({
   timeoutConfig: {
@@ -313,7 +313,7 @@ if (granted) {
 When running in Cloudflare Workers, timeout enforcement uses Durable Object alarms:
 
 ```typescript
-import { createTransactionManager } from '@dotdo/dosql';
+import { createTransactionManager } from 'dosql';
 
 export class DatabaseDO {
   private txnManager: ExtendedTransactionManager;
@@ -446,7 +446,7 @@ await txnManager.commit();
 ### Savepoint Wrapper Function
 
 ```typescript
-import { executeWithSavepoint } from '@dotdo/dosql';
+import { executeWithSavepoint } from 'dosql';
 
 await txnManager.begin();
 
@@ -488,7 +488,7 @@ Transaction 2: Holds lock on B, waiting for lock on A
 ### Enabling Deadlock Detection
 
 ```typescript
-import { createLockManager, createTransactionManager } from '@dotdo/dosql';
+import { createLockManager, createTransactionManager } from 'dosql';
 
 const lockManager = createLockManager({
   detectDeadlocks: true,
@@ -552,7 +552,7 @@ const lockManager = createLockManager({
 ### Handling Deadlock Errors
 
 ```typescript
-import { TransactionError, TransactionErrorCode, DeadlockError } from '@dotdo/dosql';
+import { TransactionError, TransactionErrorCode, DeadlockError } from 'dosql';
 
 try {
   await lockManager.acquire({
@@ -695,7 +695,7 @@ DoSQL supports two-phase commit for transactions spanning multiple Durable Objec
 ### Two-Phase Commit Protocol
 
 ```typescript
-import { TwoPhaseCoordinator, Participant } from '@dotdo/dosql';
+import { TwoPhaseCoordinator, Participant } from 'dosql';
 
 // Create coordinator
 const coordinator = new TwoPhaseCoordinator({
@@ -816,7 +816,7 @@ export class AccountsDO implements DurableObject {
 For long-running distributed transactions, consider the Saga pattern:
 
 ```typescript
-import { SagaOrchestrator } from '@dotdo/dosql';
+import { SagaOrchestrator } from 'dosql';
 
 const saga = new SagaOrchestrator();
 
@@ -1003,7 +1003,7 @@ if (remaining < 10000) {
 ### Transaction Error Types
 
 ```typescript
-import { TransactionError, TransactionErrorCode } from '@dotdo/dosql';
+import { TransactionError, TransactionErrorCode } from 'dosql';
 
 try {
   await txnManager.begin();
@@ -1213,7 +1213,7 @@ import {
   TransactionError,
   TransactionErrorCode,
   IsolationLevel
-} from '@dotdo/dosql';
+} from 'dosql';
 
 interface TransferResult {
   transferId: number;
@@ -1452,7 +1452,7 @@ import {
   TransactionError,
   TransactionErrorCode,
   IsolationLevel
-} from '@dotdo/dosql';
+} from 'dosql';
 
 interface ReservationResult {
   reservationId: number;

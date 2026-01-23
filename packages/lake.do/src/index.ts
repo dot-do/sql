@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Client SDK for DoLake Lakehouse
+ * lake.do - Client SDK for DoLake Lakehouse
  *
  * @description A TypeScript client library for interacting with DoLake, a lakehouse
  * solution built on Cloudflare Workers and R2. Provides real-time CDC streaming,
@@ -26,14 +26,14 @@
  * ## Installation
  *
  * ```bash
- * npm install @dotdo/lake.do
+ * npm install lake.do
  * ```
  *
  * ## Quick Start
  *
  * @example
  * ```typescript
- * import { createLakeClient } from '@dotdo/lake.do';
+ * import { createLakeClient } from 'lake.do';
  *
  * // Create a client
  * const client = createLakeClient({
@@ -100,7 +100,7 @@
  * - {@link CompactionJobId} - Compaction job identifier
  *
  * @packageDocumentation
- * @module @dotdo/lake.do
+ * @module lake.do
  */
 
 // =============================================================================
@@ -294,7 +294,7 @@ export type {
  *
  * @example
  * ```typescript
- * import { createPartitionKey, createSnapshotId } from '@dotdo/lake.do';
+ * import { createPartitionKey, createSnapshotId } from 'lake.do';
  *
  * const partitionKey = createPartitionKey('date=2024-01-15');
  * const snapshotId = createSnapshotId('snap_123');
@@ -316,7 +316,7 @@ export {
 // =============================================================================
 
 /**
- * Common types re-exported from @dotdo/sql.do for convenience - stable.
+ * Common types re-exported from sql.do for convenience - stable.
  *
  * These types are used in CDC events and are provided here to avoid
  * requiring a separate import from sql.do.
@@ -335,7 +335,7 @@ export type {
 } from './types.js';
 
 /**
- * CDC types re-exported from @dotdo/sql.do - experimental.
+ * CDC types re-exported from sql.do - experimental.
  *
  * @public
  * @stability experimental

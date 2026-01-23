@@ -1,11 +1,11 @@
 /**
- * @dotdo/shared-types - Unified types for DoSQL ecosystem
+ * @dotdo/sql-types - Unified types for DoSQL ecosystem
  *
  * This package provides the canonical type definitions for:
- * - @dotdo/sql.do (client)
- * - @dotdo/dosql (server)
- * - @dotdo/lake.do (client)
- * - @dotdo/dolake (server)
+ * - sql.do (client)
+ * - dosql (server)
+ * - lake.do (client)
+ * - dolake (server)
  *
  * All packages should import shared types from here to ensure compatibility.
  *
@@ -71,7 +71,7 @@ declare const ShardIdBrand: unique symbol;
  *
  * @example
  * ```typescript
- * import { createTransactionId, TransactionId, isValidatedTransactionId } from '@dotdo/shared-types';
+ * import { createTransactionId, TransactionId, isValidatedTransactionId } from '@dotdo/sql-types';
  *
  * // Create a validated transaction ID
  * const txId: TransactionId = createTransactionId('tx-abc123-def456');
@@ -98,7 +98,7 @@ export type TransactionId = string & { readonly [TransactionIdBrand]: never };
  *
  * @example
  * ```typescript
- * import { createLSN, LSN, compareLSN, incrementLSN, serializeLSN } from '@dotdo/shared-types';
+ * import { createLSN, LSN, compareLSN, incrementLSN, serializeLSN } from '@dotdo/sql-types';
  *
  * // Create a validated LSN
  * const lsn: LSN = createLSN(1000n);
@@ -129,7 +129,7 @@ export type LSN = bigint & { readonly [LSNBrand]: never };
  *
  * @example
  * ```typescript
- * import { createStatementHash, StatementHash, PreparedStatement } from '@dotdo/shared-types';
+ * import { createStatementHash, StatementHash, PreparedStatement } from '@dotdo/sql-types';
  *
  * // Create a validated statement hash
  * const hash: StatementHash = createStatementHash('a1b2c3d4e5f6');
@@ -155,7 +155,7 @@ export type StatementHash = string & { readonly [StatementHashBrand]: never };
  *
  * @example
  * ```typescript
- * import { createShardId, ShardId, ShardInfo } from '@dotdo/shared-types';
+ * import { createShardId, ShardId, ShardInfo } from '@dotdo/sql-types';
  *
  * // Create a validated shard ID
  * const shardId: ShardId = createShardId('shard-us-east-001');

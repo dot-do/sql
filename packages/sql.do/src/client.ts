@@ -1,5 +1,5 @@
 /**
- * @dotdo/sql.do - CapnWeb RPC Client for DoSQL
+ * sql.do - CapnWeb RPC Client for DoSQL
  *
  * @packageDocumentation
  */
@@ -422,7 +422,7 @@ export interface SQLClientConfig {
   idempotency?: IdempotencyConfig;
 }
 
-// RetryConfig is imported from @dotdo/shared-types via ./types.js
+// RetryConfig is imported from @dotdo/sql-types via ./types.js
 
 // =============================================================================
 // Re-export Event Types from types.ts
@@ -467,7 +467,7 @@ type EventListenerStore = {
  *
  * @example
  * ```typescript
- * import { createSQLClient } from '@dotdo/sql.do';
+ * import { createSQLClient } from 'sql.do';
  *
  * // Create a client
  * const client = createSQLClient({

@@ -2,15 +2,15 @@
  * GREEN Phase TDD Tests: Type Duplication Resolution
  *
  * These tests verify that type duplication issues have been resolved between client and server packages:
- * - @dotdo/sql.do (client) vs @dotdo/dosql (server)
- * - @dotdo/lake.do (client) vs @dotdo/dolake (server)
+ * - sql.do (client) vs dosql (server)
+ * - lake.do (client) vs dolake (server)
  *
  * Issue Reference: CODE_REVIEW.md Issue #3
  *
- * Solution: Created a shared @dotdo/shared-types package that all packages import from.
+ * Solution: Created a shared @dotdo/sql-types package that all packages import from.
  * Types are re-exported through the dependency chain:
- *   @dotdo/shared-types -> @dotdo/sql.do -> @dotdo/dosql
- *   @dotdo/shared-types -> @dotdo/sql.do -> @dotdo/lake.do -> @dotdo/dolake
+ *   @dotdo/sql-types -> sql.do -> dosql
+ *   @dotdo/sql-types -> sql.do -> lake.do -> dolake
  */
 
 import { describe, it, expect } from 'vitest';
@@ -36,7 +36,7 @@ import type {
   RPCError as ClientRPCError,
   IsolationLevel as ClientIsolationLevel,
   ClientCapabilities as ClientClientCapabilities,
-} from '@dotdo/sql.do';
+} from 'sql.do';
 
 import {
   CDCOperationCode as ClientCDCOperationCode,
@@ -44,7 +44,7 @@ import {
   isServerCDCEvent as clientIsServerCDCEvent,
   isClientCDCEvent as clientIsClientCDCEvent,
   serverToClientCDCEvent as clientServerToClientCDCEvent,
-} from '@dotdo/sql.do';
+} from 'sql.do';
 
 // Server types (dosql/rpc) - now re-exports from sql.do which re-exports from shared-types
 import type {
@@ -72,24 +72,24 @@ import type {
   CDCEvent as DoLakeCDCEvent,
   CDCOperation as DoLakeCDCOperation,
   ClientCapabilities as DoLakeClientCapabilities,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 import {
   CDCOperationCode as DoLakeCDCOperationCode,
   DEFAULT_CLIENT_CAPABILITIES as DoLakeDefaultCapabilities,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 // Lake.do types (lake.do client) - now re-exports from sql.do
 import type {
   CDCEvent as LakeClientCDCEvent,
   CDCOperation as LakeClientCDCOperation,
   ClientCapabilities as LakeClientCapabilities,
-} from '@dotdo/lake.do';
+} from 'lake.do';
 
 import {
   CDCOperationCode as LakeClientCDCOperationCode,
   DEFAULT_CLIENT_CAPABILITIES as LakeClientDefaultCapabilities,
-} from '@dotdo/lake.do';
+} from 'lake.do';
 
 // CDC types from dosql/cdc - now re-exports from sql.do
 import type {
@@ -364,7 +364,7 @@ describe('Type Duplication - ColumnType Compatibility', () => {
 
   it('should provide mapping between SQL and JS column types', () => {
     // The unified types include mapping functions
-    const { SQL_TO_JS_TYPE_MAP, JS_TO_SQL_TYPE_MAP, sqlToJsType, jsToSqlType } = require('@dotdo/sql.do');
+    const { SQL_TO_JS_TYPE_MAP, JS_TO_SQL_TYPE_MAP, sqlToJsType, jsToSqlType } = require('sql.do');
 
     // Test SQL to JS mapping
     expect(SQL_TO_JS_TYPE_MAP.INTEGER).toBe('number');
@@ -480,7 +480,7 @@ describe('Type Duplication - IsolationLevel Compatibility', () => {
 describe('Type Duplication - Import Path Verification', () => {
   it('should be able to import shared types from unified sources', () => {
     // All types can now be imported from the appropriate package
-    // and they all originate from @dotdo/shared-types
+    // and they all originate from @dotdo/sql-types
 
     // The import paths work correctly
     const sharedTypesExist = true;

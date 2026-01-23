@@ -8,7 +8,7 @@
  *
  * @example
  * ```typescript
- * import { createProcedureRegistry, createProcedureExecutor, parseProcedure } from '@dotdo/dosql/proc';
+ * import { createProcedureRegistry, createProcedureExecutor, parseProcedure } from 'dosql/proc';
  *
  * // Create registry and executor
  * const registry = createProcedureRegistry({

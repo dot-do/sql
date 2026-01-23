@@ -686,13 +686,13 @@ When debugging slow queries:
 ### Prerequisites
 
 ```bash
-npm install @dotdo/dosql
+npm install dosql
 ```
 
 ### Basic Benchmark Script
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 async function runBenchmark() {
   const db = await DB('benchmark', {

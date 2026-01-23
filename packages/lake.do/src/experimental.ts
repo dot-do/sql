@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do/experimental - Experimental exports
+ * lake.do/experimental - Experimental exports
  *
  * This module contains experimental features that may change in any version.
  * Use with caution in production environments.
@@ -28,7 +28,7 @@
  *   CDCOperationCode,
  *   isServerCDCEvent,
  *   serverToClientCDCEvent,
- * } from '@dotdo/lake.do/experimental';
+ * } from 'lake.do/experimental';
  *
  * // Configure CDC streaming options
  * const streamOptions: CDCStreamOptions = {
@@ -134,7 +134,7 @@ export type {
 // =============================================================================
 
 /**
- * CDC types re-exported from @dotdo/sql.do - experimental.
+ * CDC types re-exported from sql.do - experimental.
  *
  * @stability experimental
  * @since 0.1.0

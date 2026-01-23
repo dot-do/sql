@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Data Transformation Utilities
+ * lake.do - Data Transformation Utilities
  *
  * This module provides functions for transforming raw RPC responses
  * into properly typed client-side objects with branded types and Date objects.

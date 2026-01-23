@@ -1,5 +1,5 @@
 /**
- * @dotdo/sql.do/experimental - Experimental exports
+ * sql.do/experimental - Experimental exports
  *
  * This module contains experimental features that may change in any version.
  * Use with caution in production environments.
@@ -81,7 +81,7 @@
  *   CDCOperationCode,
  *   isServerCDCEvent,
  *   serverToClientCDCEvent,
- * } from '@dotdo/sql.do/experimental';
+ * } from 'sql.do/experimental';
  *
  * // Generate idempotency key for mutation requests
  * const key = await generateIdempotencyKey('INSERT INTO users (name) VALUES (?)', ['Alice']);

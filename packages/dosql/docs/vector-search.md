@@ -144,7 +144,7 @@ LIMIT 10;
 **Note:** For dot product, ensure your vectors are normalized (unit length). If not, normalize them before storage:
 
 ```typescript
-import { vector_normalize } from '@dotdo/dosql/vector';
+import { vector_normalize } from 'dosql/vector';
 
 // Normalize before storing
 const normalized = vector_normalize(embedding);
@@ -236,7 +236,7 @@ WITH (
 For programmatic control over index creation:
 
 ```typescript
-import { HnswIndex, DistanceMetric } from '@dotdo/dosql/vector';
+import { HnswIndex, DistanceMetric } from 'dosql/vector';
 
 // Create index with configuration
 const index = new HnswIndex({
@@ -293,7 +293,7 @@ HNSW parameters control the trade-off between recall (accuracy), speed, and memo
 | > 1M | 32 | 400 | 200 |
 
 ```typescript
-import { HnswIndex, DistanceMetric } from '@dotdo/dosql/vector';
+import { HnswIndex, DistanceMetric } from 'dosql/vector';
 
 // High recall configuration
 const highRecallIndex = new HnswIndex({
@@ -331,7 +331,7 @@ LIMIT 10;
 In TypeScript:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const db = await DB('semantic-search');
 
@@ -382,7 +382,7 @@ LIMIT 10;
 **Programmatic hybrid search with VectorColumn:**
 
 ```typescript
-import { VectorColumn, hybridSearch, DistanceMetric, VectorType } from '@dotdo/dosql/vector';
+import { VectorColumn, hybridSearch, DistanceMetric, VectorType } from 'dosql/vector';
 
 // First, get candidate IDs from scalar query (uses B-tree index)
 const categoryResults = await db.query(
@@ -455,7 +455,7 @@ LIMIT 100;
 OpenAI provides high-quality text embeddings through their API:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 import OpenAI from 'openai';
 
 const openai = new OpenAI();
@@ -602,7 +602,7 @@ async function indexLargeDataset(documents: Document[]) {
 Start with defaults and adjust based on recall requirements:
 
 ```typescript
-import { HnswIndex, DistanceMetric } from '@dotdo/dosql/vector';
+import { HnswIndex, DistanceMetric } from 'dosql/vector';
 
 // Step 1: Create index with balanced defaults
 const index = new HnswIndex({
@@ -652,7 +652,7 @@ console.log(`Recall@10: ${(recall * 100).toFixed(1)}%`);
 Quantization reduces vector storage by 4x with minimal accuracy loss:
 
 ```typescript
-import { VectorColumn, VectorType, DistanceMetric } from '@dotdo/dosql/vector';
+import { VectorColumn, VectorType, DistanceMetric } from 'dosql/vector';
 
 // Enable quantization to reduce memory usage
 const column = new VectorColumn({
@@ -697,7 +697,7 @@ const bestResults = column.search(query, 10, 300);
 **2. Pre-filter to reduce search space:**
 
 ```typescript
-import { hybridSearch } from '@dotdo/dosql/vector';
+import { hybridSearch } from 'dosql/vector';
 
 const results = hybridSearch(column, query, {
   filterIds: categoryIds,
@@ -755,7 +755,7 @@ WITH (dimensions = 1536, metric = 'cosine', m = 16);
 
 ```typescript
 import OpenAI from 'openai';
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const openai = new OpenAI();
 const db = await DB('docs');

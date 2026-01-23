@@ -1,7 +1,7 @@
 /**
- * @dotdo/sql.do - Shared types for DoSQL client and server
+ * sql.do - Shared types for DoSQL client and server
  *
- * This module re-exports types from @dotdo/shared-types for backward compatibility
+ * This module re-exports types from @dotdo/sql-types for backward compatibility
  * and adds any client-specific type definitions.
  *
  * @packageDocumentation
@@ -12,10 +12,10 @@
 // =============================================================================
 
 /**
- * Re-exported types from `@dotdo/shared-types` for unified type definitions.
+ * Re-exported types from `@dotdo/sql-types` for unified type definitions.
  *
  * These types are the canonical definitions for the DoSQL ecosystem and are
- * re-exported here for convenience. Importing from `@dotdo/sql.do` ensures
+ * re-exported here for convenience. Importing from `sql.do` ensures
  * type compatibility across the entire stack.
  *
  * ## Branded Types
@@ -82,7 +82,7 @@
  * - `responseToResult()` / `resultToResponse()` - Query result converters
  * - `isValidLSN()` / `isValidTransactionId()` etc. - Validation guards
  *
- * @see {@link https://github.com/dotdo/shared-types | @dotdo/shared-types} for canonical definitions
+ * @see {@link https://github.com/dotdo/shared-types | @dotdo/sql-types} for canonical definitions
  *
  * @public
  * @stability stable
@@ -199,7 +199,7 @@ export {
   DEFAULT_RETRY_CONFIG,
   isRetryConfig,
   createRetryConfig,
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // =============================================================================
 // Client Interface (sql.do specific)
@@ -215,7 +215,7 @@ import type {
   TransactionOptions,
   TransactionState,
   TableSchema,
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // =============================================================================
 // Event Types

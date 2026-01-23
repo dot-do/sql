@@ -82,4 +82,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - This is the initial stable release
 - All APIs are considered experimental and may change before 1.0
-- Designed for use with `@dotdo/sql.do`, `@dotdo/dosql`, `@dotdo/lake.do`, and `@dotdo/dolake`
+- Designed for use with `sql.do`, `dosql`, `lake.do`, and `dolake`

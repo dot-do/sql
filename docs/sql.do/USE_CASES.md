@@ -152,8 +152,8 @@ CREATE INDEX idx_tasks_status ON tasks(status);
 
 ```typescript
 // src/tenant-database.ts
-import { DB, Database } from '@dotdo/dosql';
-import { createTieredBackend, createDOBackend, createR2Backend } from '@dotdo/dosql/fsx';
+import { DB, Database } from 'dosql';
+import { createTieredBackend, createDOBackend, createR2Backend } from 'dosql/fsx';
 
 interface Env {
   TENANT_DATA: R2Bucket;
@@ -672,7 +672,7 @@ CREATE TABLE permissions (
 
 ```typescript
 // src/collaborative-document.ts
-import { DB, Database, createCDC } from '@dotdo/dosql';
+import { DB, Database, createCDC } from 'dosql';
 
 interface Operation {
   type: 'insert' | 'update' | 'delete' | 'move';
@@ -1318,8 +1318,8 @@ CREATE INDEX idx_regional_region_date ON regional_rollups(region, date);
 
 ```typescript
 // src/regional-analytics.ts
-import { DB, Database, createCDC } from '@dotdo/dosql';
-import { createCrypto } from '@dotdo/dosql/crypto';
+import { DB, Database, createCDC } from 'dosql';
+import { createCrypto } from 'dosql/crypto';
 
 interface AnalyticsEvent {
   sessionId: string;
@@ -1894,7 +1894,7 @@ CREATE TABLE payments (
 
 ```typescript
 // src/inventory-sku.ts
-import { DB, Database } from '@dotdo/dosql';
+import { DB, Database } from 'dosql';
 
 interface ReserveResult {
   success: boolean;
@@ -2598,7 +2598,7 @@ CREATE TABLE alert_history (
 
 ```typescript
 // src/building-telemetry.ts
-import { DB, Database } from '@dotdo/dosql';
+import { DB, Database } from 'dosql';
 
 interface SensorReading {
   sensorId: string;

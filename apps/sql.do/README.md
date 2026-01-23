@@ -7,7 +7,7 @@ You deployed to Cloudflare. Your Workers run in 300+ cities. But every database 
 **DoSQL runs SQL where your code runs.**
 
 ```typescript
-import { DB } from '@dotdo/dosql'
+import { DB } from 'dosql'
 
 const db = await DB('acme', { migrations: '.do/migrations' })
 
@@ -39,7 +39,7 @@ DoSQL embeds a complete SQL database inside Cloudflare Durable Objects. ACID tra
 ### Install
 
 ```bash
-npm install @dotdo/dosql
+npm install dosql
 ```
 
 ### Define Schema
@@ -190,7 +190,7 @@ const enriched = await db.query(`
 Stream every mutation to your lakehouse.
 
 ```typescript
-import { CDC } from '@dotdo/dosql/cdc'
+import { CDC } from 'dosql/cdc'
 
 for await (const change of CDC(db).subscribe()) {
   await lakehouse.append(change)
@@ -209,11 +209,11 @@ for await (const change of CDC(db).subscribe()) {
 ## Start Now
 
 ```bash
-npm install @dotdo/dosql
+npm install dosql
 ```
 
 ```typescript
-import { DB } from '@dotdo/dosql'
+import { DB } from 'dosql'
 
 const db = await DB('app')
 await db.run('CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)')
@@ -251,4 +251,4 @@ MIT
 
 ---
 
-[Get Started](https://sql.do/docs) | [GitHub](https://github.com/dotdo/sql) | [npm](https://www.npmjs.com/package/@dotdo/dosql)
+[Get Started](https://sql.do/docs) | [GitHub](https://github.com/dotdo/sql) | [npm](https://www.npmjs.com/package/dosql)

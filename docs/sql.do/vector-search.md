@@ -236,7 +236,7 @@ DoSQL supports multiple vector precision types for different use cases:
 | `F1BIT` | 0.125 | Binary | 32x savings, specialized models only |
 
 ```typescript
-import { VectorColumn, VectorType, DistanceMetric } from '@dotdo/dosql/vector';
+import { VectorColumn, VectorType, DistanceMetric } from 'dosql/vector';
 
 // Standard F32 column (recommended default)
 const standardColumn = new VectorColumn({
@@ -288,7 +288,7 @@ WITH (
 For programmatic control over index creation and management:
 
 ```typescript
-import { HnswIndex, DistanceMetric } from '@dotdo/dosql/vector';
+import { HnswIndex, DistanceMetric } from 'dosql/vector';
 
 // Create index with configuration
 const index = new HnswIndex({
@@ -384,7 +384,7 @@ LIMIT 10;
 In TypeScript:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const db = await DB('semantic-search');
 
@@ -436,7 +436,7 @@ LIMIT 10;
 **Pre-filter pattern for large datasets:**
 
 ```typescript
-import { hybridSearch, VectorColumn } from '@dotdo/dosql/vector';
+import { hybridSearch, VectorColumn } from 'dosql/vector';
 
 // First, get candidate IDs from scalar query (uses B-tree index)
 const categoryIds = await db.query(
@@ -500,7 +500,7 @@ LIMIT 100;
 OpenAI provides high-quality text embeddings through their API:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 import OpenAI from 'openai';
 
 const openai = new OpenAI();
@@ -690,7 +690,7 @@ console.log(`Recall@10: ${(recall * 100).toFixed(1)}%`);
 Quantization reduces vector storage by 4-8x with minimal accuracy loss:
 
 ```typescript
-import { VectorColumn, VectorType } from '@dotdo/dosql/vector';
+import { VectorColumn, VectorType } from 'dosql/vector';
 
 // Enable quantization to reduce memory usage
 const column = new VectorColumn({
@@ -820,7 +820,7 @@ WITH (dimensions = 1536, metric = 'cosine', m = 16);
 **Ingestion:**
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 import OpenAI from 'openai';
 
 const openai = new OpenAI();

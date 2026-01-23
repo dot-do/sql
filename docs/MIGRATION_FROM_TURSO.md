@@ -370,7 +370,7 @@ WITH (dimensions = 1536, metric = 'cosine');
 **Option 2: Inline Migrations**
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 const tursoSchema = `
   CREATE TABLE users (
@@ -393,7 +393,7 @@ const db = await DB('my-tenant', {
 
 ```typescript
 import { createClient } from '@libsql/client';
-import { DB, Database } from '@dotdo/dosql';
+import { DB, Database } from 'dosql';
 
 // Step 1: Export all data from Turso
 async function exportTursoData(
@@ -669,8 +669,8 @@ client.close();
 **DoSQL (After):**
 
 ```typescript
-// Install: npm install @dotdo/sql.do @dotdo/dosql
-import { createWebSocketClient } from '@dotdo/dosql/rpc';
+// Install: npm install sql.do dosql
+import { createWebSocketClient } from 'dosql/rpc';
 
 const client = await createWebSocketClient({
   url: 'wss://my-worker.example.com/db',
@@ -728,7 +728,7 @@ const response = await fetch('https://my-database.turso.io/v2/pipeline', {
 });
 
 // DoSQL CapnWeb RPC (via client SDK)
-import { createHttpClient } from '@dotdo/dosql/rpc';
+import { createHttpClient } from 'dosql/rpc';
 
 const client = createHttpClient({
   url: 'https://my-worker.example.com/db',
@@ -747,8 +747,8 @@ const users = await client.query('SELECT * FROM users');
 //   { name = "DOSQL_DB", class_name = "TenantDatabase" }
 // ]
 
-import { DoSQLTarget, handleDoSQLRequest, isDoSQLRequest } from '@dotdo/dosql/rpc';
-import { DB, Database } from '@dotdo/dosql';
+import { DoSQLTarget, handleDoSQLRequest, isDoSQLRequest } from 'dosql/rpc';
+import { DB, Database } from 'dosql';
 
 export interface Env {
   DOSQL_DB: DurableObjectNamespace;
@@ -942,7 +942,7 @@ try {
 **DoSQL Error Handling:**
 
 ```typescript
-import { TransactionError, TransactionErrorCode } from '@dotdo/dosql/transaction';
+import { TransactionError, TransactionErrorCode } from 'dosql/transaction';
 
 try {
   await client.run('INSERT INTO users (email) VALUES (?)', ['duplicate@test.com']);
@@ -1214,7 +1214,7 @@ const results = await client.execute({
 **DoSQL Vector Search:**
 
 ```typescript
-import { vector_distance_cos } from '@dotdo/dosql/vector';
+import { vector_distance_cos } from 'dosql/vector';
 
 // DoSQL: Vector similarity search
 const embedding = new Float32Array([0.1, 0.2, ...]); // 1536 dimensions
@@ -1228,7 +1228,7 @@ const results = await client.query(`
 `, [embedding]);
 
 // Option 2: Using VectorColumn for advanced features
-import { VectorColumn, hybridSearch } from '@dotdo/dosql/vector';
+import { VectorColumn, hybridSearch } from 'dosql/vector';
 
 const vectorCol = new VectorColumn({
   dimensions: 1536,
@@ -1684,7 +1684,7 @@ class RollbackEnabledDatabase {
 
 ```typescript
 // Replay CDC events to Turso
-import { createCDC } from '@dotdo/dosql/cdc';
+import { createCDC } from 'dosql/cdc';
 
 async function syncDoSQLToTurso(
   dosql: Database,
@@ -1843,7 +1843,7 @@ const stub = env.DOSQL_DB.get(id);
 ### 8. Bundle Size Considerations
 
 - Turso's `@libsql/client/web` is ~500KB (WASM-based)
-- DoSQL's `@dotdo/dosql` is ~7KB (pure TypeScript)
+- DoSQL's `dosql` is ~7KB (pure TypeScript)
 - This can significantly impact cold start times on Cloudflare Workers
 
 ### 9. CDC vs Triggers
@@ -1878,7 +1878,7 @@ Migrating from Turso to DoSQL provides access to advanced features like compile-
 1. **Assess your needs** - Only migrate if you need DoSQL's unique features or are building on Cloudflare Workers
 2. **Export your schema** - Use Turso CLI or programmatic export
 3. **Plan data migration** - Choose between full export, incremental sync, or dual-write
-4. **Update client code** - Replace `@libsql/client` with `@dotdo/sql.do`
+4. **Update client code** - Replace `@libsql/client` with `sql.do`
 5. **Migrate vectors** - Adjust syntax for vector columns and indexes
 6. **Adapt replication strategy** - Move from edge replicas to Durable Objects
 7. **Test thoroughly** - Run both databases in parallel and verify consistency

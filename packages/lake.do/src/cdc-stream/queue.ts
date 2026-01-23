@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Bounded Queue Implementation
+ * lake.do - Bounded Queue Implementation
  *
  * This module provides a bounded queue with configurable backpressure strategies.
  *

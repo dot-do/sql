@@ -22,7 +22,7 @@ DoLake is a Durable Object that receives CDC events from DoSQL and writes them t
 DoLake requires the following environment bindings:
 
 ```typescript
-import { DoLake, type DoLakeEnv } from '@dotdo/dolake';
+import { DoLake, type DoLakeEnv } from 'dolake';
 
 /**
  * Environment bindings for DoLake
@@ -44,7 +44,7 @@ interface Env extends DoLakeEnv {
 DoLake uses `DoLakeConfig` to control flush behavior, buffer sizes, and Parquet settings:
 
 ```typescript
-import { type DoLakeConfig, DEFAULT_DOLAKE_CONFIG } from '@dotdo/dolake';
+import { type DoLakeConfig, DEFAULT_DOLAKE_CONFIG } from 'dolake';
 
 /**
  * Full DoLake configuration with all available options
@@ -82,7 +82,7 @@ const customConfig: DoLakeConfig = {
 Export DoLake in your worker and route requests to it:
 
 ```typescript
-import { DoLake } from '@dotdo/dolake';
+import { DoLake } from 'dolake';
 
 // Export the DoLake Durable Object class
 export { DoLake };
@@ -126,7 +126,7 @@ export default {
 DoLake includes built-in rate limiting to protect against overload:
 
 ```typescript
-import { type RateLimitConfig, DEFAULT_RATE_LIMIT_CONFIG } from '@dotdo/dolake';
+import { type RateLimitConfig, DEFAULT_RATE_LIMIT_CONFIG } from 'dolake';
 
 /**
  * Rate limiting is configured internally but can be monitored via /status endpoint
@@ -179,7 +179,7 @@ Configure both DOs in your `wrangler.jsonc`:
 From your DoSQL instance, connect to DoLake:
 
 ```typescript
-import { type CDCEvent, type CDCBatchMessage, type AckMessage } from '@dotdo/dolake';
+import { type CDCEvent, type CDCBatchMessage, type AckMessage } from 'dolake';
 
 class DoSQL implements DurableObject {
   private dolakeWs: WebSocket | null = null;
@@ -557,7 +557,7 @@ import {
   type FlushRequestMessage,
   type AckMessage,
   type NackMessage,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 interface DoSQLEnv {
   DOLAKE: DurableObjectNamespace;

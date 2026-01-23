@@ -14,7 +14,7 @@
  * @packageDocumentation
  */
 
-import { DoLake, type DoLakeEnv } from '@dotdo/dolake';
+import { DoLake, type DoLakeEnv } from 'dolake';
 
 // Re-export DoLake for wrangler to detect the Durable Object class
 export { DoLake };

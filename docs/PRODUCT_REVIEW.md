@@ -2,7 +2,7 @@
 
 **Review Date:** 2026-01-22
 **Reviewer:** Claude Opus 4.5
-**Packages:** `@dotdo/dosql`, `@dotdo/dolake`, `@dotdo/sql.do`, `@dotdo/lake.do`
+**Packages:** `dosql`, `dolake`, `sql.do`, `lake.do`
 **Repository:** `/Users/nathanclevenger/projects/sql`
 
 ---
@@ -239,7 +239,7 @@ DoSQL's defensible advantages:
 
 ### 6.2 Export Structure
 
-The current `index.ts` exports are comprehensive but mix stable and experimental APIs. Recommendation: Create separate entry points (`@dotdo/dosql/experimental`).
+The current `index.ts` exports are comprehensive but mix stable and experimental APIs. Recommendation: Create separate entry points (`dosql/experimental`).
 
 ---
 

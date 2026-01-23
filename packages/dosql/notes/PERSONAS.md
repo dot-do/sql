@@ -109,7 +109,7 @@ Auth:         Clerk or Auth0
 
 ```typescript
 // src/tenant-database.ts
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export class TenantDatabase implements DurableObject {
   private db: Database | null = null;
@@ -236,7 +236,7 @@ State:        Custom in-memory state machine
 
 ```typescript
 // src/document-do.ts
-import { DB, createCDC } from '@dotdo/dosql';
+import { DB, createCDC } from 'dosql';
 
 export class DocumentDO implements DurableObject {
   private db: Database | null = null;
@@ -406,7 +406,7 @@ Streaming:    Kafka via Cloudflare Queues
 
 ```typescript
 // src/edge-analytics.ts
-import { DB, createCDC } from '@dotdo/dosql';
+import { DB, createCDC } from 'dosql';
 
 export class EdgeAnalyticsDO implements DurableObject {
   private db: Database | null = null;
@@ -591,7 +591,7 @@ Fulfillment:  Third-party WMS integration
 
 ```typescript
 // src/inventory-sku.ts
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export class InventorySKU implements DurableObject {
   private db: Database | null = null;
@@ -797,7 +797,7 @@ Alerts:       PagerDuty integration
 
 ```typescript
 // src/building-telemetry.ts
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 interface SensorReading {
   sensorId: string;

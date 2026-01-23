@@ -6,7 +6,7 @@
  *
  * @example
  * ```typescript
- * import { drizzle } from '@dotdo/dosql/orm/drizzle';
+ * import { drizzle } from 'dosql/orm/drizzle';
  * import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
  * import { eq } from 'drizzle-orm';
  *

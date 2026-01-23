@@ -2,7 +2,7 @@
 
 > The database engine built for Cloudflare Durable Objects
 
-[![npm version](https://img.shields.io/npm/v/@dotdo/dosql.svg)](https://www.npmjs.com/package/@dotdo/dosql)
+[![npm version](https://img.shields.io/npm/v/dosql.svg)](https://www.npmjs.com/package/dosql)
 [![Bundle Size](https://img.shields.io/badge/bundle-7.4KB_gzip-brightgreen)](./docs/architecture.md#bundle-size)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-orange.svg)](https://workers.cloudflare.com/)
@@ -25,7 +25,7 @@ DoSQL runs **inside** your Durable Object. Not as a separate service. Not as an 
 
 ```typescript
 import { DurableObject } from 'cloudflare:workers';
-import { DB, type Database } from '@dotdo/dosql';
+import { DB, type Database } from 'dosql';
 
 export class UserDatabase extends DurableObject<Env> {
   private db: Database | null = null;
@@ -84,7 +84,7 @@ D1 and Turso are great databases. But they're external services. Every query is 
 ### 1. Install
 
 ```bash
-npm install @dotdo/dosql
+npm install dosql
 ```
 
 ### 2. Create your Durable Object
@@ -92,7 +92,7 @@ npm install @dotdo/dosql
 ```typescript
 // src/database.ts
 import { DurableObject } from 'cloudflare:workers';
-import { DB, type Database } from '@dotdo/dosql';
+import { DB, type Database } from 'dosql';
 
 interface Env {
   R2_BUCKET: R2Bucket;
@@ -250,7 +250,7 @@ export class CompactingDatabase extends DurableObject<Env> {
 Query data across multiple Durable Objects:
 
 ```typescript
-import { createShardRouter } from '@dotdo/dosql/sharding';
+import { createShardRouter } from 'dosql/sharding';
 
 export class CoordinatorDatabase extends DurableObject<Env> {
   async aggregateUsers(): Promise<UserStats> {
@@ -274,7 +274,7 @@ export class CoordinatorDatabase extends DurableObject<Env> {
 Capture every change and stream to R2/Iceberg:
 
 ```typescript
-import { createCDC } from '@dotdo/dosql/cdc';
+import { createCDC } from 'dosql/cdc';
 
 export class StreamingDatabase extends DurableObject<Env> {
   private cdc = createCDC();
@@ -313,7 +313,7 @@ export class StreamingDatabase extends DurableObject<Env> {
 Keep recent data in DO SQLite, archive historical data to R2:
 
 ```typescript
-import { createTieredBackend } from '@dotdo/dosql/fsx';
+import { createTieredBackend } from 'dosql/fsx';
 
 export class TieredDatabase extends DurableObject<Env> {
   private async getDB(): Promise<Database> {
@@ -505,13 +505,13 @@ DoSQL is designed for Workers' 1MB limit:
 
 | Module | Use Case | Stability |
 |--------|----------|-----------|
-| `@dotdo/dosql` | Core DB operations | Beta |
-| `@dotdo/dosql/fsx` | Storage backends | Experimental |
-| `@dotdo/dosql/cdc` | Change data capture | Experimental |
-| `@dotdo/dosql/sharding` | Cross-DO queries | Experimental |
-| `@dotdo/dosql/wal` | Write-ahead log | Beta |
-| `@dotdo/dosql/rpc` | DO-to-DO communication | Beta |
-| `@dotdo/dosql/errors` | Error types | Stable |
+| `dosql` | Core DB operations | Beta |
+| `dosql/fsx` | Storage backends | Experimental |
+| `dosql/cdc` | Change data capture | Experimental |
+| `dosql/sharding` | Cross-DO queries | Experimental |
+| `dosql/wal` | Write-ahead log | Beta |
+| `dosql/rpc` | DO-to-DO communication | Beta |
+| `dosql/errors` | Error types | Stable |
 
 ## Requirements
 
@@ -546,5 +546,5 @@ MIT
 ## Links
 
 - [GitHub](https://github.com/dotdo/sql)
-- [npm](https://www.npmjs.com/package/@dotdo/dosql)
+- [npm](https://www.npmjs.com/package/dosql)
 - [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)

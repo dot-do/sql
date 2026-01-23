@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - CapnWeb RPC Client for DoLake
+ * lake.do - CapnWeb RPC Client for DoLake
  *
  * This is the main client facade that composes:
  * - WebSocketConnectionManager for connection handling
@@ -137,7 +137,7 @@ export interface LakeClientConfig {
  *
  * @example
  * ```typescript
- * import { createLakeClient } from '@dotdo/lake.do';
+ * import { createLakeClient } from 'lake.do';
  *
  * const client = createLakeClient({
  *   url: 'https://lake.example.com',
@@ -788,7 +788,7 @@ export class DoLakeClient implements LakeClient {
  *
  * @example
  * ```typescript
- * import { createLakeClient } from '@dotdo/lake.do';
+ * import { createLakeClient } from 'lake.do';
  *
  * // Basic usage
  * const client = createLakeClient({

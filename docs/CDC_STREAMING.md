@@ -81,7 +81,7 @@ CDC is enabled by default on all tables in DoSQL. The WAL automatically captures
 Every write operation to DoSQL generates WAL entries:
 
 ```typescript
-import { createDoSQL } from '@dotdo/dosql';
+import { createDoSQL } from 'dosql';
 
 const db = createDoSQL(env.DOSQL);
 
@@ -101,8 +101,8 @@ await db.exec('DELETE FROM users WHERE id = ?',
 Configure WAL behavior for optimal CDC streaming in your Durable Object:
 
 ```typescript
-import { createCDC } from '@dotdo/dosql/cdc';
-import type { WALConfig } from '@dotdo/dosql/wal';
+import { createCDC } from 'dosql/cdc';
+import type { WALConfig } from 'dosql/wal';
 
 // Custom WAL configuration for high-throughput CDC
 const walConfig: Partial<WALConfig> = {
@@ -267,7 +267,7 @@ DoSQL provides multiple ways to subscribe to CDC streams: async iterators, callb
 The simplest approach uses async iterators:
 
 ```typescript
-import { createCDC } from '@dotdo/dosql/cdc';
+import { createCDC } from 'dosql/cdc';
 
 const cdc = createCDC(backend);
 const subscription = cdc.subscribe();
@@ -320,7 +320,7 @@ for await (const event of subscription.subscribeChanges<User>(
 For callback-style processing with pause/resume support:
 
 ```typescript
-import { createCDCStream } from '@dotdo/dosql/cdc';
+import { createCDCStream } from 'dosql/cdc';
 
 const stream = createCDCStream(reader, {
   fromLSN: 0n,
@@ -412,7 +412,7 @@ await slots.deleteSlot('old-consumer');
 For subscribing to a single table:
 
 ```typescript
-import { subscribeTable } from '@dotdo/dosql/cdc';
+import { subscribeTable } from 'dosql/cdc';
 
 interface Order {
   id: string;
@@ -646,7 +646,7 @@ Robust CDC consumers must handle errors gracefully and implement retry logic.
 ### CDC Error Types
 
 ```typescript
-import { CDCError, CDCErrorCode } from '@dotdo/dosql/cdc';
+import { CDCError, CDCErrorCode } from 'dosql/cdc';
 
 enum CDCErrorCode {
   SUBSCRIPTION_FAILED = 'CDC_SUBSCRIPTION_FAILED',
@@ -661,7 +661,7 @@ enum CDCErrorCode {
 ### Basic Error Handling
 
 ```typescript
-import { CDCError, CDCErrorCode } from '@dotdo/dosql/cdc';
+import { CDCError, CDCErrorCode } from 'dosql/cdc';
 
 async function runCDCConsumer() {
   try {
@@ -836,7 +836,7 @@ const subscription = cdc.subscribe({
 When streaming to lakehouse, handle backpressure signals:
 
 ```typescript
-import { createLakehouseStreamer, type BackpressureSignal } from '@dotdo/dosql/cdc';
+import { createLakehouseStreamer, type BackpressureSignal } from 'dosql/cdc';
 
 const streamer = createLakehouseStreamer(reader, backend, {
   lakehouseUrl: 'wss://lakehouse.example.com',
@@ -968,7 +968,7 @@ DoSQL provides first-class support for streaming CDC events to DoLake for analyt
 ### Lakehouse Streamer Setup
 
 ```typescript
-import { createLakehouseStreamer } from '@dotdo/dosql/cdc';
+import { createLakehouseStreamer } from 'dosql/cdc';
 
 const streamer = createLakehouseStreamer(walReader, backend, {
   lakehouseUrl: 'wss://your-dolake-instance.workers.dev',
@@ -1085,7 +1085,7 @@ for await (const event of subscription.subscribeChanges(0n)) {
 For high-throughput scenarios, use the WAL capturer:
 
 ```typescript
-import { createWALCapturer, type CaptureBatch } from '@dotdo/dosql/cdc';
+import { createWALCapturer, type CaptureBatch } from 'dosql/cdc';
 
 const capturer = createWALCapturer(walReader, {
   fromLSN: lastLSN,
@@ -1127,7 +1127,7 @@ Build a real-time analytics dashboard that updates instantly when data changes.
 
 ```typescript
 // dashboard-cdc.ts
-import { createCDC, type ChangeEvent } from '@dotdo/dosql/cdc';
+import { createCDC, type ChangeEvent } from 'dosql/cdc';
 
 interface DashboardMetrics {
   totalOrders: number;
@@ -1466,8 +1466,8 @@ type OrderEvent = OrderCreated | OrderItemAdded | OrderShipped;
 
 ```typescript
 // event-store.ts
-import { createDoSQL } from '@dotdo/dosql';
-import { createCDC, type ChangeEvent } from '@dotdo/dosql/cdc';
+import { createDoSQL } from 'dosql';
+import { createCDC, type ChangeEvent } from 'dosql/cdc';
 
 export class EventStore {
   constructor(
@@ -1869,7 +1869,7 @@ Implement automatic cache invalidation using CDC to keep caches synchronized wit
 
 ```typescript
 // cache-manager.ts
-import { createCDC, type ChangeEvent } from '@dotdo/dosql/cdc';
+import { createCDC, type ChangeEvent } from 'dosql/cdc';
 
 interface CacheConfig {
   /** KV namespace for caching */
@@ -2008,7 +2008,7 @@ export class CacheManager {
 ```typescript
 // worker.ts
 import { CacheManager } from './cache-manager';
-import { createCDC } from '@dotdo/dosql/cdc';
+import { createCDC } from 'dosql/cdc';
 
 const cacheManager = new CacheManager(cdc, {
   kv: env.CACHE_KV,

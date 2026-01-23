@@ -98,15 +98,15 @@ Experimental features can be imported from the `/experimental` subpath:
 
 ```typescript
 // Explicit import of experimental features
-import { generateIdempotencyKey } from '@dotdo/sql.do/experimental';
-import { CDCStreamOptions, CompactionConfig } from '@dotdo/lake.do/experimental';
+import { generateIdempotencyKey } from 'sql.do/experimental';
+import { CDCStreamOptions, CompactionConfig } from 'lake.do/experimental';
 ```
 
 Alternatively, they are also available from the main entry point with JSDoc warnings:
 
 ```typescript
 // Also available from main export (with stability annotations in docs)
-import { generateIdempotencyKey, CDCOperationCode } from '@dotdo/sql.do';
+import { generateIdempotencyKey, CDCOperationCode } from 'sql.do';
 ```
 
 ## Migration Path
@@ -189,7 +189,7 @@ Initial release with stability annotations:
 ### Example: Safe Usage of Experimental Features
 
 ```typescript
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 // Use stable features directly
 const client = createSQLClient({ url: 'https://sql.example.com' });
@@ -199,7 +199,7 @@ const result = await client.query('SELECT * FROM users');
 let idempotencyKey: string | undefined;
 try {
   // Dynamic import for experimental features
-  const { generateIdempotencyKey } = await import('@dotdo/sql.do/experimental');
+  const { generateIdempotencyKey } = await import('sql.do/experimental');
   idempotencyKey = await generateIdempotencyKey('INSERT INTO logs (msg) VALUES (?)', ['test']);
 } catch {
   // Fallback if experimental API changes

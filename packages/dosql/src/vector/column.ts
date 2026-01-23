@@ -7,7 +7,7 @@
  * - Integration with B-tree for hybrid queries
  * - Batch operations for performance
  *
- * @module @dotdo/dosql/vector/column
+ * @module dosql/vector/column
  */
 
 import {

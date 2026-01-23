@@ -583,7 +583,7 @@ await client.query('SELECT id, name FROM users');
 
 **Validate SQL before execution:**
 ```typescript
-import { isBalanced } from '@dotdo/dosql';
+import { isBalanced } from 'dosql';
 
 function validateSql(sql: string): boolean {
   if (!isBalanced(sql)) {

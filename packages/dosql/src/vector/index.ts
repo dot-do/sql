@@ -9,7 +9,7 @@
  *
  * @example
  * ```typescript
- * import { HnswIndex, VectorColumn, vector_distance_cos } from '@dotdo/dosql/vector';
+ * import { HnswIndex, VectorColumn, vector_distance_cos } from 'dosql/vector';
  *
  * // Create an HNSW index
  * const index = new HnswIndex({ M: 16, efConstruction: 200 });
@@ -19,7 +19,7 @@
  * const results = index.search(new Float32Array([0.15, 0.25, 0.35]), 10);
  * ```
  *
- * @module @dotdo/dosql/vector
+ * @module dosql/vector
  */
 
 // =============================================================================

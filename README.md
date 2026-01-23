@@ -3,9 +3,9 @@
 [![Build Status](https://github.com/dot-do/sql/actions/workflows/ci.yml/badge.svg)](https://github.com/dot-do/sql/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![npm @dotdo/sql.do](https://img.shields.io/npm/v/@dotdo/sql.do.svg?label=@dotdo/sql.do)](https://www.npmjs.com/package/@dotdo/sql.do)
-[![npm @dotdo/dosql](https://img.shields.io/npm/v/@dotdo/dosql.svg?label=@dotdo/dosql)](https://www.npmjs.com/package/@dotdo/dosql)
-[![npm @dotdo/dolake](https://img.shields.io/npm/v/@dotdo/dolake.svg?label=@dotdo/dolake)](https://www.npmjs.com/package/@dotdo/dolake)
+[![npm sql.do](https://img.shields.io/npm/v/sql.do.svg?label=sql.do)](https://www.npmjs.com/package/sql.do)
+[![npm dosql](https://img.shields.io/npm/v/dosql.svg?label=dosql)](https://www.npmjs.com/package/dosql)
+[![npm dolake](https://img.shields.io/npm/v/dolake.svg?label=dolake)](https://www.npmjs.com/package/dolake)
 [![Bundle Size](https://img.shields.io/badge/bundle-2.9KB%20gzip-brightgreen)](#bundle-size)
 ![Developer Preview](https://img.shields.io/badge/Status-Developer%20Preview-orange)
 
@@ -35,10 +35,10 @@ SQL database for Cloudflare Workers - DoSQL and DoLake.
 
 | Package | Version | Node.js | TypeScript | Cloudflare Workers |
 |---------|---------|---------|------------|-------------------|
-| @dotdo/sql.do | 0.1.x | 18+ | 5.3+ | 2024-01-01+ |
-| @dotdo/dosql | 0.1.x | 18+ | 5.3+ | 2024-01-01+ |
-| @dotdo/dolake | 0.1.x | 18+ | 5.3+ | 2024-01-01+ |
-| @dotdo/lake.do | 0.1.x | 18+ | 5.3+ | 2024-01-01+ |
+| sql.do | 0.1.x | 18+ | 5.3+ | 2024-01-01+ |
+| dosql | 0.1.x | 18+ | 5.3+ | 2024-01-01+ |
+| dolake | 0.1.x | 18+ | 5.3+ | 2024-01-01+ |
+| lake.do | 0.1.x | 18+ | 5.3+ | 2024-01-01+ |
 
 ## Prerequisites
 
@@ -95,13 +95,13 @@ wrangler kv:namespace create LAKEHOUSE_KV
 Install the client SDK:
 
 ```bash
-npm install @dotdo/sql.do
+npm install sql.do
 ```
 
 Connect and query:
 
 ```typescript
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 const client = createSQLClient({
   url: 'https://sql.example.com',
@@ -119,8 +119,8 @@ await client.close();
 ### TypeScript Example with Types
 
 ```typescript
-import { createSQLClient, QueryResult, SQLError } from '@dotdo/sql.do';
-import type { SQLClientConfig, TransactionContext } from '@dotdo/sql.do';
+import { createSQLClient, QueryResult, SQLError } from 'sql.do';
+import type { SQLClientConfig, TransactionContext } from 'sql.do';
 
 interface User {
   id: number;
@@ -155,7 +155,7 @@ console.log(`Found user: ${user.name}`);
 ### Error Handling
 
 ```typescript
-import { createSQLClient, SQLError, RPCErrorCode } from '@dotdo/sql.do';
+import { createSQLClient, SQLError, RPCErrorCode } from 'sql.do';
 
 const client = createSQLClient({ url: 'https://sql.example.com' });
 
@@ -211,11 +211,11 @@ This monorepo contains the DoSQL and DoLake packages for building SQL databases 
 
 | Package | Description | Stability | npm |
 |---------|-------------|-----------|-----|
-| [`@dotdo/sql.do`](./packages/sql.do) | Client SDK for DoSQL | :yellow_circle: Beta | [![npm](https://img.shields.io/npm/v/@dotdo/sql.do.svg)](https://www.npmjs.com/package/@dotdo/sql.do) |
-| [`@dotdo/lake.do`](./packages/lake.do) | Client SDK for DoLake | :red_circle: Experimental | [![npm](https://img.shields.io/npm/v/@dotdo/lake.do.svg)](https://www.npmjs.com/package/@dotdo/lake.do) |
-| [`@dotdo/dosql`](./packages/dosql) | SQL database engine (server) | :yellow_circle: Beta | [![npm](https://img.shields.io/npm/v/@dotdo/dosql.svg)](https://www.npmjs.com/package/@dotdo/dosql) |
-| [`@dotdo/dolake`](./packages/dolake) | Lakehouse worker (server) | :red_circle: Experimental | [![npm](https://img.shields.io/npm/v/@dotdo/dolake.svg)](https://www.npmjs.com/package/@dotdo/dolake) |
-| [`@dotdo/shared-types`](./packages/shared-types) | Shared TypeScript types | :red_circle: Experimental | [![npm](https://img.shields.io/npm/v/@dotdo/shared-types.svg)](https://www.npmjs.com/package/@dotdo/shared-types) |
+| [`sql.do`](./packages/sql.do) | Client SDK for DoSQL | :yellow_circle: Beta | [![npm](https://img.shields.io/npm/v/sql.do.svg)](https://www.npmjs.com/package/sql.do) |
+| [`lake.do`](./packages/lake.do) | Client SDK for DoLake | :red_circle: Experimental | [![npm](https://img.shields.io/npm/v/lake.do.svg)](https://www.npmjs.com/package/lake.do) |
+| [`dosql`](./packages/dosql) | SQL database engine (server) | :yellow_circle: Beta | [![npm](https://img.shields.io/npm/v/dosql.svg)](https://www.npmjs.com/package/dosql) |
+| [`dolake`](./packages/dolake) | Lakehouse worker (server) | :red_circle: Experimental | [![npm](https://img.shields.io/npm/v/dolake.svg)](https://www.npmjs.com/package/dolake) |
+| [`@dotdo/sql-types`](./packages/shared-types) | Shared TypeScript types | :red_circle: Experimental | [![npm](https://img.shields.io/npm/v/@dotdo/sql-types.svg)](https://www.npmjs.com/package/@dotdo/sql-types) |
 
 ### Stability Legend
 
@@ -240,17 +240,17 @@ All client packages are optimized for minimal bundle size with full tree-shaking
 
 | Package | Minified | Gzipped | Tree-shakeable |
 |---------|----------|---------|----------------|
-| `@dotdo/sql.do` | 7.2 KB | **2.9 KB** | Yes |
-| `@dotdo/lake.do` | 6.1 KB | **2.4 KB** | Yes |
-| `@dotdo/shared-types` | 3.0 KB | **1.3 KB** | Yes |
-| `@dotdo/dosql` (core) | 164.6 KB | **49.6 KB** | Yes |
-| `@dotdo/dolake` | 407.9 KB | **87.4 KB** | Yes |
+| `sql.do` | 7.2 KB | **2.9 KB** | Yes |
+| `lake.do` | 6.1 KB | **2.4 KB** | Yes |
+| `@dotdo/sql-types` | 3.0 KB | **1.3 KB** | Yes |
+| `dosql` (core) | 164.6 KB | **49.6 KB** | Yes |
+| `dolake` | 407.9 KB | **87.4 KB** | Yes |
 
 ### Comparison with Alternatives
 
 | Solution | Client Bundle (gzip) | Notes |
 |----------|---------------------|-------|
-| **@dotdo/sql.do** | **2.9 KB** | Lightweight client, server does heavy lifting |
+| **sql.do** | **2.9 KB** | Lightweight client, server does heavy lifting |
 | @libsql/client | ~45 KB | Turso/libSQL client |
 | @cloudflare/d1 | ~5 KB | Cloudflare D1 bindings (workers only) |
 | sql.js | ~500 KB | Full SQLite in WASM |
@@ -280,15 +280,15 @@ All packages use ES modules with explicit exports, enabling bundlers to eliminat
 
 ```typescript
 // Only imports what you need - unused exports are removed
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 // Types are compile-time only - zero runtime cost
-import type { QueryResult, SQLClientConfig } from '@dotdo/sql.do';
+import type { QueryResult, SQLClientConfig } from 'sql.do';
 ```
 
 **Tree-shaking tips:**
 
-1. **Use named imports** - Avoid `import * as sql from '@dotdo/sql.do'`
+1. **Use named imports** - Avoid `import * as sql from 'sql.do'`
 2. **Import types separately** - Use `import type` for TypeScript types
 3. **Check your bundler** - Ensure tree-shaking is enabled (default in Vite, esbuild, Rollup)
 4. **Analyze your bundle** - Use `npx vite-bundle-visualizer` or similar tools

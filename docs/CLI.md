@@ -24,13 +24,13 @@ Comprehensive documentation for the DoSQL command-line interface.
 ### Global Installation
 
 ```bash
-npm install -g @dotdo/dosql-cli
+npm install -g dosql-cli
 ```
 
 ### Local Installation (Project)
 
 ```bash
-npm install --save-dev @dotdo/dosql-cli
+npm install --save-dev dosql-cli
 ```
 
 When installed locally, use `npx dosql` or add scripts to your `package.json`:
@@ -49,7 +49,7 @@ When installed locally, use `npx dosql` or add scripts to your `package.json`:
 
 ```bash
 dosql --version
-# @dotdo/dosql-cli v0.1.0
+# dosql-cli v0.1.0
 
 dosql --help
 # Usage: dosql <command> [options]
@@ -1171,7 +1171,7 @@ jobs:
           node-version: '20'
 
       - name: Install DoSQL CLI
-        run: npm install -g @dotdo/dosql-cli
+        run: npm install -g dosql-cli
 
       - name: Run Migrations (Staging)
         run: dosql migrate run --env staging

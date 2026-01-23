@@ -13,10 +13,10 @@ The `@dotdo/sql` monorepo implements a complete edge-native database stack for C
 
 | Package | Role | Dependencies |
 |---------|------|--------------|
-| **@dotdo/sql.do** | Client SDK for DoSQL | None |
-| **@dotdo/lake.do** | Client SDK for DoLake | `@dotdo/sql.do` |
-| **@dotdo/dosql** | Server-side DO (SQL engine) | `@dotdo/sql.do` |
-| **@dotdo/dolake** | Server-side DO (Lakehouse) | `@dotdo/lake.do` |
+| **sql.do** | Client SDK for DoSQL | None |
+| **lake.do** | Client SDK for DoLake | `sql.do` |
+| **dosql** | Server-side DO (SQL engine) | `sql.do` |
+| **dolake** | Server-side DO (Lakehouse) | `lake.do` |
 
 The architecture follows a clean client/server separation with shared types and CapnWeb RPC for communication.
 
@@ -37,7 +37,7 @@ The architecture follows a clean client/server separation with shared types and 
          │                                                               │
          ▼                                                               ▼
 ┌─────────────────┐                                           ┌─────────────────┐
-│  @dotdo/sql.do  │                                           │ @dotdo/lake.do  │
+│  sql.do  │                                           │ lake.do  │
 │  (Client SDK)   │ ◀──────────── depends on ─────────────────│  (Client SDK)   │
 │                 │                                           │                 │
 │ - SQLClient     │                                           │ - LakeClient    │
@@ -48,7 +48,7 @@ The architecture follows a clean client/server separation with shared types and 
          │ depends on                                                   │ depends on
          ▼                                                              ▼
 ┌─────────────────┐                                           ┌─────────────────┐
-│  @dotdo/dosql   │                                           │  @dotdo/dolake  │
+│  dosql   │                                           │  dolake  │
 │  (Server DO)    │ ─────────── CDC Stream ────────────────▶  │  (Server DO)    │
 │                 │              (WebSocket)                  │                 │
 │ - SQL Parser    │                                           │ - CDC Buffer    │
@@ -63,7 +63,7 @@ The architecture follows a clean client/server separation with shared types and 
 
 ## Module Structure Analysis
 
-### @dotdo/sql.do (Client SDK)
+### sql.do (Client SDK)
 
 ```
 packages/sql.do/src/
@@ -99,7 +99,7 @@ RPCMethod, RPCRequest, RPCResponse, RPCError
 SQLClient, DoSQLClient, TransactionContext, SQLError
 ```
 
-### @dotdo/lake.do (Client SDK)
+### lake.do (Client SDK)
 
 ```
 packages/lake.do/src/
@@ -109,7 +109,7 @@ packages/lake.do/src/
 ```
 
 **Key Design Decisions:**
-- Re-exports common types from `@dotdo/sql.do` for consistency
+- Re-exports common types from `sql.do` for consistency
 - AsyncIterable-based CDC subscription for backpressure handling
 - Parquet file and snapshot IDs as branded types
 - Compaction job management through RPC
@@ -138,7 +138,7 @@ Snapshot, TimeTravelOptions
 TransactionId, LSN, SQLValue, CDCOperation, CDCEvent
 ```
 
-### @dotdo/dosql (Server DO)
+### dosql (Server DO)
 
 ```
 packages/dosql/src/
@@ -196,7 +196,7 @@ packages/dosql/src/
 - Replication slot-based CDC for exactly-once delivery
 - WAL with CRC32 checksums and segment management
 
-### @dotdo/dolake (Server DO)
+### dolake (Server DO)
 
 ```
 packages/dolake/src/
@@ -696,7 +696,7 @@ packages/dolake/src/
 │  Pattern: Client packages export types that server packages depend on           │
 │                                                                                 │
 │  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │                        @dotdo/sql.do                                     │    │
+│  │                        sql.do                                     │    │
 │  │                        (Canonical Types)                                 │    │
 │  │                                                                          │    │
 │  │  Branded Types:                                                          │    │
@@ -728,7 +728,7 @@ packages/dolake/src/
 │                                     │ depends on                                │
 │                                     ▼                                           │
 │  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │                        @dotdo/dosql                                      │    │
+│  │                        dosql                                      │    │
 │  │                        (Server Implementation)                           │    │
 │  │                                                                          │    │
 │  │  import type {                                                           │    │
@@ -737,7 +737,7 @@ packages/dolake/src/
 │  │    RPCRequest,                                                           │    │
 │  │    RPCResponse,                                                          │    │
 │  │    QueryResult,                                                          │    │
-│  │  } from '@dotdo/sql.do';                                                 │    │
+│  │  } from 'sql.do';                                                 │    │
 │  │                                                                          │    │
 │  │  // Server uses same types for serialization/deserialization             │    │
 │  │  // Ensures wire format compatibility                                    │    │
@@ -745,11 +745,11 @@ packages/dolake/src/
 │                                                                                 │
 │                                                                                 │
 │  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │                        @dotdo/lake.do                                    │    │
+│  │                        lake.do                                    │    │
 │  │                        (Extends sql.do types)                            │    │
 │  │                                                                          │    │
 │  │  // Re-export sql.do types for client convenience                        │    │
-│  │  export type { TransactionId, LSN, SQLValue } from '@dotdo/sql.do';      │    │
+│  │  export type { TransactionId, LSN, SQLValue } from 'sql.do';      │    │
 │  │                                                                          │    │
 │  │  // Add lake-specific branded types                                      │    │
 │  │  type CDCEventId = string & { readonly [Brand]: never };                 │    │
@@ -761,14 +761,14 @@ packages/dolake/src/
 │                                     │ depends on                                │
 │                                     ▼                                           │
 │  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │                        @dotdo/dolake                                     │    │
+│  │                        dolake                                     │    │
 │  │                        (Server Implementation)                           │    │
 │  │                                                                          │    │
 │  │  import type {                                                           │    │
 │  │    CDCEventId,                                                           │    │
 │  │    PartitionKey,                                                         │    │
 │  │    SnapshotId,                                                           │    │
-│  │  } from '@dotdo/lake.do';                                                │    │
+│  │  } from 'lake.do';                                                │    │
 │  │                                                                          │    │
 │  │  // Also imports from sql.do transitively                                │    │
 │  └─────────────────────────────────────────────────────────────────────────┘    │

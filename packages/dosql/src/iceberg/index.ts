@@ -14,7 +14,7 @@
  * @example
  * ```typescript
  * // Client mode - connect to external catalog
- * import { createIcebergClient } from '@dotdo/dosql/iceberg';
+ * import { createIcebergClient } from 'dosql/iceberg';
  *
  * const client = createIcebergClient('https://tabular.io/api/v1', {
  *   token: process.env.TABULAR_TOKEN,
@@ -29,7 +29,7 @@
  * @example
  * ```typescript
  * // Server mode - expose DoSQL as catalog
- * import { createIcebergServer } from '@dotdo/dosql/iceberg';
+ * import { createIcebergServer } from 'dosql/iceberg';
  * import { Hono } from 'hono';
  *
  * const app = new Hono();

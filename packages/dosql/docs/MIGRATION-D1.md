@@ -150,7 +150,7 @@ database_id = "xxx-xxx-xxx"
 
 ```typescript
 // DoSQL: Durable Object pattern
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export interface Env {
   DOSQL_DB: DurableObjectNamespace;
@@ -498,7 +498,7 @@ try {
 
 ```typescript
 // DoSQL: Exception-based
-import { DoSQLError } from '@dotdo/dosql';
+import { DoSQLError } from 'dosql';
 
 try {
   const users = await db.query('SELECT * FROM users');
@@ -589,7 +589,7 @@ const users = await db.query<User>(
 ### Step 1: Install DoSQL
 
 ```bash
-npm install @dotdo/dosql
+npm install dosql
 ```
 
 ### Step 2: Create the Durable Object Class
@@ -597,7 +597,7 @@ npm install @dotdo/dosql
 Create `src/database.ts`:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export interface Env {
   // Keep D1 during migration (optional)

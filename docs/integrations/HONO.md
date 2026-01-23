@@ -39,7 +39,7 @@ npm create hono@latest my-dosql-app
 cd my-dosql-app
 
 # Install DoSQL and dependencies
-npm install @dotdo/sql.do hono zod
+npm install sql.do hono zod
 npm install -D @cloudflare/workers-types wrangler typescript
 ```
 
@@ -77,7 +77,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { prettyJSON } from 'hono/pretty-json';
-import { createSQLClient, type SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, type SQLClient } from 'sql.do';
 
 // Environment bindings
 type Env = {
@@ -143,7 +143,7 @@ export default app;
 ```typescript
 // src/middleware/database.ts
 import { createMiddleware } from 'hono/factory';
-import { createSQLClient, type SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, type SQLClient } from 'sql.do';
 
 type Env = {
   DOSQL_URL: string;
@@ -176,7 +176,7 @@ export const dbMiddleware = createMiddleware<{
 ```typescript
 // src/middleware/tenant-database.ts
 import { createMiddleware } from 'hono/factory';
-import { createSQLClient, type SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, type SQLClient } from 'sql.do';
 import { HTTPException } from 'hono/http-exception';
 
 type Env = {
@@ -242,7 +242,7 @@ function extractTenantFromJWT(auth?: string): string | null {
 ```typescript
 // src/middleware/transaction.ts
 import { createMiddleware } from 'hono/factory';
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 
 type Variables = {
   db: SQLClient;
@@ -282,7 +282,7 @@ export const transactionMiddleware = createMiddleware<{
 ```typescript
 // src/middleware/read-replica.ts
 import { createMiddleware } from 'hono/factory';
-import { createSQLClient, type SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, type SQLClient } from 'sql.do';
 
 type Env = {
   DOSQL_URL: string;
@@ -331,7 +331,7 @@ export const readReplicaMiddleware = createMiddleware<{
 ```typescript
 // src/routes/users.ts
 import { Hono } from 'hono';
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 
 type Env = {
   DOSQL_URL: string;
@@ -459,7 +459,7 @@ export default users;
 ```typescript
 // src/routes/posts.ts
 import { Hono } from 'hono';
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 
 type Variables = {
   db: SQLClient;
@@ -704,7 +704,7 @@ import {
   type CreateUser,
   type UpdateUser,
 } from '../db/schema';
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 
 type Variables = {
   db: SQLClient;
@@ -815,7 +815,7 @@ export default users;
 // src/middleware/advanced-validation.ts
 import { z } from 'zod';
 import { createMiddleware } from 'hono/factory';
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 
 // Custom refinements for database validation
 export const UniqueEmailSchema = z.object({
@@ -1102,7 +1102,7 @@ export default app;
 
 ```typescript
 // src/db/types.ts
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 
 // Entity types
 export interface User {
@@ -1157,7 +1157,7 @@ export interface UserStats {
 
 ```typescript
 // src/db/queries.ts
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 import type { User, Post, PostWithAuthor, UserStats } from './types';
 
 /**
@@ -1312,7 +1312,7 @@ export class PostQueries {
 // src/routes/users-typed.ts
 import { Hono } from 'hono';
 import { UserQueries } from '../db/queries';
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 
 type Variables = {
   db: SQLClient;
@@ -1365,8 +1365,8 @@ export default users;
 // src/routes/cdc.ts
 import { Hono } from 'hono';
 import { upgradeWebSocket } from 'hono/cloudflare-workers';
-import type { SQLClient } from '@dotdo/sql.do';
-import type { CDCEvent, ChangeEvent } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
+import type { CDCEvent, ChangeEvent } from 'sql.do';
 
 type Env = {
   DOSQL_URL: string;
@@ -1669,7 +1669,7 @@ import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
-import { createSQLClient, type SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, type SQLClient } from 'sql.do';
 
 // =============================================================================
 // Types
@@ -2003,7 +2003,7 @@ export default app;
 // src/routes/query.ts
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 
 type Variables = {
   db: SQLClient;
@@ -2445,7 +2445,7 @@ export default query;
 ```typescript
 // src/middleware/optimized-database.ts
 import { createMiddleware } from 'hono/factory';
-import { createSQLClient, type SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, type SQLClient } from 'sql.do';
 
 type Env = {
   DOSQL_URL: string;
@@ -2490,7 +2490,7 @@ export const optimizedDbMiddleware = createMiddleware<{
 
 ```typescript
 // src/lib/query-batcher.ts
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 
 interface PendingQuery {
   sql: string;
@@ -2645,7 +2645,7 @@ async function revalidate(c: any, kv: KVNamespace, key: string, ttl: number) {
 // src/routes/export.ts
 import { Hono } from 'hono';
 import { stream } from 'hono/streaming';
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 
 type Variables = {
   db: SQLClient;
@@ -2742,7 +2742,7 @@ export default exportRoutes;
 
 ```typescript
 // src/lib/query-optimizer.ts
-import type { SQLClient } from '@dotdo/sql.do';
+import type { SQLClient } from 'sql.do';
 
 /**
  * Query optimizer utilities

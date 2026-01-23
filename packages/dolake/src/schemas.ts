@@ -350,7 +350,7 @@ export type ValidatedRpcMessage = z.infer<typeof RpcMessageSchema>;
  * ## Handling the Error
  *
  * ```typescript
- * import { validateClientMessage, MessageValidationError } from '@dotdo/dolake';
+ * import { validateClientMessage, MessageValidationError } from 'dolake';
  *
  * try {
  *   const message = validateClientMessage(rawData);

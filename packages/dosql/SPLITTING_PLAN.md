@@ -66,7 +66,7 @@ packages/dosql/src/
 
 ### Tier 1: Core Foundation (High Priority)
 
-#### 1. `@dotdo/dosql-core`
+#### 1. `dosql-core`
 **Purpose**: Core types, parser, and engine with no ORM dependencies
 
 **Includes**:
@@ -97,7 +97,7 @@ export type { Engine, QueryPlan, Operator };
 
 ---
 
-#### 2. `@dotdo/dosql-sharding`
+#### 2. `dosql-sharding`
 **Purpose**: Vitess-inspired distributed query routing
 
 **Includes**:
@@ -109,7 +109,7 @@ export type { Engine, QueryPlan, Operator };
   - `replica.ts` - Replica selector
 
 **Dependencies**:
-- `@dotdo/dosql-core` (for engine types, ShardId)
+- `dosql-core` (for engine types, ShardId)
 
 **Exports**:
 ```typescript
@@ -125,7 +125,7 @@ export { createRouter, createExecutor, createShardingClient };
 
 ---
 
-#### 3. `@dotdo/dosql-orm`
+#### 3. `dosql-orm`
 **Purpose**: ORM integrations (Drizzle, Kysely, Knex, Prisma)
 
 **Includes**:
@@ -135,7 +135,7 @@ export { createRouter, createExecutor, createShardingClient };
 - `orm/prisma/` - Prisma adapter
 
 **Dependencies**:
-- `@dotdo/dosql-core` (for SqlValue, Row, QueryResult)
+- `dosql-core` (for SqlValue, Row, QueryResult)
 - `drizzle-orm` (peerDep)
 - `kysely` (peerDep)
 - `knex` (peerDep)
@@ -161,7 +161,7 @@ export { PrismaDoSQLAdapter, createPrismaAdapter } from './prisma';
 
 ### Tier 2: Extended Capabilities (Medium Priority)
 
-#### 4. `@dotdo/dosql-storage`
+#### 4. `dosql-storage`
 **Purpose**: Storage layer abstractions
 
 **Includes**:
@@ -172,11 +172,11 @@ export { PrismaDoSQLAdapter, createPrismaAdapter } from './prisma';
 - `compaction/` - Compaction scheduler
 
 **Dependencies**:
-- `@dotdo/dosql-core`
+- `dosql-core`
 
 ---
 
-#### 5. `@dotdo/dosql-transaction`
+#### 5. `dosql-transaction`
 **Purpose**: Transaction management and WAL
 
 **Includes**:
@@ -186,37 +186,37 @@ export { PrismaDoSQLAdapter, createPrismaAdapter } from './prisma';
 - `timetravel/` - Time travel queries
 
 **Dependencies**:
-- `@dotdo/dosql-core`
+- `dosql-core`
 
 ---
 
-#### 6. `@dotdo/dosql-rpc`
+#### 6. `dosql-rpc`
 **Purpose**: CapnWeb RPC layer for DO communication
 
 **Includes**:
 - `rpc/` - Complete RPC module
 
 **Dependencies**:
-- `@dotdo/dosql-core`
+- `dosql-core`
 - `capnweb`
 
 ---
 
-#### 7. `@dotdo/dosql-cdc`
+#### 7. `dosql-cdc`
 **Purpose**: Change data capture and streaming
 
 **Includes**:
 - `cdc/` - CDC capture and streaming
 
 **Dependencies**:
-- `@dotdo/dosql-core`
-- `@dotdo/dosql-rpc` (optional)
+- `dosql-core`
+- `dosql-rpc` (optional)
 
 ---
 
 ### Tier 3: Specialized Features (Lower Priority)
 
-#### 8. `@dotdo/dosql-search`
+#### 8. `dosql-search`
 **Purpose**: Full-text and vector search
 
 **Includes**:
@@ -224,11 +224,11 @@ export { PrismaDoSQLAdapter, createPrismaAdapter } from './prisma';
 - `vector/` - Vector search, HNSW
 
 **Dependencies**:
-- `@dotdo/dosql-core`
+- `dosql-core`
 
 ---
 
-#### 9. `@dotdo/dosql-proc`
+#### 9. `dosql-proc`
 **Purpose**: Stored procedures and migrations
 
 **Includes**:
@@ -237,11 +237,11 @@ export { PrismaDoSQLAdapter, createPrismaAdapter } from './prisma';
 - `triggers/` - Trigger support
 
 **Dependencies**:
-- `@dotdo/dosql-core`
+- `dosql-core`
 
 ---
 
-#### 10. `@dotdo/dosql-lakehouse`
+#### 10. `dosql-lakehouse`
 **Purpose**: Lakehouse and Iceberg integration
 
 **Includes**:
@@ -249,8 +249,8 @@ export { PrismaDoSQLAdapter, createPrismaAdapter } from './prisma';
 - `iceberg/` - Iceberg table format
 
 **Dependencies**:
-- `@dotdo/dosql-core`
-- `@dotdo/dosql-storage`
+- `dosql-core`
+- `dosql-storage`
 - `iceberg-js`
 
 ---
@@ -259,7 +259,7 @@ export { PrismaDoSQLAdapter, createPrismaAdapter } from './prisma';
 
 ```
                     ┌─────────────────────┐
-                    │   @dotdo/dosql-core │
+                    │   dosql-core │
                     └─────────┬───────────┘
                               │
           ┌───────────────────┼───────────────────┐
@@ -286,23 +286,23 @@ export { PrismaDoSQLAdapter, createPrismaAdapter } from './prisma';
 
 ### Phase 1: Core Extraction (Week 1)
 
-1. **Create `@dotdo/dosql-core`**
+1. **Create `dosql-core`**
    - Extract `engine/types.ts` (branded types, SqlValue, Row, etc.)
    - Move parser modules
    - Move basic engine infrastructure
    - Ensure no circular dependencies
 
 2. **Update main `dosql` package**
-   - Add `@dotdo/dosql-core` as dependency
+   - Add `dosql-core` as dependency
    - Re-export core types for backward compatibility
 
 ### Phase 2: Sharding and ORM (Week 2)
 
-3. **Create `@dotdo/dosql-sharding`**
+3. **Create `dosql-sharding`**
    - Extract sharding module
-   - Update imports to use `@dotdo/dosql-core`
+   - Update imports to use `dosql-core`
 
-4. **Create `@dotdo/dosql-orm`**
+4. **Create `dosql-orm`**
    - Extract ORM integrations
    - Make ORM libraries peer dependencies
    - Update imports
@@ -321,7 +321,7 @@ export { PrismaDoSQLAdapter, createPrismaAdapter } from './prisma';
 ### Phase 4: Deprecation (Week 5+)
 
 6. **Deprecate monolithic package**
-   - Mark main `@dotdo/dosql` as deprecated
+   - Mark main `dosql` as deprecated
    - Point users to new packages
    - Maintain backward compatibility layer
 
@@ -334,23 +334,23 @@ import {
   createQueryEngine,
   createShardingClient,
   drizzle
-} from '@dotdo/dosql';
-import { hashVindex } from '@dotdo/dosql/sharding';
-import { DoSQLDialect } from '@dotdo/dosql/orm/kysely';
+} from 'dosql';
+import { hashVindex } from 'dosql/sharding';
+import { DoSQLDialect } from 'dosql/orm/kysely';
 ```
 
 ### After (Split Packages)
 
 ```typescript
 // Core functionality
-import { createQueryEngine } from '@dotdo/dosql-core';
+import { createQueryEngine } from 'dosql-core';
 
 // Sharding
-import { createShardingClient, hashVindex } from '@dotdo/dosql-sharding';
+import { createShardingClient, hashVindex } from 'dosql-sharding';
 
 // ORM integrations
-import { drizzle } from '@dotdo/dosql-orm/drizzle';
-import { DoSQLDialect } from '@dotdo/dosql-orm/kysely';
+import { drizzle } from 'dosql-orm/drizzle';
+import { DoSQLDialect } from 'dosql-orm/kysely';
 ```
 
 ## Risk Assessment
@@ -371,16 +371,16 @@ import { DoSQLDialect } from '@dotdo/dosql-orm/kysely';
 
 **Start with the low-risk, high-value split:**
 
-1. **Immediate**: Create `@dotdo/dosql-orm` package
+1. **Immediate**: Create `dosql-orm` package
    - Clear boundaries (only imports `engine/types.ts`)
    - Reduces main package dependencies (drizzle-orm, kysely, knex become peer deps)
    - Users who don't need ORM don't need those deps
 
-2. **Short-term**: Create `@dotdo/dosql-sharding` package
+2. **Short-term**: Create `dosql-sharding` package
    - Self-contained module
    - Only imports `engine/types.ts` for ShardId
 
-3. **Medium-term**: Create `@dotdo/dosql-core` with extracted types
+3. **Medium-term**: Create `dosql-core` with extracted types
    - Most complex due to many consumers
    - Should be done carefully with full test coverage
 

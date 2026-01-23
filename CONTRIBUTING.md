@@ -416,8 +416,8 @@ pnpm test
 #### Run Specific Package Tests
 
 ```bash
-pnpm --filter @dotdo/dosql test
-pnpm --filter @dotdo/dolake test
+pnpm --filter dosql test
+pnpm --filter dolake test
 ```
 
 #### Run Single Test File

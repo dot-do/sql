@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Client Event Emitter
+ * lake.do - Client Event Emitter
  *
  * This module provides a typed event emitter for the DoLakeClient.
  *

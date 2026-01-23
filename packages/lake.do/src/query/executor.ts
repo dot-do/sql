@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Query Executor
+ * lake.do - Query Executor
  *
  * This module provides query execution and response transformation logic.
  *

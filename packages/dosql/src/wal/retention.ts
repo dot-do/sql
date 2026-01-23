@@ -11,14 +11,14 @@
  * - retention/metrics.ts - Retention metrics and monitoring
  * - retention/index.ts - Main exports and facade
  *
- * For new code, you can import directly from '@dotdo/dosql/wal/retention':
+ * For new code, you can import directly from 'dosql/wal/retention':
  * ```typescript
- * import { createWALRetentionManager } from '@dotdo/dosql/wal/retention';
+ * import { createWALRetentionManager } from 'dosql/wal/retention';
  * ```
  *
  * Or from this file for backward compatibility:
  * ```typescript
- * import { createWALRetentionManager } from '@dotdo/dosql/wal/retention.js';
+ * import { createWALRetentionManager } from 'dosql/wal/retention.js';
  * ```
  *
  * @packageDocumentation

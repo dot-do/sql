@@ -313,7 +313,7 @@ export type ExtractUrlFromFrom<S extends string> =
  * Users can extend this interface to add compile-time schema support
  *
  * @example
- * declare module '@dotdo/dosql' {
+ * declare module 'dosql' {
  *   interface UrlSourceRegistry {
  *     'https://api.example.com/users.json': {
  *       id: 'number';

@@ -7,7 +7,7 @@
  * - Dot product (for normalized vectors)
  * - Hamming distance (for binary vectors)
  *
- * @module @dotdo/dosql/vector/distance
+ * @module dosql/vector/distance
  */
 
 import { DistanceMetric, type Vector } from './types.js';

@@ -4,8 +4,8 @@
  * Types for the lakehouse component that receives CDC streams from DoSQL
  * and writes to R2 as Parquet/Iceberg.
  *
- * This module re-exports unified types from @dotdo/lake.do (which uses @dotdo/sql.do
- * and @dotdo/shared-types) and provides server-specific types.
+ * This module re-exports unified types from lake.do (which uses sql.do
+ * and @dotdo/sql-types) and provides server-specific types.
  */
 
 import {
@@ -38,7 +38,7 @@ export {
   // Type Converters
   serverToClientCDCEvent,
   clientToServerCDCEvent,
-} from '@dotdo/lake.do';
+} from 'lake.do';
 
 // =============================================================================
 // Timestamp Utilities
@@ -66,7 +66,7 @@ export type CDCOperationCodeValue = 0 | 1 | 2 | 3;
 // RPC Message Types (DoSQL -> DoLake)
 // =============================================================================
 
-import type { CDCEvent, ClientCapabilities } from '@dotdo/lake.do';
+import type { CDCEvent, ClientCapabilities } from 'lake.do';
 
 /**
  * Message type discriminator

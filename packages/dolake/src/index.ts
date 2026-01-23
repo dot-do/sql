@@ -1,5 +1,5 @@
 /**
- * @dotdo/dolake
+ * dolake
  *
  * DoLake - Lakehouse worker for CDC streaming to Iceberg/Parquet on R2
  *
@@ -54,7 +54,7 @@
  * }
  *
  * // worker.ts
- * import { DoLake } from '@dotdo/dolake';
+ * import { DoLake } from 'dolake';
  *
  * export { DoLake };
  *

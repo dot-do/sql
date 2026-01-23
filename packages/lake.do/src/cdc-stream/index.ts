@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - CDC Stream Module
+ * lake.do - CDC Stream Module
  *
  * This module exports CDC stream components with separated concerns:
  * - Queue management (BoundedQueue)

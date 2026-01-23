@@ -58,7 +58,7 @@ export type DoSQLDatabase<TSchema extends Record<string, unknown>> = DoSQLDrizzl
  *
  * @example Basic usage
  * ```typescript
- * import { drizzle } from '@dotdo/dosql/orm/drizzle';
+ * import { drizzle } from 'dosql/orm/drizzle';
  * import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
  *
  * // Define schema
@@ -78,7 +78,7 @@ export type DoSQLDatabase<TSchema extends Record<string, unknown>> = DoSQLDrizzl
  *
  * @example With schema for relations
  * ```typescript
- * import { drizzle } from '@dotdo/dosql/orm/drizzle';
+ * import { drizzle } from 'dosql/orm/drizzle';
  * import * as schema from './schema';
  *
  * const db = drizzle({

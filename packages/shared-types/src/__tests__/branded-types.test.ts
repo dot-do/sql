@@ -2,7 +2,7 @@
  * Branded Types Enforcement TDD Tests (GREEN PHASE)
  *
  * These tests verify the implementation of branded type enforcement
- * in @dotdo/shared-types.
+ * in @dotdo/sql-types.
  *
  * Implemented:
  * - Factory functions validate input and throw on invalid values

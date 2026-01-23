@@ -18,7 +18,7 @@ At its core, DoSQL follows a classic database architecture with some important a
                           v
            +------------------------------+
            |         DoSQL Client         |
-           |    (@dotdo/sql.do SDK)       |
+           |    (sql.do SDK)       |
            +------------------------------+
                           |
                    WebSocket/HTTP

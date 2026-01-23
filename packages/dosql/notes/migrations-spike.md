@@ -493,7 +493,7 @@ const migration = generateMigration(previousSchema, schema);
 ### 6.1 Basic Usage
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 // Define migrations inline
 const db = await DB('my-tenant', {
@@ -531,7 +531,7 @@ const users = await db.query('SELECT * FROM users');
 ### 6.2 Using Drizzle Migrations
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 // Load from Drizzle folder
 const db = await DB('my-tenant', {
@@ -543,7 +543,7 @@ const db = await DB('my-tenant', {
 ### 6.3 Custom Loader
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 // Load migrations from R2 or API
 const db = await DB('my-tenant', {
@@ -562,7 +562,7 @@ import {
   createSchemaTracker,
   createMigrationRunner,
   createMigrations
-} from '@dotdo/dosql/migrations';
+} from 'dosql/migrations';
 
 // In Durable Object
 export class TenantDB implements DurableObject {
@@ -597,7 +597,7 @@ export class TenantDB implements DurableObject {
 ### 6.5 Reversible Migrations
 
 ```typescript
-import { createReversibleMigration } from '@dotdo/dosql/migrations';
+import { createReversibleMigration } from 'dosql/migrations';
 
 const migration = createReversibleMigration(
   // Up

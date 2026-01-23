@@ -10,7 +10,7 @@
  * - Serialization/deserialization for persistence
  * - Support for multiple distance metrics
  *
- * @module @dotdo/dosql/vector/hnsw
+ * @module dosql/vector/hnsw
  */
 
 import {

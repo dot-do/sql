@@ -98,7 +98,7 @@ npx create-remix@latest my-remix-app --template remix-run/remix/templates/cloudf
 cd my-remix-app
 
 # Install DoSQL
-npm install @dotdo/dosql
+npm install dosql
 
 # Create migrations folder
 mkdir -p .do/migrations
@@ -120,7 +120,7 @@ CREATE INDEX idx_users_email ON users(email);
 Create `app/db.server.ts`:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export interface Env {
   DOSQL_DB: DurableObjectNamespace;
@@ -218,7 +218,7 @@ npx create-remix@latest my-remix-app --template remix-run/remix/templates/cloudf
 cd my-remix-app
 
 # Install DoSQL and dev dependencies
-npm install @dotdo/dosql
+npm install dosql
 npm install -D @cloudflare/workers-types wrangler
 ```
 
@@ -365,7 +365,7 @@ export default defineConfig({
 Create `server/durable-object.ts`:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export interface Env {
   DOSQL_DB: DurableObjectNamespace;

@@ -1,6 +1,6 @@
 > **Developer Preview** - This package is under active development. APIs may change. Not recommended for production use.
 
-# @dotdo/shared-types
+# @dotdo/sql-types
 
 Unified type definitions for the DoSQL ecosystem. This package provides the canonical type definitions shared between client and server packages.
 
@@ -15,7 +15,7 @@ Unified type definitions for the DoSQL ecosystem. This package provides the cano
 ## Installation
 
 ```bash
-npm install @dotdo/shared-types
+npm install @dotdo/sql-types
 ```
 
 ## Overview
@@ -24,10 +24,10 @@ This package serves as the single source of truth for types across:
 
 | Package | Role |
 |---------|------|
-| `@dotdo/sql.do` | SQL client for Cloudflare Workers |
-| `@dotdo/dosql` | SQL server (Durable Object) |
-| `@dotdo/lake.do` | Lakehouse client |
-| `@dotdo/dolake` | Lakehouse server |
+| `sql.do` | SQL client for Cloudflare Workers |
+| `dosql` | SQL server (Durable Object) |
+| `lake.do` | Lakehouse client |
+| `dolake` | Lakehouse server |
 
 By centralizing type definitions, we ensure type compatibility and prevent drift between client and server implementations.
 
@@ -38,7 +38,7 @@ Branded types provide compile-time type safety by making structurally identical 
 ### LSN (Log Sequence Number)
 
 ```typescript
-import { LSN, createLSN } from '@dotdo/shared-types';
+import { LSN, createLSN } from '@dotdo/sql-types';
 
 // Create a branded LSN from a bigint
 const lsn: LSN = createLSN(12345n);
@@ -67,7 +67,7 @@ import {
   compareLSN,
   incrementLSN,
   lsnValue
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // Create LSN values
 const lsn1 = createLSN(1000n);
@@ -106,7 +106,7 @@ import {
   createTransactionId,
   createShardId,
   createStatementHash,
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // Validate before creating branded types
 function processLSN(value: unknown): LSN | null {
@@ -166,7 +166,7 @@ import {
   isValidatedStatementHash,
   createLSN,
   LSN,
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // Create a validated LSN
 const lsn = createLSN(1000n);
@@ -187,7 +187,7 @@ These `isValidated*` functions are useful for:
 ### TransactionId
 
 ```typescript
-import { TransactionId, createTransactionId } from '@dotdo/shared-types';
+import { TransactionId, createTransactionId } from '@dotdo/sql-types';
 
 // Create a branded transaction ID
 const txId: TransactionId = createTransactionId('txn_550e8400-e29b-41d4');
@@ -201,7 +201,7 @@ const result = await client.query('UPDATE users SET name = ?', {
 ### ShardId
 
 ```typescript
-import { ShardId, createShardId } from '@dotdo/shared-types';
+import { ShardId, createShardId } from '@dotdo/sql-types';
 
 // Create a branded shard identifier
 const shardId: ShardId = createShardId('us-west-2-shard-001');
@@ -215,7 +215,7 @@ const result = await client.query('SELECT * FROM orders', {
 ### StatementHash
 
 ```typescript
-import { StatementHash, createStatementHash } from '@dotdo/shared-types';
+import { StatementHash, createStatementHash } from '@dotdo/sql-types';
 
 // Create a branded statement hash for prepared statements
 const hash: StatementHash = createStatementHash('a1b2c3d4e5f6');
@@ -234,7 +234,7 @@ const stmt: PreparedStatement = {
 The `SQLValue` type represents all valid SQL parameter and result values:
 
 ```typescript
-import { SQLValue } from '@dotdo/shared-types';
+import { SQLValue } from '@dotdo/sql-types';
 
 const values: SQLValue[] = [
   'text',           // string
@@ -253,7 +253,7 @@ const values: SQLValue[] = [
 Covers both SQL-style and JavaScript-style type representations:
 
 ```typescript
-import { ColumnType, SQLColumnType, JSColumnType } from '@dotdo/shared-types';
+import { ColumnType, SQLColumnType, JSColumnType } from '@dotdo/sql-types';
 
 // SQL-style (client-facing)
 const sqlTypes: SQLColumnType[] = [
@@ -278,7 +278,7 @@ import {
   jsToSqlType,
   SQL_TO_JS_TYPE_MAP,
   JS_TO_SQL_TYPE_MAP
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // Convert SQL type to JS type
 const jsType = sqlToJsType('INTEGER'); // 'number'
@@ -300,7 +300,7 @@ console.log(JS_TO_SQL_TYPE_MAP.json);     // 'JSON'
 Unified query request supporting all client and server features:
 
 ```typescript
-import { QueryRequest } from '@dotdo/shared-types';
+import { QueryRequest } from '@dotdo/sql-types';
 
 const request: QueryRequest = {
   sql: 'SELECT * FROM users WHERE status = ? AND created_at > ?',
@@ -329,7 +329,7 @@ const timeTravel: QueryRequest = {
 Simplified options for client use:
 
 ```typescript
-import { QueryOptions, TransactionId, LSN } from '@dotdo/shared-types';
+import { QueryOptions, TransactionId, LSN } from '@dotdo/sql-types';
 
 const options: QueryOptions = {
   transactionId: createTransactionId('txn_123'),
@@ -346,7 +346,7 @@ const options: QueryOptions = {
 ### QueryResponse and QueryResult
 
 ```typescript
-import { QueryResponse, QueryResult, responseToResult, resultToResponse } from '@dotdo/shared-types';
+import { QueryResponse, QueryResult, responseToResult, resultToResponse } from '@dotdo/sql-types';
 
 // Server returns QueryResponse
 const response: QueryResponse<{ id: number; name: string }> = {
@@ -381,7 +381,7 @@ import {
   CDCOperationCode,
   serverToClientCDCEvent,
   clientToServerCDCEvent
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // Define your row type
 interface User {
@@ -419,7 +419,7 @@ console.log(CDCOperationCode.TRUNCATE); // 3
 ### Type Guards for CDC Events
 
 ```typescript
-import { isServerCDCEvent, isClientCDCEvent } from '@dotdo/shared-types';
+import { isServerCDCEvent, isClientCDCEvent } from '@dotdo/sql-types';
 
 function processEvent(event: CDCEvent) {
   if (isServerCDCEvent(event)) {
@@ -439,7 +439,7 @@ function processEvent(event: CDCEvent) {
 ### IsolationLevel
 
 ```typescript
-import { IsolationLevel, ServerIsolationLevel } from '@dotdo/shared-types';
+import { IsolationLevel, ServerIsolationLevel } from '@dotdo/sql-types';
 
 // All supported isolation levels
 const levels: IsolationLevel[] = [
@@ -465,7 +465,7 @@ import {
   TransactionOptions,
   TransactionState,
   TransactionHandle
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // Options for beginning a transaction
 const txOptions: TransactionOptions = {
@@ -503,7 +503,7 @@ import {
   RPCMethod,
   RPCError,
   RPCErrorCode
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // RPC request envelope
 const request: RPCRequest = {
@@ -542,7 +542,7 @@ const errorResponse: RPCResponse = {
 The `RPCErrorCode` enum provides standardized error codes for all RPC communication scenarios. These codes enable programmatic error handling and help clients distinguish between different failure modes.
 
 ```typescript
-import { RPCErrorCode, RPCError } from '@dotdo/shared-types';
+import { RPCErrorCode, RPCError } from '@dotdo/sql-types';
 ```
 
 #### Error Code Reference
@@ -575,7 +575,7 @@ import { RPCErrorCode, RPCError } from '@dotdo/shared-types';
 ##### Basic Error Handling
 
 ```typescript
-import { RPCErrorCode, RPCResponse, isSuccess } from '@dotdo/shared-types';
+import { RPCErrorCode, RPCResponse, isSuccess } from '@dotdo/sql-types';
 
 async function executeQuery(sql: string): Promise<QueryResult> {
   const response: RPCResponse<QueryResult> = await rpcClient.call('query', { sql });
@@ -609,7 +609,7 @@ async function executeQuery(sql: string): Promise<QueryResult> {
 ##### Transaction Error Handling
 
 ```typescript
-import { RPCErrorCode, RPCError } from '@dotdo/shared-types';
+import { RPCErrorCode, RPCError } from '@dotdo/sql-types';
 
 async function transferFunds(fromId: number, toId: number, amount: number): Promise<void> {
   const maxRetries = 3;
@@ -651,7 +651,7 @@ async function transferFunds(fromId: number, toId: number, amount: number): Prom
 ##### CDC Error Handling
 
 ```typescript
-import { RPCErrorCode, CDCEvent } from '@dotdo/shared-types';
+import { RPCErrorCode, CDCEvent } from '@dotdo/sql-types';
 
 async function subscribeToCDC(fromLSN: bigint, tables: string[]): Promise<AsyncIterable<CDCEvent>> {
   try {
@@ -683,7 +683,7 @@ async function subscribeToCDC(fromLSN: bigint, tables: string[]): Promise<AsyncI
 ##### Creating Custom Error Responses
 
 ```typescript
-import { RPCErrorCode, RPCError, RPCResponse } from '@dotdo/shared-types';
+import { RPCErrorCode, RPCError, RPCResponse } from '@dotdo/sql-types';
 
 function createErrorResponse(
   requestId: string,
@@ -739,7 +739,7 @@ function handleQuery(request: RPCRequest): RPCResponse {
 ##### Categorizing Errors for Retry Logic
 
 ```typescript
-import { RPCErrorCode } from '@dotdo/shared-types';
+import { RPCErrorCode } from '@dotdo/sql-types';
 
 const RETRYABLE_ERRORS: Set<RPCErrorCode> = new Set([
   RPCErrorCode.TIMEOUT,
@@ -806,7 +806,7 @@ import {
   ColumnDefinition,
   IndexDefinition,
   ForeignKeyDefinition
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 const usersSchema: TableSchema = {
   name: 'users',
@@ -849,7 +849,7 @@ const usersSchema: TableSchema = {
 ## Sharding Types
 
 ```typescript
-import { ShardConfig, ShardInfo, ShardId } from '@dotdo/shared-types';
+import { ShardConfig, ShardInfo, ShardId } from '@dotdo/sql-types';
 
 const config: ShardConfig = {
   shardCount: 16,
@@ -867,7 +867,7 @@ const shardInfo: ShardInfo = {
 ## Connection Types
 
 ```typescript
-import { ConnectionOptions, ConnectionStats } from '@dotdo/shared-types';
+import { ConnectionOptions, ConnectionStats } from '@dotdo/sql-types';
 
 const options: ConnectionOptions = {
   url: 'wss://sql.example.com/v1',
@@ -895,7 +895,7 @@ const stats: ConnectionStats = {
 ## Idempotency Configuration
 
 ```typescript
-import { IdempotencyConfig, DEFAULT_IDEMPOTENCY_CONFIG } from '@dotdo/shared-types';
+import { IdempotencyConfig, DEFAULT_IDEMPOTENCY_CONFIG } from '@dotdo/sql-types';
 
 // Custom idempotency config
 const config: IdempotencyConfig = {
@@ -911,7 +911,7 @@ console.log(DEFAULT_IDEMPOTENCY_CONFIG.ttlMs); // 86400000
 ## Client Capabilities
 
 ```typescript
-import { ClientCapabilities, DEFAULT_CLIENT_CAPABILITIES } from '@dotdo/shared-types';
+import { ClientCapabilities, DEFAULT_CLIENT_CAPABILITIES } from '@dotdo/sql-types';
 
 const capabilities: ClientCapabilities = {
   binaryProtocol: true,
@@ -935,7 +935,7 @@ The package provides two runtime modes that control validation behavior in facto
 Dev mode enables runtime validation in factory functions like `createLSN()`, `createTransactionId()`, `createShardId()`, and `createStatementHash()`. When enabled, these functions validate inputs and throw descriptive errors for invalid values.
 
 ```typescript
-import { setDevMode, isDevMode, createLSN, createTransactionId } from '@dotdo/shared-types';
+import { setDevMode, isDevMode, createLSN, createTransactionId } from '@dotdo/sql-types';
 
 // Check current mode
 console.log(isDevMode()); // true (default)
@@ -967,7 +967,7 @@ const unsafeLSN = createLSN(-1n); // No error thrown
 Strict mode enables additional format validation beyond basic type checking. When enabled, factory functions enforce stricter rules like format patterns.
 
 ```typescript
-import { setStrictMode, isStrictMode, createStatementHash } from '@dotdo/shared-types';
+import { setStrictMode, isStrictMode, createStatementHash } from '@dotdo/sql-types';
 
 // Check current mode
 console.log(isStrictMode()); // false (default)
@@ -1000,7 +1000,7 @@ const relaxedHash = createStatementHash('any-format-ok'); // OK (no format check
 ### Recommended Configuration
 
 ```typescript
-import { setDevMode, setStrictMode } from '@dotdo/shared-types';
+import { setDevMode, setStrictMode } from '@dotdo/sql-types';
 
 // Development environment: Enable all validation
 if (process.env.NODE_ENV === 'development') {
@@ -1042,7 +1042,7 @@ import {
   DEFAULT_RETRY_CONFIG,
   isRetryConfig,
   createRetryConfig
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 ```
 
 #### Properties
@@ -1075,7 +1075,7 @@ import {
   DEFAULT_RETRY_CONFIG,
   isRetryConfig,
   createRetryConfig
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // Use default configuration
 const defaultConfig = DEFAULT_RETRY_CONFIG;
@@ -1164,7 +1164,7 @@ The Result pattern provides a type-safe way to handle operations that can fail w
 The main `Result<T>` type is a discriminated union of `Success<T>` and `Failure`:
 
 ```typescript
-import { Result, Success, Failure, ResultError } from '@dotdo/shared-types';
+import { Result, Success, Failure, ResultError } from '@dotdo/sql-types';
 
 // Success type - contains the success data
 interface Success<T> {
@@ -1196,7 +1196,7 @@ type Result<T> = Success<T> | Failure;
 Use type guards to narrow the Result type and access the appropriate properties:
 
 ```typescript
-import { Result, isSuccess, isFailure } from '@dotdo/shared-types';
+import { Result, isSuccess, isFailure } from '@dotdo/sql-types';
 
 function processResult(result: Result<User>) {
   // Check for success
@@ -1223,7 +1223,7 @@ function processResult(result: Result<User>) {
 Create Result values using the constructor functions:
 
 ```typescript
-import { success, failure, failureFromError } from '@dotdo/shared-types';
+import { success, failure, failureFromError } from '@dotdo/sql-types';
 
 // Create a success result
 function getUser(id: number): Result<User> {
@@ -1262,7 +1262,7 @@ async function fetchData(url: string): Promise<Result<Data>> {
 #### unwrap - Extract value or throw
 
 ```typescript
-import { unwrap, Result } from '@dotdo/shared-types';
+import { unwrap, Result } from '@dotdo/sql-types';
 
 // At API boundaries, convert Result to throw style
 function handleRequest(result: Result<Response>) {
@@ -1277,7 +1277,7 @@ function handleRequest(result: Result<Response>) {
 #### unwrapOr - Extract value with default
 
 ```typescript
-import { unwrapOr, Result } from '@dotdo/shared-types';
+import { unwrapOr, Result } from '@dotdo/sql-types';
 
 // Provide a default value for failures
 const count = unwrapOr(getCount(), 0);
@@ -1288,7 +1288,7 @@ const config = unwrapOr(loadConfig(), DEFAULT_CONFIG);
 #### mapResult - Transform success values
 
 ```typescript
-import { mapResult, Result } from '@dotdo/shared-types';
+import { mapResult, Result } from '@dotdo/sql-types';
 
 // Transform the success value without affecting failures
 const userResult: Result<User> = getUser(id);
@@ -1303,7 +1303,7 @@ const stillFailed = mapResult(failedResult, user => user.name); // Still a failu
 #### flatMapResult - Chain Result-returning operations
 
 ```typescript
-import { flatMapResult, Result } from '@dotdo/shared-types';
+import { flatMapResult, Result } from '@dotdo/sql-types';
 
 // Chain operations that return Results
 function getUser(id: number): Result<User> { /* ... */ }
@@ -1324,7 +1324,7 @@ const finalResult = flatMapResult(
 #### combineResults - Aggregate multiple Results
 
 ```typescript
-import { combineResults, Result, isSuccess } from '@dotdo/shared-types';
+import { combineResults, Result, isSuccess } from '@dotdo/sql-types';
 
 // Combine multiple Results into one
 const results: Result<User>[] = await Promise.all([
@@ -1348,7 +1348,7 @@ if (isSuccess(combined)) {
 #### Basic Query Operation
 
 ```typescript
-import { Result, success, failure, isSuccess } from '@dotdo/shared-types';
+import { Result, success, failure, isSuccess } from '@dotdo/sql-types';
 
 interface ParsedQuery {
   type: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE';
@@ -1394,7 +1394,7 @@ import {
   flatMapResult,
   combineResults,
   unwrapOr,
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // Define operations
 function validateInput(input: string): Result<string> {
@@ -1427,7 +1427,7 @@ const data = unwrapOr(processInput(userInput), defaultData);
 #### Error Handling at API Boundaries
 
 ```typescript
-import { Result, isSuccess, unwrap, failure, success } from '@dotdo/shared-types';
+import { Result, isSuccess, unwrap, failure, success } from '@dotdo/sql-types';
 
 // Internal function returns Result
 function internalOperation(): Result<Data> {
@@ -1472,7 +1472,7 @@ import {
   isLegacyFailure,
   fromLegacyResult,
   Result,
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // Legacy result format
 interface LegacyResult<T = unknown> {
@@ -1542,7 +1542,7 @@ function createUser(name: string): Result<User> {
 Always use factory functions to create branded types:
 
 ```typescript
-import { createLSN, createTransactionId, createShardId } from '@dotdo/shared-types';
+import { createLSN, createTransactionId, createShardId } from '@dotdo/sql-types';
 
 // Good - type-safe
 const lsn = createLSN(100n);
@@ -1557,7 +1557,7 @@ const txId = createTransactionId('txn_123');
 Use converter functions when crossing client/server boundaries:
 
 ```typescript
-import { responseToResult, resultToResponse } from '@dotdo/shared-types';
+import { responseToResult, resultToResponse } from '@dotdo/sql-types';
 
 // Server handler
 function handleQuery(request: QueryRequest): QueryResponse {
@@ -1578,7 +1578,7 @@ async function query(sql: string): Promise<QueryResult> {
 Transform CDC events between wire and application formats:
 
 ```typescript
-import { serverToClientCDCEvent, clientToServerCDCEvent } from '@dotdo/shared-types';
+import { serverToClientCDCEvent, clientToServerCDCEvent } from '@dotdo/sql-types';
 
 // Receiving from server
 websocket.onmessage = (msg) => {
@@ -1599,7 +1599,7 @@ function sendEvent(event: CDCEvent) {
 Use type guards for runtime type checking:
 
 ```typescript
-import { isDateTimestamp, isNumericTimestamp } from '@dotdo/shared-types';
+import { isDateTimestamp, isNumericTimestamp } from '@dotdo/sql-types';
 
 function formatTimestamp(ts: Date | number): string {
   if (isDateTimestamp(ts)) {
@@ -1615,8 +1615,8 @@ function formatTimestamp(ts: Date | number): string {
 ## Integration with sql.do
 
 ```typescript
-import { sql } from '@dotdo/sql.do';
-import type { QueryResult, LSN, TransactionState } from '@dotdo/shared-types';
+import { sql } from 'sql.do';
+import type { QueryResult, LSN, TransactionState } from '@dotdo/sql-types';
 
 const client = sql('https://your-db.sql.do');
 
@@ -1642,8 +1642,8 @@ try {
 ## Integration with lake.do
 
 ```typescript
-import { lake } from '@dotdo/lake.do';
-import type { CDCEvent, LSN } from '@dotdo/shared-types';
+import { lake } from 'lake.do';
+import type { CDCEvent, LSN } from '@dotdo/sql-types';
 
 const client = lake('https://your-lake.lake.do');
 
@@ -1667,7 +1667,7 @@ const historicalData = await client.query('SELECT * FROM users', {
 |--------------|--------|-------|---------|--------|
 | 0.1.x        | 0.1.x  | 0.1.x | 0.1.x   | 0.1.x  |
 
-All packages in the DoSQL ecosystem should use compatible versions of `@dotdo/shared-types` to ensure type compatibility.
+All packages in the DoSQL ecosystem should use compatible versions of `@dotdo/sql-types` to ensure type compatibility.
 
 ## API Reference
 
@@ -1794,7 +1794,7 @@ import {
   getWrapperCacheConfig,
   setDevMode,
   isDevMode
-} from '@dotdo/shared-types';
+} from '@dotdo/sql-types';
 
 // Configure wrapper cache
 setWrapperCacheConfig({

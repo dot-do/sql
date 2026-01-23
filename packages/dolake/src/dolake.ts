@@ -107,7 +107,7 @@ export interface DoLakeEnv {
  * @example
  * ```typescript
  * // In your worker, export the DoLake class
- * import { DoLake } from '@dotdo/dolake';
+ * import { DoLake } from 'dolake';
  * export { DoLake };
  *
  * // Route requests to DoLake
@@ -323,7 +323,7 @@ export class DoLake implements DurableObject {
    * @example
    * ```typescript
    * // Worker that routes requests to DoLake
-   * import { DoLake } from '@dotdo/dolake';
+   * import { DoLake } from 'dolake';
    *
    * export interface Env {
    *   DOLAKE: DurableObjectNamespace;

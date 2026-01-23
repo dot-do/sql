@@ -1,7 +1,7 @@
 /**
- * @dotdo/lake.do - Shared types for DoLake client and server
+ * lake.do - Shared types for DoLake client and server
  *
- * This module re-exports types from @dotdo/sql.do (which uses @dotdo/shared-types)
+ * This module re-exports types from sql.do (which uses @dotdo/sql-types)
  * and adds lake-specific type definitions.
  *
  * @packageDocumentation
@@ -271,7 +271,7 @@ export function createCompactionJobId(id: string): CompactionJobId {
 // =============================================================================
 
 /**
- * Re-exported types from `@dotdo/sql.do` (which re-exports from `@dotdo/shared-types`).
+ * Re-exported types from `sql.do` (which re-exports from `@dotdo/sql-types`).
  *
  * These types are re-exported for convenience when building lakehouse clients.
  * They maintain type compatibility across the DoSQL ecosystem.
@@ -315,8 +315,8 @@ export function createCompactionJobId(id: string): CompactionJobId {
  * - `serverToClientCDCEvent()` - Convert server CDC event to client format
  * - `clientToServerCDCEvent()` - Convert client CDC event to server format
  *
- * @see {@link https://github.com/dotdo/sql.do | @dotdo/sql.do} for client types
- * @see {@link https://github.com/dotdo/shared-types | @dotdo/shared-types} for canonical definitions
+ * @see {@link https://github.com/dotdo/sql.do | sql.do} for client types
+ * @see {@link https://github.com/dotdo/shared-types | @dotdo/sql-types} for canonical definitions
  *
  * @public
  * @stability stable
@@ -331,7 +331,7 @@ export type {
   ClientCDCOperation,
   ClientCapabilities,
   RetryConfig,
-} from '@dotdo/sql.do';
+} from 'sql.do';
 
 export {
   CDCOperationCode,
@@ -351,16 +351,16 @@ export {
   // Dev Mode
   setDevMode,
   isDevMode,
-} from '@dotdo/sql.do';
+} from 'sql.do';
 
 // Import isDevMode for local use in factory functions
-import { isDevMode } from '@dotdo/sql.do';
+import { isDevMode } from 'sql.do';
 
 // =============================================================================
 // CDC Streaming Types
 // =============================================================================
 
-import type { CDCEvent, LSN } from '@dotdo/sql.do';
+import type { CDCEvent, LSN } from 'sql.do';
 
 /**
  * Configuration options for subscribing to CDC (Change Data Capture) streams.
@@ -1122,7 +1122,7 @@ export interface LakeRPCError {
  *
  * @example
  * ```typescript
- * import { createLakeClient } from '@dotdo/lake.do';
+ * import { createLakeClient } from 'lake.do';
  *
  * const client = createLakeClient({
  *   url: 'https://lake.example.com',

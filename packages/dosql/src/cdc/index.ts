@@ -9,7 +9,7 @@
  *
  * @example
  * ```typescript
- * import { createCDC } from '@dotdo/dosql/cdc';
+ * import { createCDC } from 'dosql/cdc';
  *
  * // Create CDC from backend
  * const cdc = createCDC(backend);

@@ -14,7 +14,7 @@
  *   createReplica,
  *   createExtendedRouter,
  *   SessionManager,
- * } from '@dotdo/dosql/replication';
+ * } from 'dosql/replication';
  *
  * // Create primary
  * const primary = createPrimary({ backend, walWriter, walReader });

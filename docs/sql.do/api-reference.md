@@ -59,19 +59,19 @@ DoSQL provides multiple subpath exports for importing specific functionality:
 
 ```typescript
 // Main entry point - Database, Statement, types, errors
-import { Database, createDatabase, DatabaseError } from '@dotdo/dosql';
+import { Database, createDatabase, DatabaseError } from 'dosql';
 
 // RPC client/server for remote database access
-import { createRPCClient, createRPCServer } from '@dotdo/dosql/rpc';
+import { createRPCClient, createRPCServer } from 'dosql/rpc';
 
 // Write-Ahead Log for durability
-import { createWALWriter, createWALReader } from '@dotdo/dosql/wal';
+import { createWALWriter, createWALReader } from 'dosql/wal';
 
 // Change Data Capture for real-time streaming
-import { createCDC, createCDCSubscription } from '@dotdo/dosql/cdc';
+import { createCDC, createCDCSubscription } from 'dosql/cdc';
 
 // Transaction utilities
-import { TransactionManager } from '@dotdo/dosql/transaction';
+import { TransactionManager } from 'dosql/transaction';
 
 // FSX - File System Abstraction for tiered storage
 import {
@@ -80,27 +80,27 @@ import {
   createTieredBackend,
   createCOWBackend,
   MemoryFSXBackend,
-} from '@dotdo/dosql/fsx';
+} from 'dosql/fsx';
 
 // ORM adapters
-import { createPrismaAdapter } from '@dotdo/dosql/orm/prisma';
-import { createKyselyAdapter } from '@dotdo/dosql/orm/kysely';
-import { createKnexAdapter } from '@dotdo/dosql/orm/knex';
-import { createDrizzleAdapter } from '@dotdo/dosql/orm/drizzle';
+import { createPrismaAdapter } from 'dosql/orm/prisma';
+import { createKyselyAdapter } from 'dosql/orm/kysely';
+import { createKnexAdapter } from 'dosql/orm/knex';
+import { createDrizzleAdapter } from 'dosql/orm/drizzle';
 ```
 
 | Subpath | Description |
 |---------|-------------|
-| `@dotdo/dosql` | Main entry point with Database class, types, and errors |
-| `@dotdo/dosql/rpc` | RPC client/server for remote database operations |
-| `@dotdo/dosql/wal` | Write-Ahead Log for durability and recovery |
-| `@dotdo/dosql/cdc` | Change Data Capture for real-time change streaming |
-| `@dotdo/dosql/transaction` | Transaction management utilities |
-| `@dotdo/dosql/fsx` | File System Abstraction with tiered storage backends |
-| `@dotdo/dosql/orm/prisma` | Prisma ORM adapter |
-| `@dotdo/dosql/orm/kysely` | Kysely query builder adapter |
-| `@dotdo/dosql/orm/knex` | Knex.js query builder adapter |
-| `@dotdo/dosql/orm/drizzle` | Drizzle ORM adapter |
+| `dosql` | Main entry point with Database class, types, and errors |
+| `dosql/rpc` | RPC client/server for remote database operations |
+| `dosql/wal` | Write-Ahead Log for durability and recovery |
+| `dosql/cdc` | Change Data Capture for real-time change streaming |
+| `dosql/transaction` | Transaction management utilities |
+| `dosql/fsx` | File System Abstraction with tiered storage backends |
+| `dosql/orm/prisma` | Prisma ORM adapter |
+| `dosql/orm/kysely` | Kysely query builder adapter |
+| `dosql/orm/knex` | Knex.js query builder adapter |
+| `dosql/orm/drizzle` | Drizzle ORM adapter |
 
 ---
 
@@ -162,7 +162,7 @@ interface DatabaseOptions {
 #### Examples
 
 ```typescript
-import { Database, createDatabase } from '@dotdo/dosql';
+import { Database, createDatabase } from 'dosql';
 
 // Example 1: In-memory database (default)
 const db = new Database();
@@ -307,7 +307,7 @@ const guests = stmt.all('guest');
 ##### Error Handling
 
 ```typescript
-import { DatabaseError, DatabaseErrorCode } from '@dotdo/dosql';
+import { DatabaseError, DatabaseErrorCode } from 'dosql';
 
 try {
   const stmt = db.prepare('SELECT * FROM nonexistent_table');
@@ -397,7 +397,7 @@ db.exec(`
 ##### Error Handling
 
 ```typescript
-import { DatabaseError, ReadOnlyError } from '@dotdo/dosql';
+import { DatabaseError, ReadOnlyError } from 'dosql';
 
 // Read-only database error
 const readOnlyDb = new Database(':memory:', { readonly: true });
@@ -1801,7 +1801,7 @@ import {
   BindingErrorCode,
   SQLSyntaxError,
   ErrorCategory,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Example 1: Basic error handling
 try {
@@ -1932,7 +1932,7 @@ import {
   type WALConfig,
   type AppendOptions,
   type AppendResult,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create a WAL writer
 const writer = createWALWriter(backend, config);
@@ -1963,7 +1963,7 @@ import {
   reconstructTransactions,
   type WALReader,
   type ReadOptions,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create a reader
 const reader = createWALReader(backend);
@@ -1997,7 +1997,7 @@ import {
   type CheckpointManager,
   type Checkpoint,
   type RecoveryState,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create checkpoint manager
 const checkpointManager = createCheckpointManager(storage, writer);
@@ -2039,7 +2039,7 @@ import {
   type CDCSubscription,
   type ChangeEvent,
   type CDCFilter,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create CDC instance
 const cdc = createCDC(backend);
@@ -2086,7 +2086,7 @@ import {
   createReplicationSlotManager,
   type ReplicationSlotManager,
   type ReplicationSlot,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create slot manager
 const slots = createReplicationSlotManager(storage);
@@ -2125,7 +2125,7 @@ import {
   createURLVirtualTable,
   createVirtualTableRegistry,
   resolveVirtualTableFromClause,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create registry
 const registry = createVirtualTableRegistry({
@@ -2162,7 +2162,7 @@ import {
   createR2Source,
   parseR2Uri,
   listR2Objects,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create R2 source
 const source = createR2Source(r2Bucket, 'data/users.parquet');
@@ -2200,7 +2200,7 @@ import {
   type TieredStorageConfig,
   type TieredStorageBackend,
   type MigrationResult,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 /**
  * Storage tier enum indicating where data resides
@@ -2282,7 +2282,7 @@ import {
   createTieredBackend,
   createDOBackend,
   createR2Backend,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create individual backends
 const hotBackend = createDOBackend(ctx.storage);
@@ -2501,7 +2501,7 @@ import {
   createRangeShardRouter,
   type ShardRouter,
   type ShardConfig,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Consistent hash sharding
 const router = createConsistentHashRouter({
@@ -2532,7 +2532,7 @@ import {
   ProcedureBuilder,
   type Procedure,
   type ProcedureContext,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Define a procedure using the builder
 const createUser = procedure()
@@ -2580,7 +2580,7 @@ import {
   ColumnarWriter,
   ColumnarReader,
   analyzeForEncoding,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 /**
  * Supported column encodings:
@@ -2739,7 +2739,7 @@ const writer = new ColumnarWriter(schema, {
 The writer automatically analyzes data and selects the best encoding.
 
 ```typescript
-import { analyzeForEncoding, type EncodingAnalysis } from '@dotdo/dosql';
+import { analyzeForEncoding, type EncodingAnalysis } from 'dosql';
 
 // Analyze data to determine optimal encoding
 const values = ['active', 'active', 'inactive', 'active', 'pending'];
@@ -2768,7 +2768,7 @@ const numericAnalysis = analyzeForEncoding(numbers, 'int32');
 Each column chunk stores statistics for predicate pushdown.
 
 ```typescript
-import { type ColumnStats, getColumnStats } from '@dotdo/dosql';
+import { type ColumnStats, getColumnStats } from 'dosql';
 
 interface ColumnStats {
   /** Minimum value in the chunk */
@@ -2812,7 +2812,7 @@ import {
   inferSchema,
   type ColumnarTableSchema,
   type WriterConfig,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Define schema explicitly
 const schema: ColumnarTableSchema = {
@@ -2881,7 +2881,7 @@ import {
   type ReaderConfig,
   type ReadRequest,
   type Predicate,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create reader
 const config: ReaderConfig = {
@@ -2962,7 +2962,7 @@ type ColumnDataType =
   | 'timestamp'; // 8 byte Unix timestamp (milliseconds)
 
 // Type helpers
-import { isNumericType, isIntegerType, isSignedType, getBytesPerElement } from '@dotdo/dosql';
+import { isNumericType, isIntegerType, isSignedType, getBytesPerElement } from 'dosql';
 
 isNumericType('float64');      // true
 isIntegerType('int32');        // true
@@ -3008,7 +3008,7 @@ import {
   MAX_ROWS_PER_ROW_GROUP,  // 65536 rows max
   MIN_ROWS_FOR_DICT,       // 100 rows minimum for dictionary
   DICT_CARDINALITY_THRESHOLD, // 10% max unique/total ratio
-} from '@dotdo/dosql';
+} from 'dosql';
 ```
 
 ---

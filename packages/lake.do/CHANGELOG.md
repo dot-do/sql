@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-01-22
 
 ### Added
-- Initial release of `@dotdo/lake.do` client SDK
+- Initial release of `lake.do` client SDK
 - `createLakeClient` factory function for creating DoLake connections
 - `DoLakeClient` class implementing CapnWeb RPC over WebSocket
 - SQL query execution with `query<T>()` method
@@ -34,10 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Event emitter API: `on()`, `off()`, `once()` for connection events
 - Retry configuration support
 - CDCStreamController with backpressure support
-- Experimental module exports via `@dotdo/lake.do/experimental`
+- Experimental module exports via `lake.do/experimental`
 
 ### Dependencies
-- Requires `@dotdo/sql.do` as peer dependency for shared types
+- Requires `sql.do` as peer dependency for shared types
 
 [Unreleased]: https://github.com/dot-do/sql/compare/lake.do@0.1.0...HEAD
 [0.1.0]: https://github.com/dot-do/sql/releases/tag/lake.do@0.1.0

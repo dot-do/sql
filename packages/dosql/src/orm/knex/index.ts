@@ -7,7 +7,7 @@
  *
  * @example
  * ```typescript
- * import { createKnex } from '@dotdo/dosql/orm/knex';
+ * import { createKnex } from 'dosql/orm/knex';
  *
  * const knex = createKnex({ backend: dosqlBackend });
  *
@@ -60,8 +60,8 @@ import type { SqlValue, Row } from '../../engine/types.js';
  *
  * @example
  * ```typescript
- * import { createKnex } from '@dotdo/dosql/orm/knex';
- * import { createBackend } from '@dotdo/dosql';
+ * import { createKnex } from 'dosql/orm/knex';
+ * import { createBackend } from 'dosql';
  *
  * const backend = createBackend({ storage: durableObjectStorage });
  * const knex = createKnex({ backend });

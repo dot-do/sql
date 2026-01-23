@@ -61,7 +61,7 @@ wrangler whoami
 cd your-dosql-project
 
 # Install DoSQL and development dependencies
-npm install @dotdo/dosql
+npm install dosql
 npm install wrangler @cloudflare/workers-types typescript --save-dev
 ```
 
@@ -120,7 +120,7 @@ CREATE INDEX idx_users_email ON users(email);
 Create `src/database.ts`:
 
 ```typescript
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 export interface Env {
   DOSQL_DB: DurableObjectNamespace;

@@ -14,7 +14,7 @@
  * 7. Error handling - connection failure handling incomplete
  * 8. Reconnection logic - no automatic reconnection implemented
  *
- * @module @dotdo/lake.do/tests
+ * @module lake.do/tests
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

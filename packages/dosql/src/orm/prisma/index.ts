@@ -7,7 +7,7 @@
  * @example
  * ```typescript
  * import { PrismaClient } from '@prisma/client';
- * import { PrismaDoSQLAdapter, createPrismaAdapter } from '@dotdo/dosql/orm/prisma';
+ * import { PrismaDoSQLAdapter, createPrismaAdapter } from 'dosql/orm/prisma';
  *
  * // Using the class directly
  * const adapter = new PrismaDoSQLAdapter({ backend: dosqlBackend });

@@ -4,7 +4,7 @@
  * Defines vector data types, column configurations, and index parameters
  * for native vector search support (Turso-style).
  *
- * @module @dotdo/dosql/vector/types
+ * @module dosql/vector/types
  */
 
 // =============================================================================

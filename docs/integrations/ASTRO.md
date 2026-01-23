@@ -35,13 +35,13 @@ This guide covers integrating DoSQL with [Astro](https://astro.build), the moder
 
 ```bash
 # Using npm
-npm install @dotdo/sql.do
+npm install sql.do
 
 # Using pnpm
-pnpm add @dotdo/sql.do
+pnpm add sql.do
 
 # Using yarn
-yarn add @dotdo/sql.do
+yarn add sql.do
 ```
 
 ### Project Configuration
@@ -50,7 +50,7 @@ Create a DoSQL client configuration file:
 
 ```typescript
 // src/lib/db.ts
-import { createSQLClient, type SQLClientConfig } from '@dotdo/sql.do';
+import { createSQLClient, type SQLClientConfig } from 'sql.do';
 
 const config: SQLClientConfig = {
   url: import.meta.env.DOSQL_URL,
@@ -708,7 +708,7 @@ export default defineConfig({
 
 ```typescript
 // src/lib/db.ts
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 export function getClientFromRuntime(runtime: App.Locals['runtime']) {
   const env = runtime.env;
@@ -1080,7 +1080,7 @@ if (!post) {
 
 ```typescript
 // src/lib/cdc.ts
-import { createCDCClient, type CDCEvent } from '@dotdo/sql.do';
+import { createCDCClient, type CDCEvent } from 'sql.do';
 
 export function createCDCSubscription(
   tables: string[],
@@ -2627,7 +2627,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
 
 ```typescript
 // src/lib/db.ts
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 // Singleton pattern for connection reuse
 let clientInstance: ReturnType<typeof createSQLClient> | null = null;
@@ -2821,7 +2821,7 @@ async function getProductsCursor(cursor?: string, limit = 20) {
 
 ```typescript
 // src/lib/db.ts
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 const client = createSQLClient({
   url: import.meta.env.DOSQL_URL,

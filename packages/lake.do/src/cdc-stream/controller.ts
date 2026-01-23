@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - CDC Stream Controller
+ * lake.do - CDC Stream Controller
  *
  * This module provides the main CDCStreamController that coordinates
  * queue management, metrics tracking, and async iteration.

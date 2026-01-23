@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Load shedding under critical load conditions
 
 ### Dependencies
-- `@dotdo/lake.do` - Client SDK for DoLake connections
+- `lake.do` - Client SDK for DoLake connections
 - `hyparquet` - Parquet file writing
 - `zod` - Runtime schema validation
 

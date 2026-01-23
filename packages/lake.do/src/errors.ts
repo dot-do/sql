@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Error Classes
+ * lake.do - Error Classes
  *
  * This module provides consolidated error classes for the lake.do client.
  * All error classes extend LakeError for consistent error handling.

@@ -93,7 +93,7 @@ npm create astro@latest my-astro-app -- --template minimal
 cd my-astro-app
 
 # Install DoSQL and Cloudflare adapter
-npm install @dotdo/dosql
+npm install dosql
 npm install @astrojs/cloudflare
 npm install -D @cloudflare/workers-types wrangler
 ```
@@ -224,7 +224,7 @@ Create `src/lib/db.ts`:
 
 ```typescript
 // src/lib/db.ts
-import { DB, type Database } from '@dotdo/dosql';
+import { DB, type Database } from 'dosql';
 import type { Env } from '../env';
 
 // Type for the database client

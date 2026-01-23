@@ -88,7 +88,7 @@ cd my-hono-app
 # Select "cloudflare-workers" as the template
 
 # Install DoSQL
-npm install @dotdo/dosql
+npm install dosql
 
 # Install development dependencies
 npm install -D @cloudflare/workers-types wrangler
@@ -164,7 +164,7 @@ bucket_name = "my-data-bucket"
 
 ```typescript
 // src/types.ts
-import type { Database } from '@dotdo/dosql';
+import type { Database } from 'dosql';
 
 export interface Env {
   DOSQL_DB: DurableObjectNamespace;
@@ -188,7 +188,7 @@ declare module 'hono' {
 
 ```typescript
 // src/durable-objects/database.ts
-import { DB, type Database } from '@dotdo/dosql';
+import { DB, type Database } from 'dosql';
 
 export class DoSQLDatabase implements DurableObject {
   private db: Database | null = null;
@@ -271,7 +271,7 @@ export class DoSQLDatabase implements DurableObject {
 
 ```typescript
 // src/db/client.ts
-import type { Database, RunResult } from '@dotdo/dosql';
+import type { Database, RunResult } from 'dosql';
 
 export interface DBClient {
   query<T>(sql: string, params?: unknown[]): Promise<T[]>;
@@ -1404,7 +1404,7 @@ export { wsRouter };
 
 ```typescript
 // src/durable-objects/websocket-hub.ts
-import { DB, type Database } from '@dotdo/dosql';
+import { DB, type Database } from 'dosql';
 
 interface WebSocketSession {
   socket: WebSocket;
@@ -1574,7 +1574,7 @@ export class ForbiddenError extends HTTPException {
 // src/index.ts
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import { DoSQLError } from '@dotdo/dosql';
+import { DoSQLError } from 'dosql';
 
 const app = new Hono();
 

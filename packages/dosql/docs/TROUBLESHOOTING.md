@@ -29,7 +29,7 @@ Run through these checks before diving into specific issues:
 | Check | Command/Action | Fix |
 |-------|----------------|-----|
 | Node.js version | `node --version` | Use Node.js 18+ |
-| Package installed | `npm ls @dotdo/dosql` | `npm install @dotdo/dosql` |
+| Package installed | `npm ls dosql` | `npm install dosql` |
 | DO class exported | Check `src/index.ts` has `export class` | Add `export` keyword |
 | Migration tag exists | Check `wrangler.jsonc` migrations array | Add migration tag |
 | Binding names match | Compare wrangler config with `env.NAME` | Fix name mismatch |
@@ -230,7 +230,7 @@ const client = createHttpClient({
 Use the SQL validator before executing:
 
 ```typescript
-import { validateSQL } from '@dotdo/dosql/parser';
+import { validateSQL } from 'dosql/parser';
 
 const result = validateSQL('SELECT * FROM users WHERE id = ?');
 if (!result.valid) {
@@ -977,14 +977,14 @@ Use selective imports:
 
 ```typescript
 // Minimal import (~7 KB gzipped)
-import { DB } from '@dotdo/dosql';
+import { DB } from 'dosql';
 
 // Add only what you need
-import { createCDC } from '@dotdo/dosql/cdc';  // +2 KB
-import { createBranchManager } from '@dotdo/dosql/branch';  // +3 KB
+import { createCDC } from 'dosql/cdc';  // +2 KB
+import { createBranchManager } from 'dosql/branch';  // +3 KB
 
 // AVOID: Importing everything (~34 KB)
-// import * from '@dotdo/dosql';
+// import * from 'dosql';
 ```
 
 ### Type Errors After Update
@@ -1196,7 +1196,7 @@ npx wrangler dev --port 8788
 ### Enable Debug Logging
 
 ```typescript
-import { DB, ConsoleLogger, LogLevel } from '@dotdo/dosql';
+import { DB, ConsoleLogger, LogLevel } from 'dosql';
 
 const db = await DB('tenant', {
   logger: new ConsoleLogger({
@@ -1340,7 +1340,7 @@ async fetch(request: Request): Promise<Response> {
 ### Error Inspection
 
 ```typescript
-import { isDoSQLError } from '@dotdo/dosql/errors';
+import { isDoSQLError } from 'dosql/errors';
 
 // Check if error is from DoSQL
 if (isDoSQLError(error)) {
@@ -1528,7 +1528,7 @@ If you are still experiencing issues:
 **Opening an issue:**
 
 Include:
-- DoSQL version (`npm ls @dotdo/dosql`)
+- DoSQL version (`npm ls dosql`)
 - Minimal reproduction code
 - Error messages with codes and stack traces
 - Wrangler configuration (sanitized)

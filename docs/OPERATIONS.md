@@ -1499,7 +1499,7 @@ import {
   rangeVindex,
   shard,
   createShardId,
-} from '@dotdo/dosql/sharding';
+} from 'dosql/sharding';
 
 export const vschema = createVSchema(
   {
@@ -1646,7 +1646,7 @@ WHERE current.name != historical.name;
 
 ```typescript
 // src/recovery.ts
-import { createTimeTravelSession, timestamp, lsn } from '@dotdo/dosql/timetravel';
+import { createTimeTravelSession, timestamp, lsn } from 'dosql/timetravel';
 
 export async function recoverToPointInTime(
   db: Database,

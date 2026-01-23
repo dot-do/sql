@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Connection Types
+ * lake.do - Connection Types
  *
  * This module provides types for WebSocket connection management.
  *

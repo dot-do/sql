@@ -44,8 +44,8 @@ pnpm build
 pnpm test
 
 # Run specific package tests
-pnpm --filter @dotdo/dosql test
-pnpm --filter @dotdo/dolake test
+pnpm --filter dosql test
+pnpm --filter dolake test
 ```
 
 ## Testing Philosophy

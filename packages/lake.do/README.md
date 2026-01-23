@@ -1,6 +1,6 @@
 > **Developer Preview** - This package is under active development. APIs may change. Not recommended for production use.
 
-# @dotdo/lake.do
+# lake.do
 
 Client SDK for DoLake - Lakehouse on Cloudflare Workers.
 
@@ -45,7 +45,7 @@ Client SDK for DoLake - Lakehouse on Cloudflare Workers.
 ## Installation
 
 ```bash
-pnpm add @dotdo/lake.do
+pnpm add lake.do
 ```
 
 ## Usage
@@ -53,7 +53,7 @@ pnpm add @dotdo/lake.do
 ### Query Lakehouse Data
 
 ```typescript
-import { createLakeClient } from '@dotdo/lake.do';
+import { createLakeClient } from 'lake.do';
 
 const client = createLakeClient({
   url: 'https://lake.example.com',
@@ -80,7 +80,7 @@ const filtered = await client.query<{ id: string; name: string }>(
 ### CDC Streaming
 
 ```typescript
-import { CDCError, ConnectionError } from '@dotdo/lake.do';
+import { CDCError, ConnectionError } from 'lake.do';
 
 // Subscribe to change data capture events with error handling
 async function consumeCDCStream() {
@@ -147,7 +147,7 @@ consumeCDCStream().catch(console.error);
 For high-throughput scenarios, use `CDCStreamController` directly for fine-grained control over queue bounds and backpressure:
 
 ```typescript
-import { CDCStreamController, type BackpressureStrategy } from '@dotdo/lake.do';
+import { CDCStreamController, type BackpressureStrategy } from 'lake.do';
 
 // Create a controller with backpressure configuration
 const controller = new CDCStreamController({
@@ -415,11 +415,11 @@ import type {
   SnapshotId,
   CompactionJobId,
 
-  // Re-exported types from @dotdo/sql.do
+  // Re-exported types from sql.do
   TransactionId,
   LSN,
   SQLValue,
-} from '@dotdo/lake.do';
+} from 'lake.do';
 ```
 
 ### Branded Type Factory Functions
@@ -445,7 +445,7 @@ import {
   createParquetFileId,
   createSnapshotId,
   createCompactionJobId,
-} from '@dotdo/lake.do';
+} from 'lake.do';
 
 // Create branded identifiers from plain strings
 const partitionKey = createPartitionKey('date=2024-01-15');
@@ -465,7 +465,7 @@ import {
   createSnapshotId,
   type PartitionKey,
   type SnapshotId,
-} from '@dotdo/lake.do';
+} from 'lake.do';
 
 function processPartition(key: PartitionKey): void {
   // ...
@@ -491,7 +491,7 @@ querySnapshot(snapshotId);
 #### Using with Client Methods
 
 ```typescript
-import { createLakeClient, createPartitionKey, createSnapshotId } from '@dotdo/lake.do';
+import { createLakeClient, createPartitionKey, createSnapshotId } from 'lake.do';
 
 const client = createLakeClient({ url: 'https://lake.example.com' });
 
@@ -518,7 +518,7 @@ console.log(`Compaction ${status.status}`);
 In development mode (`NODE_ENV !== 'production'`), the factory functions validate their inputs:
 
 ```typescript
-import { createPartitionKey } from '@dotdo/lake.do';
+import { createPartitionKey } from 'lake.do';
 
 // These throw errors in development mode
 createPartitionKey('');         // Error: PartitionKey cannot be empty
@@ -538,7 +538,7 @@ import {
   createPartitionKey,
   type Snapshot,
   type PartitionInfo,
-} from '@dotdo/lake.do';
+} from 'lake.do';
 
 // API responses return branded types directly
 const snapshots: Snapshot[] = await client.listSnapshots('orders');
@@ -584,7 +584,7 @@ import {
   serverToClientCDCEvent,
   clientToServerCDCEvent,
   createRetryConfig,
-} from '@dotdo/lake.do';
+} from 'lake.do';
 ```
 
 ### Event Types
@@ -593,7 +593,7 @@ import {
 import type {
   LakeClientEventType,    // 'connected' | 'disconnected' | 'reconnecting' | 'reconnected' | 'error'
   LakeClientEventHandler, // (event?: unknown) => void
-} from '@dotdo/lake.do';
+} from 'lake.do';
 ```
 
 ## Troubleshooting
@@ -610,7 +610,7 @@ import type {
 | `CONNECTION_TIMEOUT` | Connection attempt timed out | Increase timeout; verify endpoint accessibility |
 
 ```typescript
-import { ConnectionError, createLakeClient } from '@dotdo/lake.do';
+import { ConnectionError, createLakeClient } from 'lake.do';
 
 const client = createLakeClient({
   url: 'https://lake.example.com',
@@ -645,7 +645,7 @@ try {
 | Dropped events | Backpressure strategy discarding events | Use `block` strategy for guaranteed delivery |
 
 ```typescript
-import { CDCStreamController } from '@dotdo/lake.do';
+import { CDCStreamController } from 'lake.do';
 
 // Configure backpressure handling
 const controller = new CDCStreamController({
@@ -683,7 +683,7 @@ console.log(`Dropped: ${metrics.droppedCount}`);
 | `PARTITION_NOT_FOUND` | Requested partition missing | Check partition key format |
 
 ```typescript
-import { QueryError, LakeError } from '@dotdo/lake.do';
+import { QueryError, LakeError } from 'lake.do';
 
 try {
   const result = await client.query('SELECT * FROM nonexistent_table');
@@ -717,7 +717,7 @@ try {
 | `Request timeout: listPartitions` | Too many partitions | Use filters; paginate results |
 
 ```typescript
-import { TimeoutError, createLakeClient } from '@dotdo/lake.do';
+import { TimeoutError, createLakeClient } from 'lake.do';
 
 // Configure longer timeout for analytical queries
 const client = createLakeClient({

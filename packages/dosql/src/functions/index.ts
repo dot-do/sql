@@ -11,7 +11,7 @@
  *
  * @example
  * ```typescript
- * import { invokeFunction, hasFunction, isAggregate } from '@dotdo/dosql/functions';
+ * import { invokeFunction, hasFunction, isAggregate } from 'dosql/functions';
  *
  * // Invoke a function
  * const result = invokeFunction('upper', ['hello']); // 'HELLO'
@@ -25,7 +25,7 @@
  *
  * @example Register custom function
  * ```typescript
- * import { defaultRegistry } from '@dotdo/dosql/functions';
+ * import { defaultRegistry } from 'dosql/functions';
  *
  * defaultRegistry.register('double', {
  *   fn: (x) => typeof x === 'number' ? x * 2 : null,

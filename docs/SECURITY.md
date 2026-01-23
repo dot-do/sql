@@ -518,7 +518,7 @@ DoSQL includes a state-aware SQL tokenizer (`packages/dosql/src/database/tokeniz
 However, the tokenizer is for **parsing**, not **sanitization**. It does not make string concatenation safe.
 
 ```typescript
-import { tokenizeSQL, isBalanced } from '@dotdo/dosql';
+import { tokenizeSQL, isBalanced } from 'dosql';
 
 // Check if SQL is syntactically balanced (for validation, not sanitization)
 if (!isBalanced(sql)) {

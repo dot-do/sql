@@ -3,7 +3,7 @@
  *
  * Types for streaming changes from the WAL to subscribers.
  *
- * This module re-exports unified CDC types from @dotdo/shared-types via @dotdo/sql.do
+ * This module re-exports unified CDC types from @dotdo/sql-types via sql.do
  * and provides CDC-specific types for the server implementation.
  */
 
@@ -21,7 +21,7 @@ import {
 // =============================================================================
 
 /**
- * Re-exported CDC types from `@dotdo/shared-types` (via `@dotdo/sql.do`).
+ * Re-exported CDC types from `@dotdo/sql-types` (via `sql.do`).
  *
  * These types provide the canonical Change Data Capture definitions for the
  * DoSQL ecosystem. Using these shared types ensures compatibility between
@@ -95,7 +95,7 @@ import {
  * }
  * ```
  *
- * @see {@link https://github.com/dotdo/shared-types | @dotdo/shared-types} for canonical definitions
+ * @see {@link https://github.com/dotdo/shared-types | @dotdo/sql-types} for canonical definitions
  *
  * @public
  * @stability experimental
@@ -111,7 +111,7 @@ export {
   isNumericTimestamp,
   serverToClientCDCEvent,
   clientToServerCDCEvent,
-} from '@dotdo/sql.do';
+} from 'sql.do';
 
 // =============================================================================
 // CDC Filter Types

@@ -1,5 +1,5 @@
 /**
- * Runtime Configuration for @dotdo/shared-types
+ * Runtime Configuration for @dotdo/sql-types
  *
  * This module contains runtime state and configuration functions.
  * It is separated from the pure type definitions in index.ts to maintain

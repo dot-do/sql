@@ -8,7 +8,7 @@
  * @example
  * ```typescript
  * import { Kysely } from 'kysely';
- * import { DoSQLDialect, createDoSQLKysely } from '@dotdo/dosql/orm/kysely';
+ * import { DoSQLDialect, createDoSQLKysely } from 'dosql/orm/kysely';
  *
  * // Define your database schema
  * interface Database {

@@ -1,6 +1,6 @@
 > **Developer Preview** - This package is under active development. APIs may change. Not recommended for production use.
 
-# @dotdo/dolake
+# dolake
 
 DoLake is a high-performance Lakehouse Durable Object that receives CDC (Change Data Capture) events from DoSQL instances via WebSocket, batches them intelligently, and writes them as Parquet files to R2 with full Iceberg metadata support.
 
@@ -168,7 +168,7 @@ DoLake uses a state machine to manage its lifecycle and ensure safe concurrent o
 #### State Machine API
 
 ```typescript
-import { DoLakeStateMachine, type StateChangeEvent } from '@dotdo/dolake';
+import { DoLakeStateMachine, type StateChangeEvent } from 'dolake';
 
 const stateMachine = new DoLakeStateMachine({
   flushIntervalMs: 60_000,
@@ -204,7 +204,7 @@ const history = stateMachine.getHistory();
 ## Installation
 
 ```bash
-npm install @dotdo/dolake
+npm install dolake
 ```
 
 ## Quick Start
@@ -241,7 +241,7 @@ npm install @dotdo/dolake
 
 ```typescript
 // src/worker.ts
-import { DoLake } from '@dotdo/dolake';
+import { DoLake } from 'dolake';
 
 export { DoLake };
 
@@ -385,7 +385,7 @@ SELECT * FROM dolake.default.users WHERE created_at > DATE '2024-01-01';
 The main Durable Object class that handles CDC ingestion and lakehouse operations.
 
 ```typescript
-import { DoLake, type DoLakeEnv } from '@dotdo/dolake';
+import { DoLake, type DoLakeEnv } from 'dolake';
 
 export { DoLake };
 ```
@@ -557,7 +557,7 @@ id = "your-kv-namespace-id"
 
 ```typescript
 // src/worker.ts - Type-safe environment interface
-import { DoLake, type DoLakeEnv } from '@dotdo/dolake';
+import { DoLake, type DoLakeEnv } from 'dolake';
 
 export { DoLake };
 
@@ -793,7 +793,7 @@ interface DoLakeConfig {
 }
 
 // Access defaults
-import { DEFAULT_DOLAKE_CONFIG } from '@dotdo/dolake';
+import { DEFAULT_DOLAKE_CONFIG } from 'dolake';
 ```
 
 ## CDC Streaming
@@ -1214,7 +1214,7 @@ The P2 durability tier is specifically designed for **analytics events ingestion
 import {
   AnalyticsEventHandler,
   P2_DURABILITY_CONFIG,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 // P2 durability configuration
 const config = {
@@ -1291,7 +1291,7 @@ SUCCESS    RETRY (x3)
 The `AnalyticsEventBuffer` handles client-side batching with dual flush triggers:
 
 ```typescript
-import { AnalyticsEventBuffer, type AnalyticsEvent } from '@dotdo/dolake';
+import { AnalyticsEventBuffer, type AnalyticsEvent } from 'dolake';
 
 const buffer = new AnalyticsEventBuffer({
   maxBatchSize: 100,      // Flush at 100 events
@@ -1390,7 +1390,7 @@ const status = await response.json();
 Events are automatically classified into durability tiers based on table name, source, or explicit metadata:
 
 ```typescript
-import { classifyEvent, DurabilityTier } from '@dotdo/dolake';
+import { classifyEvent, DurabilityTier } from 'dolake';
 
 // Classification by table name
 classifyEvent({ table: 'payments', ... });      // P0 (Critical)
@@ -1554,7 +1554,7 @@ interface RateLimitConfig {
 }
 
 // Access defaults
-import { DEFAULT_RATE_LIMIT_CONFIG } from '@dotdo/dolake';
+import { DEFAULT_RATE_LIMIT_CONFIG } from 'dolake';
 ```
 
 ### Token Bucket Algorithm
@@ -1666,7 +1666,7 @@ Token bucket is ideal for CDC streaming because:
 #### Configuration Example
 
 ```typescript
-import { RateLimiter, DEFAULT_RATE_LIMIT_CONFIG } from '@dotdo/dolake';
+import { RateLimiter, DEFAULT_RATE_LIMIT_CONFIG } from 'dolake';
 
 // High-throughput configuration
 const highThroughputLimiter = new RateLimiter({
@@ -1749,7 +1749,7 @@ By default, connections from private IP ranges bypass rate limiting. This is app
 **Custom Whitelist Configuration:**
 
 ```typescript
-import { RateLimiter, DEFAULT_RATE_LIMIT_CONFIG } from '@dotdo/dolake';
+import { RateLimiter, DEFAULT_RATE_LIMIT_CONFIG } from 'dolake';
 
 // Add additional trusted networks
 const limiter = new RateLimiter({
@@ -1823,7 +1823,7 @@ With the default configuration (`connectionsPerSecond: 20`), this means:
 #### Checking Load Level
 
 ```typescript
-import { RateLimiter } from '@dotdo/dolake';
+import { RateLimiter } from 'dolake';
 
 const limiter = new RateLimiter();
 
@@ -1919,7 +1919,7 @@ import {
   type ScalingConfig,
   type ParallelWriteResult,
   DEFAULT_SCALING_CONFIG,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 // Create with custom configuration
 const writeManager = new ParallelWriteManager({
@@ -2003,7 +2003,7 @@ import {
   HorizontalScalingManager,
   type ScalingStatus,
   DEFAULT_SCALING_CONFIG,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 const scalingManager = new HorizontalScalingManager({
   ...DEFAULT_SCALING_CONFIG,
@@ -2040,7 +2040,7 @@ import {
   type AutoScalingConfig,
   type LoadMetrics,
   type ScaleEvent,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 const autoScaler = new AutoScalingManager({
   minInstances: 2,
@@ -2128,7 +2128,7 @@ console.log(`Total RPS: ${aggregate.requestsPerSecond}`);
 Manages compaction of partition files to optimal sizes.
 
 ```typescript
-import { PartitionCompactionManager } from '@dotdo/dolake';
+import { PartitionCompactionManager } from 'dolake';
 
 const compactionManager = new PartitionCompactionManager();
 compactionManager.registerPartition('dt=2024-01-15', partitionMetadata);
@@ -2145,7 +2145,7 @@ const result = await compactionManager.compactPartition(
 Analyzes partition distribution and recommends rebalancing actions.
 
 ```typescript
-import { PartitionRebalancer } from '@dotdo/dolake';
+import { PartitionRebalancer } from 'dolake';
 
 const rebalancer = new PartitionRebalancer();
 rebalancer.registerPartitionSize('dt=2024-01-15', BigInt(1024 * 1024 * 1024), BigInt(1000000));
@@ -2165,7 +2165,7 @@ for (const action of recommendation.actions) {
 Handles large file operations with multipart upload and range reads.
 
 ```typescript
-import { LargeFileHandler } from '@dotdo/dolake';
+import { LargeFileHandler } from 'dolake';
 
 const fileHandler = new LargeFileHandler();
 
@@ -2195,7 +2195,7 @@ import {
   createHourPartitionSpec,
   createBucketPartitionSpec,
   createCompositePartitionSpec,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 // Day partitioning (e.g., dt=2024-01-15)
 const daySpec = createDayPartitionSpec('timestamp', 1000);
@@ -2273,7 +2273,7 @@ import {
   CacheInvalidator,
   type CacheInvalidationConfig,
   DEFAULT_CACHE_INVALIDATION_CONFIG,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 const invalidator = new CacheInvalidator({
   enabled: true,                    // Enable cache invalidation
@@ -2455,7 +2455,7 @@ import {
   validateCDCBatchMessage,
   MessageValidationError,
   CDCBatchMessageSchema,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 // Validate any client message
 try {
@@ -2489,7 +2489,7 @@ import {
   FlushError,
   ParquetWriteError,
   IcebergError,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 try {
   // ... operation
@@ -2536,7 +2536,7 @@ try {
 
 ```typescript
 // Main class - Experimental
-export { DoLake, type DoLakeEnv } from '@dotdo/dolake';
+export { DoLake, type DoLakeEnv } from 'dolake';
 
 // Types - Experimental
 export {
@@ -2550,7 +2550,7 @@ export {
   type FlushResult,
   type BufferStats,
   // ... and many more
-} from '@dotdo/dolake';
+} from 'dolake';
 
 // Rate limiting - Beta
 export {
@@ -2558,7 +2558,7 @@ export {
   type RateLimitConfig,
   type RateLimitResult,
   DEFAULT_RATE_LIMIT_CONFIG,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 // Schemas - Beta
 export {
@@ -2566,7 +2566,7 @@ export {
   ConnectMessageSchema,
   validateClientMessage,
   MessageValidationError,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 // Iceberg utilities - Experimental
 export {
@@ -2574,21 +2574,21 @@ export {
   createTableMetadata,
   createAppendSnapshot,
   createDayPartitionSpec,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 // Compaction - Experimental
 export {
   CompactionManager,
   type CompactionConfig,
   DEFAULT_COMPACTION_CONFIG,
-} from '@dotdo/dolake';
+} from 'dolake';
 ```
 
 ## Related Packages
 
-- **[@dotdo/lake.do](https://www.npmjs.com/package/@dotdo/lake.do)** - Client SDK for connecting to DoLake
-- **[@dotdo/sql.do](https://www.npmjs.com/package/@dotdo/sql.do)** - DoSQL with built-in CDC streaming
-- **[@dotdo/shared-types](https://www.npmjs.com/package/@dotdo/shared-types)** - Shared type definitions
+- **[lake.do](https://www.npmjs.com/package/lake.do)** - Client SDK for connecting to DoLake
+- **[sql.do](https://www.npmjs.com/package/sql.do)** - DoSQL with built-in CDC streaming
+- **[@dotdo/sql-types](https://www.npmjs.com/package/@dotdo/sql-types)** - Shared type definitions
 
 ## Documentation
 
@@ -2995,11 +2995,11 @@ Some imports have been reorganized:
 
 ```typescript
 // Before (0.0.x)
-import { DoLake } from '@dotdo/dolake/do';
-import { CDCEvent } from '@dotdo/dolake/types';
+import { DoLake } from 'dolake/do';
+import { CDCEvent } from 'dolake/types';
 
 // After (0.1.x)
-import { DoLake, type CDCEvent, type DoLakeEnv } from '@dotdo/dolake';
+import { DoLake, type CDCEvent, type DoLakeEnv } from 'dolake';
 ```
 
 #### Configuration Changes
@@ -3016,7 +3016,7 @@ const config = {
 };
 
 // After (0.1.x) - explicit typed config
-import { DEFAULT_DOLAKE_CONFIG, type DoLakeConfig } from '@dotdo/dolake';
+import { DEFAULT_DOLAKE_CONFIG, type DoLakeConfig } from 'dolake';
 
 const config: Partial<DoLakeConfig> = {
   ...DEFAULT_DOLAKE_CONFIG,
@@ -3035,7 +3035,7 @@ Rate limiting is now enabled by default:
 // (nothing to configure)
 
 // After (0.1.x) - configure rate limits
-import { DEFAULT_RATE_LIMIT_CONFIG, type RateLimitConfig } from '@dotdo/dolake';
+import { DEFAULT_RATE_LIMIT_CONFIG, type RateLimitConfig } from 'dolake';
 
 const rateLimitConfig: Partial<RateLimitConfig> = {
   ...DEFAULT_RATE_LIMIT_CONFIG,
@@ -3103,14 +3103,14 @@ import {
   ConnectMessageSchema,
   validateClientMessage,
   MessageValidationError,
-} from '@dotdo/dolake';
+} from 'dolake';
 ```
 
 ### Migration Checklist
 
 Use this checklist when migrating from 0.0.x to 0.1.x:
 
-- [ ] Update `@dotdo/dolake` package to 0.1.x
+- [ ] Update `dolake` package to 0.1.x
 - [ ] Update connect messages to include `protocolVersion: 1` and `capabilities`
 - [ ] Update CDC batch messages to use `cdc_batch` type with sequence tracking
 - [ ] Update CDC events to use strict `CDCEvent` format with `operation` enum

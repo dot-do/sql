@@ -14,7 +14,7 @@
  *   createTransactionManager,
  *   executeInTransaction,
  *   IsolationLevel
- * } from '@dotdo/dosql/transaction';
+ * } from 'dosql/transaction';
  *
  * const manager = createTransactionManager({ walWriter });
  *

@@ -13,13 +13,13 @@ export interface InitResult {
 }
 
 // Configuration file template.
-// Note: This imports defineConfig from '@dotdo/dosql', which is the DoSQL runtime library.
-// Users must install this package separately: npm install @dotdo/dosql
-// If @dotdo/dosql is not available, users can remove the import and defineConfig wrapper,
+// Note: This imports defineConfig from 'dosql', which is the DoSQL runtime library.
+// Users must install this package separately: npm install dosql
+// If dosql is not available, users can remove the import and defineConfig wrapper,
 // or create their own defineConfig function that returns the config object unchanged.
 const CONFIG_TEMPLATE = (name: string) => `// DoSQL configuration file
-// Requires: npm install @dotdo/dosql (or remove defineConfig wrapper if not using)
-import { defineConfig } from '@dotdo/dosql';
+// Requires: npm install dosql (or remove defineConfig wrapper if not using)
+import { defineConfig } from 'dosql';
 
 export default defineConfig({
   name: '${name}',

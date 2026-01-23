@@ -16,8 +16,8 @@ Configure Change Data Capture streaming from your databases to DoLake.
 ### DoSQL Source
 
 ```typescript
-import { DoLake } from '@dotdo/lake.do'
-import { DoSQL } from '@dotdo/dosql'
+import { DoLake } from 'lake.do'
+import { DoSQL } from 'dosql'
 
 // Create DoLake instance
 const lake = new DoLake({

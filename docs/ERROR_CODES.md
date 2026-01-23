@@ -1762,7 +1762,7 @@ Invalid message format: Missing required field 'sql'
 | Property | Value |
 |----------|-------|
 | Code | N/A (Exception type) |
-| Class Location | `@dotdo/dolake` - `packages/dolake/src/schemas.ts` |
+| Class Location | `dolake` - `packages/dolake/src/schemas.ts` |
 | HTTP Status | 400 Bad Request |
 | WebSocket NACK Reason | `invalid_format` |
 | Retryable | No |
@@ -1816,7 +1816,7 @@ import {
   validateClientMessage,
   MessageValidationError,
   CDCBatchMessageSchema,
-} from '@dotdo/dolake';
+} from 'dolake';
 
 // Method 1: Using validation functions
 try {
@@ -2276,7 +2276,7 @@ Cannot write empty event list
 #### Handling SQL Errors
 
 ```typescript
-import { createSQLClient, SQLError } from '@dotdo/sql.do';
+import { createSQLClient, SQLError } from 'sql.do';
 
 const client = createSQLClient({ url: 'wss://dosql.example.com' });
 
@@ -2347,7 +2347,7 @@ async function executeInTransaction<T>(
 #### Handling Lake Errors
 
 ```typescript
-import { createLakeClient, LakeError } from '@dotdo/lake.do';
+import { createLakeClient, LakeError } from 'lake.do';
 
 const lakeClient = createLakeClient({ url: 'wss://dolake.example.com' });
 
@@ -2438,7 +2438,7 @@ async function sendWithRetry<T>(
 ### Handling NACK Messages in DoLake Streaming
 
 ```typescript
-import type { NackMessage, AckMessage } from '@dotdo/dolake';
+import type { NackMessage, AckMessage } from 'dolake';
 
 function handleDoLakeResponse(message: AckMessage | NackMessage) {
   if (message.type === 'nack') {

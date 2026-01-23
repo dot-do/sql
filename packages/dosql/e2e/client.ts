@@ -74,14 +74,14 @@ export interface LatencyMeasurement {
 /**
  * E2E-specific CDCEvent type for DoSQL testing.
  *
- * NOTE: This differs from the canonical CDCEvent in @dotdo/sql.do:
+ * NOTE: This differs from the canonical CDCEvent in sql.do:
  * - Uses `oldRow/newRow` instead of `before/after` (matches E2E API responses)
  * - Uses `txId` instead of `transactionId` (simplified field name)
  * - Operation is a simple union rather than the CDCOperation branded type
  * This is intentional - E2E tests work with the external API contract which
  * may serialize/transform fields differently than internal types.
  *
- * @see @dotdo/sql.do for the canonical CDCEvent interface
+ * @see sql.do for the canonical CDCEvent interface
  */
 export interface CDCEvent {
   lsn: bigint;

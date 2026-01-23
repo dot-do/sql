@@ -129,7 +129,7 @@ const client = createHttpClient({
 **Solution:** Use the error's location info and validate queries:
 
 ```typescript
-import { validateSQL } from '@dotdo/dosql/parser';
+import { validateSQL } from 'dosql/parser';
 
 const validation = validateSQL('SELECT * FROM users WHERE id = ?');
 if (!validation.valid) {
@@ -385,11 +385,11 @@ streamer.on('backpressure', (signal) => {
 
 ```typescript
 // Use selective imports
-import { DB } from '@dotdo/dosql';           // ~7 KB gzipped
-import { createCDC } from '@dotdo/dosql/cdc'; // +2 KB
+import { DB } from 'dosql';           // ~7 KB gzipped
+import { createCDC } from 'dosql/cdc'; // +2 KB
 
 // Don't import everything
-// import * from '@dotdo/dosql';  // ~34 KB - avoid!
+// import * from 'dosql';  // ~34 KB - avoid!
 ```
 
 #### R2 Bucket Binding Errors
@@ -474,7 +474,7 @@ wrangler r2 bucket create my-data-bucket
 ### Enable Debug Logging
 
 ```typescript
-import { DB, ConsoleLogger, LogLevel } from '@dotdo/dosql';
+import { DB, ConsoleLogger, LogLevel } from 'dosql';
 
 const db = await DB('tenant', {
   logger: new ConsoleLogger({
@@ -684,9 +684,9 @@ streamer.on('backpressure', (signal) => {
 
 A: Use selective imports:
 ```typescript
-import { DB } from '@dotdo/dosql';           // ~7 KB
-import { createCDC } from '@dotdo/dosql/cdc'; // +2 KB
-// Avoid: import * from '@dotdo/dosql';       // ~34 KB
+import { DB } from 'dosql';           // ~7 KB
+import { createCDC } from 'dosql/cdc'; // +2 KB
+// Avoid: import * from 'dosql';       // ~34 KB
 ```
 
 **Q: Why is my DO not found after deployment?**

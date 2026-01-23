@@ -1,5 +1,5 @@
 /**
- * @dotdo/lake.do - Event Emitter
+ * lake.do - Event Emitter
  *
  * This module provides a simple typed event emitter for connection events.
  *

@@ -251,7 +251,7 @@ class DoSQLPrismaTransaction implements Transaction {
  * @example
  * ```typescript
  * import { PrismaClient } from '@prisma/client';
- * import { PrismaDoSQLAdapter } from '@dotdo/dosql/orm/prisma';
+ * import { PrismaDoSQLAdapter } from 'dosql/orm/prisma';
  *
  * const adapter = new PrismaDoSQLAdapter({ backend: dosqlBackend });
  * const prisma = new PrismaClient({ adapter });
@@ -264,7 +264,7 @@ export class PrismaDoSQLAdapter implements DriverAdapter {
   readonly provider = 'sqlite' as const;
 
   /** Adapter identification name */
-  readonly adapterName = '@dotdo/dosql-prisma';
+  readonly adapterName = 'dosql-prisma';
 
   /** DoSQL backend instance */
   private readonly backend: DoSQLBackend;

@@ -160,7 +160,7 @@ SQL injection is the most critical database vulnerability. DoSQL provides multip
 **Always use parameter placeholders.** This is your most important security practice.
 
 ```typescript
-import { createDatabase } from '@dotdo/dosql';
+import { createDatabase } from 'dosql';
 
 const db = createDatabase();
 

@@ -7,7 +7,7 @@
  *
  * @example
  * ```typescript
- * import { createIndexWriter, createR2IndexReader } from '@dotdo/dosql/r2-index';
+ * import { createIndexWriter, createR2IndexReader } from 'dosql/r2-index';
  *
  * // Build an index
  * const writer = createIndexWriter({

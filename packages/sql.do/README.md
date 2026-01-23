@@ -1,9 +1,9 @@
 > **Developer Preview** - This package is under active development. APIs may change. Not recommended for production use.
 
-# @dotdo/sql.do
+# sql.do
 
-[![npm version](https://img.shields.io/npm/v/@dotdo/sql.do.svg)](https://www.npmjs.com/package/@dotdo/sql.do)
-[![bundle size](https://img.shields.io/bundlephobia/minzip/@dotdo/sql.do)](https://bundlephobia.com/package/@dotdo/sql.do)
+[![npm version](https://img.shields.io/npm/v/sql.do.svg)](https://www.npmjs.com/package/sql.do)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/sql.do)](https://bundlephobia.com/package/sql.do)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -97,17 +97,17 @@ Client SDK for DoSQL - SQL database on Cloudflare Workers with CapnWeb RPC.
 ## Installation
 
 ```bash
-npm install @dotdo/sql.do
+npm install sql.do
 # or
-pnpm add @dotdo/sql.do
+pnpm add sql.do
 # or
-yarn add @dotdo/sql.do
+yarn add sql.do
 ```
 
 ## Quick Start
 
 ```typescript
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 const client = createSQLClient({
   url: 'https://sql.example.com',
@@ -166,7 +166,7 @@ function createSQLClient(config: SQLClientConfig): SQLClient;
 **Example:**
 
 ```typescript
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 const client = createSQLClient({
   url: 'https://sql.example.com',
@@ -1054,7 +1054,7 @@ import {
   createLSN,
   createStatementHash,
   createShardId,
-} from '@dotdo/sql.do';
+} from 'sql.do';
 
 const txId = createTransactionId('tx-123');
 const lsn = createLSN(BigInt(1000));
@@ -1225,7 +1225,7 @@ const historicalUsers = await client.query<User>(
 );
 
 // Query at a specific LSN
-import { createLSN } from '@dotdo/sql.do';
+import { createLSN } from 'sql.do';
 
 const snapshotUsers = await client.query<User>(
   'SELECT * FROM users',
@@ -1251,7 +1251,7 @@ console.log(`Users grew from ${lastMonth.rows[0].count} to ${current.rows[0].cou
 Prevent duplicate mutations when retrying requests:
 
 ```typescript
-import { generateIdempotencyKey, isMutationQuery } from '@dotdo/sql.do';
+import { generateIdempotencyKey, isMutationQuery } from 'sql.do';
 
 // Automatic (enabled by default)
 const client = createSQLClient({
@@ -1416,7 +1416,7 @@ The SDK provides several error classes for different failure scenarios:
 Thrown when the client fails to establish or maintain a connection to the database.
 
 ```typescript
-import { ConnectionError } from '@dotdo/sql.do';
+import { ConnectionError } from 'sql.do';
 
 try {
   await client.connect();
@@ -1440,7 +1440,7 @@ try {
 Thrown when an operation exceeds its configured timeout duration.
 
 ```typescript
-import { TimeoutError } from '@dotdo/sql.do';
+import { TimeoutError } from 'sql.do';
 
 try {
   await client.query('SELECT * FROM large_table', [], { timeout: 5000 });
@@ -1463,7 +1463,7 @@ try {
 ### `SQLError`
 
 ```typescript
-import { SQLError } from '@dotdo/sql.do';
+import { SQLError } from 'sql.do';
 
 try {
   await client.exec('INSERT INTO users (id, name) VALUES (?, ?)', [1, 'Alice']);
@@ -1600,7 +1600,7 @@ const config: SQLClientConfig = {
 ### Cloudflare Workers
 
 ```typescript
-import { createSQLClient, type SQLClient } from '@dotdo/sql.do';
+import { createSQLClient, type SQLClient } from 'sql.do';
 
 export interface Env {
   DOSQL_URL: string;
@@ -1631,7 +1631,7 @@ export default {
 
 ```typescript
 import { Hono } from 'hono';
-import { createSQLClient } from '@dotdo/sql.do';
+import { createSQLClient } from 'sql.do';
 
 const app = new Hono<{ Bindings: { DOSQL_URL: string; DOSQL_TOKEN: string } }>();
 
@@ -1659,7 +1659,7 @@ export default app;
 ### Repository Pattern
 
 ```typescript
-import { createSQLClient, type SQLClient, type QueryResult } from '@dotdo/sql.do';
+import { createSQLClient, type SQLClient, type QueryResult } from 'sql.do';
 
 interface User {
   id: number;
@@ -1833,7 +1833,7 @@ import {
 
   // Client capabilities
   DEFAULT_CLIENT_CAPABILITIES,
-} from '@dotdo/sql.do/experimental';
+} from 'sql.do/experimental';
 ```
 
 > **Warning**: Experimental features may change or be removed without notice. Use with caution in production.
@@ -1853,7 +1853,7 @@ import {
 | `UNAUTHORIZED` | Invalid or expired token | Refresh authentication token |
 
 ```typescript
-import { ConnectionError, SQLError } from '@dotdo/sql.do';
+import { ConnectionError, SQLError } from 'sql.do';
 
 // Handle connection errors gracefully
 client.on('error', (event) => {
@@ -1898,7 +1898,7 @@ const client = createSQLClient({
 });
 
 // Manual retry for specific errors
-import { SQLError, isRetryableError } from '@dotdo/sql.do';
+import { SQLError, isRetryableError } from 'sql.do';
 
 async function queryWithRetry<T>(sql: string, params: unknown[]): Promise<T[]> {
   for (let i = 0; i < 3; i++) {
@@ -1968,7 +1968,7 @@ await safeTransaction(async (tx) => {
 | `COLUMN_NOT_FOUND` | Column does not exist | Verify column name matches schema |
 
 ```typescript
-import { SQLError } from '@dotdo/sql.do';
+import { SQLError } from 'sql.do';
 
 try {
   await client.exec('INSERT INTO users (id, email) VALUES (?, ?)', [1, 'test@example.com']);

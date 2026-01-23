@@ -7,7 +7,7 @@ Complete API documentation for DoLake.
 ### Constructor
 
 ```typescript
-import { DoLake } from '@dotdo/lake.do'
+import { DoLake } from 'lake.do'
 
 const lake = new DoLake({
   catalog: env.LAKE_CATALOG,    // Durable Object binding
@@ -276,7 +276,7 @@ const stats = await lake.getStatistics('users')
 ## Error Handling
 
 ```typescript
-import { DoLakeError, SnapshotNotFoundError, TableNotFoundError } from '@dotdo/lake.do'
+import { DoLakeError, SnapshotNotFoundError, TableNotFoundError } from 'lake.do'
 
 try {
   await lake.query('SELECT * FROM nonexistent')
@@ -302,5 +302,5 @@ import type {
   TableMetadata,
   Snapshot,
   CompactionStatus
-} from '@dotdo/lake.do'
+} from 'lake.do'
 ```
