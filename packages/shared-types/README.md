@@ -760,6 +760,8 @@ All packages in the DoSQL ecosystem should use compatible versions of `@dotdo/sh
 |----------|-------------|
 | `getWrapperMapStats()` | Get statistics about internal wrapper maps (size counts for memory monitoring) |
 | `clearWrapperMaps()` | Clear internal wrapper maps (useful for testing or memory management) |
+| `setWrapperCacheConfig(config)` | Configure wrapper cache behavior (maxSize, ttlMs, enabled) |
+| `getWrapperCacheConfig()` | Get current wrapper cache configuration |
 | `setDevMode(boolean)` | Enable/disable development mode for extra validation |
 | `isDevMode()` | Check if development mode is enabled |
 | `setStrictMode(boolean)` | Enable/disable strict mode for format validation |
@@ -769,9 +771,19 @@ All packages in the DoSQL ecosystem should use compatible versions of `@dotdo/sh
 import {
   getWrapperMapStats,
   clearWrapperMaps,
+  setWrapperCacheConfig,
+  getWrapperCacheConfig,
   setDevMode,
   isDevMode
 } from '@dotdo/shared-types';
+
+// Configure wrapper cache
+setWrapperCacheConfig({
+  maxSize: 5000,    // Maximum entries (default: 10000)
+  ttlMs: 60000,     // TTL in ms (0 = no expiry, default: 0)
+  enabled: true,    // Enable/disable caching
+});
+console.log('Cache config:', getWrapperCacheConfig());
 
 // Check wrapper map memory usage
 const stats = getWrapperMapStats();

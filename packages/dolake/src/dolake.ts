@@ -460,6 +460,20 @@ export class DoLake implements DurableObject {
   // Alarm Handler
   // ===========================================================================
 
+  /**
+   * Handles scheduled alarms for periodic operations.
+   *
+   * This method is called by the Cloudflare Durable Object runtime when an alarm fires.
+   * Alarms are used to:
+   * - Trigger periodic buffer flushes to ensure data durability
+   * - Wake the DO from hibernation to check for pending work
+   * - Recover from fallback storage if primary writes failed
+   *
+   * Note: When the DO is hibernated, the alarm will wake it automatically.
+   * The alarm is rescheduled after each execution based on flushIntervalMs.
+   *
+   * @see https://developers.cloudflare.com/durable-objects/api/alarms/
+   */
   async alarm(): Promise<void> {
     await handleAlarm(
       {
