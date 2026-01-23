@@ -1,6 +1,6 @@
 # Next.js Integration Guide
 
-A comprehensive guide for using DoSQL with Next.js applications, covering Server Components, Server Actions, API Routes, and real-time features.
+Build full-stack applications with DoSQL and Next.js App Router. This guide covers Server Components, Server Actions, Route Handlers, real-time features, and deployment strategies.
 
 ## Table of Contents
 
@@ -8,8 +8,9 @@ A comprehensive guide for using DoSQL with Next.js applications, covering Server
 - [Setup](#setup)
 - [Server Components](#server-components)
 - [Server Actions](#server-actions)
-- [API Routes](#api-routes)
-- [Client-Side](#client-side)
+- [Route Handlers](#route-handlers)
+- [Client-Side Patterns](#client-side-patterns)
+- [Real-Time Features](#real-time-features)
 - [Edge Runtime](#edge-runtime)
 - [Deployment](#deployment)
 
@@ -17,31 +18,29 @@ A comprehensive guide for using DoSQL with Next.js applications, covering Server
 
 ## Overview
 
-### Why DoSQL + Next.js
+DoSQL and Next.js complement each other well. DoSQL runs on Cloudflare Workers with Durable Objects, providing edge-native SQL databases. Next.js App Router provides Server Components and Server Actions that enable direct database access without intermediate API layers.
 
-DoSQL pairs well with Next.js for several reasons:
+### Key Benefits
 
-| Feature | Benefit |
-|---------|---------|
-| **Edge-Native** | DoSQL runs on Cloudflare Workers, enabling low-latency database access at the edge alongside Next.js Edge Runtime |
-| **Type-Safe SQL** | Full TypeScript support with compile-time query validation matches Next.js's TypeScript-first approach |
-| **Real-Time CDC** | Stream database changes to React components for live updates |
-| **Serverless** | No connection pooling needed - each request gets a dedicated Durable Object instance |
-| **Time Travel** | Built-in versioning enables audit logs and undo functionality |
+| Feature | Description |
+|---------|-------------|
+| **Edge-Native** | DoSQL runs at the edge, minimizing latency when paired with Next.js Edge Runtime |
+| **Type-Safe** | Full TypeScript support with compile-time query validation |
+| **Real-Time** | Stream database changes to React components via CDC |
+| **Serverless** | No connection pooling required - each request uses a dedicated Durable Object |
+| **Time Travel** | Built-in versioning for audit logs and undo functionality |
 
 ### App Router vs Pages Router
 
-DoSQL works with both routing paradigms, but the App Router unlocks additional capabilities:
+This guide focuses on the App Router, which provides:
 
-| Feature | App Router | Pages Router |
-|---------|------------|--------------|
-| Server Components | Native support | Not available |
-| Server Actions | Native mutations | API routes required |
-| Streaming | ReadableStream support | Limited |
-| Edge Runtime | Per-route configuration | Global or per-page |
-| Caching | Fine-grained revalidation | Page-level caching |
+- Server Components for direct database queries
+- Server Actions for type-safe mutations
+- Streaming and Suspense support
+- Per-route runtime configuration
+- Fine-grained cache revalidation
 
-**Recommendation**: Use the App Router for new projects to take full advantage of Server Components and Server Actions with DoSQL.
+The Pages Router is supported but requires API routes for all database operations. New projects should use the App Router.
 
 ---
 
@@ -50,97 +49,61 @@ DoSQL works with both routing paradigms, but the App Router unlocks additional c
 ### Installation
 
 ```bash
-# Install DoSQL
 npm install @dotdo/dosql
 
-# Install peer dependencies
-npm install @cloudflare/workers-types --save-dev
-
-# Optional: Install SWR or React Query for client-side data fetching
+# Optional: Client-side data fetching libraries
 npm install swr
 # or
 npm install @tanstack/react-query
 ```
 
-### next.config.js Configuration
+### Environment Variables
 
-Configure Next.js to work with DoSQL and external service bindings:
+Create `.env.local` with your DoSQL configuration:
+
+```bash
+# DoSQL Connection (Cloudflare Worker endpoint)
+DOSQL_URL=https://your-worker.your-subdomain.workers.dev
+DOSQL_API_KEY=your-api-key
+
+# WebSocket URL for real-time features (client-accessible)
+NEXT_PUBLIC_DOSQL_WS_URL=wss://your-worker.your-subdomain.workers.dev/ws
+```
+
+### Next.js Configuration
+
+Configure Next.js for DoSQL compatibility:
 
 ```javascript
 // next.config.js
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Enable experimental features for edge compatibility
-  experimental: {
-    // Required for Cloudflare bindings
-    runtime: 'edge',
-  },
-
-  // Webpack configuration for DoSQL
+  // Enable WebAssembly for DoSQL dependencies
   webpack: (config, { isServer }) => {
     if (isServer) {
-      // Handle DoSQL's WASM dependencies
       config.experiments = {
         ...config.experiments,
         asyncWebAssembly: true,
       };
     }
-
     return config;
   },
 
-  // External packages that should not be bundled
+  // Exclude DoSQL from server bundling
   serverExternalPackages: ['@dotdo/dosql'],
-
-  // Headers for CORS if needed
-  async headers() {
-    return [
-      {
-        source: '/api/:path*',
-        headers: [
-          { key: 'Access-Control-Allow-Origin', value: '*' },
-          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, DELETE, OPTIONS' },
-        ],
-      },
-    ];
-  },
 };
 
 module.exports = nextConfig;
 ```
 
-### Environment Variables
-
-Create a `.env.local` file with your DoSQL configuration:
-
-```bash
-# .env.local
-
-# DoSQL Connection URL (Cloudflare Worker endpoint)
-DOSQL_URL=https://your-worker.your-subdomain.workers.dev
-
-# Authentication (if using)
-DOSQL_API_KEY=your-api-key
-
-# WebSocket URL for real-time features
-DOSQL_WS_URL=wss://your-worker.your-subdomain.workers.dev/ws
-
-# Optional: R2 bucket for cold storage
-DOSQL_R2_BUCKET=your-bucket-name
-
-# Cloudflare bindings (when deploying to Cloudflare Pages)
-# These are configured in wrangler.toml, not here
-```
-
-### Database Client Setup
+### Database Client
 
 Create a reusable database client:
 
 ```typescript
 // lib/db.ts
-import { createHttpClient, createWebSocketClient } from '@dotdo/dosql/rpc';
+import { createHttpClient } from '@dotdo/dosql/rpc';
 
-// HTTP client for Server Components and Server Actions
 export function getDB() {
   if (!process.env.DOSQL_URL) {
     throw new Error('DOSQL_URL environment variable is required');
@@ -151,21 +114,7 @@ export function getDB() {
     headers: {
       Authorization: `Bearer ${process.env.DOSQL_API_KEY}`,
     },
-    batch: true, // Enable request batching for better performance
-  });
-}
-
-// WebSocket client factory for real-time features (client-side)
-export function createRealtimeClient() {
-  if (!process.env.NEXT_PUBLIC_DOSQL_WS_URL) {
-    throw new Error('NEXT_PUBLIC_DOSQL_WS_URL environment variable is required');
-  }
-
-  return createWebSocketClient({
-    url: process.env.NEXT_PUBLIC_DOSQL_WS_URL,
-    reconnect: true,
-    reconnectDelay: 1000,
-    maxReconnectAttempts: 10,
+    batch: true,
   });
 }
 ```
@@ -207,9 +156,9 @@ export interface Comment {
 
 ## Server Components
 
-Server Components enable direct database queries without API routes, reducing latency and bundle size.
+Server Components query the database directly without API routes, reducing latency and client bundle size.
 
-### Database Queries in Server Components
+### Basic Query
 
 ```typescript
 // app/users/page.tsx
@@ -218,9 +167,9 @@ import type { User } from '@/lib/types';
 
 export default async function UsersPage() {
   const db = getDB();
-
-  // Direct database query in Server Component
-  const users = await db.query<User>('SELECT * FROM users ORDER BY created_at DESC');
+  const users = await db.query<User>(
+    'SELECT * FROM users ORDER BY created_at DESC'
+  );
 
   return (
     <div>
@@ -240,14 +189,14 @@ export default async function UsersPage() {
 
 ### Parallel Data Fetching
 
-Fetch multiple data sources in parallel for better performance:
+Fetch multiple data sources concurrently:
 
 ```typescript
 // app/dashboard/page.tsx
 import { getDB } from '@/lib/db';
 import type { User, Post } from '@/lib/types';
 
-async function getUsers() {
+async function getActiveUsers() {
   const db = getDB();
   return db.query<User>('SELECT * FROM users WHERE active = ?', [true]);
 }
@@ -271,56 +220,92 @@ async function getStats() {
 }
 
 export default async function DashboardPage() {
-  // Parallel data fetching
   const [users, posts, stats] = await Promise.all([
-    getUsers(),
+    getActiveUsers(),
     getRecentPosts(),
     getStats(),
   ]);
 
   return (
     <div className="grid grid-cols-3 gap-6">
-      <div>
+      <section>
         <h2>Active Users ({stats?.users})</h2>
         <UserList users={users} />
-      </div>
-      <div>
+      </section>
+      <section>
         <h2>Recent Posts ({stats?.posts})</h2>
         <PostList posts={posts} />
-      </div>
-      <div>
-        <h2>Stats</h2>
+      </section>
+      <section>
+        <h2>Statistics</h2>
         <StatsCard stats={stats} />
-      </div>
+      </section>
     </div>
   );
 }
 ```
 
-### Caching Strategies
+### Dynamic Routes with Async Params
 
-Use Next.js caching with DoSQL queries:
+Next.js 15 uses Promise-based params. Await them before use:
+
+```typescript
+// app/posts/[id]/page.tsx
+import { getDB } from '@/lib/db';
+import { notFound } from 'next/navigation';
+import type { Post, Comment } from '@/lib/types';
+
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
+
+export default async function PostPage({ params }: PageProps) {
+  const { id } = await params;
+  const postId = parseInt(id, 10);
+
+  const db = getDB();
+  const [post, comments] = await Promise.all([
+    db.queryOne<Post>('SELECT * FROM posts WHERE id = ?', [postId]),
+    db.query<Comment>(
+      'SELECT * FROM comments WHERE post_id = ? ORDER BY created_at ASC',
+      [postId]
+    ),
+  ]);
+
+  if (!post) {
+    notFound();
+  }
+
+  return (
+    <article>
+      <h1>{post.title}</h1>
+      <div dangerouslySetInnerHTML={{ __html: post.content }} />
+      <CommentSection comments={comments} postId={postId} />
+    </article>
+  );
+}
+```
+
+### Caching with unstable_cache
+
+Cache database queries with targeted revalidation:
 
 ```typescript
 // app/posts/[id]/page.tsx
 import { getDB } from '@/lib/db';
 import { unstable_cache } from 'next/cache';
+import { notFound } from 'next/navigation';
 import type { Post, Comment } from '@/lib/types';
 
-// Cache the post query with tags for targeted revalidation
 const getPost = unstable_cache(
   async (id: number) => {
     const db = getDB();
     return db.queryOne<Post>('SELECT * FROM posts WHERE id = ?', [id]);
   },
   ['post'],
-  {
-    tags: ['posts'],
-    revalidate: 60, // Revalidate every 60 seconds
-  }
+  { tags: ['posts'], revalidate: 60 }
 );
 
-// Cache comments separately
 const getComments = unstable_cache(
   async (postId: number) => {
     const db = getDB();
@@ -330,13 +315,14 @@ const getComments = unstable_cache(
     );
   },
   ['comments'],
-  {
-    tags: ['comments'],
-    revalidate: 30,
-  }
+  { tags: ['comments'], revalidate: 30 }
 );
 
-export default async function PostPage({ params }: { params: Promise<{ id: string }> }) {
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
+
+export default async function PostPage({ params }: PageProps) {
   const { id } = await params;
   const postId = parseInt(id, 10);
 
@@ -359,65 +345,31 @@ export default async function PostPage({ params }: { params: Promise<{ id: strin
 }
 ```
 
-### Revalidation Patterns
+### Rendering Modes
 
-Implement on-demand revalidation when data changes:
-
-```typescript
-// app/api/revalidate/route.ts
-import { revalidateTag, revalidatePath } from 'next/cache';
-import { NextRequest, NextResponse } from 'next/server';
-
-export async function POST(request: NextRequest) {
-  const { type, id } = await request.json();
-
-  switch (type) {
-    case 'post':
-      // Revalidate specific post
-      revalidateTag('posts');
-      revalidatePath(`/posts/${id}`);
-      break;
-    case 'comment':
-      // Revalidate comments for a post
-      revalidateTag('comments');
-      break;
-    case 'user':
-      // Revalidate user-related pages
-      revalidateTag('users');
-      revalidatePath('/users');
-      break;
-  }
-
-  return NextResponse.json({ revalidated: true });
-}
-```
-
-### Dynamic vs Static Rendering
-
-Control rendering behavior based on data requirements:
+Control rendering behavior per route:
 
 ```typescript
-// Static: Generate at build time
+// Force static generation with periodic revalidation
 // app/posts/page.tsx
 export const dynamic = 'force-static';
-export const revalidate = 3600; // Revalidate every hour
+export const revalidate = 3600; // Revalidate hourly
 
-// Dynamic: Always fetch fresh data
+// Force dynamic rendering (fresh data on every request)
 // app/dashboard/page.tsx
 export const dynamic = 'force-dynamic';
 
-// Auto: Let Next.js decide based on data fetching
-// app/profile/page.tsx
-// (no export, Next.js decides automatically)
+// Let Next.js decide based on data fetching patterns
+// (default behavior - no export needed)
 ```
 
 ---
 
 ## Server Actions
 
-Server Actions provide type-safe mutations directly from React components.
+Server Actions provide type-safe mutations directly from React components. They run on the server and can revalidate cached data.
 
-### Mutations with Server Actions
+### Basic Mutation
 
 ```typescript
 // app/posts/actions.ts
@@ -425,59 +377,28 @@ Server Actions provide type-safe mutations directly from React components.
 
 import { getDB } from '@/lib/db';
 import { revalidateTag } from 'next/cache';
-import { z } from 'zod';
-
-// Input validation schema
-const CreatePostSchema = z.object({
-  title: z.string().min(1).max(200),
-  content: z.string().min(1),
-  published: z.boolean().default(false),
-});
+import { redirect } from 'next/navigation';
 
 export async function createPost(formData: FormData) {
-  const db = getDB();
-
-  // Validate input
-  const validated = CreatePostSchema.parse({
-    title: formData.get('title'),
-    content: formData.get('content'),
-    published: formData.get('published') === 'true',
-  });
-
-  // Insert into database
-  const result = await db.run(
-    `INSERT INTO posts (title, content, published, user_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-    [validated.title, validated.content, validated.published, 1] // Replace with actual user ID from session
-  );
-
-  // Revalidate cached data
-  revalidateTag('posts');
-
-  return { id: result.lastInsertRowId };
-}
-
-export async function updatePost(id: number, formData: FormData) {
   const db = getDB();
 
   const title = formData.get('title') as string;
   const content = formData.get('content') as string;
   const published = formData.get('published') === 'true';
 
-  await db.run(
-    `UPDATE posts
-     SET title = ?, content = ?, published = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`,
-    [title, content, published, id]
+  const result = await db.run(
+    `INSERT INTO posts (title, content, published, created_at, updated_at)
+     VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    [title, content, published]
   );
 
   revalidateTag('posts');
+  redirect(`/posts/${result.lastInsertRowId}`);
 }
 
 export async function deletePost(id: number) {
   const db = getDB();
 
-  // Use transaction to delete post and related comments
   await db.transaction(async (tx) => {
     await tx.run('DELETE FROM comments WHERE post_id = ?', [id]);
     await tx.run('DELETE FROM posts WHERE id = ?', [id]);
@@ -485,12 +406,11 @@ export async function deletePost(id: number) {
 
   revalidateTag('posts');
   revalidateTag('comments');
+  redirect('/posts');
 }
 ```
 
-### Form Handling
-
-Create forms that use Server Actions:
+### Form with Server Action
 
 ```tsx
 // app/posts/new/page.tsx
@@ -549,63 +469,9 @@ export default function NewPostPage() {
 }
 ```
 
-### Optimistic Updates
+### Error Handling with useActionState
 
-Implement optimistic UI updates with useOptimistic:
-
-```tsx
-// components/LikeButton.tsx
-'use client';
-
-import { useOptimistic, useTransition } from 'react';
-import { likePost } from '@/app/posts/actions';
-
-interface LikeButtonProps {
-  postId: number;
-  initialLikes: number;
-  isLiked: boolean;
-}
-
-export function LikeButton({ postId, initialLikes, isLiked }: LikeButtonProps) {
-  const [isPending, startTransition] = useTransition();
-
-  const [optimisticState, addOptimistic] = useOptimistic(
-    { likes: initialLikes, isLiked },
-    (state, newIsLiked: boolean) => ({
-      likes: newIsLiked ? state.likes + 1 : state.likes - 1,
-      isLiked: newIsLiked,
-    })
-  );
-
-  const handleClick = () => {
-    const newIsLiked = !optimisticState.isLiked;
-
-    startTransition(async () => {
-      addOptimistic(newIsLiked);
-      await likePost(postId, newIsLiked);
-    });
-  };
-
-  return (
-    <button
-      onClick={handleClick}
-      disabled={isPending}
-      className={`flex items-center gap-2 rounded-full px-4 py-2 ${
-        optimisticState.isLiked
-          ? 'bg-red-100 text-red-600'
-          : 'bg-gray-100 text-gray-600'
-      }`}
-    >
-      <span>{optimisticState.isLiked ? 'Liked' : 'Like'}</span>
-      <span>{optimisticState.likes}</span>
-    </button>
-  );
-}
-```
-
-### Error Handling in Actions
-
-Handle errors gracefully in Server Actions:
+Use `useActionState` for form validation and error display:
 
 ```typescript
 // app/posts/actions.ts
@@ -614,33 +480,39 @@ Handle errors gracefully in Server Actions:
 import { getDB } from '@/lib/db';
 import { revalidateTag } from 'next/cache';
 
-export type ActionResult<T = void> =
-  | { success: true; data: T }
-  | { success: false; error: string };
+export type ActionState = {
+  success: boolean;
+  error?: string;
+  data?: { id: number };
+} | null;
 
-export async function createPost(formData: FormData): Promise<ActionResult<{ id: number }>> {
+export async function createPost(
+  prevState: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const title = formData.get('title') as string;
+  const content = formData.get('content') as string;
+
+  // Validation
+  if (!title?.trim()) {
+    return { success: false, error: 'Title is required' };
+  }
+  if (!content?.trim()) {
+    return { success: false, error: 'Content is required' };
+  }
+  if (title.length > 200) {
+    return { success: false, error: 'Title must be 200 characters or less' };
+  }
+
   try {
     const db = getDB();
-
-    const title = formData.get('title') as string;
-    const content = formData.get('content') as string;
-
-    if (!title || title.trim().length === 0) {
-      return { success: false, error: 'Title is required' };
-    }
-
-    if (!content || content.trim().length === 0) {
-      return { success: false, error: 'Content is required' };
-    }
-
     const result = await db.run(
-      `INSERT INTO posts (title, content, user_id, created_at)
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
-      [title, content, 1] // Replace with actual user ID from session
+      `INSERT INTO posts (title, content, created_at, updated_at)
+       VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [title, content]
     );
 
     revalidateTag('posts');
-
     return { success: true, data: { id: Number(result.lastInsertRowId) } };
   } catch (error) {
     console.error('Failed to create post:', error);
@@ -654,25 +526,62 @@ export async function createPost(formData: FormData): Promise<ActionResult<{ id:
 'use client';
 
 import { useActionState } from 'react';
-import { createPost, type ActionResult } from '@/app/posts/actions';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { createPost, type ActionState } from '@/app/posts/actions';
 
 export function CreatePostForm() {
-  const [state, formAction, isPending] = useActionState(
+  const router = useRouter();
+  const [state, formAction, isPending] = useActionState<ActionState, FormData>(
     createPost,
-    null as ActionResult<{ id: number }> | null
+    null
   );
+
+  useEffect(() => {
+    if (state?.success && state.data?.id) {
+      router.push(`/posts/${state.data.id}`);
+    }
+  }, [state, router]);
 
   return (
     <form action={formAction} className="space-y-4">
-      {state && !state.success && (
+      {state?.error && (
         <div className="rounded-md bg-red-50 p-4 text-red-700">
           {state.error}
         </div>
       )}
 
-      {/* Form fields... */}
+      <div>
+        <label htmlFor="title" className="block text-sm font-medium">
+          Title
+        </label>
+        <input
+          type="text"
+          id="title"
+          name="title"
+          required
+          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+        />
+      </div>
 
-      <button type="submit" disabled={isPending}>
+      <div>
+        <label htmlFor="content" className="block text-sm font-medium">
+          Content
+        </label>
+        <textarea
+          id="content"
+          name="content"
+          rows={10}
+          required
+          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+        />
+      </div>
+
+      <button
+        type="submit"
+        disabled={isPending}
+        className="rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+      >
         {isPending ? 'Creating...' : 'Create Post'}
       </button>
     </form>
@@ -680,13 +589,66 @@ export function CreatePostForm() {
 }
 ```
 
+### Optimistic Updates
+
+Show immediate feedback while mutations complete:
+
+```tsx
+// components/LikeButton.tsx
+'use client';
+
+import { useOptimistic, useTransition } from 'react';
+import { toggleLike } from '@/app/posts/actions';
+
+interface LikeButtonProps {
+  postId: number;
+  initialLikes: number;
+  initialIsLiked: boolean;
+}
+
+export function LikeButton({ postId, initialLikes, initialIsLiked }: LikeButtonProps) {
+  const [isPending, startTransition] = useTransition();
+
+  const [optimistic, addOptimistic] = useOptimistic(
+    { likes: initialLikes, isLiked: initialIsLiked },
+    (state, newIsLiked: boolean) => ({
+      likes: newIsLiked ? state.likes + 1 : state.likes - 1,
+      isLiked: newIsLiked,
+    })
+  );
+
+  const handleClick = () => {
+    const newIsLiked = !optimistic.isLiked;
+    startTransition(async () => {
+      addOptimistic(newIsLiked);
+      await toggleLike(postId, newIsLiked);
+    });
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={isPending}
+      className={`flex items-center gap-2 rounded-full px-4 py-2 ${
+        optimistic.isLiked
+          ? 'bg-red-100 text-red-600'
+          : 'bg-gray-100 text-gray-600'
+      }`}
+    >
+      <span>{optimistic.isLiked ? 'Liked' : 'Like'}</span>
+      <span>{optimistic.likes}</span>
+    </button>
+  );
+}
+```
+
 ---
 
-## API Routes
+## Route Handlers
 
-Use API Routes (Route Handlers) for complex operations, webhooks, and third-party integrations.
+Use Route Handlers for REST APIs, webhooks, and operations that need HTTP method control.
 
-### Route Handlers with DoSQL
+### Basic CRUD Routes
 
 ```typescript
 // app/api/posts/route.ts
@@ -694,7 +656,6 @@ import { getDB } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Post } from '@/lib/types';
 
-// GET /api/posts
 export async function GET(request: NextRequest) {
   const db = getDB();
   const searchParams = request.nextUrl.searchParams;
@@ -705,10 +666,8 @@ export async function GET(request: NextRequest) {
 
   const [posts, countResult] = await Promise.all([
     db.query<Post>(
-      `SELECT * FROM posts
-       WHERE published = ?
-       ORDER BY created_at DESC
-       LIMIT ? OFFSET ?`,
+      `SELECT * FROM posts WHERE published = ?
+       ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       [true, limit, offset]
     ),
     db.queryOne<{ total: number }>(
@@ -728,7 +687,6 @@ export async function GET(request: NextRequest) {
   });
 }
 
-// POST /api/posts
 export async function POST(request: NextRequest) {
   const db = getDB();
   const body = await request.json();
@@ -748,30 +706,31 @@ export async function POST(request: NextRequest) {
     [title, content, published]
   );
 
-  return NextResponse.json(
-    { id: result.lastInsertRowId },
-    { status: 201 }
-  );
+  return NextResponse.json({ id: result.lastInsertRowId }, { status: 201 });
 }
 ```
 
 ### Dynamic Route Handlers
+
+Handle individual resources with async params:
 
 ```typescript
 // app/api/posts/[id]/route.ts
 import { getDB } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 
-interface Params {
-  params: { id: string };
+interface RouteContext {
+  params: Promise<{ id: string }>;
 }
 
-// GET /api/posts/[id]
-export async function GET(request: NextRequest, { params }: Params) {
+export async function GET(request: NextRequest, context: RouteContext) {
+  const { id } = await context.params;
   const db = getDB();
-  const id = parseInt(params.id, 10);
 
-  const post = await db.queryOne('SELECT * FROM posts WHERE id = ?', [id]);
+  const post = await db.queryOne(
+    'SELECT * FROM posts WHERE id = ?',
+    [parseInt(id, 10)]
+  );
 
   if (!post) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
@@ -780,10 +739,9 @@ export async function GET(request: NextRequest, { params }: Params) {
   return NextResponse.json(post);
 }
 
-// PUT /api/posts/[id]
-export async function PUT(request: NextRequest, { params }: Params) {
+export async function PUT(request: NextRequest, context: RouteContext) {
+  const { id } = await context.params;
   const db = getDB();
-  const id = parseInt(params.id, 10);
   const body = await request.json();
 
   const { title, content, published } = body;
@@ -795,7 +753,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
          published = COALESCE(?, published),
          updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-    [title, content, published, id]
+    [title, content, published, parseInt(id, 10)]
   );
 
   if (result.rowsAffected === 0) {
@@ -805,41 +763,37 @@ export async function PUT(request: NextRequest, { params }: Params) {
   return NextResponse.json({ success: true });
 }
 
-// DELETE /api/posts/[id]
-export async function DELETE(request: NextRequest, { params }: Params) {
+export async function DELETE(request: NextRequest, context: RouteContext) {
+  const { id } = await context.params;
   const db = getDB();
-  const id = parseInt(params.id, 10);
+  const postId = parseInt(id, 10);
 
   await db.transaction(async (tx) => {
-    await tx.run('DELETE FROM comments WHERE post_id = ?', [id]);
-    await tx.run('DELETE FROM posts WHERE id = ?', [id]);
+    await tx.run('DELETE FROM comments WHERE post_id = ?', [postId]);
+    await tx.run('DELETE FROM posts WHERE id = ?', [postId]);
   });
 
   return NextResponse.json({ success: true });
 }
 ```
 
-### Streaming Responses
+### Streaming Response
 
 Stream large datasets to the client:
 
 ```typescript
 // app/api/export/posts/route.ts
 import { getDB } from '@/lib/db';
-import { NextRequest } from 'next/server';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const db = getDB();
 
-  // Create a streaming response
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
 
-      // Write CSV header
       controller.enqueue(encoder.encode('id,title,content,created_at\n'));
 
-      // Stream posts using DoSQL's streaming interface
       const stmt = db.prepare('SELECT * FROM posts ORDER BY id');
 
       for await (const post of stmt.iterate()) {
@@ -864,68 +818,182 @@ function escapeCSV(str: string): string {
 }
 ```
 
-### Webhook Handler with Time Travel
+### Revalidation Endpoint
 
-Use DoSQL's time travel for audit logging:
+Trigger cache revalidation from external services:
 
 ```typescript
-// app/api/webhooks/stripe/route.ts
-import { getDB } from '@/lib/db';
+// app/api/revalidate/route.ts
+import { revalidateTag, revalidatePath } from 'next/cache';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
-  const db = getDB();
-  const payload = await request.text();
-  const signature = request.headers.get('stripe-signature');
+  const { type, id, secret } = await request.json();
 
-  // Verify webhook signature (implementation depends on your setup)
-  const event = verifyStripeWebhook(payload, signature);
-
-  // Store the webhook event with timestamp for auditing
-  await db.run(
-    `INSERT INTO webhook_events (provider, event_type, payload, received_at)
-     VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
-    ['stripe', event.type, payload]
-  );
-
-  // Process the event
-  switch (event.type) {
-    case 'payment_intent.succeeded':
-      await handlePaymentSuccess(db, event.data.object);
-      break;
-    case 'customer.subscription.updated':
-      await handleSubscriptionUpdate(db, event.data.object);
-      break;
+  // Verify webhook secret
+  if (secret !== process.env.REVALIDATE_SECRET) {
+    return NextResponse.json({ error: 'Invalid secret' }, { status: 401 });
   }
 
-  return NextResponse.json({ received: true });
+  switch (type) {
+    case 'post':
+      revalidateTag('posts');
+      if (id) revalidatePath(`/posts/${id}`);
+      break;
+    case 'comment':
+      revalidateTag('comments');
+      break;
+    case 'user':
+      revalidateTag('users');
+      revalidatePath('/users');
+      break;
+    default:
+      return NextResponse.json({ error: 'Unknown type' }, { status: 400 });
+  }
+
+  return NextResponse.json({ revalidated: true });
+}
+```
+
+---
+
+## Client-Side Patterns
+
+### SWR Integration
+
+Use SWR for client-side data fetching with caching:
+
+```typescript
+// hooks/useQuery.ts
+'use client';
+
+import useSWR, { type SWRConfiguration } from 'swr';
+
+interface QueryOptions extends SWRConfiguration {
+  params?: unknown[];
 }
 
-async function handlePaymentSuccess(db: ReturnType<typeof getDB>, paymentIntent: any) {
-  await db.transaction(async (tx) => {
-    // Update order status
-    await tx.run(
-      `UPDATE orders SET status = ?, paid_at = CURRENT_TIMESTAMP WHERE payment_intent_id = ?`,
-      ['paid', paymentIntent.id]
-    );
+async function fetcher([sql, params]: [string, unknown[]]) {
+  const response = await fetch('/api/query', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql, params }),
+  });
 
-    // Record payment
-    await tx.run(
-      `INSERT INTO payments (order_id, amount, currency, payment_intent_id, created_at)
-       SELECT id, ?, ?, ?, CURRENT_TIMESTAMP FROM orders WHERE payment_intent_id = ?`,
-      [paymentIntent.amount, paymentIntent.currency, paymentIntent.id, paymentIntent.id]
-    );
+  if (!response.ok) {
+    throw new Error('Query failed');
+  }
+
+  return response.json();
+}
+
+export function useQuery<T>(sql: string, options: QueryOptions = {}) {
+  const { params = [], ...swrOptions } = options;
+
+  return useSWR<T[]>([sql, params], fetcher, {
+    revalidateOnFocus: false,
+    ...swrOptions,
+  });
+}
+```
+
+```tsx
+// Usage in component
+'use client';
+
+import { useQuery } from '@/hooks/useQuery';
+import type { Post } from '@/lib/types';
+
+export function RecentPosts() {
+  const { data: posts, error, isLoading } = useQuery<Post>(
+    'SELECT * FROM posts WHERE published = ? ORDER BY created_at DESC LIMIT ?',
+    { params: [true, 5], refreshInterval: 30000 }
+  );
+
+  if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error loading posts</div>;
+
+  return (
+    <ul>
+      {posts?.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### React Query Integration
+
+Use React Query for more complex caching scenarios:
+
+```typescript
+// hooks/useDoSQLQuery.ts
+'use client';
+
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
+async function queryDB<T>(sql: string, params?: unknown[]): Promise<T[]> {
+  const response = await fetch('/api/query', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql, params }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Query failed');
+  }
+
+  return response.json();
+}
+
+export function useDoSQLQuery<T>(
+  key: string[],
+  sql: string,
+  params?: unknown[]
+) {
+  return useQuery({
+    queryKey: key,
+    queryFn: () => queryDB<T>(sql, params),
+  });
+}
+
+export function useDoSQLMutation(
+  sql: string,
+  options?: { invalidateKeys?: string[][] }
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: unknown[]) => {
+      const response = await fetch('/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql, params }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Mutation failed');
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      options?.invalidateKeys?.forEach((key) => {
+        queryClient.invalidateQueries({ queryKey: key });
+      });
+    },
   });
 }
 ```
 
 ---
 
-## Client-Side
+## Real-Time Features
 
-Integrate DoSQL with client-side data fetching and real-time updates.
+### WebSocket Hook
 
-### WebSocket Connection for Real-Time
+Create a hook for real-time database connections:
 
 ```typescript
 // hooks/useDoSQLRealtime.ts
@@ -934,25 +1002,15 @@ Integrate DoSQL with client-side data fetching and real-time updates.
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { createWebSocketClient } from '@dotdo/dosql/rpc';
 
-interface UseRealtimeOptions {
-  url?: string;
-  reconnect?: boolean;
-}
-
-export function useDoSQLRealtime(options: UseRealtimeOptions = {}) {
-  const {
-    url = process.env.NEXT_PUBLIC_DOSQL_WS_URL!,
-    reconnect = true,
-  } = options;
-
+export function useDoSQLRealtime() {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const clientRef = useRef<ReturnType<typeof createWebSocketClient> | null>(null);
 
   useEffect(() => {
     const client = createWebSocketClient({
-      url,
-      reconnect,
+      url: process.env.NEXT_PUBLIC_DOSQL_WS_URL!,
+      reconnect: true,
       onConnect: () => setIsConnected(true),
       onDisconnect: () => setIsConnected(false),
       onError: (err) => setError(err),
@@ -963,7 +1021,7 @@ export function useDoSQLRealtime(options: UseRealtimeOptions = {}) {
     return () => {
       client.close();
     };
-  }, [url, reconnect]);
+  }, []);
 
   const query = useCallback(async <T>(sql: string, params?: unknown[]): Promise<T[]> => {
     if (!clientRef.current) {
@@ -972,18 +1030,11 @@ export function useDoSQLRealtime(options: UseRealtimeOptions = {}) {
     return clientRef.current.query<T>(sql, params);
   }, []);
 
-  const run = useCallback(async (sql: string, params?: unknown[]) => {
-    if (!clientRef.current) {
-      throw new Error('WebSocket not connected');
-    }
-    return clientRef.current.run(sql, params);
-  }, []);
-
-  return { isConnected, error, query, run, client: clientRef.current };
+  return { isConnected, error, query, client: clientRef.current };
 }
 ```
 
-### CDC Subscriptions
+### CDC Subscription Hook
 
 Subscribe to real-time database changes:
 
@@ -991,7 +1042,7 @@ Subscribe to real-time database changes:
 // hooks/useCDCSubscription.ts
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { createWebSocketClient, type ChangeEvent } from '@dotdo/dosql/rpc';
 
 interface CDCOptions {
@@ -999,12 +1050,11 @@ interface CDCOptions {
   operations?: ('INSERT' | 'UPDATE' | 'DELETE')[];
 }
 
-export function useCDCSubscription<T>(
+export function useCDCSubscription(
   options: CDCOptions,
   onEvent: (event: ChangeEvent) => void
 ) {
   const [isSubscribed, setIsSubscribed] = useState(false);
-  const [lastLSN, setLastLSN] = useState<bigint>(0n);
 
   useEffect(() => {
     const client = createWebSocketClient({
@@ -1012,11 +1062,8 @@ export function useCDCSubscription<T>(
       reconnect: true,
     });
 
-    let subscription: AsyncIterable<ChangeEvent> | null = null;
-
     async function subscribe() {
-      subscription = await client.subscribeCDC({
-        fromLSN: lastLSN,
+      const subscription = await client.subscribeCDC({
         tables: options.tables,
         operations: options.operations,
       });
@@ -1024,7 +1071,6 @@ export function useCDCSubscription<T>(
       setIsSubscribed(true);
 
       for await (const event of subscription) {
-        setLastLSN(event.lsn);
         onEvent(event);
       }
     }
@@ -1035,19 +1081,21 @@ export function useCDCSubscription<T>(
       client.close();
       setIsSubscribed(false);
     };
-  }, [options.tables?.join(','), options.operations?.join(',')]);
+  }, [options.tables?.join(','), options.operations?.join(','), onEvent]);
 
-  return { isSubscribed, lastLSN };
+  return { isSubscribed };
 }
 ```
 
-### Real-Time Component Example
+### Live Comments Component
+
+Display real-time comment updates:
 
 ```tsx
 // components/LiveComments.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useCDCSubscription } from '@/hooks/useCDCSubscription';
 import type { Comment } from '@/lib/types';
 
@@ -1062,7 +1110,6 @@ export function LiveComments({ postId, initialComments }: LiveCommentsProps) {
   useCDCSubscription(
     { tables: ['comments'], operations: ['INSERT', 'UPDATE', 'DELETE'] },
     (event) => {
-      // Filter for this post's comments
       if (event.after?.post_id !== postId && event.before?.post_id !== postId) {
         return;
       }
@@ -1099,179 +1146,19 @@ export function LiveComments({ postId, initialComments }: LiveCommentsProps) {
 }
 ```
 
-### SWR Integration
-
-Use SWR for client-side data fetching with caching:
-
-```typescript
-// hooks/useDoSQL.ts
-'use client';
-
-import useSWR, { type SWRConfiguration } from 'swr';
-
-interface QueryOptions extends SWRConfiguration {
-  params?: unknown[];
-}
-
-export function useQuery<T>(sql: string, options: QueryOptions = {}) {
-  const { params = [], ...swrOptions } = options;
-
-  const fetcher = async () => {
-    const response = await fetch('/api/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql, params }),
-    });
-
-    if (!response.ok) {
-      throw new Error('Query failed');
-    }
-
-    return response.json();
-  };
-
-  // Create cache key from SQL and params
-  const key = JSON.stringify({ sql, params });
-
-  return useSWR<T[]>(key, fetcher, {
-    revalidateOnFocus: false,
-    ...swrOptions,
-  });
-}
-
-// Usage
-function PostsList() {
-  const { data: posts, error, isLoading, mutate } = useQuery<Post>(
-    'SELECT * FROM posts WHERE published = ? ORDER BY created_at DESC',
-    { params: [true], refreshInterval: 30000 }
-  );
-
-  if (isLoading) return <div>Loading...</div>;
-  if (error) return <div>Error loading posts</div>;
-
-  return (
-    <ul>
-      {posts?.map((post) => (
-        <li key={post.id}>{post.title}</li>
-      ))}
-    </ul>
-  );
-}
-```
-
-### React Query Integration
-
-Use React Query for more advanced caching scenarios:
-
-```typescript
-// hooks/useDoSQLQuery.ts
-'use client';
-
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-
-async function queryDB<T>(sql: string, params?: unknown[]): Promise<T[]> {
-  const response = await fetch('/api/query', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql, params }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Query failed');
-  }
-
-  return response.json();
-}
-
-// Query hook
-export function useDoSQLQuery<T>(
-  key: string[],
-  sql: string,
-  params?: unknown[]
-) {
-  return useQuery({
-    queryKey: key,
-    queryFn: () => queryDB<T>(sql, params),
-  });
-}
-
-// Mutation hook
-export function useDoSQLMutation(
-  sql: string,
-  options?: {
-    invalidateKeys?: string[][];
-  }
-) {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (params: unknown[]) => {
-      const response = await fetch('/api/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql, params }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Mutation failed');
-      }
-
-      return response.json();
-    },
-    onSuccess: () => {
-      // Invalidate related queries
-      options?.invalidateKeys?.forEach((key) => {
-        queryClient.invalidateQueries({ queryKey: key });
-      });
-    },
-  });
-}
-
-// Usage
-function UserProfile({ userId }: { userId: number }) {
-  const { data: user, isLoading } = useDoSQLQuery<User>(
-    ['user', userId.toString()],
-    'SELECT * FROM users WHERE id = ?',
-    [userId]
-  );
-
-  const updateUser = useDoSQLMutation(
-    'UPDATE users SET name = ? WHERE id = ?',
-    { invalidateKeys: [['user', userId.toString()], ['users']] }
-  );
-
-  if (isLoading) return <div>Loading...</div>;
-
-  return (
-    <div>
-      <h2>{user?.[0]?.name}</h2>
-      <button
-        onClick={() => updateUser.mutate(['New Name', userId])}
-        disabled={updateUser.isPending}
-      >
-        Update Name
-      </button>
-    </div>
-  );
-}
-```
-
 ---
 
 ## Edge Runtime
 
 Run DoSQL queries at the edge for minimal latency.
 
-### Using DoSQL on Edge
-
-Configure routes to run on the Edge Runtime:
+### Edge Route Handler
 
 ```typescript
 // app/api/edge/posts/route.ts
 import { createHttpClient } from '@dotdo/dosql/rpc';
 import { NextRequest, NextResponse } from 'next/server';
 
-// Force Edge Runtime
 export const runtime = 'edge';
 
 export async function GET(request: NextRequest) {
@@ -1282,25 +1169,27 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  const posts = await db.query('SELECT * FROM posts WHERE published = ? LIMIT 10', [true]);
+  const posts = await db.query(
+    'SELECT * FROM posts WHERE published = ? LIMIT 10',
+    [true]
+  );
 
   return NextResponse.json(posts);
 }
 ```
 
-### Vercel Edge Functions
+### Geo-Aware Queries
 
-Deploy DoSQL-powered Edge Functions to Vercel:
+Use edge geolocation for personalized content:
 
 ```typescript
-// app/api/geo-posts/route.ts
+// app/api/nearby/route.ts
 import { createHttpClient } from '@dotdo/dosql/rpc';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'edge';
 
 export async function GET(request: NextRequest) {
-  // Get geo information from Vercel Edge
   const country = request.geo?.country || 'US';
   const city = request.geo?.city || 'Unknown';
 
@@ -1311,29 +1200,23 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  // Query posts relevant to the user's region
   const posts = await db.query(
     `SELECT * FROM posts
-     WHERE published = ?
-     AND (region = ? OR region IS NULL)
-     ORDER BY created_at DESC
-     LIMIT 10`,
+     WHERE published = ? AND (region = ? OR region IS NULL)
+     ORDER BY created_at DESC LIMIT 10`,
     [true, country]
   );
 
-  return NextResponse.json({
-    posts,
-    geo: { country, city },
-  });
+  return NextResponse.json({ posts, geo: { country, city } });
 }
 ```
 
-### Cloudflare Workers Integration
+### Cloudflare Pages Integration
 
-When deploying to Cloudflare Pages, you can access Durable Objects directly:
+Access Durable Objects directly when deployed to Cloudflare Pages:
 
 ```typescript
-// functions/api/posts/[[route]].ts (Cloudflare Pages Function)
+// functions/api/posts/[[route]].ts
 import { DB } from '@dotdo/dosql';
 
 interface Env {
@@ -1343,65 +1226,20 @@ interface Env {
 export const onRequest: PagesFunction<Env> = async (context) => {
   const { request, env } = context;
 
-  // Get Durable Object stub
   const id = env.DOSQL_DB.idFromName('default');
   const stub = env.DOSQL_DB.get(id);
 
-  // Forward request to Durable Object
   return stub.fetch(request);
 };
-```
-
-### Hybrid Approach: Edge + Origin
-
-Use edge for reads, origin for writes:
-
-```typescript
-// app/api/posts/route.ts
-import { createHttpClient } from '@dotdo/dosql/rpc';
-import { NextRequest, NextResponse } from 'next/server';
-
-// Edge for fast reads
-export const runtime = 'edge';
-
-export async function GET(request: NextRequest) {
-  const db = createHttpClient({ url: process.env.DOSQL_URL! });
-  const posts = await db.query('SELECT * FROM posts LIMIT 10');
-  return NextResponse.json(posts);
-}
-
-// app/api/posts/create/route.ts
-// Origin for writes (no runtime export = Node.js runtime)
-import { getDB } from '@/lib/db';
-import { revalidateTag } from 'next/cache';
-import { NextRequest, NextResponse } from 'next/server';
-
-export async function POST(request: NextRequest) {
-  const db = getDB();
-  const body = await request.json();
-
-  await db.run(
-    'INSERT INTO posts (title, content) VALUES (?, ?)',
-    [body.title, body.content]
-  );
-
-  revalidateTag('posts');
-
-  return NextResponse.json({ success: true });
-}
 ```
 
 ---
 
 ## Deployment
 
-### Vercel Deployment
+### Vercel
 
-Deploy your Next.js + DoSQL application to Vercel:
-
-#### 1. Environment Variables
-
-Set environment variables in Vercel Dashboard or via CLI:
+#### Environment Setup
 
 ```bash
 vercel env add DOSQL_URL
@@ -1409,12 +1247,10 @@ vercel env add DOSQL_API_KEY
 vercel env add NEXT_PUBLIC_DOSQL_WS_URL
 ```
 
-#### 2. Build Configuration
+#### vercel.json
 
 ```json
-// vercel.json
 {
-  "buildCommand": "next build",
   "framework": "nextjs",
   "regions": ["iad1", "sfo1", "cdg1"],
   "env": {
@@ -1424,7 +1260,7 @@ vercel env add NEXT_PUBLIC_DOSQL_WS_URL
 }
 ```
 
-#### 3. Middleware for Edge Routing
+#### Middleware for Region Routing
 
 ```typescript
 // middleware.ts
@@ -1432,10 +1268,8 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
-  // Add custom headers or route to nearest DoSQL region
   const response = NextResponse.next();
 
-  // Example: Route to nearest Cloudflare region
   const region = request.geo?.country === 'US' ? 'us' : 'eu';
   response.headers.set('x-dosql-region', region);
 
@@ -1447,24 +1281,16 @@ export const config = {
 };
 ```
 
-### Cloudflare Pages Deployment
+### Cloudflare Pages
 
-Deploy to Cloudflare Pages with native Durable Objects access:
-
-#### 1. wrangler.toml Configuration
+#### wrangler.toml
 
 ```toml
-# wrangler.toml
 name = "my-nextjs-app"
 compatibility_date = "2024-01-01"
 
 [build]
 command = "npx @cloudflare/next-on-pages"
-
-[[d1_databases]]
-binding = "DB"
-database_name = "my-database"
-database_id = "xxxxx"
 
 [[durable_objects.bindings]]
 name = "DOSQL_DB"
@@ -1475,7 +1301,7 @@ tag = "v1"
 new_classes = ["TenantDatabase"]
 ```
 
-#### 2. Pages Functions
+#### Pages Function Middleware
 
 ```typescript
 // functions/_middleware.ts
@@ -1486,20 +1312,16 @@ interface Env {
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
-  // Add bindings to the request context
   context.data.db = context.env.DOSQL_DB;
   return context.next();
 };
 ```
 
-### Self-Hosted Options
+### Self-Hosted
 
-Deploy Next.js with DoSQL on your own infrastructure:
-
-#### Docker Compose Setup
+#### Docker Compose
 
 ```yaml
-# docker-compose.yml
 version: '3.8'
 
 services:
@@ -1519,24 +1341,11 @@ services:
       - ./worker:/app
     environment:
       - WORKER_SCRIPT=/app/index.js
-
-  # Optional: Local R2-compatible storage
-  minio:
-    image: minio/minio
-    ports:
-      - '9000:9000'
-    volumes:
-      - minio-data:/data
-    command: server /data
-
-volumes:
-  minio-data:
 ```
 
 #### Dockerfile
 
 ```dockerfile
-# Dockerfile
 FROM node:20-alpine AS base
 
 FROM base AS deps
@@ -1564,69 +1373,42 @@ ENV PORT=3000
 CMD ["node", "server.js"]
 ```
 
-### Performance Optimization
+### Performance Tips
 
-#### Connection Pooling Proxy
-
-When self-hosting, use a connection pooling proxy:
+**Request Batching**: Enable batching in the client to combine multiple queries:
 
 ```typescript
-// lib/db-pool.ts
-import { createHttpClient } from '@dotdo/dosql/rpc';
-
-// Singleton connection pool
-let dbPool: ReturnType<typeof createHttpClient> | null = null;
-
-export function getPooledDB() {
-  if (!dbPool) {
-    dbPool = createHttpClient({
-      url: process.env.DOSQL_URL!,
-      headers: {
-        Authorization: `Bearer ${process.env.DOSQL_API_KEY}`,
-      },
-      // Connection pool settings
-      maxConnections: 10,
-      idleTimeout: 60000,
-      batch: true,
-      batchMaxSize: 100,
-      batchMaxWait: 10,
-    });
-  }
-
-  return dbPool;
-}
-```
-
-#### Request Batching
-
-Batch multiple queries in a single request:
-
-```typescript
-// lib/batch.ts
-import { createHttpClient } from '@dotdo/dosql/rpc';
-
 const db = createHttpClient({
   url: process.env.DOSQL_URL!,
   batch: true,
   batchMaxSize: 50,
-  batchMaxWait: 5, // ms
+  batchMaxWait: 5, // milliseconds
 });
+```
 
-// These queries are automatically batched
-async function getDashboardData() {
-  const [users, posts, comments] = await Promise.all([
-    db.query('SELECT COUNT(*) as count FROM users'),
-    db.query('SELECT COUNT(*) as count FROM posts'),
-    db.query('SELECT COUNT(*) as count FROM comments'),
-  ]);
+**Connection Reuse**: Use a singleton client in server code:
 
-  return { users, posts, comments };
+```typescript
+// lib/db.ts
+let dbInstance: ReturnType<typeof createHttpClient> | null = null;
+
+export function getDB() {
+  if (!dbInstance) {
+    dbInstance = createHttpClient({
+      url: process.env.DOSQL_URL!,
+      headers: {
+        Authorization: `Bearer ${process.env.DOSQL_API_KEY}`,
+      },
+      batch: true,
+    });
+  }
+  return dbInstance;
 }
 ```
 
 ---
 
-## Next Steps
+## Related Documentation
 
 - [API Reference](../api-reference.md) - Complete DoSQL API documentation
 - [Advanced Features](../advanced.md) - Time travel, branching, CDC
