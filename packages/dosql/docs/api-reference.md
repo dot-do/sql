@@ -45,6 +45,10 @@ Complete API documentation for DoSQL - a type-safe SQL database for Cloudflare W
   - [Change Events](#change-events)
   - [Replication Slots](#replication-slots)
   - [Lakehouse Streaming](#lakehouse-streaming)
+- [Transaction Management](#transaction-management)
+  - [Transaction Manager](#transaction-manager)
+  - [Isolation Levels](#isolation-levels)
+  - [MVCC Support](#mvcc-support)
 - [Branching](#branching)
   - [Branch Manager](#branch-manager)
   - [Branch Operations](#branch-operations)
@@ -60,10 +64,14 @@ Complete API documentation for DoSQL - a type-safe SQL database for Cloudflare W
   - [Storage Backends](#storage-backends)
   - [Tiered Storage](#tiered-storage)
   - [Copy-on-Write Backend](#copy-on-write-backend)
-- [Advanced Features](#advanced-features)
-  - [Sharding](#sharding)
-  - [Stored Procedures](#stored-procedures)
-  - [Observability](#observability)
+- [Stored Procedures](#stored-procedures)
+  - [Procedure Registry](#procedure-registry)
+  - [Procedure Builder](#procedure-builder)
+  - [Functional API](#functional-api)
+- [Sharding](#sharding)
+  - [VSchema Definition](#vschema-definition)
+  - [Vindex Types](#vindex-types)
+  - [Query Routing](#query-routing)
 - [Columnar Storage](#columnar-storage)
   - [Encoding Types](#encoding-types)
   - [Automatic Encoding Selection](#automatic-encoding-selection)
@@ -72,7 +80,6 @@ Complete API documentation for DoSQL - a type-safe SQL database for Cloudflare W
   - [Reader Usage](#reader-usage)
   - [Data Types](#data-types)
   - [Predicate Operations](#predicate-operations)
-  - [Constants](#constants)
 
 ---
 
@@ -112,7 +119,12 @@ import { createKnexAdapter } from 'dosql/orm/knex';
 import { createDrizzleAdapter } from 'dosql/orm/drizzle';
 
 // Stored procedures
-import { createProcedureRegistry, createProcedureExecutor, procedure } from 'dosql/proc';
+import {
+  createProcedureRegistry,
+  createProcedureExecutor,
+  procedure,
+  defineProcedures,
+} from 'dosql/proc';
 ```
 
 | Subpath | Description |
@@ -128,8 +140,6 @@ import { createProcedureRegistry, createProcedureExecutor, procedure } from 'dos
 | `dosql/orm/kysely` | Kysely query builder adapter |
 | `dosql/orm/knex` | Knex.js query builder adapter |
 | `dosql/orm/drizzle` | Drizzle ORM adapter |
-
-**Note:** Branching, migrations, and observability are available via the main entry point re-exports. See the relevant sections below for usage.
 
 ---
 
@@ -156,34 +166,19 @@ Creates a new database instance.
 
 ```typescript
 interface DatabaseOptions {
-  /**
-   * Whether to open database in read-only mode
-   * @default false
-   */
+  /** Whether to open database in read-only mode */
   readonly?: boolean;
 
-  /**
-   * Whether to require the database file to exist
-   * @default false
-   */
+  /** Whether to require the database file to exist */
   fileMustExist?: boolean;
 
-  /**
-   * Timeout for acquiring locks (milliseconds)
-   * @default 5000
-   */
+  /** Timeout for acquiring locks (milliseconds) */
   timeout?: number;
 
-  /**
-   * Verbose logging function for debugging
-   * @default undefined
-   */
+  /** Verbose logging function for debugging */
   verbose?: (message?: unknown, ...params: unknown[]) => void;
 
-  /**
-   * Maximum size of the statement cache
-   * @default 100
-   */
+  /** Maximum size of the statement cache */
   statementCacheSize?: number;
 }
 ```
@@ -193,27 +188,22 @@ interface DatabaseOptions {
 ```typescript
 import { createDatabase } from 'dosql';
 
-// Example 1: In-memory database (default)
+// In-memory database (default)
 const db = createDatabase();
 
-// Example 2: Named in-memory database
+// Named in-memory database
 const db = createDatabase(':memory:');
 
-// Example 3: With options
+// With options
 const db = createDatabase(':memory:', {
   readonly: false,
   timeout: 10000,
   statementCacheSize: 200,
 });
 
-// Example 4: With verbose logging
+// With verbose logging
 const db = createDatabase(':memory:', {
   verbose: console.log,
-});
-
-// Example 5: Read-only mode
-const db = createDatabase(':memory:', {
-  readonly: true,
 });
 ```
 
@@ -221,41 +211,18 @@ const db = createDatabase(':memory:', {
 
 ```typescript
 class Database {
-  /**
-   * Database filename (or ':memory:')
-   */
+  /** Database filename (or ':memory:') */
   readonly name: string;
 
-  /**
-   * Whether the database is read-only
-   */
+  /** Whether the database is read-only */
   readonly readonly: boolean;
 
-  /**
-   * Whether the database connection is open
-   */
+  /** Whether the database connection is open */
   readonly open: boolean;
 
-  /**
-   * Whether currently in a transaction
-   */
+  /** Whether currently in a transaction */
   readonly inTransaction: boolean;
 }
-```
-
-#### Example: Checking Database State
-
-```typescript
-const db = createDatabase();
-
-console.log(db.name);           // ':memory:'
-console.log(db.readonly);       // false
-console.log(db.open);           // true
-console.log(db.inTransaction);  // false
-
-// After closing
-db.close();
-console.log(db.open);           // false
 ```
 
 ---
@@ -279,71 +246,31 @@ prepare<T = unknown, P extends BindParameters = BindParameters>(
 | `T` | Expected row type for SELECT queries |
 | `P` | Parameter types for binding |
 
-##### Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `sql` | `string` | SQL statement to prepare |
-
-##### Returns
-
-`Statement<T, P>` - A prepared statement object
-
 ##### Examples
 
 ```typescript
-// Example 1: Simple SELECT
+// Simple SELECT
 const stmt = db.prepare('SELECT * FROM users');
 const users = stmt.all();
 
-// Example 2: With positional parameters
+// With positional parameters
 const stmt = db.prepare<{ id: number; name: string }>(
   'SELECT id, name FROM users WHERE id = ?'
 );
 const user = stmt.get(42);
-// user is typed as { id: number; name: string } | undefined
 
-// Example 3: With named parameters
+// With named parameters
 const stmt = db.prepare<{ id: number; name: string }, { userId: number }>(
   'SELECT id, name FROM users WHERE id = :userId'
 );
 const user = stmt.get({ userId: 42 });
 
-// Example 4: INSERT statement
+// INSERT statement
 const insertStmt = db.prepare(
   'INSERT INTO users (name, email) VALUES (?, ?)'
 );
 const result = insertStmt.run('Alice', 'alice@example.com');
 console.log(result.lastInsertRowid); // 1
-
-// Example 5: UPDATE statement
-const updateStmt = db.prepare(
-  'UPDATE users SET active = ? WHERE id = ?'
-);
-const result = updateStmt.run(true, 42);
-console.log(result.changes); // 1
-
-// Example 6: Reusing prepared statements
-const stmt = db.prepare('SELECT * FROM users WHERE role = ?');
-const admins = stmt.all('admin');
-const users = stmt.all('user');
-const guests = stmt.all('guest');
-```
-
-##### Error Handling
-
-```typescript
-import { DatabaseError, DatabaseErrorCode } from 'dosql';
-
-try {
-  const stmt = db.prepare('SELECT * FROM nonexistent_table');
-  stmt.all();
-} catch (error) {
-  if (error instanceof DatabaseError) {
-    console.log(error.code); // 'STMT_TABLE_NOT_FOUND'
-    console.log(error.message);
-  }
-}
 ```
 
 ---
@@ -356,20 +283,10 @@ Execute one or more SQL statements. Does not return results.
 exec(sql: string): this
 ```
 
-##### Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `sql` | `string` | SQL string (may contain multiple statements) |
-
-##### Returns
-
-`this` - The database instance (for chaining)
-
 ##### Examples
 
 ```typescript
-// Example 1: Create table
+// Create table
 db.exec(`
   CREATE TABLE users (
     id INTEGER PRIMARY KEY,
@@ -379,71 +296,17 @@ db.exec(`
   )
 `);
 
-// Example 2: Multiple statements
+// Multiple statements
 db.exec(`
   CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
   CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT);
   CREATE INDEX idx_posts_user ON posts(user_id);
 `);
 
-// Example 3: Chaining
+// Chaining
 db.exec('CREATE TABLE a (id INTEGER)')
   .exec('CREATE TABLE b (id INTEGER)')
   .exec('CREATE TABLE c (id INTEGER)');
-
-// Example 4: Schema migration script
-db.exec(`
-  -- Enable foreign keys
-  PRAGMA foreign_keys = ON;
-
-  -- Create users table
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL
-  );
-
-  -- Create posts table with foreign key
-  CREATE TABLE IF NOT EXISTS posts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    body TEXT,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-`);
-
-// Example 5: Handling semicolons in string literals (supported)
-db.exec(`
-  INSERT INTO users (name) VALUES ('John; Doe');
-  INSERT INTO users (name) VALUES ('Jane "O''Brien"');
-`);
-```
-
-##### Error Handling
-
-```typescript
-import { DatabaseError, ReadOnlyError } from 'dosql';
-
-// Read-only database error
-const readOnlyDb = createDatabase(':memory:', { readonly: true });
-try {
-  readOnlyDb.exec('CREATE TABLE test (id INTEGER)');
-} catch (error) {
-  if (error instanceof ReadOnlyError) {
-    console.log('Cannot modify read-only database');
-  }
-}
-
-// Closed database error
-db.close();
-try {
-  db.exec('SELECT 1');
-} catch (error) {
-  if (error instanceof DatabaseError && error.code === 'DB_CLOSED') {
-    console.log('Database is closed');
-  }
-}
 ```
 
 ---
@@ -456,61 +319,21 @@ Close the database connection and release resources.
 close(): this
 ```
 
-##### Returns
-
-`this` - The database instance
-
-##### Examples
-
-```typescript
-// Example 1: Basic usage
-const db = createDatabase();
-// ... use database
-db.close();
-
-// Example 2: Try-finally pattern
-const db = createDatabase();
-try {
-  db.exec('CREATE TABLE test (id INTEGER)');
-  db.prepare('INSERT INTO test VALUES (?)').run(1);
-} finally {
-  db.close();
-}
-
-// Example 3: Checking if closed
-const db = createDatabase();
-console.log(db.open); // true
-db.close();
-console.log(db.open); // false
-
-// Example 4: Safe to call multiple times
-db.close();
-db.close(); // No error
-```
-
 ---
 
 ### Prepared Statements
-
-The `Statement` interface provides methods for executing prepared SQL statements.
 
 #### Statement Properties
 
 ```typescript
 interface Statement<T, P> {
-  /**
-   * The original SQL string
-   */
+  /** The original SQL string */
   readonly source: string;
 
-  /**
-   * Whether the statement is read-only (SELECT, etc.)
-   */
+  /** Whether the statement is read-only (SELECT, etc.) */
   readonly reader: boolean;
 
-  /**
-   * Whether the statement has been finalized
-   */
+  /** Whether the statement has been finalized */
   readonly finalized: boolean;
 }
 ```
@@ -525,22 +348,6 @@ Bind parameters to the statement (chainable).
 bind(...params: P extends any[] ? P : [P]): this
 ```
 
-```typescript
-// Example 1: Positional parameters
-const stmt = db.prepare('SELECT * FROM users WHERE id = ? AND active = ?');
-const boundStmt = stmt.bind(42, true);
-const user = boundStmt.get();
-
-// Example 2: Named parameters
-const stmt = db.prepare('SELECT * FROM users WHERE id = :id');
-const user = stmt.bind({ id: 42 }).get();
-
-// Example 3: Chaining with configuration
-const stmt = db.prepare('SELECT id FROM users WHERE active = ?');
-const ids = stmt.bind(true).pluck().all();
-// ids is number[]
-```
-
 ##### run()
 
 Execute the statement and return modification results.
@@ -549,45 +356,12 @@ Execute the statement and return modification results.
 run(...params: P extends any[] ? P : [P]): RunResult
 
 interface RunResult {
-  /**
-   * Number of rows affected by the statement
-   */
+  /** Number of rows affected by the statement */
   changes: number;
 
-  /**
-   * Row ID of the last inserted row (for INSERT statements)
-   * Returns 0 if no rows were inserted
-   */
+  /** Row ID of the last inserted row (for INSERT statements) */
   lastInsertRowid: number | bigint;
 }
-```
-
-```typescript
-// Example 1: INSERT
-const stmt = db.prepare('INSERT INTO users (name, email) VALUES (?, ?)');
-const result = stmt.run('Alice', 'alice@example.com');
-console.log(result.changes);        // 1
-console.log(result.lastInsertRowid); // 1
-
-// Example 2: UPDATE
-const stmt = db.prepare('UPDATE users SET active = ? WHERE role = ?');
-const result = stmt.run(false, 'guest');
-console.log(result.changes); // Number of rows updated
-
-// Example 3: DELETE
-const stmt = db.prepare('DELETE FROM users WHERE active = ?');
-const result = stmt.run(false);
-console.log(result.changes); // Number of rows deleted
-
-// Example 4: Batch inserts
-const insert = db.prepare('INSERT INTO users (name) VALUES (?)');
-const names = ['Alice', 'Bob', 'Carol'];
-let totalInserted = 0;
-for (const name of names) {
-  const { changes } = insert.run(name);
-  totalInserted += changes;
-}
-console.log(`Inserted ${totalInserted} users`);
 ```
 
 ##### get()
@@ -598,34 +372,6 @@ Execute the statement and return the first row.
 get(...params: P extends any[] ? P : [P]): T | undefined
 ```
 
-```typescript
-// Example 1: Basic usage
-const stmt = db.prepare('SELECT * FROM users WHERE id = ?');
-const user = stmt.get(42);
-if (user) {
-  console.log(user.name);
-}
-
-// Example 2: Typed result
-interface User {
-  id: number;
-  name: string;
-  email: string;
-}
-const stmt = db.prepare<User>('SELECT * FROM users WHERE id = ?');
-const user = stmt.get(42);
-// user is User | undefined
-
-// Example 3: With named parameters
-const stmt = db.prepare('SELECT * FROM users WHERE email = :email');
-const user = stmt.get({ email: 'alice@example.com' });
-
-// Example 4: Aggregate query
-const stmt = db.prepare('SELECT COUNT(*) as count FROM users WHERE active = ?');
-const result = stmt.get(true);
-console.log(result?.count); // e.g., 42
-```
-
 ##### all()
 
 Execute the statement and return all matching rows.
@@ -634,67 +380,12 @@ Execute the statement and return all matching rows.
 all(...params: P extends any[] ? P : [P]): T[]
 ```
 
-```typescript
-// Example 1: All rows
-const stmt = db.prepare('SELECT * FROM users');
-const users = stmt.all();
-
-// Example 2: Filtered rows
-const stmt = db.prepare('SELECT * FROM users WHERE active = ?');
-const activeUsers = stmt.all(true);
-
-// Example 3: Typed results
-interface User {
-  id: number;
-  name: string;
-}
-const stmt = db.prepare<User>('SELECT id, name FROM users WHERE role = ?');
-const admins = stmt.all('admin');
-// admins is User[]
-
-// Example 4: Complex query
-const stmt = db.prepare(`
-  SELECT u.id, u.name, COUNT(p.id) as post_count
-  FROM users u
-  LEFT JOIN posts p ON p.user_id = u.id
-  GROUP BY u.id
-  HAVING post_count > ?
-`);
-const prolificUsers = stmt.all(10);
-```
-
 ##### iterate()
 
 Execute the statement and return an iterator over rows.
 
 ```typescript
 iterate(...params: P extends any[] ? P : [P]): IterableIterator<T>
-```
-
-```typescript
-// Example 1: Basic iteration
-const stmt = db.prepare('SELECT * FROM users');
-for (const user of stmt.iterate()) {
-  console.log(user.name);
-}
-
-// Example 2: Early termination
-const stmt = db.prepare('SELECT * FROM large_table');
-for (const row of stmt.iterate()) {
-  if (row.id > 100) break; // Stop early
-  processRow(row);
-}
-
-// Example 3: With parameters
-const stmt = db.prepare('SELECT * FROM logs WHERE level = ?');
-for (const log of stmt.iterate('ERROR')) {
-  console.error(log.message);
-}
-
-// Example 4: Spread into array
-const stmt = db.prepare('SELECT id FROM users LIMIT 10');
-const ids = [...stmt.pluck().iterate()];
-// ids is number[]
 ```
 
 ##### columns()
@@ -718,55 +409,12 @@ interface ColumnInfo {
 }
 ```
 
-```typescript
-// Example 1: Basic column info
-const stmt = db.prepare('SELECT id, name FROM users');
-const cols = stmt.columns();
-console.log(cols);
-// [
-//   { name: 'id', column: 'id', table: 'users', database: 'main', type: 'INTEGER' },
-//   { name: 'name', column: 'name', table: 'users', database: 'main', type: 'TEXT' }
-// ]
-
-// Example 2: With aliases
-const stmt = db.prepare('SELECT id AS user_id, name AS user_name FROM users');
-const cols = stmt.columns();
-console.log(cols[0].name);   // 'user_id'
-console.log(cols[0].column); // 'id'
-
-// Example 3: Expression columns
-const stmt = db.prepare('SELECT COUNT(*) as total FROM users');
-const cols = stmt.columns();
-console.log(cols[0].name);  // 'total'
-console.log(cols[0].table); // null (expression, not from table)
-```
-
 ##### finalize()
 
 Release resources associated with the statement.
 
 ```typescript
 finalize(): void
-```
-
-```typescript
-// Example 1: Manual finalization
-const stmt = db.prepare('SELECT * FROM users');
-const users = stmt.all();
-stmt.finalize();
-
-// Example 2: Check finalized state
-const stmt = db.prepare('SELECT 1');
-console.log(stmt.finalized); // false
-stmt.finalize();
-console.log(stmt.finalized); // true
-
-// Attempting to use a finalized statement throws an error
-try {
-  stmt.all();
-} catch (error) {
-  console.log(error.code); // 'STMT_FINALIZED'
-}
 ```
 
 #### Statement Configuration
@@ -795,13 +443,6 @@ const stmt = db.prepare(`
 `).expand();
 const rows = stmt.all();
 // rows have structure: { users: { id, name }, posts: { title } }
-
-// Combining options
-const stmt = db.prepare('SELECT id FROM users WHERE active = ?')
-  .safeIntegers()
-  .pluck();
-const ids = stmt.all(true);
-// ids is bigint[]
 ```
 
 ---
@@ -834,7 +475,7 @@ interface TransactionFunction<F> {
 ##### Examples
 
 ```typescript
-// Example 1: Basic transaction
+// Basic transaction
 const transfer = db.transaction((from: number, to: number, amount: number) => {
   const fromBalance = db.prepare('SELECT balance FROM accounts WHERE id = ?').pluck().get(from);
   if (fromBalance < amount) {
@@ -848,22 +489,7 @@ const transfer = db.transaction((from: number, to: number, amount: number) => {
 // Execute the transaction
 const result = transfer(1, 2, 100);
 
-// Example 2: Transaction with return value
-const createUserWithProfile = db.transaction((name: string, bio: string) => {
-  const { lastInsertRowid: userId } = db.prepare(
-    'INSERT INTO users (name) VALUES (?)'
-  ).run(name);
-
-  db.prepare(
-    'INSERT INTO profiles (user_id, bio) VALUES (?, ?)'
-  ).run(userId, bio);
-
-  return userId;
-});
-
-const newUserId = createUserWithProfile('Alice', 'Software engineer');
-
-// Example 3: Using different modes
+// Using different modes
 const bulkInsert = db.transaction((items: Item[]) => {
   const insert = db.prepare('INSERT INTO items (name, value) VALUES (?, ?)');
   for (const item of items) {
@@ -871,53 +497,9 @@ const bulkInsert = db.transaction((items: Item[]) => {
   }
 });
 
-// Deferred mode (default)
-bulkInsert(items);
-
-// Immediate mode - gets write lock immediately
-bulkInsert.immediate(items);
-
-// Exclusive mode - full exclusive access
-bulkInsert.exclusive(items);
-
-// Example 4: Automatic rollback on error
-const failingTransaction = db.transaction(() => {
-  db.prepare('INSERT INTO users (name) VALUES (?)').run('Alice');
-  throw new Error('Oops!');
-  // Transaction automatically rolls back
-});
-
-try {
-  failingTransaction();
-} catch (error) {
-  // Error is re-thrown, but transaction is rolled back
-  console.log('Transaction failed:', error.message);
-}
-
-// Example 5: Nested function calls
-const createOrder = db.transaction((userId: number, items: OrderItem[]) => {
-  const { lastInsertRowid: orderId } = db.prepare(
-    'INSERT INTO orders (user_id) VALUES (?)'
-  ).run(userId);
-
-  const insertItem = db.prepare(
-    'INSERT INTO order_items (order_id, product_id, quantity) VALUES (?, ?, ?)'
-  );
-
-  for (const item of items) {
-    insertItem.run(orderId, item.productId, item.quantity);
-  }
-
-  // Update inventory
-  const updateStock = db.prepare(
-    'UPDATE products SET stock = stock - ? WHERE id = ?'
-  );
-  for (const item of items) {
-    updateStock.run(item.quantity, item.productId);
-  }
-
-  return { orderId, itemCount: items.length };
-});
+bulkInsert(items);             // Deferred mode (default)
+bulkInsert.immediate(items);   // Gets write lock immediately
+bulkInsert.exclusive(items);   // Full exclusive access
 ```
 
 ---
@@ -928,23 +510,17 @@ Savepoints allow partial rollback within a transaction.
 
 #### savepoint()
 
-Begin a savepoint.
-
 ```typescript
 savepoint(name: string): this
 ```
 
 #### release()
 
-Release (commit) a savepoint.
-
 ```typescript
 release(name: string): this
 ```
 
 #### rollback()
-
-Rollback to a savepoint or the transaction.
 
 ```typescript
 rollback(name?: string): this
@@ -953,178 +529,36 @@ rollback(name?: string): this
 ##### Examples
 
 ```typescript
-// Example 1: Basic savepoint usage
+// Basic savepoint usage
 db.savepoint('sp1');
 db.prepare('INSERT INTO users (name) VALUES (?)').run('Alice');
 db.release('sp1'); // Commits the savepoint
 
-// Example 2: Rollback to savepoint
+// Rollback to savepoint
 db.savepoint('sp1');
 db.prepare('INSERT INTO users (name) VALUES (?)').run('Alice');
 db.rollback('sp1'); // Undoes the insert
 
-// Example 3: Nested savepoints
-const complexOperation = db.transaction(() => {
-  // Main operation
-  db.prepare('INSERT INTO orders (user_id) VALUES (?)').run(1);
-
-  db.savepoint('items');
-  try {
-    db.prepare('INSERT INTO order_items (order_id, product_id) VALUES (?, ?)').run(1, 100);
-    // If this fails, we can rollback just the items
-  } catch (error) {
-    db.rollback('items');
-    // Handle partial failure
-  }
-  db.release('items');
-});
-
-// Example 4: Try-catch pattern with savepoints
-const importData = db.transaction((rows: DataRow[]) => {
-  let successCount = 0;
-  let errorCount = 0;
-
-  for (const row of rows) {
-    db.savepoint('row');
-    try {
-      db.prepare('INSERT INTO data (value) VALUES (?)').run(row.value);
-      db.release('row');
-      successCount++;
-    } catch (error) {
-      db.rollback('row');
-      errorCount++;
-    }
-  }
-
-  return { successCount, errorCount };
-});
-```
-
-#### Savepoint Nesting Limitations
-
-While savepoints support nesting, there are important limitations and constraints to be aware of:
-
-##### Maximum Nesting Depth
-
-```typescript
-// DoSQL enforces a maximum savepoint nesting depth of 32
-// Exceeding this limit throws a DatabaseError
-
-// This will eventually fail:
-for (let i = 0; i < 50; i++) {
-  db.savepoint(`sp_${i}`); // Throws at i=32
-}
-```
-
-##### Name Uniqueness Within Active Savepoints
-
-```typescript
-// Savepoint names must be unique among currently active (unreleased) savepoints
-// Reusing an active savepoint name throws an error
-
-db.savepoint('sp1');
-db.savepoint('sp2');
-db.savepoint('sp1'); // ERROR: Savepoint 'sp1' already exists
-
-// However, after releasing a savepoint, its name can be reused:
-db.savepoint('sp1');
-db.release('sp1');
-db.savepoint('sp1'); // OK - sp1 was released
-```
-
-##### Savepoint Ordering Constraints
-
-```typescript
-// Savepoints must be released or rolled back in LIFO (stack) order
-// You cannot release or rollback an inner savepoint before an outer one
-
-db.savepoint('outer');
-db.savepoint('inner');
-
-// INCORRECT - cannot release outer before inner
-db.release('outer'); // ERROR: Cannot release savepoint with active nested savepoints
-
-// CORRECT - release in reverse order
-db.release('inner');
-db.release('outer');
-```
-
-##### Rollback Behavior with Nested Savepoints
-
-```typescript
-// Rolling back to a savepoint also releases all savepoints created after it
-db.savepoint('sp1');
-db.prepare('INSERT INTO t VALUES (1)').run();
-db.savepoint('sp2');
-db.prepare('INSERT INTO t VALUES (2)').run();
-db.savepoint('sp3');
-db.prepare('INSERT INTO t VALUES (3)').run();
-
-// Rolling back to sp1 also implicitly releases sp2 and sp3
-db.rollback('sp1');
-
-// After rollback, sp2 and sp3 no longer exist
-db.release('sp2'); // ERROR: Savepoint 'sp2' does not exist
-```
-
-##### Transaction Context Required
-
-```typescript
-// Savepoints are only valid within an active transaction
-// Using savepoints outside a transaction throws an error
-
-// INCORRECT - no active transaction
-db.savepoint('sp1'); // ERROR: Cannot create savepoint outside transaction
-
-// CORRECT - within transaction
-const doWork = db.transaction(() => {
-  db.savepoint('sp1'); // OK
-  // ... work ...
-  db.release('sp1');
-});
-doWork();
-```
-
-##### Memory Considerations
-
-```typescript
-// Each active savepoint consumes memory for tracking state
-// Deep nesting or many parallel savepoints can impact performance
-
-// Best practice: Keep nesting shallow and release savepoints promptly
+// Try-catch pattern with savepoints
 const processItems = db.transaction((items: Item[]) => {
   for (const item of items) {
     db.savepoint('item');
     try {
       processItem(item);
-      db.release('item'); // Release immediately after success
+      db.release('item');
     } catch {
       db.rollback('item');
     }
-    // Savepoint is always released/rolled back before next iteration
   }
 });
 ```
 
-##### Savepoints and DDL Statements
+##### Savepoint Constraints
 
-```typescript
-// Some DDL statements (CREATE TABLE, DROP TABLE, etc.) may implicitly
-// commit the transaction in certain SQL implementations.
-// In DoSQL, DDL within savepoints follows SQLite semantics:
-
-const migration = db.transaction(() => {
-  db.savepoint('schema_change');
-  try {
-    db.exec('ALTER TABLE users ADD COLUMN status TEXT');
-    db.release('schema_change');
-  } catch (error) {
-    db.rollback('schema_change');
-    // Schema change is rolled back
-    throw error;
-  }
-});
-```
+- Maximum nesting depth: 32
+- Names must be unique among active savepoints
+- Must be released/rolled back in LIFO order
+- Only valid within an active transaction
 
 ---
 
@@ -1134,17 +568,15 @@ Execute multiple queries in a single request with configurable execution semanti
 
 #### batch()
 
-Execute multiple queries with control over atomicity and error handling.
-
 ```typescript
 batch(request: BatchRequest): Promise<BatchResponse>
 
 interface BatchRequest {
   /** Array of queries to execute */
   queries: QueryRequest[];
-  /** Whether to execute in a single transaction (default: false) */
+  /** Whether to execute in a single transaction */
   atomic?: boolean;
-  /** Whether to continue on error (default: false) */
+  /** Whether to continue on error */
   continueOnError?: boolean;
   /** Branch for all queries */
   branch?: string;
@@ -1162,211 +594,22 @@ interface BatchResponse {
   /** Final LSN after batch */
   lsn: bigint;
 }
-
-interface BatchError {
-  /** Index of the failed query */
-  index: number;
-  /** Error message */
-  error: string;
-  /** Error code */
-  code?: string;
-}
 ```
 
-#### Atomic vs ContinueOnError Tradeoffs
-
-The `atomic` and `continueOnError` options control how the batch handles failures. Understanding their interaction is critical for choosing the right behavior for your use case.
-
-##### Option Combinations
+#### Atomic vs ContinueOnError
 
 | `atomic` | `continueOnError` | Behavior | Use Case |
 |----------|-------------------|----------|----------|
 | `false` | `false` | Stop on first error, no rollback | Fast-fail, partial results acceptable |
-| `false` | `true` | Continue on errors, no rollback | Best-effort execution, collect all results |
+| `false` | `true` | Continue on errors, no rollback | Best-effort execution |
 | `true` | `false` | Stop on first error, rollback all | All-or-nothing consistency |
-| `true` | `true` | Continue on errors, rollback all on any error | Validate all queries, rollback if any fail |
-
-##### Atomic Mode (`atomic: true`)
-
-When `atomic` is enabled, all queries execute within a single database transaction:
-
-- **All succeed together**: If all queries complete successfully, changes are committed atomically
-- **All fail together**: If any query fails, all changes are rolled back - the database remains unchanged
-- **Isolation**: Other concurrent operations see either all changes or none
-
-```typescript
-// Example: Transfer money between accounts (all-or-nothing)
-const result = await rpc.batch({
-  queries: [
-    { sql: 'UPDATE accounts SET balance = balance - ? WHERE id = ?', params: [100, 1] },
-    { sql: 'UPDATE accounts SET balance = balance + ? WHERE id = ?', params: [100, 2] },
-    { sql: 'INSERT INTO transfers (from_id, to_id, amount) VALUES (?, ?, ?)', params: [1, 2, 100] },
-  ],
-  atomic: true,
-});
-
-// If any query fails, no money moves and no transfer is recorded
-```
-
-**When to use atomic mode:**
-- Financial transactions (transfers, payments)
-- Multi-table inserts with foreign key relationships
-- Any operation where partial completion would leave data inconsistent
-- Schema migrations that must apply completely or not at all
-
-**Tradeoffs of atomic mode:**
-- Holds locks longer (entire batch duration)
-- Higher latency due to transaction overhead
-- May increase lock contention under high concurrency
-- Single failure causes complete rollback (potentially expensive re-work)
-
-##### Continue On Error Mode (`continueOnError: true`)
-
-When `continueOnError` is enabled, execution proceeds through all queries regardless of failures:
-
-```typescript
-// Example: Import data with best-effort semantics
-const result = await rpc.batch({
-  queries: [
-    { sql: 'INSERT INTO users (id, name) VALUES (?, ?)', params: [1, 'Alice'] },
-    { sql: 'INSERT INTO users (id, name) VALUES (?, ?)', params: [1, 'Bob'] }, // Duplicate key!
-    { sql: 'INSERT INTO users (id, name) VALUES (?, ?)', params: [3, 'Carol'] },
-  ],
-  continueOnError: true,
-});
-
-// result.successCount = 2 (Alice and Carol)
-// result.errorCount = 1 (Bob failed due to duplicate key)
-// Both Alice and Carol are inserted
-```
-
-**When to use continueOnError:**
-- Bulk data imports where some failures are expected
-- Idempotent operations (INSERT OR IGNORE patterns)
-- Collecting validation errors across all queries
-- Processing independent operations in a single request
-
-**Tradeoffs of continueOnError:**
-- May leave database in partially updated state
-- Requires checking each result for errors
-- Harder to reason about final state if some operations failed
-- Not suitable for dependent operations
-
-##### Combining Atomic + ContinueOnError
-
-When both options are enabled, the batch executes all queries but rolls back if any fail:
-
-```typescript
-// Example: Validate an entire batch before committing
-const result = await rpc.batch({
-  queries: [
-    { sql: 'INSERT INTO orders (id, user_id) VALUES (?, ?)', params: [1, 100] },
-    { sql: 'INSERT INTO order_items (order_id, product_id) VALUES (?, ?)', params: [1, 50] },
-    { sql: 'UPDATE inventory SET qty = qty - 1 WHERE product_id = ?', params: [50] },
-  ],
-  atomic: true,
-  continueOnError: true,
-});
-
-// All queries execute, but if ANY fail, ALL are rolled back
-// Useful for dry-run validation or detecting all errors at once
-```
-
-**When to use both:**
-- Validating complex multi-statement operations
-- Detecting all constraint violations in one pass
-- Testing migrations before applying them
-- Pre-flight checks that need full error reporting
-
-##### Default Behavior (`atomic: false`, `continueOnError: false`)
-
-Without either option, the batch stops on the first error with no transaction wrapper:
-
-```typescript
-// Example: Sequential operations, stop on first failure
-const result = await rpc.batch({
-  queries: [
-    { sql: 'INSERT INTO users (name) VALUES (?)', params: ['Alice'] },
-    { sql: 'INVALID SQL HERE' }, // Error!
-    { sql: 'INSERT INTO users (name) VALUES (?)', params: ['Carol'] }, // Never executed
-  ],
-});
-
-// result.successCount = 1 (Alice)
-// result.errorCount = 1 (invalid SQL)
-// Carol's insert is skipped - results array has placeholder for it
-```
-
-**When to use defaults:**
-- Simple sequential operations where order matters
-- When you want to fail fast without overhead
-- Operations that are easy to retry from the point of failure
-
-##### Performance Considerations
-
-| Mode | Transaction Overhead | Lock Duration | Error Recovery |
-|------|---------------------|---------------|----------------|
-| Default | None | Per-query | Retry from failure point |
-| `atomic` only | Full | Entire batch | Retry entire batch |
-| `continueOnError` only | None | Per-query | Check each result |
-| Both | Full | Entire batch | Retry entire batch |
-
-##### Examples
-
-```typescript
-// Example 1: Atomic batch for data consistency
-const transfer = await rpc.batch({
-  queries: [
-    { sql: 'UPDATE accounts SET balance = balance - 100 WHERE id = 1' },
-    { sql: 'UPDATE accounts SET balance = balance + 100 WHERE id = 2' },
-  ],
-  atomic: true,
-});
-
-// Example 2: Best-effort bulk insert
-const bulkInsert = await rpc.batch({
-  queries: users.map(user => ({
-    sql: 'INSERT OR IGNORE INTO users (email, name) VALUES (?, ?)',
-    params: [user.email, user.name],
-  })),
-  continueOnError: true,
-});
-console.log(`Inserted ${bulkInsert.successCount} of ${users.length} users`);
-
-// Example 3: Validate before commit
-const validation = await rpc.batch({
-  queries: migrationStatements,
-  atomic: true,
-  continueOnError: true,
-});
-if (validation.errorCount > 0) {
-  console.log('Migration would fail:', validation.results.filter(r => 'error' in r));
-  // All changes are already rolled back
-}
-
-// Example 4: Process results with error handling
-const result = await rpc.batch({
-  queries: operations,
-  continueOnError: true,
-});
-
-for (let i = 0; i < result.results.length; i++) {
-  const r = result.results[i];
-  if ('error' in r) {
-    console.error(`Query ${i} failed: ${r.error}`);
-  } else {
-    console.log(`Query ${i} affected ${r.changes} rows`);
-  }
-}
-```
+| `true` | `true` | Continue on errors, rollback all on any error | Validate all, rollback if any fail |
 
 ---
 
 ### PRAGMA Commands
 
 #### pragma()
-
-Execute a PRAGMA statement.
 
 ```typescript
 pragma<N extends PragmaName>(name: N, value?: SqlValue): PragmaResult<N>
@@ -1394,49 +637,17 @@ type PragmaName =
 ##### Examples
 
 ```typescript
-// Example 1: Get/set journal mode
+// Get/set journal mode
 const mode = db.pragma('journal_mode');
-console.log(mode); // 'memory'
 
-// Example 2: Enable foreign keys
+// Enable foreign keys
 db.pragma('foreign_keys', 1);
-const enabled = db.pragma('foreign_keys');
-console.log(enabled); // 1
 
-// Example 3: Set cache size
-db.pragma('cache_size', -64000); // 64MB (negative = KB)
+// Get table info
+const columns = db.pragma('table_info', 'users');
 
-// Example 4: Get table info
-interface TableInfoRow {
-  cid: number;
-  name: string;
-  type: string;
-  notnull: number;
-  dflt_value: string | null;
-  pk: number;
-}
-const columns = db.pragma('table_info', 'users') as TableInfoRow[];
-for (const col of columns) {
-  console.log(`${col.name}: ${col.type}`);
-}
-
-// Example 5: Integrity check
+// Integrity check
 const result = db.pragma('integrity_check');
-console.log(result); // ['ok'] if database is healthy
-
-// Example 6: Get database list
-const databases = db.pragma('database_list');
-console.log(databases);
-// [{ seq: 0, name: 'main', file: ':memory:' }]
-
-// Example 7: Application version tracking
-db.pragma('user_version', 3); // Set schema version
-const version = db.pragma('user_version');
-console.log(version); // 3
-
-// Example 8: Get compile options
-const options = db.pragma('compile_options');
-console.log(options); // ['ENABLE_FTS5', 'ENABLE_JSON1', ...]
 ```
 
 ---
@@ -1454,45 +665,19 @@ function(name: string, fn: (...args: SqlValue[]) => SqlValue): this
 ##### Examples
 
 ```typescript
-// Example 1: Simple function
+// Simple function
 db.function('double', (x) => Number(x) * 2);
-const result = db.prepare('SELECT double(5)').pluck().get();
-console.log(result); // 10
+const result = db.prepare('SELECT double(5)').pluck().get(); // 10
 
-// Example 2: String function
+// String function
 db.function('reverse', (str) => {
   return String(str).split('').reverse().join('');
 });
-const reversed = db.prepare("SELECT reverse('hello')").pluck().get();
-console.log(reversed); // 'olleh'
 
-// Example 3: Multi-argument function
+// Multi-argument function
 db.function('clamp', (value, min, max) => {
   const v = Number(value);
-  const lo = Number(min);
-  const hi = Number(max);
-  return Math.max(lo, Math.min(hi, v));
-});
-const clamped = db.prepare('SELECT clamp(150, 0, 100)').pluck().get();
-console.log(clamped); // 100
-
-// Example 4: Using in queries
-db.function('is_valid_email', (email) => {
-  const pattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return pattern.test(String(email)) ? 1 : 0;
-});
-const validUsers = db.prepare(`
-  SELECT * FROM users WHERE is_valid_email(email) = 1
-`).all();
-
-// Example 5: JSON processing
-db.function('json_extract_name', (jsonStr) => {
-  try {
-    const obj = JSON.parse(String(jsonStr));
-    return obj.name ?? null;
-  } catch {
-    return null;
-  }
+  return Math.max(Number(min), Math.min(Number(max), v));
 });
 ```
 
@@ -1507,24 +692,16 @@ aggregate<TAccumulator = unknown>(
 ): this
 
 interface AggregateOptions<TAccumulator> {
-  /**
-   * Called for each row to update the accumulator state
-   */
+  /** Called for each row to update the accumulator state */
   step: (accumulator: TAccumulator, ...values: SqlValue[]) => void;
 
-  /**
-   * Called to finalize and return the aggregate result
-   */
+  /** Called to finalize and return the aggregate result */
   result: (accumulator: TAccumulator) => SqlValue;
 
-  /**
-   * Initial accumulator value
-   */
+  /** Initial accumulator value */
   start?: TAccumulator;
 
-  /**
-   * Optional inverse function for window functions
-   */
+  /** Optional inverse function for window functions */
   inverse?: (accumulator: TAccumulator, ...values: SqlValue[]) => void;
 }
 ```
@@ -1532,62 +709,18 @@ interface AggregateOptions<TAccumulator> {
 ##### Examples
 
 ```typescript
-// Example 1: Custom sum
+// Custom sum
 db.aggregate<number>('my_sum', {
   start: 0,
   step: (acc, value) => acc + Number(value),
   result: (acc) => acc,
 });
-const total = db.prepare('SELECT my_sum(amount) FROM orders').pluck().get();
 
-// Example 2: String concatenation
-db.aggregate<string[]>('string_agg', {
-  start: [],
-  step: (acc, value, separator = ',') => {
-    acc.push(String(value));
-  },
-  result: (acc) => acc.join(','),
-});
-const names = db.prepare('SELECT string_agg(name) FROM users').pluck().get();
-
-// Example 3: Min/Max range
-interface MinMax {
-  min: number;
-  max: number;
-}
-db.aggregate<MinMax>('range', {
-  start: { min: Infinity, max: -Infinity },
-  step: (acc, value) => {
-    const n = Number(value);
-    if (n < acc.min) acc.min = n;
-    if (n > acc.max) acc.max = n;
-  },
-  result: (acc) => acc.max - acc.min,
-});
-
-// Example 4: Custom average with object state
-interface AvgState {
-  sum: number;
-  count: number;
-}
-db.aggregate<AvgState>('custom_avg', {
-  start: { sum: 0, count: 0 },
-  step: (acc, value) => {
-    if (value !== null) {
-      acc.sum += Number(value);
-      acc.count++;
-    }
-  },
-  result: (acc) => acc.count > 0 ? acc.sum / acc.count : null,
-});
-
-// Example 5: Median (collects all values)
+// Median
 db.aggregate<number[]>('median', {
   start: [],
   step: (acc, value) => {
-    if (value !== null) {
-      acc.push(Number(value));
-    }
+    if (value !== null) acc.push(Number(value));
   },
   result: (acc) => {
     if (acc.length === 0) return null;
@@ -1607,9 +740,6 @@ db.aggregate<number[]>('median', {
 ### SQL Value Types
 
 ```typescript
-/**
- * Supported SQL value types for binding
- */
 type SqlValue =
   | string      // TEXT
   | number      // INTEGER, REAL
@@ -1623,19 +753,8 @@ type SqlValue =
 ### Parameter Binding
 
 ```typescript
-/**
- * Named parameters object using :name, @name, or $name syntax
- */
 type NamedParameters = Record<string, SqlValue>;
-
-/**
- * Positional parameters array using ? or ?NNN syntax
- */
 type PositionalParameters = SqlValue[];
-
-/**
- * Union of all parameter binding styles
- */
 type BindParameters = NamedParameters | PositionalParameters;
 ```
 
@@ -1656,32 +775,16 @@ db.prepare('SELECT * FROM users WHERE id = @id').get({ id: 42 });
 
 // Named parameters with $name
 db.prepare('SELECT * FROM users WHERE id = $id').get({ id: 42 });
-
-// Blob binding
-const data = new Uint8Array([1, 2, 3, 4]);
-db.prepare('INSERT INTO files (content) VALUES (?)').run(data);
-
-// Date binding (converted to ISO string)
-const now = new Date();
-db.prepare('INSERT INTO events (created_at) VALUES (?)').run(now);
-
-// BigInt binding
-const bigId = 9007199254740993n;
-db.prepare('INSERT INTO big_table (id) VALUES (?)').run(bigId);
 ```
 
 ### Result Types
 
 ```typescript
 interface RunResult {
-  /**
-   * Number of rows affected by the statement
-   */
+  /** Number of rows affected by the statement */
   changes: number;
 
-  /**
-   * Row ID of the last inserted row (for INSERT statements)
-   */
+  /** Row ID of the last inserted row (for INSERT statements) */
   lastInsertRowid: number | bigint;
 }
 
@@ -1738,15 +841,6 @@ abstract class DoSQLError extends Error {
   withRecoveryHint(hint: string): this;
 }
 
-interface ErrorContext {
-  requestId?: string;
-  transactionId?: string;
-  sql?: string;
-  table?: string;
-  column?: string;
-  metadata?: Record<string, unknown>;
-}
-
 enum ErrorCategory {
   CONNECTION = 'CONNECTION',
   EXECUTION = 'EXECUTION',
@@ -1760,7 +854,7 @@ enum ErrorCategory {
 
 ### Error Codes
 
-#### Database Error Codes
+#### DatabaseErrorCode
 
 ```typescript
 enum DatabaseErrorCode {
@@ -1776,7 +870,7 @@ enum DatabaseErrorCode {
 }
 ```
 
-#### Statement Error Codes
+#### StatementErrorCode
 
 ```typescript
 enum StatementErrorCode {
@@ -1790,7 +884,7 @@ enum StatementErrorCode {
 }
 ```
 
-#### Binding Error Codes
+#### BindingErrorCode
 
 ```typescript
 enum BindingErrorCode {
@@ -1802,34 +896,18 @@ enum BindingErrorCode {
 }
 ```
 
-#### Syntax Error Codes
-
-```typescript
-enum SyntaxErrorCode {
-  UNEXPECTED_TOKEN = 'SYNTAX_UNEXPECTED_TOKEN',
-  UNEXPECTED_EOF = 'SYNTAX_UNEXPECTED_EOF',
-  INVALID_IDENTIFIER = 'SYNTAX_INVALID_IDENTIFIER',
-  INVALID_LITERAL = 'SYNTAX_INVALID_LITERAL',
-  GENERAL = 'SYNTAX_ERROR',
-}
-```
-
 ### Error Handling Patterns
 
 ```typescript
 import {
   DoSQLError,
   DatabaseError,
-  DatabaseErrorCode,
   StatementError,
-  StatementErrorCode,
   BindingError,
-  BindingErrorCode,
-  SQLSyntaxError,
   ErrorCategory,
 } from 'dosql';
 
-// Example 1: Basic error handling
+// Basic error handling
 try {
   db.prepare('SELECT * FROM nonexistent').all();
 } catch (error) {
@@ -1837,22 +915,10 @@ try {
     console.log('Code:', error.code);
     console.log('Category:', error.category);
     console.log('Retryable:', error.isRetryable());
-    console.log('User message:', error.toUserMessage());
   }
 }
 
-// Example 2: Handle specific error types
-try {
-  db.prepare('INSERT INTO users (name) VALUES (?)').run();
-} catch (error) {
-  if (error instanceof BindingError) {
-    if (error.code === BindingErrorCode.MISSING_PARAM) {
-      console.log('Missing parameter');
-    }
-  }
-}
-
-// Example 3: Handle by category
+// Handle by category
 try {
   await someOperation();
 } catch (error) {
@@ -1864,59 +930,14 @@ try {
       case ErrorCategory.VALIDATION:
         console.log('Invalid input:', error.toUserMessage());
         break;
-      case ErrorCategory.CONFLICT:
-        console.log('Conflict detected - may need retry');
-        break;
       case ErrorCategory.TIMEOUT:
         console.log('Operation timed out');
         break;
-      default:
-        console.log('Unexpected error:', error.message);
     }
   }
 }
 
-// Example 4: Structured logging
-try {
-  db.exec('INVALID SQL');
-} catch (error) {
-  if (error instanceof DoSQLError) {
-    const logEntry = error.toLogEntry();
-    logger.error(logEntry);
-    // {
-    //   level: 'error',
-    //   timestamp: '2024-01-15T10:30:00.000Z',
-    //   error: { name: 'SQLSyntaxError', code: 'SYNTAX_ERROR', message: '...' },
-    //   metadata: { category: 'VALIDATION', ... }
-    // }
-  }
-}
-
-// Example 5: API response serialization
-try {
-  await handleRequest();
-} catch (error) {
-  if (error instanceof DoSQLError) {
-    return new Response(JSON.stringify(error.toJSON()), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-}
-
-// Example 6: Add context to errors
-try {
-  db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-} catch (error) {
-  if (error instanceof DoSQLError) {
-    throw error
-      .withContext({ requestId: ctx.requestId, sql: 'SELECT * FROM users' })
-      .withRecoveryHint('Check that the users table exists');
-  }
-  throw error;
-}
-
-// Example 7: Retry pattern for retryable errors
+// Retry pattern
 async function executeWithRetry<T>(
   fn: () => Promise<T>,
   maxRetries = 3
@@ -1929,7 +950,7 @@ async function executeWithRetry<T>(
     } catch (error) {
       lastError = error as Error;
       if (error instanceof DoSQLError && !error.isRetryable()) {
-        throw error; // Don't retry non-retryable errors
+        throw error;
       }
       await new Promise(r => setTimeout(r, 100 * Math.pow(2, attempt)));
     }
@@ -1959,15 +980,15 @@ interface ConnectionOptions {
   url: string;
   /** Default branch for all queries */
   defaultBranch?: string;
-  /** Connection timeout in milliseconds (default: 30000) */
+  /** Connection timeout in milliseconds */
   connectTimeoutMs?: number;
-  /** Query timeout in milliseconds (default: 30000) */
+  /** Query timeout in milliseconds */
   queryTimeoutMs?: number;
-  /** Auto-reconnect on disconnect (default: true) */
+  /** Auto-reconnect on disconnect */
   autoReconnect?: boolean;
-  /** Max reconnect attempts (default: 5) */
+  /** Max reconnect attempts */
   maxReconnectAttempts?: number;
-  /** Delay between reconnect attempts in ms (default: 1000) */
+  /** Delay between reconnect attempts in ms */
   reconnectDelayMs?: number;
 }
 
@@ -1976,20 +997,6 @@ const client = createWebSocketClient({
   defaultBranch: 'main',
   autoReconnect: true,
 });
-
-// Execute queries
-const result = await client.query({
-  sql: 'SELECT * FROM users WHERE id = $1',
-  params: [123],
-});
-
-// Subscribe to CDC
-for await (const event of client.subscribeCDC({ fromLSN: 0n, tables: ['users'] })) {
-  console.log('Change:', event);
-}
-
-// Close connection
-client.close();
 ```
 
 #### createHttpClient()
@@ -2003,13 +1010,6 @@ const client = createHttpClient({
   url: 'https://dosql.example.com/rpc',
   defaultBranch: 'main',
 });
-
-// Execute queries (streaming and CDC not supported)
-const result = await client.query({
-  sql: 'SELECT * FROM users LIMIT 10',
-});
-
-client.close();
 ```
 
 ### Query Operations
@@ -2051,99 +1051,51 @@ interface QueryResponse {
   hasMore: boolean;
 }
 
-// Execute a query
 const result = await client.query({
-  sql: 'SELECT id, name, email FROM users WHERE active = $1',
+  sql: 'SELECT id, name FROM users WHERE active = $1',
   params: [true],
   limit: 100,
 });
-
-console.log('Columns:', result.columns);
-console.log('Row count:', result.rowCount);
-console.log('Execution time:', result.executionTimeMs, 'ms');
 ```
 
 ### Streaming Queries
 
-For large result sets, use streaming to avoid memory issues:
-
 ```typescript
 interface StreamRequest {
-  /** SQL query string */
   sql: string;
-  /** Query parameters */
   params?: unknown[];
-  /** Chunk size (rows per chunk) */
   chunkSize?: number;
-  /** Maximum total rows */
   maxRows?: number;
-  /** Branch for query isolation */
   branch?: string;
 }
 
 interface StreamChunk {
-  /** Chunk sequence number (0-indexed) */
   chunkIndex: number;
-  /** Rows in this chunk */
   rows: unknown[][];
-  /** Row count in this chunk */
   rowCount: number;
-  /** Whether this is the final chunk */
   isLast: boolean;
-  /** Total rows streamed so far */
   totalRowsSoFar: number;
 }
 
-// Stream large results
 for await (const chunk of client.queryStream({
   sql: 'SELECT * FROM events WHERE timestamp > $1',
   params: ['2024-01-01'],
   chunkSize: 1000,
-  maxRows: 100000,
 })) {
-  console.log(`Received chunk ${chunk.chunkIndex} with ${chunk.rowCount} rows`);
   processRows(chunk.rows);
-
-  if (chunk.isLast) {
-    console.log(`Stream complete: ${chunk.totalRowsSoFar} total rows`);
-  }
 }
 ```
 
 ### Transaction Operations
 
 ```typescript
-import { withTransaction, type TransactionContext } from 'dosql/rpc';
+import { withTransaction } from 'dosql/rpc';
 
 interface BeginTransactionRequest {
-  /** Isolation level */
   isolation?: 'READ_COMMITTED' | 'REPEATABLE_READ' | 'SERIALIZABLE';
-  /** Transaction timeout in ms */
   timeoutMs?: number;
-  /** Branch for the transaction */
   branch?: string;
-  /** Read-only transaction */
   readOnly?: boolean;
-}
-
-interface TransactionHandle {
-  /** Transaction ID */
-  txId: string;
-  /** LSN at transaction start */
-  startLSN: bigint;
-  /** Expiration timestamp */
-  expiresAt: number;
-}
-
-// Manual transaction management
-const handle = await client.beginTransaction({ isolation: 'SERIALIZABLE' });
-try {
-  await client.query({ sql: 'INSERT INTO users (name) VALUES ($1)', params: ['Alice'] });
-  await client.query({ sql: 'INSERT INTO logs (action) VALUES ($1)', params: ['user_created'] });
-  await client.commit({ txId: handle.txId });
-} catch (error) {
-  await client.rollback({ txId: handle.txId });
-  throw error;
 }
 
 // Using the convenience wrapper
@@ -2158,92 +1110,44 @@ const result = await withTransaction(client, async (tx) => {
 
 ```typescript
 interface SchemaRequest {
-  /** Tables to get schema for (empty = all) */
   tables?: string[];
-  /** Branch to query */
   branch?: string;
-  /** Include indexes */
   includeIndexes?: boolean;
-  /** Include foreign keys */
   includeForeignKeys?: boolean;
 }
 
 interface SchemaResponse {
-  /** Table schemas */
   tables: TableSchema[];
-  /** Current schema version */
   version: number;
-  /** Last modification LSN */
   lastModifiedLSN: bigint;
 }
 
-interface TableSchema {
-  name: string;
-  columns: ColumnSchema[];
-  primaryKey: string[];
-  indexes?: IndexSchema[];
-  foreignKeys?: ForeignKeySchema[];
-}
-
-// Get schema information
 const schema = await client.getSchema({
   tables: ['users', 'posts'],
   includeIndexes: true,
-  includeForeignKeys: true,
 });
-
-for (const table of schema.tables) {
-  console.log(`Table: ${table.name}`);
-  for (const col of table.columns) {
-    console.log(`  ${col.name}: ${col.type} ${col.nullable ? 'NULL' : 'NOT NULL'}`);
-  }
-}
 ```
 
 ### Connection Management
 
 ```typescript
 interface ConnectionStats {
-  /** Whether connected */
   connected: boolean;
-  /** Connection ID */
   connectionId?: string;
-  /** Current branch */
   branch?: string;
-  /** Current LSN */
   currentLSN?: bigint;
-  /** Latency in ms */
   latencyMs?: number;
-  /** Messages sent */
   messagesSent: number;
-  /** Messages received */
   messagesReceived: number;
-  /** Reconnect count */
   reconnectCount: number;
 }
 
-// Ping the server
 const pong = await client.ping();
-console.log('LSN:', pong.lsn);
-console.log('Timestamp:', new Date(pong.timestamp));
-
-// Get connection stats
 const stats = client.getConnectionStats();
-console.log('Connected:', stats.connected);
-console.log('Latency:', stats.latencyMs, 'ms');
-
-// Check connection
-if (!client.isConnected()) {
-  await client.reconnect();
-}
-
-// Close when done
 client.close();
 ```
 
 ### Server Implementation
-
-Implement the RPC server in your Durable Object:
 
 ```typescript
 import { DoSQLTarget, handleDoSQLRequest, type QueryExecutor } from 'dosql/rpc';
@@ -2254,7 +1158,7 @@ export class DoSQLDurableObject implements DurableObject {
   constructor(ctx: DurableObjectState, env: Env) {
     const executor = new MyQueryExecutor(ctx);
     this.target = new DoSQLTarget(executor, undefined, {
-      streamTTLMs: 30 * 60 * 1000, // 30 minutes
+      streamTTLMs: 30 * 60 * 1000,
       maxConcurrentStreams: 100,
       onScheduleAlarm: (delayMs) => ctx.storage.setAlarm(Date.now() + delayMs),
     });
@@ -2262,44 +1166,10 @@ export class DoSQLDurableObject implements DurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-
     if (url.pathname === '/rpc') {
       return handleDoSQLRequest(request, this.target);
     }
-
     return new Response('Not Found', { status: 404 });
-  }
-
-  async alarm(): Promise<void> {
-    // Clean up expired streams
-    this.target.cleanupExpiredStreams();
-  }
-}
-
-// Implement the QueryExecutor interface
-class MyQueryExecutor implements QueryExecutor {
-  async execute(sql: string, params?: unknown[], options?: ExecuteOptions): Promise<ExecuteResult> {
-    // Execute SQL and return results
-  }
-
-  getCurrentLSN(): bigint {
-    // Return current LSN
-  }
-
-  async getSchema(tables?: string[]): Promise<TableSchema[]> {
-    // Return schema information
-  }
-
-  async beginTransaction(options?: TransactionOptions): Promise<string> {
-    // Begin transaction and return ID
-  }
-
-  async commit(txId: string): Promise<void> {
-    // Commit transaction
-  }
-
-  async rollback(txId: string, savepoint?: string): Promise<void> {
-    // Rollback transaction
   }
 }
 ```
@@ -2321,45 +1191,33 @@ import {
   type WALWriter,
   type WALEntry,
   type WALConfig,
-  type AppendOptions,
-  type AppendResult,
 } from 'dosql/wal';
 
 interface WALConfig {
-  /** Maximum segment size in bytes (default: 2MB) */
+  /** Maximum segment size in bytes */
   maxSegmentSize?: number;
-  /** Flush interval in ms (default: 100) */
+  /** Flush interval in ms */
   flushIntervalMs?: number;
-  /** Enable CRC32 checksums (default: true) */
+  /** Enable CRC32 checksums */
   enableChecksums?: boolean;
 }
 
 interface WALEntry {
-  /** Timestamp when entry was created */
   timestamp: number;
-  /** Transaction ID */
   txnId: string;
-  /** Operation type */
   op: 'INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE' | 'DDL';
-  /** Table name */
   table: string;
-  /** Value before change (for UPDATE/DELETE) */
   before?: Uint8Array;
-  /** Value after change (for INSERT/UPDATE) */
   after?: Uint8Array;
-  /** Primary key value */
   pk?: Uint8Array;
-  /** Branch name */
   branch?: string;
 }
 
-// Create a WAL writer
 const writer = createWALWriter(backend, {
-  maxSegmentSize: 2 * 1024 * 1024, // 2MB
+  maxSegmentSize: 2 * 1024 * 1024,
   enableChecksums: true,
 });
 
-// Write an entry
 const result = await writer.append({
   timestamp: Date.now(),
   txnId: generateTxnId(),
@@ -2368,19 +1226,6 @@ const result = await writer.append({
   after: new TextEncoder().encode(JSON.stringify({ id: 1, name: 'Alice' })),
 });
 
-console.log('LSN:', result.lsn);
-
-// Flush to storage
-await writer.flush();
-
-// Get current LSN
-const lsn = writer.getCurrentLSN();
-
-// Using transactions
-const tx = createTransaction();
-tx.addInsert('users', { id: 1, name: 'Alice' });
-tx.addUpdate('users', { id: 1, name: 'Alice Updated' }, { id: 1, name: 'Alice' });
-await writer.appendTransaction(tx);
 await writer.flush();
 ```
 
@@ -2392,11 +1237,8 @@ import {
   tailWAL,
   readWALBatched,
   reconstructTransactions,
-  type WALReader,
-  type ReadOptions,
 } from 'dosql/wal';
 
-// Create a reader
 const reader = createWALReader(backend);
 
 // Read all entries from LSN
@@ -2405,25 +1247,13 @@ for await (const entry of reader.iterate({ fromLSN: 0n })) {
 }
 
 // Read in batches
-const batches = readWALBatched(reader, { batchSize: 100 });
-for await (const batch of batches) {
+for await (const batch of readWALBatched(reader, { batchSize: 100 })) {
   processBatch(batch);
 }
 
 // Tail the WAL (follow new entries)
-const tail = tailWAL(reader, {
-  fromLSN: lastLSN,
-  pollInterval: 100,
-  maxWait: 5000,
-});
-for await (const entry of tail) {
+for await (const entry of tailWAL(reader, { fromLSN: lastLSN })) {
   handleNewEntry(entry);
-}
-
-// Reconstruct transactions
-const transactions = reconstructTransactions(reader, { fromLSN: 0n });
-for await (const tx of transactions) {
-  console.log('Transaction:', tx.txnId, 'Entries:', tx.entries.length);
 }
 ```
 
@@ -2435,38 +1265,23 @@ import {
   performRecovery,
   needsRecovery,
   createAutoCheckpointer,
-  type CheckpointManager,
-  type Checkpoint,
-  type RecoveryState,
 } from 'dosql/wal';
 
-// Create checkpoint manager
 const checkpointManager = createCheckpointManager(storage, writer);
 
-// Create a checkpoint
 const checkpoint = await checkpointManager.createCheckpoint();
-console.log('Checkpoint at LSN:', checkpoint.lsn);
 
-// Get latest checkpoint
-const latest = await checkpointManager.getLatestCheckpoint();
-
-// Check if recovery is needed
 if (await needsRecovery(storage)) {
   const state = await performRecovery(storage, writer, reader);
   console.log(`Recovered ${state.entriesReplayed} entries`);
-  console.log('Recovery LSN:', state.recoveredLSN);
 }
 
-// Auto-checkpoint
 const autoCheckpointer = createAutoCheckpointer(checkpointManager, {
-  intervalMs: 60000,      // Every minute
-  maxEntries: 10000,      // Or every 10k entries
-  maxSizeBytes: 50 * 1024 * 1024, // Or every 50MB
+  intervalMs: 60000,
+  maxEntries: 10000,
+  maxSizeBytes: 50 * 1024 * 1024,
 });
 autoCheckpointer.start();
-
-// Stop auto-checkpointing
-autoCheckpointer.stop();
 ```
 
 ### WAL Retention
@@ -2474,47 +1289,32 @@ autoCheckpointer.stop();
 ```typescript
 import {
   createWALRetentionManager,
-  DEFAULT_RETENTION_POLICY,
   RETENTION_PRESETS,
-  type WALRetentionManager,
   type RetentionPolicy,
 } from 'dosql/wal';
 
 interface RetentionPolicy {
-  /** Maximum age of entries in ms */
   maxAgeMs?: number;
-  /** Maximum number of entries */
   maxEntries?: number;
-  /** Maximum size in bytes */
   maxSizeBytes?: number;
-  /** Minimum entries to keep */
   minEntriesToKeep?: number;
-  /** Cleanup schedule (cron) */
   cleanupSchedule?: string;
 }
 
-// Create retention manager
 const retention = createWALRetentionManager(backend, writer, {
   policy: {
-    maxAgeMs: 7 * 24 * 60 * 60 * 1000, // 7 days
-    maxSizeBytes: 1024 * 1024 * 1024,   // 1GB
+    maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+    maxSizeBytes: 1024 * 1024 * 1024,
     minEntriesToKeep: 1000,
   },
 });
 
-// Check what can be cleaned up
 const check = await retention.checkRetention();
-console.log('Expired entries:', check.expiredCount);
-console.log('Can reclaim:', check.reclaimableBytes, 'bytes');
-
-// Perform cleanup
 const result = await retention.cleanup();
-console.log('Cleaned:', result.entriesRemoved, 'entries');
-console.log('Reclaimed:', result.bytesReclaimed, 'bytes');
 
 // Use presets
 const retention = createWALRetentionManager(backend, writer, {
-  policy: RETENTION_PRESETS.production, // or 'development', 'testing'
+  policy: RETENTION_PRESETS.production,
 });
 ```
 
@@ -2532,25 +1332,19 @@ import {
   createCDCSubscription,
   subscribeTable,
   subscribeBatched,
-  type CDCSubscription,
   type CDCFilter,
 } from 'dosql/cdc';
 
 interface CDCFilter {
-  /** Tables to subscribe to (empty = all) */
   tables?: string[];
-  /** Operations to filter */
   operations?: ('INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE')[];
-  /** Custom predicate function */
   predicate?: (entry: WALEntry) => boolean;
 }
 
-// Create CDC instance
 const cdc = createCDC(backend);
-
-// Subscribe to all changes
 const subscription = createCDCSubscription(backend);
 
+// Subscribe to all changes
 for await (const entry of subscription.subscribe(0n)) {
   console.log('Change:', entry.op, entry.table);
 }
@@ -2562,23 +1356,11 @@ for await (const event of subscription.subscribeChanges(0n, {
 }, JSON.parse)) {
   if (event.type === 'insert') {
     console.log('New user:', event.data);
-  } else if (event.type === 'update') {
-    console.log('Updated user:', event.data, 'was:', event.oldData);
   }
 }
 
-// Subscribe to specific table
-const userChanges = subscribeTable(cdc, 'users', { fromLSN: 0n });
-for await (const change of userChanges) {
-  handleUserChange(change);
-}
-
 // Batched subscription for throughput
-const batched = subscribeBatched(cdc, {
-  batchSize: 100,
-  maxWaitMs: 1000,
-});
-for await (const batch of batched) {
+for await (const batch of subscribeBatched(cdc, { batchSize: 100 })) {
   await processBatch(batch);
 }
 ```
@@ -2587,153 +1369,154 @@ for await (const batch of batched) {
 
 ```typescript
 interface ChangeEvent<T = unknown> {
-  /** Event type */
   type: 'insert' | 'update' | 'delete' | 'truncate';
-  /** Table name */
   table: string;
-  /** LSN of the change */
   lsn: bigint;
-  /** Timestamp */
   timestamp: number;
-  /** Transaction ID */
   txnId: string;
-  /** Data after change (INSERT/UPDATE) */
   data?: T;
-  /** Data before change (UPDATE/DELETE) */
   oldData?: T;
-  /** Primary key */
   pk?: unknown;
-  /** Branch name */
   branch?: string;
-}
-
-// Handle typed events
-interface User {
-  id: number;
-  name: string;
-  email: string;
-}
-
-for await (const event of subscription.subscribeChanges<User>(0n, {
-  tables: ['users'],
-})) {
-  switch (event.type) {
-    case 'insert':
-      console.log('Created user:', event.data?.id);
-      break;
-    case 'update':
-      console.log('Updated user:', event.data?.id, 'name changed from', event.oldData?.name);
-      break;
-    case 'delete':
-      console.log('Deleted user:', event.oldData?.id);
-      break;
-  }
 }
 ```
 
 ### Replication Slots
 
-Replication slots provide persistent position tracking for CDC consumers:
-
 ```typescript
 import {
   createReplicationSlotManager,
-  type ReplicationSlotManager,
   type ReplicationSlot,
 } from 'dosql/cdc';
 
 interface ReplicationSlot {
-  /** Slot name */
   name: string;
-  /** Last confirmed LSN */
   confirmedLSN: bigint;
-  /** Creation timestamp */
   createdAt: number;
-  /** Last activity timestamp */
   lastActiveAt: number;
-  /** Metadata */
   metadata?: Record<string, unknown>;
 }
 
-// Create slot manager
 const slots = createReplicationSlotManager(storage);
 
-// Create a slot
 await slots.createSlot('my-consumer', 0n, {
-  metadata: { version: '1.0', consumer: 'analytics' },
+  metadata: { version: '1.0' },
 });
 
-// Get slot
-const slot = await slots.getSlot('my-consumer');
-console.log('Last confirmed LSN:', slot?.confirmedLSN);
-
-// Subscribe from slot (resumes from last position)
 const subscription = await slots.subscribeFromSlot('my-consumer');
 for await (const entry of subscription) {
   await processEntry(entry);
-
-  // Confirm processing
   await slots.updateSlot('my-consumer', entry.lsn);
 }
-
-// List all slots
-const allSlots = await slots.listSlots();
-for (const slot of allSlots) {
-  console.log(`${slot.name}: LSN ${slot.confirmedLSN}`);
-}
-
-// Delete a slot
-await slots.deleteSlot('my-consumer');
 ```
 
 ### Lakehouse Streaming
 
-Stream CDC events to a lakehouse (Iceberg/Delta Lake):
-
 ```typescript
 import {
   createLakehouseStreamer,
-  DEFAULT_LAKEHOUSE_CONFIG,
-  type LakehouseStreamer,
   type LakehouseStreamConfig,
 } from 'dosql/cdc';
 
 interface LakehouseStreamConfig {
-  /** Target lakehouse URL */
   targetUrl: string;
-  /** Batch size for commits */
   batchSize: number;
-  /** Flush interval in ms */
   flushIntervalMs: number;
-  /** Retry configuration */
   retry: RetryConfig;
-  /** Checkpoint interval */
   checkpointIntervalMs: number;
 }
 
-// Create streamer
 const streamer = createLakehouseStreamer(cdc, {
   targetUrl: 'iceberg://my-catalog/database/table',
   batchSize: 1000,
   flushIntervalMs: 5000,
-  retry: {
-    maxAttempts: 5,
-    baseDelayMs: 1000,
-    maxDelayMs: 30000,
-  },
 });
 
-// Start streaming
 await streamer.start({ fromLSN: 0n });
-
-// Check status
 const status = streamer.getStatus();
-console.log('Current LSN:', status.currentLSN);
-console.log('Events streamed:', status.eventsStreamed);
-console.log('Last checkpoint:', status.lastCheckpoint);
-
-// Stop streaming
 await streamer.stop();
+```
+
+---
+
+## Transaction Management
+
+The transaction module provides SQLite-compatible transaction semantics with MVCC support.
+
+### Transaction Manager
+
+```typescript
+import {
+  createTransactionManager,
+  executeInTransaction,
+  executeWithSavepoint,
+  executeReadOnly,
+  type TransactionManagerOptions,
+} from 'dosql/transaction';
+
+interface TransactionManagerOptions {
+  walWriter?: WALWriter;
+  lockManager?: LockManager;
+  mvccStore?: MVCCStore;
+  defaultIsolation?: IsolationLevel;
+  defaultTimeout?: number;
+}
+
+const manager = createTransactionManager({ walWriter });
+
+// Execute in transaction
+const result = await executeInTransaction(manager, async (ctx) => {
+  ctx.logOperation({ op: 'INSERT', table: 'users', afterValue: data });
+  return { success: true };
+});
+
+// Execute with savepoint
+await executeWithSavepoint(manager, 'sp1', async (ctx) => {
+  // Operations that can be rolled back independently
+});
+
+// Read-only transaction
+const data = await executeReadOnly(manager, async (ctx) => {
+  return ctx.query('SELECT * FROM users');
+});
+```
+
+### Isolation Levels
+
+```typescript
+enum IsolationLevel {
+  READ_UNCOMMITTED = 'READ_UNCOMMITTED',
+  READ_COMMITTED = 'READ_COMMITTED',
+  REPEATABLE_READ = 'REPEATABLE_READ',
+  SERIALIZABLE = 'SERIALIZABLE',
+}
+```
+
+### MVCC Support
+
+```typescript
+import {
+  createLockManager,
+  createMVCCStore,
+  createIsolationEnforcer,
+  createSnapshot,
+  isVersionVisible,
+  type LockManager,
+  type MVCCStore,
+} from 'dosql/transaction';
+
+const lockManager = createLockManager({
+  deadlockDetection: true,
+  lockTimeoutMs: 5000,
+});
+
+const mvccStore = createMVCCStore();
+
+const isolationEnforcer = createIsolationEnforcer({
+  lockManager,
+  mvccStore,
+  level: IsolationLevel.SERIALIZABLE,
+});
 ```
 
 ---
@@ -2742,54 +1525,29 @@ await streamer.stop();
 
 DoSQL provides git-like branching for database versioning.
 
-> **Note:** The branching module is available internally but not currently exported via the main package subpaths. Contact the team for access to this feature.
-
 ### Branch Manager
 
 ```typescript
-// Internal module - types shown for reference
 import {
   createBranchManager,
-  DOBranchManager,
   type BranchManager,
   type BranchMetadata,
-  type BranchManagerConfig,
-} from 'dosql/branch'; // Not currently in exports
+} from 'dosql'; // Re-exported from main package
 
 interface BranchMetadata {
-  /** Branch name */
   name: string;
-  /** Parent branch name */
   parent?: string;
-  /** Creation LSN */
   createdAtLSN: bigint;
-  /** Creation timestamp */
   createdAt: number;
-  /** Last commit LSN */
   headLSN: bigint;
-  /** Author information */
   author?: AuthorInfo;
-  /** Branch description */
   description?: string;
 }
 
-interface BranchManagerConfig {
-  /** Default branch name (default: 'main') */
-  defaultBranch?: string;
-  /** Protected branches that cannot be deleted */
-  protectedBranches?: string[];
-  /** Maximum branch name length */
-  maxBranchNameLength?: number;
-}
-
-// Create branch manager
 const branchManager = createBranchManager(storage, {
   defaultBranch: 'main',
   protectedBranches: ['main', 'production'],
 });
-
-// Or use the DO implementation directly
-const branchManager = new DOBranchManager(storage);
 ```
 
 ### Branch Operations
@@ -2800,264 +1558,113 @@ const branch = await branchManager.createBranch({
   name: 'feature/new-users',
   fromBranch: 'main',
   author: { name: 'Alice', email: 'alice@example.com' },
-  description: 'Add new user features',
 });
 
 // List branches
 const branches = await branchManager.listBranches();
-for (const b of branches) {
-  console.log(`${b.name} (from ${b.parent}): LSN ${b.headLSN}`);
-}
 
-// Get branch info
-const info = await branchManager.getBranch('feature/new-users');
-console.log('Created at:', new Date(info.createdAt));
-
-// Checkout a branch (set current branch)
+// Checkout a branch
 await branchManager.checkout('feature/new-users');
-const current = branchManager.getCurrentBranch();
-console.log('Current branch:', current);
-
-// Get branch log
-const log = await branchManager.getLog('feature/new-users', { limit: 10 });
-for (const entry of log) {
-  console.log(`${entry.commitId}: ${entry.message}`);
-}
 
 // Compare branches
 const diff = await branchManager.compare('main', 'feature/new-users');
-console.log('Commits ahead:', diff.commitsAhead);
-console.log('Commits behind:', diff.commitsBehind);
-console.log('Files changed:', diff.filesChanged.length);
 
 // Delete a branch
-await branchManager.deleteBranch('feature/new-users', { force: false });
+await branchManager.deleteBranch('feature/new-users');
 ```
 
 ### Merge Operations
 
 ```typescript
-// Internal module - types shown for reference
-import {
-  diff,
-  threeWayMerge,
-  resolveConflicts,
-  type MergeStrategy,
-  type MergeResult,
-  type MergeConflict,
-} from 'dosql/branch'; // Not currently in exports
-
 type MergeStrategy = 'fast-forward' | 'merge' | 'squash' | 'rebase';
 
 interface MergeResult {
-  /** Whether merge succeeded */
   success: boolean;
-  /** Resulting commit ID */
   commitId?: string;
-  /** Conflicts if any */
   conflicts?: MergeConflict[];
-  /** Merge strategy used */
   strategy: MergeStrategy;
 }
 
-interface MergeConflict {
-  /** Path of conflicting file */
-  path: string;
-  /** Our version */
-  ours: string;
-  /** Their version */
-  theirs: string;
-  /** Base version */
-  base?: string;
-}
-
-// Merge a branch
 const result = await branchManager.merge({
   source: 'feature/new-users',
   target: 'main',
   strategy: 'merge',
   message: 'Merge feature/new-users into main',
-  author: { name: 'Alice', email: 'alice@example.com' },
 });
-
-if (result.success) {
-  console.log('Merged successfully:', result.commitId);
-} else {
-  console.log('Conflicts detected:');
-  for (const conflict of result.conflicts!) {
-    console.log(`  ${conflict.path}`);
-  }
-
-  // Resolve conflicts
-  const resolved = resolveConflicts(result.conflicts!, {
-    strategy: 'ours', // or 'theirs', 'manual'
-  });
-}
-
-// Three-way merge for custom resolution
-const mergeResult = threeWayMerge(base, ours, theirs);
-if (mergeResult.hasConflicts) {
-  // Handle conflicts manually
-  for (const region of mergeResult.conflicts) {
-    console.log('Conflict at lines:', region.start, '-', region.end);
-  }
-}
 ```
 
 ---
 
 ## Migrations
 
-> **Note:** The migrations module is available internally but not currently exported via the main package subpaths. Contact the team for access to this feature.
-
 ### Migration Runner
 
 ```typescript
-// Internal module - types shown for reference
 import {
   createMigrationRunner,
-  createMigration,
   createMigrations,
-  sortMigrations,
-  type MigrationRunner,
   type Migration,
-  type MigrationResult,
-} from 'dosql/migrations'; // Not currently in exports
+} from 'dosql'; // Re-exported from main package
 
 interface Migration {
-  /** Unique migration ID (timestamp-based recommended) */
   id: string;
-  /** SQL to apply the migration */
   sql: string;
-  /** SQL to reverse the migration (optional) */
   down?: string;
-  /** Migration description */
   description?: string;
-  /** Checksum for integrity verification */
   checksum?: string;
 }
 
-// Create migrations
 const migrations = createMigrations([
   {
     id: '20240101000000_init',
     sql: `
       CREATE TABLE users (
         id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL
+        name TEXT NOT NULL
       )
     `,
     down: 'DROP TABLE users',
-    description: 'Create users table',
-  },
-  {
-    id: '20240101000001_add_status',
-    sql: 'ALTER TABLE users ADD COLUMN status TEXT DEFAULT "active"',
-    description: 'Add status column to users',
   },
 ]);
 
-// Create runner
 const runner = createMigrationRunner(db, storage, {
-  table: '_migrations', // Track applied migrations
+  table: '_migrations',
   dryRun: false,
-  logger: console,
 });
 
-// Run pending migrations
-const results = await runner.up();
-for (const result of results) {
-  if (result.success) {
-    console.log(`Applied: ${result.migrationId}`);
-  } else {
-    console.error(`Failed: ${result.migrationId}`, result.error);
-  }
-}
-
-// Rollback last migration
+await runner.up();
 await runner.down(1);
-
-// Get migration status
 const status = await runner.status();
-console.log('Applied:', status.applied.map(m => m.id));
-console.log('Pending:', status.pending.map(m => m.id));
 ```
 
 ### Schema Tracker
 
 ```typescript
-// Internal module - types shown for reference
 import {
   createSchemaTracker,
   initializeWithMigrations,
-  prepareClone,
-  isCloneReady,
-  type SchemaTracker,
-  type MigrationStatus,
-} from 'dosql/migrations'; // Not currently in exports
+} from 'dosql';
 
-// Create schema tracker
 const tracker = createSchemaTracker(storage, {
-  snapshotInterval: 10, // Snapshot every 10 migrations
+  snapshotInterval: 10,
 });
 
-// Initialize database with migrations
 const status = await initializeWithMigrations({
   migrations,
   storage: ctx.storage,
   db: database,
   autoMigrate: true,
 });
-
-console.log('Schema version:', status.version);
-console.log('Applied migrations:', status.appliedCount);
-
-// Prepare a clone for new tenant
-const clone = await prepareClone(tracker, 'tenant-123');
-if (await isCloneReady(clone)) {
-  // Clone is ready to use
-  console.log('Clone initialized at version:', clone.version);
-}
-
-// Get current schema version
-const version = await tracker.getCurrentVersion();
-console.log('Current version:', version);
-
-// Create snapshot
-await tracker.createSnapshot();
 ```
 
 ### Drizzle Compatibility
 
-Load migrations from Drizzle Kit:
-
 ```typescript
-// Internal module - types shown for reference
-import {
-  loadDrizzleMigrations,
-  parseDrizzleConfig,
-  toDoSqlMigration,
-  type DrizzleMigrationFolder,
-} from 'dosql/migrations'; // Not currently in exports
+import { loadDrizzleMigrations, toDoSqlMigration } from 'dosql';
 
-// Load from Drizzle migrations folder
 const migrations = await loadDrizzleMigrations('./drizzle', {
   validateChecksums: true,
-  includeDown: false,
 });
-
-// Parse Drizzle config
-const config = await parseDrizzleConfig('./drizzle.config.ts');
-console.log('Migrations folder:', config.out);
-
-// Convert individual migration
-const drizzleMigration = {
-  idx: 0,
-  tag: '0000_init',
-  sql: 'CREATE TABLE users (...)',
-};
-const doSqlMigration = toDoSqlMigration(drizzleMigration);
 ```
 
 ---
@@ -3070,40 +1677,35 @@ Query data directly from URLs using ClickHouse-style syntax.
 
 ```typescript
 import {
-  createURLVirtualTable,
-  createVirtualTableRegistry,
-  resolveVirtualTableFromClause,
+  createResolver,
+  resolveSource,
+  UrlTableSource,
+  createUrlSource,
+  type Format,
 } from 'dosql';
 
-// Create registry
-const registry = createVirtualTableRegistry({
-  fetch: globalThis.fetch,
-});
+type Format = 'json' | 'ndjson' | 'csv' | 'parquet';
+
+const resolver = createResolver({ fetch: globalThis.fetch });
 
 // Query JSON from URL
-const users = await registry.query(
-  "SELECT * FROM 'https://api.example.com/users.json'"
+const source = await resolveSource(
+  "SELECT * FROM 'https://api.example.com/users.json'",
+  resolver
 );
 
-// Query CSV with options
-const data = await registry.query(`
-  SELECT *
-  FROM 'https://data.gov/dataset.csv'
-  WITH (headers=true, delimiter=',')
-`);
+for await (const row of source.scan()) {
+  console.log(row);
+}
 
-// Query with filtering
-const active = await registry.query(`
-  SELECT name, email
-  FROM 'https://api.example.com/users.json'
-  WHERE active = true
-  LIMIT 10
-`);
+// Create URL source directly
+const urlSource = createUrlSource('https://api.example.com/data.csv', {
+  format: 'csv',
+  headers: { Authorization: 'Bearer token' },
+});
 ```
 
 ### R2 Sources
-
-Query data from Cloudflare R2 buckets.
 
 ```typescript
 import {
@@ -3112,10 +1714,8 @@ import {
   listR2Objects,
 } from 'dosql';
 
-// Create R2 source
 const source = createR2Source(r2Bucket, 'data/users.parquet');
 
-// Scan with projection
 for await (const row of source.scan({
   columns: ['id', 'name', 'email'],
   filter: { column: 'active', op: '=', value: true },
@@ -3123,11 +1723,6 @@ for await (const row of source.scan({
   console.log(row);
 }
 
-// List objects
-const objects = await listR2Objects(r2Bucket, 'data/');
-console.log(objects);
-
-// Parse R2 URI
 const { bucket, key } = parseR2Uri('r2://mybucket/path/to/file.parquet');
 ```
 
@@ -3143,38 +1738,19 @@ import {
   createR2Backend,
   createMemoryBackend,
   type FSXBackend,
-  type FSXMetadata,
 } from 'dosql/fsx';
 
 interface FSXBackend {
-  /** Read file contents */
   read(path: string, range?: [number, number]): Promise<Uint8Array | null>;
-  /** Write file contents */
   write(path: string, data: Uint8Array): Promise<void>;
-  /** Delete a file */
   delete(path: string): Promise<void>;
-  /** List files by prefix */
   list(prefix: string): Promise<string[]>;
-  /** Check if file exists */
   exists(path: string): Promise<boolean>;
 }
 
-// Durable Object storage backend
 const doBackend = createDOBackend(ctx.storage);
-
-// R2 storage backend
-const r2Backend = createR2Backend(env.MY_BUCKET, {
-  keyPrefix: 'data/',
-});
-
-// In-memory backend (for testing)
+const r2Backend = createR2Backend(env.MY_BUCKET, { keyPrefix: 'data/' });
 const memoryBackend = createMemoryBackend();
-
-// Basic operations
-await doBackend.write('data/file.bin', data);
-const content = await doBackend.read('data/file.bin');
-const files = await doBackend.list('data/');
-await doBackend.delete('data/file.bin');
 ```
 
 ### Tiered Storage
@@ -3184,68 +1760,34 @@ import {
   createTieredBackend,
   StorageTier,
   type TieredStorageConfig,
-  type TieredStorageBackend,
-  type MigrationResult,
 } from 'dosql/fsx';
 
 enum StorageTier {
-  HOT = 'hot',   // Durable Object storage
-  COLD = 'cold', // R2 storage
-  BOTH = 'both', // Exists in both tiers
+  HOT = 'hot',
+  COLD = 'cold',
+  BOTH = 'both',
 }
 
 interface TieredStorageConfig {
-  /** Max age before data is cold (default: 1 hour) */
   hotDataMaxAge: number;
-  /** Max hot storage size (default: 100MB) */
   hotStorageMaxSize: number;
-  /** Auto-migrate cold data (default: true) */
   autoMigrate: boolean;
-  /** Read from hot first (default: true) */
   readHotFirst: boolean;
-  /** Cache R2 reads in hot (default: false) */
   cacheR2Reads: boolean;
-  /** Max file size for hot tier (default: 10MB) */
   maxHotFileSize: number;
 }
 
-// Create tiered backend
-const hot = createDOBackend(ctx.storage);
-const cold = createR2Backend(env.MY_BUCKET);
 const tiered = createTieredBackend(hot, cold, {
-  hotDataMaxAge: 30 * 60 * 1000,      // 30 minutes
-  hotStorageMaxSize: 50 * 1024 * 1024, // 50MB
+  hotDataMaxAge: 30 * 60 * 1000,
+  hotStorageMaxSize: 50 * 1024 * 1024,
   autoMigrate: true,
-  cacheR2Reads: true,
 });
 
-// Read/write (transparent across tiers)
 await tiered.write('data.bin', myData);
 const data = await tiered.read('data.bin');
 
-// Manual migration
-const result = await tiered.migrateToR2({
-  olderThan: 60 * 60 * 1000, // 1 hour
-  limit: 100,
-  deleteFromHot: true,
-});
-console.log('Migrated:', result.migrated.length);
-
-// Promote to hot tier
+await tiered.migrateToR2({ olderThan: 60 * 60 * 1000 });
 await tiered.promoteToHot(['important-data.bin']);
-
-// Pin files to hot tier (prevent migration)
-await tiered.pinToHot('critical-config.bin');
-await tiered.unpinFromHot('critical-config.bin');
-
-// Get metadata with tier info
-const meta = await tiered.metadata('myfile.bin');
-console.log('Tier:', meta?.tier);
-
-// Get storage statistics
-const stats = await tiered.getStats();
-console.log('Hot files:', stats.hot.fileCount);
-console.log('Cold files:', stats.cold.objectCount);
 ```
 
 ### Copy-on-Write Backend
@@ -3253,138 +1795,70 @@ console.log('Cold files:', stats.cold.objectCount);
 ```typescript
 import {
   createCOWBackend,
-  type COWBackend,
   type Snapshot,
   type MergeResult,
 } from 'dosql/fsx';
 
-// Create COW backend
 const cow = createCOWBackend(underlying, {
   enableSnapshots: true,
   gcIntervalMs: 60000,
 });
 
-// Create snapshots
 const snapshot1 = await cow.createSnapshot('v1.0');
-
-// Make changes (copy-on-write)
 await cow.write('data.bin', newData);
-
-// Create another snapshot
 const snapshot2 = await cow.createSnapshot('v1.1');
 
-// Restore from snapshot
 await cow.restore(snapshot1);
-
-// List snapshots
-const snapshots = await cow.listSnapshots();
-
-// Branch from snapshot
 await cow.createBranch('feature', { fromSnapshot: snapshot1 });
 await cow.checkout('feature');
 
-// Merge branches
-const result = await cow.merge({
-  source: 'feature',
-  target: 'main',
-});
-
-// Garbage collection
+const result = await cow.merge({ source: 'feature', target: 'main' });
 const gcResult = await cow.gc({ dryRun: false });
-console.log('Reclaimed:', gcResult.bytesReclaimed);
 ```
 
 ---
 
-## Advanced Features
+## Stored Procedures
 
-### Sharding
+DoSQL supports ESM-based stored procedures with PL/pgSQL-like semantics.
 
-DoSQL provides a Vitess-inspired native sharding implementation with real SQL parsing, cost-based query routing, and type-safe shard keys. Sharding APIs are exported from the main `dosql` package.
-
-```typescript
-import {
-  createShardingClient,
-  createVSchema,
-  shardedTable,
-  referenceTable,
-  hashVindex,
-  consistentHashVindex,
-  rangeVindex,
-  shard,
-  replica,
-  createShardId,
-  createRouter,
-  createExecutor,
-  createReplicaSelector,
-  type ShardingClient,
-  type VSchema,
-  type ShardConfig,
-  type ShardRPC,
-} from 'dosql';
-
-// Define your VSchema (Virtual Schema)
-const vschema = createVSchema({
-  // Sharded by tenant_id using hash distribution
-  users: shardedTable('tenant_id', hashVindex()),
-
-  // Sharded using consistent hash (better for rebalancing)
-  orders: shardedTable('order_id', consistentHashVindex(150)),
-
-  // Reference table replicated to all shards
-  countries: referenceTable(),
-}, [
-  shard(createShardId('shard-1'), 'user-do', {
-    replicas: [
-      replica('replica-1a', 'user-do-replica', 'replica', { region: 'us-west' }),
-    ],
-  }),
-  shard(createShardId('shard-2'), 'user-do'),
-]);
-
-// Create a sharding client
-const client = createShardingClient({
-  vschema,
-  rpc: myShardRPC, // Your ShardRPC implementation
-  currentRegion: request.cf?.colo,
-  executor: {
-    maxParallelShards: 16,
-    defaultTimeoutMs: 5000,
-  },
-});
-
-// Execute queries - automatically routed to correct shard
-const result = await client.query(
-  'SELECT * FROM users WHERE tenant_id = $1',
-  [123]
-);
-
-// Stream large results
-for await (const row of client.queryStream('SELECT * FROM users')) {
-  processRow(row);
-}
-```
-
-### Stored Procedures
-
-DoSQL supports ESM-based stored procedures with PL/pgSQL-like semantics, executed in sandboxed V8 isolates.
+### Procedure Registry
 
 ```typescript
 import {
   createProcedureRegistry,
   createProcedureExecutor,
   createInMemoryCatalogStorage,
-  procedure,
-  ProcedureBuilder,
   parseProcedure,
-  defineProcedure,
-  defineProcedures,
-  type Procedure,
-  type ProcedureContext,
-  type ProcedureExecutor,
 } from 'dosql/proc';
 
-// Define a procedure using the builder
+const registry = createProcedureRegistry({
+  storage: createInMemoryCatalogStorage(),
+});
+
+// Register via SQL
+const parsed = parseProcedure(`
+  CREATE PROCEDURE calculate_total AS MODULE $$
+    export default async ({ db }, userId) => {
+      const orders = await db.orders.where({ userId });
+      return orders.reduce((sum, o) => sum + o.total, 0);
+    }
+  $$;
+`);
+await registry.register({
+  name: parsed.name,
+  code: parsed.code,
+});
+
+const executor = createProcedureExecutor({ db, registry });
+const result = await executor.call('calculate_total', [userId]);
+```
+
+### Procedure Builder
+
+```typescript
+import { procedure, ProcedureBuilder } from 'dosql/proc';
+
 const createUser = procedure('createUser')
   .input<{ name: string; email: string }>()
   .output<{ id: number; created: boolean }>()
@@ -3400,368 +1874,165 @@ const createUser = procedure('createUser')
   })
   .build();
 
-// Create registry with storage
-const registry = createProcedureRegistry({
-  storage: createInMemoryCatalogStorage(),
-});
-
-// Register procedure
 await registry.register(createUser);
+```
 
-// Execute procedure
-const executor = createProcedureExecutor({ db, registry });
-const result = await executor.call('createUser', {
-  name: 'Alice',
-  email: 'alice@example.com',
-});
+### Functional API
 
-// Alternative: Parse SQL-defined procedure
-const parsed = parseProcedure(`
-  CREATE PROCEDURE calculate_total AS MODULE $$
-    export default async ({ db }, userId) => {
-      const orders = await db.orders.where({ userId });
-      return orders.reduce((sum, o) => sum + o.total, 0);
-    }
-  $$;
-`);
-await registry.register({
-  name: parsed.name,
-  code: parsed.code,
-});
+```typescript
+import {
+  defineProcedures,
+  defineProcedure,
+  withValidation,
+  withRetry,
+} from 'dosql/proc';
 
-// Functional API for defining multiple procedures
 const procs = defineProcedures(dbContext, {
   getUser: defineProcedure(async (ctx, userId: number) => {
     return ctx.db.users.find(userId);
   }),
-  updateEmail: defineProcedure(async (ctx, userId: number, email: string) => {
-    return ctx.db.users.update(userId, { email });
-  }),
+
+  updateEmail: defineProcedure(
+    withValidation(
+      { userId: 'number', email: 'string' },
+      withRetry(
+        { maxAttempts: 3 },
+        async (ctx, userId: number, email: string) => {
+          return ctx.db.users.update(userId, { email });
+        }
+      )
+    )
+  ),
 });
+
+const user = await procs.getUser(123);
 ```
 
-### Observability
+---
 
-> **Note:** The observability module provides OpenTelemetry tracing and Prometheus metrics. It is available internally but not currently exported via the package subpaths. For production use, integrate directly with your observability platform.
+## Sharding
+
+DoSQL provides Vitess-inspired native sharding with real SQL parsing and cost-based query routing.
+
+### VSchema Definition
 
 ```typescript
-// Internal module - not in package exports
-// import { createObservability, createDoSQLMetrics, instrumentQuery } from 'dosql/observability';
+import {
+  createVSchema,
+  shardedTable,
+  referenceTable,
+  hashVindex,
+  consistentHashVindex,
+  rangeVindex,
+  shard,
+  replica,
+  createShardId,
+} from 'dosql';
 
-// Types for reference
-type Observability = {
-  tracer: Tracer;
-  metrics: MetricsRegistry;
-  sanitizer: SQLSanitizer;
-  config: ObservabilityConfig;
-};
+const vschema = createVSchema({
+  users: shardedTable('tenant_id', hashVindex()),
+  orders: shardedTable('order_id', consistentHashVindex(150)),
+  countries: referenceTable(),
+}, [
+  shard(createShardId('shard-1'), 'user-do', {
+    replicas: [
+      replica('replica-1a', 'user-do-replica', 'replica', { region: 'us-west' }),
+    ],
+  }),
+  shard(createShardId('shard-2'), 'user-do'),
+]);
+```
 
-type TracingConfig = {
-  enabled: boolean;
-  serviceName: string;
-};
+### Vindex Types
 
-type MetricsConfig = {
-  enabled: boolean;
-  prefix: string;
-};
+```typescript
+// Hash Vindex - even distribution
+hashVindex()
 
-// Create observability instance
-const { tracer, metrics, sanitizer } = createObservability({
-  tracing: {
-    enabled: true,
-    serviceName: 'my-service',
-  },
-  metrics: {
-    enabled: true,
-    prefix: 'dosql',
+// Consistent Hash - better for rebalancing
+consistentHashVindex(virtualNodes?: number)
+
+// Range Vindex - for range queries
+rangeVindex(ranges: RangeConfig[])
+```
+
+### Query Routing
+
+```typescript
+import {
+  createShardingClient,
+  createRouter,
+  createExecutor,
+  type ShardingClient,
+} from 'dosql';
+
+const client = createShardingClient({
+  vschema,
+  rpc: myShardRPC,
+  currentRegion: request.cf?.colo,
+  executor: {
+    maxParallelShards: 16,
+    defaultTimeoutMs: 5000,
   },
 });
 
-// Create standard metrics
-const doSQLMetrics = createDoSQLMetrics(metrics);
-
-// Instrument query execution
-const result = await instrumentQuery(
-  { tracer, metrics, sanitizer, config },
-  doSQLMetrics,
-  'SELECT * FROM users WHERE id = $1',
-  [123],
-  async () => {
-    return db.query('SELECT * FROM users WHERE id = $1', [123]);
-  }
+// Automatically routed to correct shard
+const result = await client.query(
+  'SELECT * FROM users WHERE tenant_id = $1',
+  [123]
 );
 
-// Instrument transactions
-await instrumentTransaction(
-  { tracer, metrics, sanitizer, config },
-  doSQLMetrics,
-  async () => {
-    // Transaction operations
-  }
-);
-
-// Create custom span
-const span = tracer.startSpan('custom-operation', {
-  kind: 'INTERNAL',
-  attributes: { 'custom.key': 'value' },
-});
-try {
-  // Do work
-  span.setStatus('OK');
-} catch (error) {
-  span.setStatus('ERROR', error.message);
-  throw error;
-} finally {
-  span.end();
+// Stream large results across shards
+for await (const row of client.queryStream('SELECT * FROM users')) {
+  processRow(row);
 }
-
-// Export metrics for /metrics endpoint
-return new Response(metrics.getMetrics(), {
-  headers: { 'Content-Type': 'text/plain' },
-});
 ```
 
 ---
 
 ## Columnar Storage
 
-DoSQL includes a columnar OLAP storage engine optimized for analytics queries. It supports multiple encoding strategies, zone map filtering for predicate pushdown, and projection pushdown for efficient data access.
-
-> **Note:** The columnar storage module is available internally but not currently exported via the main package subpaths. For analytics workloads, consider using the lakehouse integration or contact the team for access.
+DoSQL includes a columnar OLAP storage engine optimized for analytics queries.
 
 ### Encoding Types
 
-The columnar storage engine supports five encoding strategies, each optimized for different data patterns.
-
 ```typescript
-import {
-  type Encoding,
-  type ColumnDataType,
-  ColumnarWriter,
-  ColumnarReader,
-  analyzeForEncoding,
-} from 'dosql';
-
-/**
- * Supported column encodings:
- * - raw: Direct typed array storage (no compression)
- * - dict: Dictionary encoding for low-cardinality strings
- * - rle: Run-length encoding for repeated values
- * - delta: Delta encoding for sorted/sequential integers
- * - bitpack: Bit-packing for small integers
- */
 type Encoding = 'raw' | 'dict' | 'rle' | 'delta' | 'bitpack';
 ```
 
-#### Raw Encoding
-
-Direct storage using typed arrays. No compression overhead, best for random or high-entropy data.
-
-```typescript
-// Raw encoding stores values directly in typed arrays
-// Supported data types:
-// - int8, int16, int32, int64
-// - uint8, uint16, uint32, uint64
-// - float32, float64
-// - boolean
-// - string (length-prefixed UTF-8)
-// - bytes (length-prefixed binary)
-// - timestamp (64-bit integer)
-
-// Example: Raw encoding is automatically selected for float columns
-const schema: ColumnarTableSchema = {
-  tableName: 'measurements',
-  columns: [
-    { name: 'sensor_id', dataType: 'int32', nullable: false },
-    { name: 'temperature', dataType: 'float64', nullable: false }, // Uses raw
-    { name: 'humidity', dataType: 'float32', nullable: true },     // Uses raw
-  ],
-};
-```
-
-#### Dictionary Encoding
-
-Optimal for low-cardinality string columns (many repeated values). Stores unique values in a dictionary and references them by index.
-
-```typescript
-// Dictionary encoding is auto-selected when:
-// - Column has >= 100 rows (MIN_ROWS_FOR_DICT)
-// - Cardinality ratio <= 10% (DICT_CARDINALITY_THRESHOLD)
-
-// Example: Status column with few unique values
-const schema: ColumnarTableSchema = {
-  tableName: 'orders',
-  columns: [
-    { name: 'id', dataType: 'int64', nullable: false },
-    { name: 'status', dataType: 'string', nullable: false }, // Auto: dict encoding
-    { name: 'customer_name', dataType: 'string', nullable: false }, // Auto: raw
-  ],
-};
-
-// Force dictionary encoding for a specific column
-const writer = new ColumnarWriter(schema, {
-  forceEncoding: new Map([['status', 'dict']]),
-});
-
-// How dictionary encoding works:
-// 1. Build dictionary: ['pending', 'shipped', 'delivered'] (3 unique values)
-// 2. Calculate bits per index: ceil(log2(3)) = 2 bits
-// 3. Store indices using bit-packing: [0, 1, 2, 1, 0, 2, ...]
-// Result: Significant space savings for repeated string values
-```
-
-#### Run-Length Encoding (RLE)
-
-Best for columns with many consecutive repeated values, such as sorted data or categorical columns.
-
-```typescript
-// RLE stores (value, count) pairs instead of individual values
-// Excellent for sorted columns or columns with long runs of the same value
-
-// Example: Event log with repeated timestamps
-const schema: ColumnarTableSchema = {
-  tableName: 'events',
-  columns: [
-    { name: 'event_type', dataType: 'int32', nullable: false }, // Good for RLE
-    { name: 'batch_id', dataType: 'int64', nullable: false },   // Good for RLE
-  ],
-};
-
-// Force RLE encoding
-const writer = new ColumnarWriter(schema, {
-  forceEncoding: new Map([['event_type', 'rle']]),
-});
-
-// How RLE works for data: [1, 1, 1, 2, 2, 3, 3, 3, 3, 3]
-// Encoded as runs: [(1, 3), (2, 2), (3, 5)]
-// Format: [runCount:4][value:N][count:4]...
-```
-
-#### Delta Encoding
-
-Optimal for sorted or sequential integer columns. Stores the first value and deltas between consecutive values.
-
-```typescript
-// Delta encoding is ideal for:
-// - Sorted primary key columns
-// - Timestamps in chronological order
-// - Sequential IDs
-
-const schema: ColumnarTableSchema = {
-  tableName: 'timeseries',
-  columns: [
-    { name: 'timestamp', dataType: 'timestamp', nullable: false }, // Good for delta
-    { name: 'sequence_id', dataType: 'int64', nullable: false },   // Good for delta
-  ],
-};
-
-// Force delta encoding
-const writer = new ColumnarWriter(schema, {
-  forceEncoding: new Map([['sequence_id', 'delta']]),
-});
-
-// How delta encoding works for sorted IDs: [100, 101, 102, 105, 106]
-// 1. Store first value: 100
-// 2. Calculate deltas: [1, 1, 3, 1]
-// 3. Bit-pack deltas using minimal bits
-// Result: Much smaller storage for sequential data
-```
-
-#### Bit-Packing
-
-Stores small integers using the minimum number of bits required.
-
-```typescript
-// Bit-packing is efficient when values use fewer bits than the data type allows
-// Example: int32 column where max value is 15 (needs only 4 bits)
-
-const schema: ColumnarTableSchema = {
-  tableName: 'ratings',
-  columns: [
-    { name: 'user_id', dataType: 'int64', nullable: false },
-    { name: 'rating', dataType: 'int32', nullable: false }, // Values 1-5, needs 3 bits
-  ],
-};
-
-// Force bit-pack encoding
-const writer = new ColumnarWriter(schema, {
-  forceEncoding: new Map([['rating', 'bitpack']]),
-});
-
-// How bit-packing works:
-// For values 1-5, only 3 bits needed per value
-// 32-bit int32 compressed to 3 bits = 10x compression
-// Format: [bitWidth:1][packedData...]
-```
+| Encoding | Best For |
+|----------|----------|
+| `raw` | Random/high-entropy data, floats |
+| `dict` | Low-cardinality strings |
+| `rle` | Consecutive repeated values |
+| `delta` | Sorted/sequential integers |
+| `bitpack` | Small integers with limited range |
 
 ### Automatic Encoding Selection
-
-The writer automatically analyzes data and selects the best encoding.
 
 ```typescript
 import { analyzeForEncoding, type EncodingAnalysis } from 'dosql';
 
-// Analyze data to determine optimal encoding
-const values = ['active', 'active', 'inactive', 'active', 'pending'];
-const analysis: EncodingAnalysis = analyzeForEncoding(values, 'string');
+const values = ['active', 'active', 'inactive', 'active'];
+const analysis = analyzeForEncoding(values, 'string');
 
-console.log(analysis);
 // {
-//   recommendedEncoding: 'dict',  // Dictionary recommended
-//   estimatedSize: 45,            // Estimated bytes
-//   cardinality: 3,               // 3 unique values
-// }
-
-// For numeric data
-const numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-const numericAnalysis = analyzeForEncoding(numbers, 'int32');
-// {
-//   recommendedEncoding: 'delta', // Delta recommended for sorted integers
-//   estimatedSize: 18,
-//   isSorted: true,
-//   runCount: 10,
+//   recommendedEncoding: 'dict',
+//   estimatedSize: 45,
+//   cardinality: 2,
 // }
 ```
 
 ### Column Statistics (Zone Maps)
 
-Each column chunk stores statistics for predicate pushdown.
-
 ```typescript
-import { type ColumnStats, getColumnStats } from 'dosql';
-
 interface ColumnStats {
-  /** Minimum value in the chunk */
   min: number | bigint | string | null;
-
-  /** Maximum value in the chunk */
   max: number | bigint | string | null;
-
-  /** Number of null values */
   nullCount: number;
-
-  /** Approximate distinct count (optional) */
   distinctCount?: number;
-
-  /** Sum for numeric columns (optional) */
   sum?: number | bigint;
 }
-
-// Get stats from serialized data
-const stats = getColumnStats(rowGroupData, 'temperature');
-console.log(stats);
-// {
-//   min: 18.5,
-//   max: 32.1,
-//   nullCount: 0,
-//   distinctCount: 1000,
-//   sum: 25000.5,
-// }
-
-// Stats enable skipping entire row groups during queries
-// Example: WHERE temperature > 40
-// If stats.max < 40, skip this entire row group
 ```
 
 ### Writer Usage
@@ -3772,61 +2043,25 @@ import {
   writeColumnar,
   inferSchema,
   type ColumnarTableSchema,
-  type WriterConfig,
 } from 'dosql';
 
-// Define schema explicitly
 const schema: ColumnarTableSchema = {
   tableName: 'users',
   columns: [
     { name: 'id', dataType: 'int64', nullable: false },
     { name: 'name', dataType: 'string', nullable: false },
-    { name: 'email', dataType: 'string', nullable: true },
     { name: 'age', dataType: 'int32', nullable: true },
-    { name: 'created_at', dataType: 'timestamp', nullable: false },
   ],
   primaryKey: ['id'],
 };
 
-// Or infer schema from sample data
-const sampleData = [
-  { id: 1n, name: 'Alice', email: 'alice@example.com', age: 30 },
-  { id: 2n, name: 'Bob', email: null, age: 25 },
-];
-const inferredSchema = inferSchema('users', sampleData);
+const writer = new ColumnarWriter(schema, {
+  targetRowsPerGroup: 65536,
+  forceEncoding: new Map([['status', 'dict']]),
+}, fsx);
 
-// Create writer with configuration
-const config: WriterConfig = {
-  targetRowsPerGroup: 65536,      // Max rows per row group
-  targetBytesPerGroup: 1048576,   // Target 1MB per row group
-  disableAutoEncoding: false,     // Allow auto encoding selection
-  forceEncoding: new Map([        // Force specific encodings
-    ['status', 'dict'],
-  ]),
-  onFlush: async (rowGroup, data) => {
-    console.log(`Flushed row group ${rowGroup.id}: ${data.length} bytes`);
-  },
-};
-
-const writer = new ColumnarWriter(schema, config, fsx);
-
-// Write rows (auto-flushes when thresholds reached)
-const rows = [
-  { id: 1n, name: 'Alice', email: 'alice@example.com', age: 30, created_at: Date.now() },
-  { id: 2n, name: 'Bob', email: null, age: 25, created_at: Date.now() },
-  // ... more rows
-];
-
-const flushedGroups = await writer.write(rows);
-
-// Finalize any remaining buffered rows
-const finalGroup = await writer.finalize();
-
-// Get all flushed row groups
-const allGroups = writer.getFlushedRowGroups();
-
-// Convenience function for simple writes
-const { rowGroups, serialized } = await writeColumnar(schema, rows, fsx);
+await writer.write(rows);
+await writer.finalize();
 ```
 
 ### Reader Usage
@@ -3834,142 +2069,50 @@ const { rowGroups, serialized } = await writeColumnar(schema, rows, fsx);
 ```typescript
 import {
   ColumnarReader,
-  readColumnarChunk,
   mightMatchPredicates,
-  aggregateSumFromStats,
-  aggregateCountFromStats,
-  aggregateMinMaxFromStats,
-  type ReaderConfig,
-  type ReadRequest,
   type Predicate,
 } from 'dosql';
 
-// Create reader
-const config: ReaderConfig = {
-  enablePredicatePushdown: true,  // Use zone maps to skip chunks
-  parallelScan: 4,                // Scan up to 4 row groups in parallel
-  prefetchMetadata: true,         // Cache row group metadata
-};
+const reader = new ColumnarReader(fsx, {
+  enablePredicatePushdown: true,
+  parallelScan: 4,
+});
 
-const reader = new ColumnarReader(fsx, config);
-
-// Read with projection and predicate pushdown
-const request: ReadRequest = {
+const result = await reader.read({
   table: 'users',
-  projection: { columns: ['id', 'name', 'email'] }, // Only these columns
+  projection: { columns: ['id', 'name'] },
   predicates: [
     { column: 'age', op: 'ge', value: 18 },
     { column: 'age', op: 'lt', value: 65 },
   ],
   limit: 100,
-  offset: 0,
-};
-
-const result = await reader.read(request);
-console.log(result);
-// {
-//   columns: Map { 'id' => [...], 'name' => [...], 'email' => [...] },
-//   rowCount: 100,
-//   rowGroupsScanned: 5,
-//   rowGroupsSkipped: 3,  // Skipped by predicate pushdown
-//   totalBytesRead: 524288,
-// }
-
-// Scan returns rows as objects
-const scanResult = await reader.scan(request);
-console.log(scanResult.rows[0]);
-// { id: 1n, name: 'Alice', email: 'alice@example.com' }
-
-// Read a single row group directly
-const columns = await reader.readRowGroup(rowGroupData, ['id', 'name']);
-
-// Check if predicates might match (for custom filtering)
-const predicates: Predicate[] = [{ column: 'age', op: 'gt', value: 100 }];
-const mightMatch = mightMatchPredicates(rowGroupData, predicates);
-if (!mightMatch) {
-  console.log('Can skip this row group - no matching rows');
-}
-
-// Aggregate directly from statistics (no data scan needed)
-const metadataList = await getRowGroupMetadataList(fsx, 'users');
-
-const totalAge = aggregateSumFromStats(metadataList, 'age');
-const userCount = aggregateCountFromStats(metadataList, 'id', false);
-const { min: minAge, max: maxAge } = aggregateMinMaxFromStats(metadataList, 'age');
-
-console.log(`Users: ${userCount}, Age range: ${minAge}-${maxAge}, Total age: ${totalAge}`);
+});
 ```
 
 ### Data Types
 
 ```typescript
-/**
- * Supported column data types
- */
 type ColumnDataType =
-  | 'int8'      // 1 byte signed integer
-  | 'int16'     // 2 byte signed integer
-  | 'int32'     // 4 byte signed integer
-  | 'int64'     // 8 byte signed integer (bigint)
-  | 'uint8'     // 1 byte unsigned integer
-  | 'uint16'    // 2 byte unsigned integer
-  | 'uint32'    // 4 byte unsigned integer
-  | 'uint64'    // 8 byte unsigned integer (bigint)
-  | 'float32'   // 4 byte IEEE 754 float
-  | 'float64'   // 8 byte IEEE 754 double
-  | 'boolean'   // 1 byte (0 or 1)
-  | 'string'    // Variable length UTF-8
-  | 'bytes'     // Variable length binary
-  | 'timestamp'; // 8 byte Unix timestamp (milliseconds)
-
-// Type helpers
-import { isNumericType, isIntegerType, isSignedType, getBytesPerElement } from 'dosql';
-
-isNumericType('float64');      // true
-isIntegerType('int32');        // true
-isSignedType('uint64');        // false
-getBytesPerElement('int32');   // 4
-getBytesPerElement('string');  // -1 (variable length)
+  | 'int8' | 'int16' | 'int32' | 'int64'
+  | 'uint8' | 'uint16' | 'uint32' | 'uint64'
+  | 'float32' | 'float64'
+  | 'boolean'
+  | 'string'
+  | 'bytes'
+  | 'timestamp';
 ```
 
 ### Predicate Operations
 
 ```typescript
-/**
- * Supported predicate operations for filtering
- */
 type PredicateOp = 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'in' | 'between';
 
-// Example predicates
 const predicates: Predicate[] = [
-  // Equality
   { column: 'status', op: 'eq', value: 'active' },
-
-  // Not equal
-  { column: 'role', op: 'ne', value: 'admin' },
-
-  // Comparisons
   { column: 'age', op: 'ge', value: 18 },
-  { column: 'created_at', op: 'lt', value: Date.now() },
-
-  // Range (between is inclusive)
   { column: 'price', op: 'between', value: 10, value2: 100 },
-
-  // IN list
-  { column: 'category', op: 'in', value: ['electronics', 'clothing', 'food'] },
+  { column: 'category', op: 'in', value: ['electronics', 'clothing'] },
 ];
-```
-
-### Constants
-
-```typescript
-import {
-  MAX_BLOB_SIZE,           // 2MB - 1KB overhead
-  TARGET_ROW_GROUP_SIZE,   // 1MB target per row group
-  MAX_ROWS_PER_ROW_GROUP,  // 65536 rows max
-  MIN_ROWS_FOR_DICT,       // 100 rows minimum for dictionary
-  DICT_CARDINALITY_THRESHOLD, // 10% max unique/total ratio
-} from 'dosql';
 ```
 
 ---
@@ -3980,4 +2123,3 @@ import {
 - [Advanced Features](./advanced.md) - Time travel, branching, CDC
 - [Architecture](./architecture.md) - Understanding DoSQL internals
 - [Troubleshooting](./TROUBLESHOOTING.md) - Common issues and solutions
-- [Testing Guide](./TESTING_REVIEW.md) - Testing best practices
