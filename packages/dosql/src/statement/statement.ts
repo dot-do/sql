@@ -25,14 +25,6 @@ import {
   createTableNotFoundError,
   createUnsupportedSqlError,
 } from '../errors/index.js';
-import { executeSelectWithSubqueries } from './subquery-executor.js';
-import {
-  parseExpressionToAST,
-  evaluateExpressionAST,
-  isSimpleColumnRef,
-  getExpressionColumnName,
-  parseSelectColumns,
-} from './expression.js';
 
 // Re-export StatementError for backwards compatibility
 export { StatementError, StatementErrorCode } from '../errors/index.js';
@@ -394,7 +386,7 @@ export function createInMemoryStorage(): InMemoryStorage {
  * Simple in-memory execution engine for testing
  */
 export class InMemoryEngine implements ExecutionEngine {
-  storage: InMemoryStorage;
+  private storage: InMemoryStorage;
 
   constructor(storage?: InMemoryStorage) {
     this.storage = storage ?? createInMemoryStorage();
@@ -575,12 +567,6 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   private executeSelect(sql: string, params: SqlValue[]): ExecutionResult {
-    // Check if SQL contains subquery patterns - use full parser for complex queries
-    const hasSubquery = /\(\s*SELECT\b/i.test(sql) || /\bEXISTS\s*\(/i.test(sql) || /\bIN\s*\(\s*SELECT\b/i.test(sql);
-    if (hasSubquery) {
-      return executeSelectWithSubqueries(sql, params, this.storage);
-    }
-
     // Simple SELECT parsing
     const match = sql.match(
       /SELECT\s+(.+?)\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+?))?(?:\s+ORDER\s+BY\s+(.+?))?(?:\s+LIMIT\s+(\d+))?$/i
@@ -622,48 +608,16 @@ export class InMemoryEngine implements ExecutionEngine {
     // Project columns
     const selectAll = columnList.trim() === '*';
     if (!selectAll) {
-      const colExprs = parseSelectColumns(columnList);
+      const colNames = columnList.split(',').map(c => c.trim());
       rows = rows.map(row => {
         const projected: Record<string, SqlValue> = {};
-        for (const col of colExprs) {
+        for (const col of colNames) {
           // Handle aliases
           const aliasMatch = col.match(/^(.+?)\s+AS\s+(\w+)$/i);
-          let expr: string;
-          let outputName: string;
           if (aliasMatch) {
-            expr = aliasMatch[1].trim();
-            outputName = aliasMatch[2];
+            const [, expr, alias] = aliasMatch;
+            projected[alias] = row[expr.trim()] ?? null;
           } else {
-            expr = col.trim();
-            outputName = getExpressionColumnName(expr);
-          }
-          // Check if it's a simple column reference
-          if (isSimpleColumnRef(expr)) {
-            projected[outputName] = row[expr] ?? null;
-          } else {
-            // Evaluate arithmetic expression
-            try {
-              const ast = parseExpressionToAST(expr);
-              const value = evaluateExpressionAST(ast, row);
-              projected[outputName] = value;
-            } catch {
-              projected[outputName] = null;
-            }
-          }
-        }
-        return projected;
-      });
-    }
-
-    return {
-      rows,
-      columns: selectAll ? table.columns : [],
-    };
-  }
-
-  private executeUpdate_PLACEHOLDER(){}
-  private TEMP_MARKER() {
-    if (false) {
             projected[col] = row[col] ?? null;
           }
         }
