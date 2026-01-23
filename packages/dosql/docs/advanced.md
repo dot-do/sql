@@ -1554,11 +1554,11 @@ import {
   type VindexConfig,
 } from '@dotdo/dosql/sharding';
 
-// Hash vindex - uniform distribution via FNV-1a or xxhash
+// Hash vindex - uniform distribution via FNV-1a or xxHash
 const userVindex = hashVindex('fnv1a');
 // Good for: Primary keys, UUIDs, random IDs
-// Pros: Even distribution, fast lookups
-// Cons: Range queries require scatter-gather
+// Pros: Even distribution, O(1) lookups
+// Cons: Range queries require scatter-gather across all shards
 
 // Consistent hash vindex - virtual nodes for smooth rebalancing
 const orderVindex = consistentHashVindex(150, 'xxhash');
@@ -1672,7 +1672,7 @@ console.log(plan);
 
 ### Cross-Shard Transactions
 
-DoSQL supports distributed transactions across shards using two-phase commit:
+DoSQL supports distributed transactions across shards using a two-phase commit protocol (2PC):
 
 ```typescript
 import { createShardExecutor, type ShardId } from '@dotdo/dosql/sharding';
@@ -1744,7 +1744,7 @@ await executor.transaction(async (tx) => {
     { sql: 'UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = ?', params: [3] },
   ]);
 }, {
-  timeout: 10000,
+  timeoutMs: 10000,
   readPreference: 'primary', // Force primary for writes
 });
 ```

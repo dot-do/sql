@@ -3135,7 +3135,7 @@ import {
   createMemoryBackend,
   type FSXBackend,
   type FSXMetadata,
-} from '@dotdo/dosql/fsx';
+} from 'dosql/fsx';
 
 interface FSXBackend {
   /** Read file contents */
@@ -3177,7 +3177,7 @@ import {
   type TieredStorageConfig,
   type TieredStorageBackend,
   type MigrationResult,
-} from '@dotdo/dosql/fsx';
+} from 'dosql/fsx';
 
 enum StorageTier {
   HOT = 'hot',   // Durable Object storage
@@ -3247,7 +3247,7 @@ import {
   type COWBackend,
   type Snapshot,
   type MergeResult,
-} from '@dotdo/dosql/fsx';
+} from 'dosql/fsx';
 
 // Create COW backend
 const cow = createCOWBackend(underlying, {
@@ -3298,7 +3298,7 @@ import {
   createRangeShardRouter,
   type ShardRouter,
   type ShardConfig,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Consistent hash sharding
 const router = createConsistentHashRouter({
@@ -3329,7 +3329,7 @@ import {
   ProcedureBuilder,
   type Procedure,
   type ProcedureContext,
-} from '@dotdo/dosql';
+} from 'dosql/proc';
 
 // Define a procedure using the builder
 const createUser = procedure()
@@ -3371,7 +3371,7 @@ import {
   type Observability,
   type TracingConfig,
   type MetricsConfig,
-} from '@dotdo/dosql/observability';
+} from 'dosql';
 
 // Create observability instance
 const { tracer, metrics, sanitizer } = createObservability({
@@ -3446,7 +3446,7 @@ import {
   ColumnarWriter,
   ColumnarReader,
   analyzeForEncoding,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 /**
  * Supported column encodings:
@@ -3605,7 +3605,7 @@ const writer = new ColumnarWriter(schema, {
 The writer automatically analyzes data and selects the best encoding.
 
 ```typescript
-import { analyzeForEncoding, type EncodingAnalysis } from '@dotdo/dosql';
+import { analyzeForEncoding, type EncodingAnalysis } from 'dosql';
 
 // Analyze data to determine optimal encoding
 const values = ['active', 'active', 'inactive', 'active', 'pending'];
@@ -3634,7 +3634,7 @@ const numericAnalysis = analyzeForEncoding(numbers, 'int32');
 Each column chunk stores statistics for predicate pushdown.
 
 ```typescript
-import { type ColumnStats, getColumnStats } from '@dotdo/dosql';
+import { type ColumnStats, getColumnStats } from 'dosql';
 
 interface ColumnStats {
   /** Minimum value in the chunk */
@@ -3678,7 +3678,7 @@ import {
   inferSchema,
   type ColumnarTableSchema,
   type WriterConfig,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Define schema explicitly
 const schema: ColumnarTableSchema = {
@@ -3747,7 +3747,7 @@ import {
   type ReaderConfig,
   type ReadRequest,
   type Predicate,
-} from '@dotdo/dosql';
+} from 'dosql';
 
 // Create reader
 const config: ReaderConfig = {
@@ -3828,7 +3828,7 @@ type ColumnDataType =
   | 'timestamp'; // 8 byte Unix timestamp (milliseconds)
 
 // Type helpers
-import { isNumericType, isIntegerType, isSignedType, getBytesPerElement } from '@dotdo/dosql';
+import { isNumericType, isIntegerType, isSignedType, getBytesPerElement } from 'dosql';
 
 isNumericType('float64');      // true
 isIntegerType('int32');        // true
@@ -3874,7 +3874,7 @@ import {
   MAX_ROWS_PER_ROW_GROUP,  // 65536 rows max
   MIN_ROWS_FOR_DICT,       // 100 rows minimum for dictionary
   DICT_CARDINALITY_THRESHOLD, // 10% max unique/total ratio
-} from '@dotdo/dosql';
+} from 'dosql';
 ```
 
 ---
