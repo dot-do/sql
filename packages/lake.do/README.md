@@ -356,20 +356,243 @@ Import types for type-safe usage:
 
 ```typescript
 import type {
-  CDCBatch,
-  CDCEvent,
-  LakeQueryResult,
-  PartitionInfo,
-  Snapshot,
-  TableMetadata,
   // Client configuration types
   LakeClientConfig,
   RetryConfig,
-  // CDC Stream types
+  LakeClient,
+
+  // Query types
+  LakeQueryOptions,
+  LakeQueryResult,
+
+  // CDC types (experimental)
+  CDCStreamOptions,
+  CDCBatch,
+  CDCEvent,
+  CDCOperation,
+  CDCStreamState,
+  ClientCDCOperation,
+  ClientCapabilities,
+
+  // CDC Stream controller types
   CDCStreamControllerOptions,
   CDCStreamMetrics,
   BackpressureStrategy,
   WaterMarkEvent,
+
+  // Partition types
+  PartitionStrategy,
+  PartitionConfig,
+  PartitionInfo,
+
+  // Snapshot and time travel types
+  Snapshot,
+  TimeTravelOptions,
+
+  // Schema types
+  LakeColumnType,
+  LakeColumn,
+  LakeSchema,
+  TableMetadata,
+
+  // Compaction types (experimental)
+  CompactionConfig,
+  CompactionJob,
+
+  // Metrics types (experimental)
+  LakeMetrics,
+
+  // RPC types (internal, for advanced usage)
+  LakeRPCMethod,
+  LakeRPCRequest,
+  LakeRPCResponse,
+  LakeRPCError,
+
+  // Branded types for type-safe identifiers
+  CDCEventId,
+  PartitionKey,
+  ParquetFileId,
+  SnapshotId,
+  CompactionJobId,
+
+  // Re-exported types from @dotdo/sql.do
+  TransactionId,
+  LSN,
+  SQLValue,
+} from '@dotdo/lake.do';
+```
+
+### Branded Type Factory Functions
+
+The library provides branded types for type-safe identifiers. These prevent accidentally mixing up different ID types at compile time. Use the factory functions to create branded type instances from plain strings.
+
+#### Available Factory Functions
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `createCDCEventId(id)` | `CDCEventId` | Creates a CDC event identifier |
+| `createPartitionKey(key)` | `PartitionKey` | Creates a partition key (e.g., `date=2024-01-15`) |
+| `createParquetFileId(id)` | `ParquetFileId` | Creates a Parquet file identifier |
+| `createSnapshotId(id)` | `SnapshotId` | Creates a snapshot identifier for time travel |
+| `createCompactionJobId(id)` | `CompactionJobId` | Creates a compaction job identifier |
+
+#### Basic Usage
+
+```typescript
+import {
+  createCDCEventId,
+  createPartitionKey,
+  createParquetFileId,
+  createSnapshotId,
+  createCompactionJobId,
+} from '@dotdo/lake.do';
+
+// Create branded identifiers from plain strings
+const partitionKey = createPartitionKey('date=2024-01-15');
+const snapshotId = createSnapshotId('snap_789');
+const jobId = createCompactionJobId('compact_456');
+const fileId = createParquetFileId('data_00001.parquet');
+const eventId = createCDCEventId('evt_123456');
+```
+
+#### Type Safety Example
+
+Branded types prevent mixing up identifiers at compile time:
+
+```typescript
+import {
+  createPartitionKey,
+  createSnapshotId,
+  type PartitionKey,
+  type SnapshotId,
+} from '@dotdo/lake.do';
+
+function processPartition(key: PartitionKey): void {
+  // ...
+}
+
+function querySnapshot(id: SnapshotId): void {
+  // ...
+}
+
+const partitionKey = createPartitionKey('date=2024-01-15');
+const snapshotId = createSnapshotId('snap_789');
+
+// Correct usage - compiles successfully
+processPartition(partitionKey);
+querySnapshot(snapshotId);
+
+// Type errors - prevented at compile time
+// processPartition(snapshotId);  // Error: SnapshotId is not assignable to PartitionKey
+// querySnapshot(partitionKey);   // Error: PartitionKey is not assignable to SnapshotId
+// processPartition('date=2024-01-15');  // Error: string is not assignable to PartitionKey
+```
+
+#### Using with Client Methods
+
+```typescript
+import { createLakeClient, createPartitionKey, createSnapshotId } from '@dotdo/lake.do';
+
+const client = createLakeClient({ url: 'https://lake.example.com' });
+
+// Time travel query using a snapshot ID
+const snapshotId = createSnapshotId('snap_789');
+const historicalData = await client.query('SELECT * FROM orders', {
+  asOf: snapshotId,
+});
+
+// Compact a specific partition
+const partitionKey = createPartitionKey('date=2024-01-15');
+const job = await client.compact(partitionKey, {
+  targetFileSize: 128 * 1024 * 1024,
+  minFiles: 5,
+});
+
+// Check compaction status using the job ID (already branded from compact())
+const status = await client.getCompactionStatus(job.id);
+console.log(`Compaction ${status.status}`);
+```
+
+#### Development Mode Validation
+
+In development mode (`NODE_ENV !== 'production'`), the factory functions validate their inputs:
+
+```typescript
+import { createPartitionKey } from '@dotdo/lake.do';
+
+// These throw errors in development mode
+createPartitionKey('');         // Error: PartitionKey cannot be empty
+createPartitionKey('   ');      // Error: PartitionKey cannot be empty
+createPartitionKey(123 as any); // Error: PartitionKey must be a string
+
+// In production mode, validation is skipped for performance
+```
+
+#### Working with API Responses
+
+When receiving data from API responses, use the factory functions to convert plain strings to branded types:
+
+```typescript
+import {
+  createSnapshotId,
+  createPartitionKey,
+  type Snapshot,
+  type PartitionInfo,
+} from '@dotdo/lake.do';
+
+// API responses return branded types directly
+const snapshots: Snapshot[] = await client.listSnapshots('orders');
+const partitions: PartitionInfo[] = await client.listPartitions('orders');
+
+// Access the branded IDs directly
+for (const snapshot of snapshots) {
+  console.log(`Snapshot ${snapshot.id} at ${snapshot.timestamp}`);
+  // snapshot.id is already typed as SnapshotId
+}
+
+for (const partition of partitions) {
+  if (partition.fileCount > 10) {
+    // partition.key is already typed as PartitionKey
+    await client.compact(partition.key);
+  }
+}
+
+// When working with external data, use factory functions
+const externalSnapshotId = createSnapshotId(response.snapshotId);
+const externalPartitionKey = createPartitionKey(response.partitionKey);
+```
+
+### CDC Constants and Utilities
+
+```typescript
+import {
+  // CDC operation codes for efficient binary encoding
+  CDCOperationCode,
+
+  // Default client capabilities
+  DEFAULT_CLIENT_CAPABILITIES,
+  DEFAULT_RETRY_CONFIG,
+
+  // Type guards
+  isServerCDCEvent,
+  isClientCDCEvent,
+  isDateTimestamp,
+  isNumericTimestamp,
+  isRetryConfig,
+
+  // Converters
+  serverToClientCDCEvent,
+  clientToServerCDCEvent,
+  createRetryConfig,
+} from '@dotdo/lake.do';
+```
+
+### Event Types
+
+```typescript
+import type {
+  LakeClientEventType,    // 'connected' | 'disconnected' | 'reconnecting' | 'reconnected' | 'error'
+  LakeClientEventHandler, // (event?: unknown) => void
 } from '@dotdo/lake.do';
 ```
 

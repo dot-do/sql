@@ -24,6 +24,22 @@ Client SDK for DoSQL - SQL database on Cloudflare Workers with CapnWeb RPC.
 - [API Reference](#api-reference)
   - [createSQLClient](#createsqlclientconfig)
   - [DoSQLClient](#dosqlclient)
+    - [query](#querytsql-params-options)
+    - [exec](#execsql-params-options)
+    - [prepare](#preparesql)
+    - [execute](#executestatement-params-options)
+    - [beginTransaction](#begintransactionoptions)
+    - [commit](#committransactionid)
+    - [rollback](#rollbacktransactionid)
+    - [transaction](#transactionfn-options)
+    - [batch](#batchstatements)
+    - [getSchema](#getschematablename)
+    - [ping](#ping)
+    - [connect](#connect)
+    - [isConnected](#isconnected)
+    - [close](#close)
+    - [on](#onevent-listener)
+    - [off](#offevent-listener)
   - [Event Types](#event-types)
   - [TransactionContext](#transactioncontext)
   - [SQLError](#sqlerror)
@@ -40,6 +56,7 @@ Client SDK for DoSQL - SQL database on Cloudflare Workers with CapnWeb RPC.
   - [Prepared Statements](#prepared-statements)
   - [Time Travel Queries](#time-travel-queries)
   - [Idempotency Keys](#idempotency-keys)
+  - [Idempotency Cache Management](#idempotency-cache-management)
 - [Error Handling](#error-handling)
 - [Configuration Options](#configuration-options)
 - [Integration Examples](#integration-examples)
@@ -828,8 +845,17 @@ interface IdempotencyConfig {
   /** Prefix for generated keys */
   keyPrefix?: string;
 
-  /** Time-to-live for keys in ms (default: 24 hours) */
+  /** Time-to-live for idempotency keys in milliseconds (server-side, default: 24 hours) */
   ttlMs?: number;
+
+  /** Maximum number of entries in the client-side idempotency key cache (default: 1000) */
+  maxCacheSize?: number;
+
+  /** Time-to-live for cached idempotency keys in milliseconds (client-side, default: 5 minutes) */
+  cacheTtlMs?: number;
+
+  /** Interval in milliseconds for periodic cache cleanup (default: 60000 = 1 minute) */
+  cleanupIntervalMs?: number;
 }
 ```
 
@@ -1251,7 +1277,190 @@ isMutationQuery('SELECT * FROM users'); // false
 
 ---
 
+### Idempotency Cache Management
+
+The client maintains an LRU cache of idempotency keys to ensure the same key is used for retries of the same request. The following methods are available for monitoring and managing this cache.
+
+#### `getCacheSize()`
+
+Gets the current number of entries in the idempotency key cache.
+
+```typescript
+getCacheSize(): number;
+```
+
+**Returns:** The number of entries currently in the cache
+
+**Example:**
+
+```typescript
+const client = createSQLClient({ url: 'https://sql.example.com' });
+
+// After some mutations...
+console.log(`Cache has ${client.getCacheSize()} entries`);
+```
+
+---
+
+#### `clearIdempotencyCache()`
+
+Clears all entries from the idempotency key cache. This forces new idempotency keys to be generated for all future requests.
+
+```typescript
+clearIdempotencyCache(): void;
+```
+
+**Warning:** Use with caution as this may affect retry semantics for in-flight requests.
+
+**Example:**
+
+```typescript
+// Clear all cached idempotency keys
+client.clearIdempotencyCache();
+console.log(`Cache cleared, now has ${client.getCacheSize()} entries`); // 0
+```
+
+---
+
+#### `getIdempotencyCacheStats()`
+
+Gets statistics about the idempotency key cache. Useful for monitoring cache effectiveness and tuning configuration.
+
+```typescript
+getIdempotencyCacheStats(): IdempotencyCacheStats;
+```
+
+**Returns:** `IdempotencyCacheStats` object with the following properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `size` | `number` | Current number of entries in the cache |
+| `hits` | `number` | Number of cache hits (key reused for retry) |
+| `misses` | `number` | Number of cache misses (new key generated) |
+| `evictions` | `number` | Number of entries evicted due to LRU or TTL |
+| `maxSize` | `number` | Maximum configured cache size |
+| `ttlMs` | `number` | TTL in milliseconds for cache entries |
+
+**Example:**
+
+```typescript
+const stats = client.getIdempotencyCacheStats();
+
+// Calculate hit rate
+const hitRate = stats.hits / (stats.hits + stats.misses) * 100;
+console.log(`Cache hit rate: ${hitRate.toFixed(1)}%`);
+
+// Monitor cache health
+console.log(`Size: ${stats.size}/${stats.maxSize}`);
+console.log(`Evictions: ${stats.evictions}`);
+
+// Alert on low hit rate (may indicate retries aren't using cached keys)
+if (hitRate < 10 && stats.hits + stats.misses > 100) {
+  console.warn('Low cache hit rate - check idempotency configuration');
+}
+```
+
+---
+
+#### `cleanupIdempotencyCache()`
+
+Triggers manual cleanup of expired entries from the idempotency cache. This is normally done automatically on a timer (configurable via `cleanupIntervalMs`), but can be called manually to force immediate cleanup.
+
+```typescript
+cleanupIdempotencyCache(): number;
+```
+
+**Returns:** The number of expired entries that were removed
+
+**Example:**
+
+```typescript
+// Force cleanup before memory-sensitive operation
+const removed = client.cleanupIdempotencyCache();
+console.log(`Removed ${removed} expired entries`);
+
+// Combine with stats for monitoring
+const statsBefore = client.getIdempotencyCacheStats();
+const removedCount = client.cleanupIdempotencyCache();
+const statsAfter = client.getIdempotencyCacheStats();
+console.log(`Cleanup removed ${removedCount} entries (${statsBefore.size} -> ${statsAfter.size})`);
+```
+
+---
+
+#### Idempotency Cache Configuration
+
+Configure the cache behavior when creating the client:
+
+```typescript
+const client = createSQLClient({
+  url: 'https://sql.example.com',
+  idempotency: {
+    enabled: true,
+    keyPrefix: 'my-service',
+    maxCacheSize: 1000,           // Maximum entries (default: 1000)
+    cacheTtlMs: 5 * 60 * 1000,    // Entry TTL: 5 minutes (default)
+    cleanupIntervalMs: 60 * 1000, // Cleanup interval: 1 minute (default)
+  },
+});
+```
+
+---
+
 ## Error Handling
+
+The SDK provides several error classes for different failure scenarios:
+
+### `ConnectionError`
+
+Thrown when the client fails to establish or maintain a connection to the database.
+
+```typescript
+import { ConnectionError } from '@dotdo/sql.do';
+
+try {
+  await client.connect();
+} catch (error) {
+  if (error instanceof ConnectionError) {
+    console.error('Failed to connect:', error.message);
+    // error.cause may contain the underlying error
+  }
+}
+```
+
+#### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `message` | `string` | Human-readable error message |
+| `cause` | `Error \| undefined` | Underlying error that caused the connection failure |
+
+### `TimeoutError`
+
+Thrown when an operation exceeds its configured timeout duration.
+
+```typescript
+import { TimeoutError } from '@dotdo/sql.do';
+
+try {
+  await client.query('SELECT * FROM large_table', [], { timeout: 5000 });
+} catch (error) {
+  if (error instanceof TimeoutError) {
+    console.error('Query timed out after', error.timeout, 'ms');
+    console.error('Operation:', error.operation);
+  }
+}
+```
+
+#### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `message` | `string` | Human-readable error message |
+| `timeout` | `number` | The timeout duration in milliseconds |
+| `operation` | `string` | The operation that timed out (e.g., 'query', 'connect') |
+
+### `SQLError`
 
 ```typescript
 import { SQLError } from '@dotdo/sql.do';

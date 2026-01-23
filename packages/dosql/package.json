@@ -42,6 +42,14 @@
       "types": "./dist/orm/drizzle/index.d.ts",
       "import": "./dist/orm/drizzle/index.js"
     },
+    "./fsx": {
+      "types": "./dist/fsx/index.d.ts",
+      "import": "./dist/fsx/index.js"
+    },
+    "./proc": {
+      "types": "./dist/proc/index.d.ts",
+      "import": "./dist/proc/index.js"
+    },
     "./e2e": {
       "types": "./e2e/index.d.ts",
       "import": "./e2e/index.js"

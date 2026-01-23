@@ -21,6 +21,11 @@ import type {
   StatementHash,
   IdempotencyConfig,
   RetryConfig,
+  ClientEventMap,
+  ClientEventListener,
+  ClientErrorEvent,
+  IdempotencyCacheStats,
+  TransactionContext as TransactionContextInterface,
 } from './types.js';
 import { createTransactionId, createLSN, createStatementHash, DEFAULT_IDEMPOTENCY_CONFIG, DEFAULT_RETRY_CONFIG } from './types.js';
 import { MessageParseError } from './errors.js';
@@ -152,24 +157,7 @@ interface LRUCacheEntry<T> {
   lastAccessedAt: number;
 }
 
-/**
- * Statistics for the idempotency cache
- * @public
- */
-export interface IdempotencyCacheStats {
-  /** Current number of entries in the cache */
-  size: number;
-  /** Number of cache hits */
-  hits: number;
-  /** Number of cache misses */
-  misses: number;
-  /** Number of evictions due to LRU or TTL */
-  evictions: number;
-  /** Maximum configured cache size */
-  maxSize: number;
-  /** TTL in milliseconds */
-  ttlMs: number;
-}
+// IdempotencyCacheStats is now defined in types.ts and re-exported above
 
 /**
  * LRU Cache with TTL support for idempotency keys.
@@ -437,137 +425,20 @@ export interface SQLClientConfig {
 // RetryConfig is imported from @dotdo/shared-types via ./types.js
 
 // =============================================================================
-// Event Emitter for Connection Events
+// Re-export Event Types from types.ts
 // =============================================================================
 
-/**
- * Connection event data for 'connected' event.
- * @public
- * @since 0.2.0
- */
-export interface ConnectedEvent {
-  url: string;
-  timestamp: Date;
-}
-
-/**
- * Disconnection event data for 'disconnected' event.
- * @public
- * @since 0.2.0
- */
-export interface DisconnectedEvent {
-  url: string;
-  timestamp: Date;
-  reason?: string;
-}
-
-/**
- * Error event data for 'error' event.
- * @public
- * @since 0.3.0
- */
-export interface ErrorEvent {
-  /** The error that occurred */
-  error: Error;
-  /** Timestamp when the error occurred */
-  timestamp: Date;
-  /** Context about where the error occurred */
-  context: 'message_parse' | 'connection' | 'rpc';
-  /** Optional request ID if the error was associated with a specific request */
-  requestId?: string;
-}
-
-/**
- * Event types for DoSQLClient.
- *
- * Maps event names to their corresponding event data types. This interface
- * enables type-safe event handling with the {@link DoSQLClient.on} and
- * {@link DoSQLClient.off} methods.
- *
- * @example
- * ```typescript
- * // Type-safe event handling
- * const client = createSQLClient({ url: 'wss://sql.example.com' });
- *
- * // Handle connection established
- * client.on('connected', (event) => {
- *   // event is typed as ConnectedEvent
- *   console.log(`Connected to ${event.url} at ${event.timestamp.toISOString()}`);
- * });
- *
- * // Handle disconnection
- * client.on('disconnected', (event) => {
- *   // event is typed as DisconnectedEvent
- *   console.log(`Disconnected: ${event.reason ?? 'unknown reason'}`);
- * });
- *
- * // Handle errors
- * client.on('error', (event) => {
- *   // event is typed as ErrorEvent
- *   console.error(`[${event.context}] ${event.error.message}`);
- *   if (event.requestId) {
- *     console.error(`Request ID: ${event.requestId}`);
- *   }
- * });
- * ```
- *
- * @public
- * @since 0.2.0
- */
-export interface ClientEventMap {
-  connected: ConnectedEvent;
-  disconnected: DisconnectedEvent;
-  error: ErrorEvent;
-}
-
-/**
- * Event listener callback type for DoSQLClient events.
- *
- * A generic type that maps event names to their corresponding callback signatures.
- * The callback receives the appropriate event data type based on the event name.
- *
- * @typeParam K - The event name key from {@link ClientEventMap}
- *
- * @example
- * ```typescript
- * // Define typed event handlers
- * const onConnected: ClientEventListener<'connected'> = (event) => {
- *   console.log(`Connected to ${event.url}`);
- * };
- *
- * const onDisconnected: ClientEventListener<'disconnected'> = (event) => {
- *   console.log(`Disconnected: ${event.reason}`);
- * };
- *
- * const onError: ClientEventListener<'error'> = (event) => {
- *   console.error(`Error in ${event.context}: ${event.error.message}`);
- * };
- *
- * // Register handlers
- * client.on('connected', onConnected);
- * client.on('disconnected', onDisconnected);
- * client.on('error', onError);
- *
- * // Later, remove specific handlers
- * client.off('connected', onConnected);
- * ```
- *
- * @example
- * ```typescript
- * // Create a reconnection handler
- * const reconnectHandler: ClientEventListener<'disconnected'> = async (event) => {
- *   console.log(`Lost connection to ${event.url}, attempting reconnect...`);
- *   await sleep(1000);
- *   await client.connect();
- * };
- *
- * client.on('disconnected', reconnectHandler);
- * ```
- *
- * @public
- * @since 0.2.0
- */
-export type ClientEventListener<K extends keyof ClientEventMap> = (event: ClientEventMap[K]) => void;
+// Event types are now defined in types.ts and imported via the type imports above.
+// Re-export them for backward compatibility with existing consumers.
+export type {
+  ConnectedEvent,
+  DisconnectedEvent,
+  ClientErrorEvent,
+  ErrorEvent,
+  ClientEventMap,
+  ClientEventListener,
+  IdempotencyCacheStats,
+} from './types.js';
 
 /**
  * Type-safe storage for event listeners, mapping each event name to its specific listener set.
@@ -1190,7 +1061,7 @@ export class DoSQLClient implements SQLClient {
     console.error(`[DoSQLClient] ${context} error:`, error);
 
     // Build error event, only including requestId if it's defined
-    const errorEvent: ErrorEvent = {
+    const errorEvent: ClientErrorEvent = {
       error,
       timestamp: new Date(),
       context,

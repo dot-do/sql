@@ -217,6 +217,151 @@ import type {
   TableSchema,
 } from '@dotdo/shared-types';
 
+// =============================================================================
+// Event Types
+// =============================================================================
+
+/**
+ * Connection event data for 'connected' event.
+ *
+ * Emitted when a WebSocket connection to the database is successfully established.
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export interface ConnectedEvent {
+  /** The URL that was connected to */
+  url: string;
+  /** Timestamp when the connection was established */
+  timestamp: Date;
+}
+
+/**
+ * Disconnection event data for 'disconnected' event.
+ *
+ * Emitted when a WebSocket connection to the database is closed.
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export interface DisconnectedEvent {
+  /** The URL that was disconnected from */
+  url: string;
+  /** Timestamp when the disconnection occurred */
+  timestamp: Date;
+  /** Optional reason for the disconnection */
+  reason?: string;
+}
+
+/**
+ * Error event data for 'error' event.
+ *
+ * Emitted when an error occurs during WebSocket communication or message parsing.
+ * Named `ClientErrorEvent` to avoid conflict with the DOM's `ErrorEvent` interface.
+ *
+ * @public
+ * @stability stable
+ * @since 0.3.0
+ */
+export interface ClientErrorEvent {
+  /** The error that occurred */
+  error: Error;
+  /** Timestamp when the error occurred */
+  timestamp: Date;
+  /** Context about where the error occurred */
+  context: 'message_parse' | 'connection' | 'rpc';
+  /** Optional request ID if the error was associated with a specific request */
+  requestId?: string;
+}
+
+/**
+ * @deprecated Use `ClientErrorEvent` instead. This alias exists for backward compatibility.
+ * @public
+ */
+export type ErrorEvent = ClientErrorEvent;
+
+/**
+ * Event types for SQLClient.
+ *
+ * Maps event names to their corresponding event data types. This interface
+ * enables type-safe event handling with the {@link SQLClient.on} and
+ * {@link SQLClient.off} methods.
+ *
+ * @example
+ * ```typescript
+ * // Type-safe event handling
+ * const client = createSQLClient({ url: 'wss://sql.example.com' });
+ *
+ * client.on('connected', (event) => {
+ *   // event is typed as ConnectedEvent
+ *   console.log(`Connected to ${event.url}`);
+ * });
+ *
+ * client.on('disconnected', (event) => {
+ *   // event is typed as DisconnectedEvent
+ *   console.log(`Disconnected: ${event.reason}`);
+ * });
+ *
+ * client.on('error', (event) => {
+ *   // event is typed as ErrorEvent
+ *   console.error(`[${event.context}] ${event.error.message}`);
+ * });
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export interface ClientEventMap {
+  connected: ConnectedEvent;
+  disconnected: DisconnectedEvent;
+  error: ClientErrorEvent;
+}
+
+/**
+ * Event listener callback type for SQLClient events.
+ *
+ * A generic type that maps event names to their corresponding callback signatures.
+ * The callback receives the appropriate event data type based on the event name.
+ *
+ * @typeParam K - The event name key from {@link ClientEventMap}
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export type ClientEventListener<K extends keyof ClientEventMap> = (event: ClientEventMap[K]) => void;
+
+// =============================================================================
+// Idempotency Cache Types
+// =============================================================================
+
+/**
+ * Statistics for the idempotency cache.
+ *
+ * Provides metrics about cache usage and effectiveness for monitoring and tuning.
+ *
+ * @public
+ * @stability stable
+ * @since 0.3.0
+ */
+export interface IdempotencyCacheStats {
+  /** Current number of entries in the cache */
+  size: number;
+  /** Number of cache hits (key reused for retry) */
+  hits: number;
+  /** Number of cache misses (new key generated) */
+  misses: number;
+  /** Number of entries evicted due to LRU or TTL */
+  evictions: number;
+  /** Maximum configured cache size */
+  maxSize: number;
+  /** TTL in milliseconds for cache entries */
+  ttlMs: number;
+}
+
 /**
  * Transaction context for executing operations within a transaction.
  *
@@ -669,6 +814,175 @@ export interface SQLClient {
    * ```
    */
   close(): Promise<void>;
+
+  // ===========================================================================
+  // Event Handling
+  // ===========================================================================
+
+  /**
+   * Registers an event listener for client events.
+   *
+   * Supported events:
+   * - `'connected'`: Emitted when WebSocket connection is established
+   * - `'disconnected'`: Emitted when WebSocket connection is closed
+   * - `'error'`: Emitted when an error occurs during WebSocket communication
+   *
+   * @typeParam K - The event name key from {@link ClientEventMap}
+   * @param event - The event name to listen for
+   * @param listener - The callback function to invoke when the event occurs
+   * @returns The client instance (for method chaining)
+   *
+   * @example
+   * ```typescript
+   * const client = createSQLClient({ url: 'wss://sql.example.com' });
+   *
+   * client.on('connected', (event) => {
+   *   console.log(`Connected to ${event.url} at ${event.timestamp}`);
+   * });
+   *
+   * client.on('disconnected', (event) => {
+   *   console.log(`Disconnected from ${event.url}: ${event.reason}`);
+   * });
+   *
+   * client.on('error', (event) => {
+   *   console.error(`Error in ${event.context}:`, event.error);
+   * });
+   *
+   * await client.connect();
+   * ```
+   *
+   * @public
+   * @stability stable
+   * @since 0.2.0
+   */
+  on<K extends keyof ClientEventMap>(event: K, listener: ClientEventListener<K>): this;
+
+  /**
+   * Removes a previously registered event listener.
+   *
+   * @typeParam K - The event name key from {@link ClientEventMap}
+   * @param event - The event name to stop listening for
+   * @param listener - The callback function to remove
+   * @returns The client instance (for method chaining)
+   *
+   * @example
+   * ```typescript
+   * const onConnected = (event: ConnectedEvent): void => {
+   *   console.log(`Connected to ${event.url}`);
+   * };
+   *
+   * // Register listener
+   * client.on('connected', onConnected);
+   *
+   * // Later, remove the listener
+   * client.off('connected', onConnected);
+   * ```
+   *
+   * @public
+   * @stability stable
+   * @since 0.2.0
+   */
+  off<K extends keyof ClientEventMap>(event: K, listener: ClientEventListener<K>): this;
+
+  // ===========================================================================
+  // Idempotency Cache Management
+  // ===========================================================================
+
+  /**
+   * Gets the current number of entries in the idempotency key cache.
+   *
+   * The idempotency cache stores keys for mutation queries to ensure the same
+   * key is used for retries of the same request.
+   *
+   * @returns The number of entries currently in the cache
+   *
+   * @example
+   * ```typescript
+   * const client = createSQLClient({ url: 'https://sql.example.com' });
+   *
+   * // After some mutations...
+   * console.log(`Cache has ${client.getCacheSize()} entries`);
+   * ```
+   *
+   * @public
+   * @stability stable
+   * @since 0.3.0
+   */
+  getCacheSize(): number;
+
+  /**
+   * Clears all entries from the idempotency key cache.
+   *
+   * This forces new idempotency keys to be generated for all future requests.
+   *
+   * **Warning:** Use with caution as this may affect retry semantics for
+   * in-flight requests.
+   *
+   * @example
+   * ```typescript
+   * // Clear all cached idempotency keys
+   * client.clearIdempotencyCache();
+   * console.log(`Cache cleared, now has ${client.getCacheSize()} entries`); // 0
+   * ```
+   *
+   * @public
+   * @stability stable
+   * @since 0.3.0
+   */
+  clearIdempotencyCache(): void;
+
+  /**
+   * Gets statistics about the idempotency key cache.
+   *
+   * Useful for monitoring cache effectiveness and tuning configuration.
+   *
+   * @returns Cache statistics including size, hits, misses, and evictions
+   *
+   * @example
+   * ```typescript
+   * const stats = client.getIdempotencyCacheStats();
+   *
+   * // Calculate hit rate
+   * const hitRate = stats.hits / (stats.hits + stats.misses) * 100;
+   * console.log(`Cache hit rate: ${hitRate.toFixed(1)}%`);
+   *
+   * // Monitor cache health
+   * console.log(`Size: ${stats.size}/${stats.maxSize}`);
+   * console.log(`Evictions: ${stats.evictions}`);
+   * ```
+   *
+   * @public
+   * @stability stable
+   * @since 0.3.0
+   */
+  getIdempotencyCacheStats(): IdempotencyCacheStats;
+
+  /**
+   * Triggers manual cleanup of expired entries from the idempotency cache.
+   *
+   * This is normally done automatically on a timer (configurable via
+   * `cleanupIntervalMs`), but can be called manually to force immediate cleanup.
+   *
+   * @returns The number of expired entries that were removed
+   *
+   * @example
+   * ```typescript
+   * // Force cleanup before memory-sensitive operation
+   * const removed = client.cleanupIdempotencyCache();
+   * console.log(`Removed ${removed} expired entries`);
+   *
+   * // Combine with stats for monitoring
+   * const statsBefore = client.getIdempotencyCacheStats();
+   * const removedCount = client.cleanupIdempotencyCache();
+   * const statsAfter = client.getIdempotencyCacheStats();
+   * console.log(`Cleanup removed ${removedCount} entries (${statsBefore.size} -> ${statsAfter.size})`);
+   * ```
+   *
+   * @public
+   * @stability stable
+   * @since 0.3.0
+   */
+  cleanupIdempotencyCache(): number;
 }
 
 // =============================================================================

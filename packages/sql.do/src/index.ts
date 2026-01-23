@@ -61,7 +61,19 @@ export type { TimeoutOperationType } from './errors.js';
  * @stability stable
  * @since 0.3.0
  */
-export type { ConnectedEvent, DisconnectedEvent, ErrorEvent, ClientEventMap, ClientEventListener } from './client.js';
+export type { ConnectedEvent, DisconnectedEvent, ClientErrorEvent, ClientEventMap, ClientEventListener } from './types.js';
+/**
+ * @deprecated Use `ClientErrorEvent` instead. This alias exists for backward compatibility.
+ */
+export type { ErrorEvent } from './types.js';
+
+/**
+ * Idempotency cache statistics type.
+ * @public
+ * @stability stable
+ * @since 0.3.0
+ */
+export type { IdempotencyCacheStats } from './types.js';
 
 /**
  * Idempotency utilities for mutation safety.

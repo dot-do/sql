@@ -15,6 +15,7 @@ This guide covers installation, basic usage, CRUD operations, migrations, and de
 - [CDC Streaming](#cdc-streaming)
 - [Migrations](#migrations)
 - [Deploying to Cloudflare Workers](#deploying-to-cloudflare-workers)
+- [Error Handling for Common Setup Failures](#error-handling-for-common-setup-failures)
 - [Troubleshooting](#troubleshooting)
 - [Next Steps](#next-steps)
 

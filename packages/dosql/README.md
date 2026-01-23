@@ -56,12 +56,14 @@ DoSQL is a database engine purpose-built for Cloudflare Workers and Durable Obje
 
 ## Version Compatibility
 
-| Dependency | Version |
-|------------|---------|
-| Node.js | 18+ |
-| TypeScript | 5.3+ |
-| Cloudflare Workers | 2024-01-01+ |
-| @cloudflare/workers-types | 4.x |
+| Dependency | Minimum | Tested |
+|------------|---------|--------|
+| Node.js | 20.0.0 | 22.21.1 |
+| TypeScript | 5.3.0 | 5.9.3 |
+| Cloudflare Workers (compatibility_date) | 2024-01-01 | 2026-01-01 |
+| @cloudflare/workers-types | 4.0.0 | 4.20260122.0 |
+| Wrangler | 4.0.0 | 4.59.3 |
+| workerd | 1.20240101.0 | 1.20260116.0 |
 
 ## Features
 
@@ -568,9 +570,9 @@ async function* paginate<T>(db: Database, sql: string, pageSize = 1000) {
 
 ## Requirements
 
-- Cloudflare Workers / Durable Objects
+- Cloudflare Workers / Durable Objects (compatibility_date 2024-01-01+)
 - TypeScript 5.3+
-- Node.js 18+ (for development)
+- Node.js 20+ (for development)
 
 ## License
 
@@ -578,20 +580,7 @@ MIT
 
 ## Changelog
 
-### 0.1.0 (2026-01-22)
-
-**Initial Release**
-
-- Core database operations (DB, query, run, transaction)
-- Schema migrations with `.do/migrations/*.sql` convention
-- Transaction management with savepoints
-- Time travel queries (experimental)
-- Database branching (experimental)
-- CDC streaming to lakehouse (experimental)
-- Virtual tables for URLs, R2, external APIs (experimental)
-- CapnWeb RPC protocol (experimental)
-- Sharding and query routing (experimental)
-- Stored procedures (experimental)
+See [CHANGELOG.md](./CHANGELOG.md) for a detailed history of changes.
 
 ## Links
 

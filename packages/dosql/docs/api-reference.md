@@ -4,6 +4,7 @@ Complete API documentation for DoSQL - a type-safe SQL database for Cloudflare W
 
 ## Table of Contents
 
+- [Module Exports](#module-exports)
 - [Database Class](#database-class)
   - [Constructor](#constructor)
   - [Properties](#properties)
@@ -49,6 +50,57 @@ Complete API documentation for DoSQL - a type-safe SQL database for Cloudflare W
   - [Data Types](#data-types)
   - [Predicate Operations](#predicate-operations)
   - [Constants](#constants)
+
+---
+
+## Module Exports
+
+DoSQL provides multiple subpath exports for importing specific functionality:
+
+```typescript
+// Main entry point - Database, Statement, types, errors
+import { Database, createDatabase, DatabaseError } from '@dotdo/dosql';
+
+// RPC client/server for remote database access
+import { createRPCClient, createRPCServer } from '@dotdo/dosql/rpc';
+
+// Write-Ahead Log for durability
+import { createWALWriter, createWALReader } from '@dotdo/dosql/wal';
+
+// Change Data Capture for real-time streaming
+import { createCDC, createCDCSubscription } from '@dotdo/dosql/cdc';
+
+// Transaction utilities
+import { TransactionManager } from '@dotdo/dosql/transaction';
+
+// FSX - File System Abstraction for tiered storage
+import {
+  createDOBackend,
+  createR2Backend,
+  createTieredBackend,
+  createCOWBackend,
+  MemoryFSXBackend,
+} from '@dotdo/dosql/fsx';
+
+// ORM adapters
+import { createPrismaAdapter } from '@dotdo/dosql/orm/prisma';
+import { createKyselyAdapter } from '@dotdo/dosql/orm/kysely';
+import { createKnexAdapter } from '@dotdo/dosql/orm/knex';
+import { createDrizzleAdapter } from '@dotdo/dosql/orm/drizzle';
+```
+
+| Subpath | Description |
+|---------|-------------|
+| `@dotdo/dosql` | Main entry point with Database class, types, and errors |
+| `@dotdo/dosql/rpc` | RPC client/server for remote database operations |
+| `@dotdo/dosql/wal` | Write-Ahead Log for durability and recovery |
+| `@dotdo/dosql/cdc` | Change Data Capture for real-time change streaming |
+| `@dotdo/dosql/transaction` | Transaction management utilities |
+| `@dotdo/dosql/fsx` | File System Abstraction with tiered storage backends |
+| `@dotdo/dosql/orm/prisma` | Prisma ORM adapter |
+| `@dotdo/dosql/orm/kysely` | Kysely query builder adapter |
+| `@dotdo/dosql/orm/knex` | Knex.js query builder adapter |
+| `@dotdo/dosql/orm/drizzle` | Drizzle ORM adapter |
 
 ---
 
