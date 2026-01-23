@@ -294,6 +294,158 @@ describe('Production E2E', () => {
 
 ---
 
+## Running Specific Test Subsets
+
+When working with the monorepo, you often need to run tests for specific modules or features rather than the entire test suite. Vitest provides several filtering mechanisms.
+
+### By File Path Pattern
+
+Run tests matching a specific path pattern:
+
+```bash
+# All tests in a specific directory
+npx vitest run src/parser/
+
+# All tests matching a glob pattern
+npx vitest run src/**/*.test.ts
+
+# Specific test file
+npx vitest run src/parser/__tests__/unified-parser.test.ts
+
+# All integration tests
+npx vitest run src/__tests__/integration/
+
+# All DO-related tests
+npx vitest run src/__tests__/do/
+```
+
+### By Test Name (--grep / -t)
+
+Filter tests by their `describe()` or `it()` names:
+
+```bash
+# Run tests containing "SELECT" in the name
+npx vitest run --grep "SELECT"
+
+# Run tests for a specific feature
+npx vitest run -t "should parse"
+
+# Case-insensitive matching
+npx vitest run --grep "deadlock" -i
+
+# Multiple patterns (OR logic)
+npx vitest run --grep "INSERT|UPDATE|DELETE"
+```
+
+### Combining Path and Name Filters
+
+```bash
+# Parser tests that mention JOIN
+npx vitest run src/parser/ --grep "JOIN"
+
+# Integration tests for CRUD operations
+npx vitest run src/__tests__/integration/ -t "insert"
+
+# Performance tests for specific latency targets
+npx vitest run src/benchmarks/ --grep "latency"
+```
+
+### By Package (Workspaces)
+
+Run tests for a specific package in the monorepo:
+
+```bash
+# Run all dosql tests
+npm test -w packages/dosql
+
+# Run all dolake tests
+npm test -w packages/dolake
+
+# Run with additional vitest args
+npm test -w packages/dosql -- --grep "parser"
+```
+
+### Running TDD Red Phase Tests
+
+Filter for `it.fails()` tests to see documented gaps:
+
+```bash
+# Note: it.fails() tests are inverted - they pass when the assertion fails
+# To see which gaps are documented, look for test files with it.fails()
+npx vitest run --grep "should" src/__tests__/e2e-lakehouse.test.ts
+npx vitest run src/benchmarks/__tests__/performance.test.ts
+```
+
+### Useful Vitest Flags
+
+| Flag | Description |
+|------|-------------|
+| `--run` | Run once (no watch mode) - **required for CI** |
+| `--grep` / `-t` | Filter by test name pattern |
+| `--reporter=verbose` | Show all test names |
+| `--bail` / `-b` | Stop on first failure |
+| `--sequence.shuffle` | Randomize test order |
+| `--testTimeout=30000` | Set timeout (ms) |
+| `--silent` | Suppress console output |
+
+### Module-Specific Examples
+
+```bash
+# SQL Parser tests
+npx vitest run src/parser/__tests__/
+
+# Query Planner tests
+npx vitest run src/planner/__tests__/
+
+# Transaction/Deadlock tests
+npx vitest run src/database/__tests__/
+
+# WAL tests
+npx vitest run src/wal/__tests__/
+
+# B-tree index tests
+npx vitest run src/btree/__tests__/
+
+# Sharding tests
+npx vitest run src/sharding/__tests__/
+
+# ORM adapter tests (Drizzle, Kysely, Knex, Prisma)
+npx vitest run src/orm/
+
+# File system abstraction tests
+npx vitest run src/fsx/__tests__/
+
+# Columnar storage tests
+npx vitest run src/columnar/__tests__/
+
+# Compaction tests
+npx vitest run src/compaction/__tests__/
+```
+
+### E2E Tests
+
+E2E tests often have different requirements (may need `wrangler dev` running):
+
+```bash
+# Run E2E tests (from package directory)
+cd packages/dosql
+npx vitest run e2e/
+
+# Specific E2E test
+npx vitest run e2e/__tests__/prod-e2e.test.ts
+```
+
+### Memory Considerations
+
+**Important**: As noted in CLAUDE.md, Vitest/Vite consume significant memory. Guidelines:
+
+1. Never run multiple vitest instances in parallel
+2. Use `npx vitest run` (not watch mode) for CI
+3. Run ONE test file at a time when debugging
+4. Kill orphan processes: `pkill -9 -f vitest; pkill -9 -f vite`
+
+---
+
 ## Skipped Tests
 
 ### it.skip() Usage (10 tests)

@@ -47,6 +47,23 @@
 export { DoSQLClient, TransactionContext, SQLError, createSQLClient } from './client.js';
 
 /**
+ * Error types for connection and message handling.
+ * @public
+ * @stability stable
+ * @since 0.3.0
+ */
+export { ConnectionError, TimeoutError, MessageParseError, isRetryableError } from './errors.js';
+export type { TimeoutOperationType } from './errors.js';
+
+/**
+ * Event types for client event listeners.
+ * @public
+ * @stability stable
+ * @since 0.3.0
+ */
+export type { ConnectedEvent, DisconnectedEvent, ErrorEvent, ClientEventMap, ClientEventListener } from './client.js';
+
+/**
  * Idempotency utilities for mutation safety.
  * @public
  * @stability experimental

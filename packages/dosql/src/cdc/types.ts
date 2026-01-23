@@ -13,6 +13,87 @@ import type { WALEntry, WALOperation, WALReader } from '../wal/types.js';
 // Re-export Unified CDC Types from shared-types via sql.do
 // =============================================================================
 
+/**
+ * Re-exported CDC types from `@dotdo/shared-types` (via `@dotdo/sql.do`).
+ *
+ * These types provide the canonical Change Data Capture definitions for the
+ * DoSQL ecosystem. Using these shared types ensures compatibility between
+ * CDC producers and consumers across the stack.
+ *
+ * ## Type Re-exports
+ *
+ * - {@link CDCOperation} - Union type of CDC operations: 'INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE'
+ *   TRUNCATE is only used server-side; clients receive INSERT/UPDATE/DELETE only.
+ *
+ * - `UnifiedCDCEvent` (aliased from CDCEvent) - The canonical CDC event structure.
+ *   Contains LSN, table name, operation, timestamp, and before/after row data.
+ *   Note: This module also defines a local `CDCEvent` type that extends the unified
+ *   type with transaction boundary events for server-side use.
+ *
+ * ## Value Re-exports
+ *
+ * - `CDCOperationCode` - Numeric codes for efficient binary encoding:
+ *   - INSERT: 0
+ *   - UPDATE: 1
+ *   - DELETE: 2
+ *   - TRUNCATE: 3
+ *
+ * ## Type Guards
+ *
+ * Functions for detecting CDC event format:
+ *
+ * - `isServerCDCEvent(event)` - Returns true if event has `txId` field (server format)
+ * - `isClientCDCEvent(event)` - Returns true if event has `transactionId` field (client format)
+ * - `isDateTimestamp(timestamp)` - Returns true if timestamp is a Date object
+ * - `isNumericTimestamp(timestamp)` - Returns true if timestamp is a Unix timestamp number
+ *
+ * ## Type Converters
+ *
+ * Functions for converting between server and client CDC event formats:
+ *
+ * - `serverToClientCDCEvent(event)` - Converts server format to client format:
+ *   - Converts numeric timestamps to Date objects
+ *   - Normalizes `oldRow`/`newRow` to `before`/`after`
+ *   - Normalizes `txId` to `transactionId`
+ *
+ * - `clientToServerCDCEvent(event)` - Converts client format to server format:
+ *   - Converts Date timestamps to Unix timestamps
+ *   - Normalizes `before`/`after` to `oldRow`/`newRow`
+ *   - Normalizes `transactionId` to `txId`
+ *
+ * @example
+ * ```typescript
+ * import {
+ *   CDCOperation,
+ *   UnifiedCDCEvent,
+ *   CDCOperationCode,
+ *   serverToClientCDCEvent,
+ * } from './types.js';
+ *
+ * // Process a CDC event from the WAL
+ * function processCDCEvent(event: UnifiedCDCEvent): void {
+ *   const clientEvent = serverToClientCDCEvent(event);
+ *
+ *   switch (clientEvent.operation) {
+ *     case 'INSERT':
+ *       console.log('New row:', clientEvent.after);
+ *       break;
+ *     case 'UPDATE':
+ *       console.log('Updated:', clientEvent.before, '->', clientEvent.after);
+ *       break;
+ *     case 'DELETE':
+ *       console.log('Deleted:', clientEvent.before);
+ *       break;
+ *   }
+ * }
+ * ```
+ *
+ * @see {@link https://github.com/dotdo/shared-types | @dotdo/shared-types} for canonical definitions
+ *
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
 export {
   type CDCOperation,
   type CDCEvent as UnifiedCDCEvent,

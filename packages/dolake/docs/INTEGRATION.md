@@ -13,6 +13,135 @@ DoSQL instances capture changes to their data and stream them to DoLake via WebS
 +----------+                    +----------+                 +----+
 ```
 
+## DoLake Instantiation
+
+DoLake is a Durable Object that receives CDC events from DoSQL and writes them to R2 as Parquet files with Iceberg metadata. Here is a complete example of how to configure and instantiate DoLake in your worker.
+
+### Environment Bindings
+
+DoLake requires the following environment bindings:
+
+```typescript
+import { DoLake, type DoLakeEnv } from '@dotdo/dolake';
+
+/**
+ * Environment bindings for DoLake
+ */
+interface Env extends DoLakeEnv {
+  /** R2 bucket for lakehouse data (required) */
+  LAKEHOUSE_BUCKET: R2Bucket;
+
+  /** KV namespace for metadata caching (optional) */
+  LAKEHOUSE_KV?: KVNamespace;
+
+  /** DoLake Durable Object namespace */
+  DOLAKE: DurableObjectNamespace;
+}
+```
+
+### Configuration Options
+
+DoLake uses `DoLakeConfig` to control flush behavior, buffer sizes, and Parquet settings:
+
+```typescript
+import { type DoLakeConfig, DEFAULT_DOLAKE_CONFIG } from '@dotdo/dolake';
+
+/**
+ * Full DoLake configuration with all available options
+ */
+const customConfig: DoLakeConfig = {
+  // R2 Storage Settings
+  r2BucketName: 'my-lakehouse-bucket',      // R2 bucket binding name
+  r2BasePath: 'warehouse/tables',            // Base path in R2 for Iceberg tables
+
+  // Flush Thresholds (trigger flush when any threshold is reached)
+  flushThresholdEvents: 10_000,              // Max events before flush (default: 10,000)
+  flushThresholdBytes: 50 * 1024 * 1024,     // Max buffer size before flush (default: 50MB)
+  flushThresholdMs: 60_000,                  // Max buffer age before flush (default: 60s)
+  flushIntervalMs: 30_000,                   // Scheduled flush interval (default: 30s)
+
+  // Buffer Settings
+  maxBufferSize: 100 * 1024 * 1024,          // Maximum buffer size (default: 100MB)
+
+  // Fallback Storage (for R2 failure recovery)
+  enableFallback: true,                      // Enable local fallback storage
+  maxFallbackSize: 10 * 1024 * 1024,         // Max fallback storage size (default: 10MB)
+
+  // Deduplication Settings
+  enableDeduplication: true,                 // Enable event deduplication
+  deduplicationWindowMs: 300_000,            // Deduplication window (default: 5 min)
+
+  // Parquet Settings
+  parquetRowGroupSize: 100_000,              // Target row group size (default: 100,000)
+  parquetCompression: 'snappy',              // Compression: 'none' | 'snappy' | 'gzip' | 'zstd'
+};
+```
+
+### Worker Export
+
+Export DoLake in your worker and route requests to it:
+
+```typescript
+import { DoLake } from '@dotdo/dolake';
+
+// Export the DoLake Durable Object class
+export { DoLake };
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Route lakehouse requests to DoLake
+    if (url.pathname.startsWith('/lakehouse') || url.pathname.startsWith('/ws')) {
+      const id = env.DOLAKE.idFromName('default');
+      const stub = env.DOLAKE.get(id);
+      return stub.fetch(request);
+    }
+
+    return new Response('Not Found', { status: 404 });
+  },
+};
+```
+
+### Multiple DoLake Instances
+
+For horizontal scaling, you can create multiple DoLake instances by table or partition:
+
+```typescript
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const tableName = url.searchParams.get('table') || 'default';
+
+    // Route to table-specific DoLake instance
+    const id = env.DOLAKE.idFromName(`lakehouse-${tableName}`);
+    const stub = env.DOLAKE.get(id);
+    return stub.fetch(request);
+  },
+};
+```
+
+### Rate Limiting Configuration
+
+DoLake includes built-in rate limiting to protect against overload:
+
+```typescript
+import { type RateLimitConfig, DEFAULT_RATE_LIMIT_CONFIG } from '@dotdo/dolake';
+
+/**
+ * Rate limiting is configured internally but can be monitored via /status endpoint
+ */
+const rateLimitConfig: RateLimitConfig = {
+  connectionsPerSecond: 100,     // Max new connections per second
+  messagesPerSecond: 1000,       // Max messages per second per connection
+  maxPayloadSize: 4 * 1024 * 1024,  // Max payload size (4MB)
+  burstCapacity: 50,             // Token bucket burst capacity
+  maxConnectionsPerIp: 10,       // Max connections per IP
+  maxEventsPerMessage: 10_000,   // Max events per batch message
+  maxEventSize: 1024 * 1024,     // Max single event size (1MB)
+};
+```
+
 ## Prerequisites
 
 Before integrating, ensure you have:

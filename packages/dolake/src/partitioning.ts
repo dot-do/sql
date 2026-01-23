@@ -465,16 +465,17 @@ export function prunePartitions(
   return { included, pruned };
 }
 
-/**
- * Parse simple SQL WHERE clause to extract partition predicates
- * This is a simplified parser for demonstration
- */
-export function parseWhereClause(sql: string): PartitionPredicate[] {
-  const predicates: PartitionPredicate[] = [];
+// =============================================================================
+// WHERE Clause Parsing Helpers
+// =============================================================================
 
-  // Match simple predicates: field = 'value' or field = value
-  const eqMatch = sql.matchAll(/(\w+)\s*=\s*'?([^'\s]+)'?/g);
-  for (const match of eqMatch) {
+/**
+ * Parse equality predicates: field = 'value' or field = value
+ */
+function parseEqualityPredicates(sql: string): PartitionPredicate[] {
+  const predicates: PartitionPredicate[] = [];
+  const matches = sql.matchAll(/(\w+)\s*=\s*'?([^'\s]+)'?/g);
+  for (const match of matches) {
     if (match[1] && match[2]) {
       predicates.push({
         field: match[1],
@@ -483,10 +484,16 @@ export function parseWhereClause(sql: string): PartitionPredicate[] {
       });
     }
   }
+  return predicates;
+}
 
-  // Match IN predicates: field IN ('a', 'b', 'c')
-  const inMatch = sql.matchAll(/(\w+)\s+IN\s*\(([^)]+)\)/gi);
-  for (const match of inMatch) {
+/**
+ * Parse IN predicates: field IN ('a', 'b', 'c')
+ */
+function parseInPredicates(sql: string): PartitionPredicate[] {
+  const predicates: PartitionPredicate[] = [];
+  const matches = sql.matchAll(/(\w+)\s+IN\s*\(([^)]+)\)/gi);
+  for (const match of matches) {
     if (match[1] && match[2]) {
       const values = match[2].split(',').map((v) => v.trim().replace(/'/g, ''));
       predicates.push({
@@ -496,10 +503,16 @@ export function parseWhereClause(sql: string): PartitionPredicate[] {
       });
     }
   }
+  return predicates;
+}
 
-  // Match BETWEEN predicates: field BETWEEN 'a' AND 'b'
-  const betweenMatch = sql.matchAll(/(\w+)\s+BETWEEN\s+'?([^'\s]+)'?\s+AND\s+'?([^'\s]+)'?/gi);
-  for (const match of betweenMatch) {
+/**
+ * Parse BETWEEN predicates: field BETWEEN 'a' AND 'b'
+ */
+function parseBetweenPredicates(sql: string): PartitionPredicate[] {
+  const predicates: PartitionPredicate[] = [];
+  const matches = sql.matchAll(/(\w+)\s+BETWEEN\s+'?([^'\s]+)'?\s+AND\s+'?([^'\s]+)'?/gi);
+  for (const match of matches) {
     if (match[1] && match[2] && match[3]) {
       predicates.push({
         field: match[1],
@@ -509,10 +522,16 @@ export function parseWhereClause(sql: string): PartitionPredicate[] {
       });
     }
   }
+  return predicates;
+}
 
-  // Match range predicates - order matters! Match >= and <= before > and <
-  const geMatch = sql.matchAll(/(\w+)\s*>=\s*'?([^'\s]+)'?/g);
-  for (const match of geMatch) {
+/**
+ * Parse greater-than-or-equal predicates: field >= value
+ */
+function parseGreaterOrEqualPredicates(sql: string): PartitionPredicate[] {
+  const predicates: PartitionPredicate[] = [];
+  const matches = sql.matchAll(/(\w+)\s*>=\s*'?([^'\s]+)'?/g);
+  for (const match of matches) {
     if (match[1] && match[2]) {
       predicates.push({
         field: match[1],
@@ -521,9 +540,16 @@ export function parseWhereClause(sql: string): PartitionPredicate[] {
       });
     }
   }
+  return predicates;
+}
 
-  const leMatch = sql.matchAll(/(\w+)\s*<=\s*'?([^'\s]+)'?/g);
-  for (const match of leMatch) {
+/**
+ * Parse less-than-or-equal predicates: field <= value
+ */
+function parseLessOrEqualPredicates(sql: string): PartitionPredicate[] {
+  const predicates: PartitionPredicate[] = [];
+  const matches = sql.matchAll(/(\w+)\s*<=\s*'?([^'\s]+)'?/g);
+  for (const match of matches) {
     if (match[1] && match[2]) {
       predicates.push({
         field: match[1],
@@ -532,11 +558,17 @@ export function parseWhereClause(sql: string): PartitionPredicate[] {
       });
     }
   }
+  return predicates;
+}
 
-  // Match > but not >= (negative lookbehind not available, so we check manually)
-  const gtMatch = sql.matchAll(/(\w+)\s*>\s*'?([^'\s>=]+)'?/g);
-  for (const match of gtMatch) {
-    // Skip if it's part of >= which was already matched
+/**
+ * Parse greater-than predicates: field > value (excluding >=)
+ */
+function parseGreaterThanPredicates(sql: string): PartitionPredicate[] {
+  const predicates: PartitionPredicate[] = [];
+  const matches = sql.matchAll(/(\w+)\s*>\s*'?([^'\s>=]+)'?/g);
+  for (const match of matches) {
+    // Skip if it's part of >= which is handled separately
     const fullMatch = match[0];
     if (!fullMatch.includes('>=') && match[1] && match[2]) {
       predicates.push({
@@ -546,10 +578,17 @@ export function parseWhereClause(sql: string): PartitionPredicate[] {
       });
     }
   }
+  return predicates;
+}
 
-  const ltMatch = sql.matchAll(/(\w+)\s*<\s*'?([^'\s<=]+)'?/g);
-  for (const match of ltMatch) {
-    // Skip if it's part of <= which was already matched
+/**
+ * Parse less-than predicates: field < value (excluding <=)
+ */
+function parseLessThanPredicates(sql: string): PartitionPredicate[] {
+  const predicates: PartitionPredicate[] = [];
+  const matches = sql.matchAll(/(\w+)\s*<\s*'?([^'\s<=]+)'?/g);
+  for (const match of matches) {
+    // Skip if it's part of <= which is handled separately
     const fullMatch = match[0];
     if (!fullMatch.includes('<=') && match[1] && match[2]) {
       predicates.push({
@@ -559,8 +598,23 @@ export function parseWhereClause(sql: string): PartitionPredicate[] {
       });
     }
   }
-
   return predicates;
+}
+
+/**
+ * Parse simple SQL WHERE clause to extract partition predicates
+ * This is a simplified parser for demonstration
+ */
+export function parseWhereClause(sql: string): PartitionPredicate[] {
+  return [
+    ...parseEqualityPredicates(sql),
+    ...parseInPredicates(sql),
+    ...parseBetweenPredicates(sql),
+    ...parseGreaterOrEqualPredicates(sql),
+    ...parseLessOrEqualPredicates(sql),
+    ...parseGreaterThanPredicates(sql),
+    ...parseLessThanPredicates(sql),
+  ];
 }
 
 // =============================================================================

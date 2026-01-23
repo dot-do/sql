@@ -3,7 +3,15 @@
  *
  * A type-safe schema definition language with compile-time inference.
  *
+ * ## Stability
+ *
+ * This module follows semantic versioning. Exports are marked with stability annotations:
+ *
+ * - **stable**: No breaking changes in minor versions. Safe for production use.
+ * - **experimental**: May change in any version. Use with caution.
+ *
  * @packageDocumentation
+ * @stability stable
  *
  * @example
  * ```typescript
@@ -58,6 +66,11 @@
 // RE-EXPORTS: TYPES
 // =============================================================================
 
+/**
+ * Core schema types and definitions.
+ * @public
+ * @stability stable
+ */
 export type {
   // Core types
   SchemaDefinition,
@@ -98,6 +111,11 @@ export type {
 // RE-EXPORTS: PARSER
 // =============================================================================
 
+/**
+ * Schema parsing utilities.
+ * @public
+ * @stability stable
+ */
 export {
   // Runtime parser functions
   parseField,
@@ -117,6 +135,11 @@ export {
   getDefaultValue,
 } from './parser.js';
 
+/**
+ * Type-level parser types.
+ * @public
+ * @stability stable
+ */
 export type {
   // Type-level parser types
   ExtractDefault,
@@ -137,6 +160,11 @@ export type {
 // RE-EXPORTS: VALIDATOR
 // =============================================================================
 
+/**
+ * Schema validation utilities.
+ * @public
+ * @stability stable
+ */
 export {
   // Validation functions
   validateSchema,
@@ -148,6 +176,11 @@ export {
   WarningCodes,
 } from './validator.js';
 
+/**
+ * Validation option types.
+ * @public
+ * @stability stable
+ */
 export type {
   ErrorCode,
   WarningCode,
@@ -158,6 +191,11 @@ export type {
 // RE-EXPORTS: CODEGEN
 // =============================================================================
 
+/**
+ * Code generation utilities.
+ * @public
+ * @stability stable
+ */
 export {
   // Main codegen functions
   generateCode,
@@ -170,6 +208,11 @@ export {
   generateValidationFunctions,
 } from './codegen.js';
 
+/**
+ * Codegen option types.
+ * @public
+ * @stability stable
+ */
 export type {
   CodegenOptions,
 } from './codegen.js';
@@ -178,6 +221,11 @@ export type {
 // RE-EXPORTS: INFERENCE
 // =============================================================================
 
+/**
+ * Type inference utilities.
+ * @public
+ * @stability stable
+ */
 export type {
   // Field inference
   InferField,
@@ -228,6 +276,9 @@ export type {
 
 /**
  * Define a type-safe schema with compile-time inference.
+ *
+ * @public
+ * @stability stable
  *
  * This is the main entry point for creating schemas. It validates the schema
  * structure and returns a strongly-typed schema object.
@@ -296,13 +347,19 @@ export function defineSchema<S extends SchemaDefinition>(schema: S): S {
  *
  * @param schema - The schema definition object
  * @returns The schema with preserved types
+ *
+ * @public
+ * @stability stable
  */
 export function unsafeDefineSchema<S extends SchemaDefinition>(schema: S): S {
   return schema;
 }
 
 /**
- * Create a table definition helper (for use outside defineSchema)
+ * Create a table definition helper (for use outside defineSchema).
+ *
+ * @public
+ * @stability stable
  *
  * @example
  * ```typescript
@@ -327,14 +384,18 @@ import { generateTypeScript as gts, generateSql as gsql } from './codegen.js';
 import { validateSchema as vs } from './validator.js';
 
 /**
- * Get all table names from a schema
+ * Get all table names from a schema.
+ * @public
+ * @stability stable
  */
 export function getTableNames<S extends SD>(schema: S): (keyof S)[] {
   return Object.keys(schema).filter((k) => !k.startsWith('@')) as (keyof S)[];
 }
 
 /**
- * Get a specific table definition from a schema
+ * Get a specific table definition from a schema.
+ * @public
+ * @stability stable
  */
 export function getTable<S extends SD, T extends keyof S>(
   schema: S,
@@ -344,35 +405,45 @@ export function getTable<S extends SD, T extends keyof S>(
 }
 
 /**
- * Get field names from a table definition
+ * Get field names from a table definition.
+ * @public
+ * @stability stable
  */
 export function getFieldNames<T extends TD>(table: T): (keyof T)[] {
   return Object.keys(table) as (keyof T)[];
 }
 
 /**
- * Generate TypeScript code from a schema
+ * Generate TypeScript code from a schema.
+ * @public
+ * @stability stable
  */
 export function toTypeScript(schema: SD): string {
   return gts(schema).fullCode;
 }
 
 /**
- * Generate SQL from a schema
+ * Generate SQL from a schema.
+ * @public
+ * @stability stable
  */
 export function toSql(schema: SD): string {
   return gsql(schema).fullScript;
 }
 
 /**
- * Validate a schema and return the result
+ * Validate a schema and return the result.
+ * @public
+ * @stability stable
  */
 export function validate(schema: SD) {
   return vs(schema);
 }
 
 /**
- * Parse a schema into structured format
+ * Parse a schema into structured format.
+ * @public
+ * @stability stable
  */
 export function parse(schema: SD) {
   return ps(schema);
@@ -383,7 +454,9 @@ export function parse(schema: SD) {
 // =============================================================================
 
 /**
- * Schema builder for fluent API construction
+ * Schema builder for fluent API construction.
+ * @public
+ * @stability stable
  */
 export class SchemaBuilder<S extends SD = {}> {
   private schema: S;
@@ -421,7 +494,9 @@ export class SchemaBuilder<S extends SD = {}> {
 }
 
 /**
- * Create a new schema builder
+ * Create a new schema builder.
+ * @public
+ * @stability stable
  */
 export function createSchemaBuilder(): SchemaBuilder<{}> {
   return new SchemaBuilder();
@@ -432,7 +507,10 @@ export function createSchemaBuilder(): SchemaBuilder<{}> {
 // =============================================================================
 
 /**
- * Helper type to get the inferred schema type from a defineSchema call
+ * Helper type to get the inferred schema type from a defineSchema call.
+ *
+ * @public
+ * @stability stable
  *
  * @example
  * ```typescript
@@ -445,7 +523,10 @@ export type SchemaOf<S extends SD> = {
 };
 
 /**
- * Helper type to extract a single table type
+ * Helper type to extract a single table type.
+ *
+ * @public
+ * @stability stable
  *
  * @example
  * ```typescript

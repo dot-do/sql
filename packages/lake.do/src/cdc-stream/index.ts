@@ -15,6 +15,11 @@
 // Controller (main export)
 // =============================================================================
 
+/**
+ * CDC stream controller and related types.
+ * @public
+ * @stability stable
+ */
 export {
   CDCStreamController,
   type CDCStreamControllerOptions,
@@ -27,6 +32,11 @@ export {
 // Queue (for advanced usage)
 // =============================================================================
 
+/**
+ * Bounded queue for backpressure management.
+ * @public
+ * @stability stable
+ */
 export {
   BoundedQueue,
   type BoundedQueueOptions,
@@ -37,6 +47,11 @@ export {
 // Metrics (for advanced usage)
 // =============================================================================
 
+/**
+ * Metrics tracking for CDC streams.
+ * @public
+ * @stability stable
+ */
 export {
   MetricsTracker,
   type MetricsTrackerOptions,

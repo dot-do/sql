@@ -315,11 +315,142 @@ export type ValidatedRpcMessage = z.infer<typeof RpcMessageSchema>;
 // =============================================================================
 
 /**
- * Error class for message validation failures
+ * Error class for WebSocket RPC message validation failures.
+ *
+ * This error is thrown when an incoming WebSocket message fails Zod schema validation.
+ * It wraps the underlying ZodError and provides methods for extracting detailed
+ * validation failure information.
+ *
+ * ## When It's Thrown
+ *
+ * - When `validateClientMessage()` receives an invalid message
+ * - When `validateRpcMessage()` receives an invalid message
+ * - When type-specific validators (e.g., `validateCDCBatchMessage()`) fail
+ * - When JSON parsing fails during message decoding in WebSocketHandler
+ *
+ * ## Error Format
+ *
+ * The error provides:
+ * - `message`: A summary of the validation failure
+ * - `zodError`: The underlying Zod validation error (null for JSON parse errors)
+ * - `name`: Always `'MessageValidationError'`
+ *
+ * When sent as a WebSocket NACK response, the error format is:
+ * ```json
+ * {
+ *   "type": "nack",
+ *   "timestamp": 1705329600000,
+ *   "sequenceNumber": 0,
+ *   "reason": "invalid_format",
+ *   "errorMessage": "sourceDoId: Required; events: Expected array, received object",
+ *   "shouldRetry": false
+ * }
+ * ```
+ *
+ * ## Handling the Error
+ *
+ * ```typescript
+ * import { validateClientMessage, MessageValidationError } from '@dotdo/dolake';
+ *
+ * try {
+ *   const message = validateClientMessage(rawData);
+ *   // Process valid message
+ * } catch (error) {
+ *   if (error instanceof MessageValidationError) {
+ *     // Get detailed field-level errors
+ *     console.error('Validation failed:', error.getErrorDetails());
+ *     // Output: "sourceDoId: Required; events: Expected array, received object"
+ *
+ *     // Access individual Zod issues for programmatic handling
+ *     if (error.zodError) {
+ *       for (const issue of error.zodError.issues) {
+ *         console.log(`Field: ${issue.path.join('.')}, Error: ${issue.message}`);
+ *       }
+ *     }
+ *   }
+ * }
+ * ```
+ *
+ * ## Common Validation Failures
+ *
+ * | Failure | Example Error |
+ * |---------|---------------|
+ * | Missing required field | `sourceDoId: Required` |
+ * | Wrong type | `timestamp: Expected number, received string` |
+ * | Invalid enum value | `operation: Invalid enum value. Expected 'INSERT' \| 'UPDATE' \| 'DELETE'` |
+ * | Invalid array | `events: Expected array, received object` |
+ * | Malformed JSON | `Failed to parse JSON: Unexpected token` |
+ * | Unknown message type | `Invalid discriminator value. Expected 'cdc_batch' \| 'connect' \| ...` |
+ *
+ * @example
+ * // Catching and handling validation errors
+ * try {
+ *   const msg = validateCDCBatchMessage(data);
+ * } catch (error) {
+ *   if (error instanceof MessageValidationError) {
+ *     // Log detailed error for debugging
+ *     console.error(error.getErrorDetails());
+ *
+ *     // Check if it's a JSON parse error vs schema validation error
+ *     if (error.zodError === null) {
+ *       console.error('JSON parsing failed');
+ *     } else {
+ *       console.error('Schema validation failed');
+ *     }
+ *   }
+ * }
+ *
+ * @see validateClientMessage
+ * @see validateRpcMessage
+ * @see CDCBatchMessageSchema
  */
 export class MessageValidationError extends Error {
+  /**
+   * The underlying Zod validation error, if available.
+   *
+   * This is `null` when the error is due to JSON parsing failure rather than
+   * schema validation failure. When present, it contains detailed information
+   * about which fields failed validation and why.
+   *
+   * @example
+   * if (error.zodError) {
+   *   for (const issue of error.zodError.issues) {
+   *     console.log(`Path: ${issue.path.join('.')}`);
+   *     console.log(`Code: ${issue.code}`);
+   *     console.log(`Message: ${issue.message}`);
+   *   }
+   * }
+   */
   public readonly zodError: ZodError | null;
 
+  /**
+   * Creates a new MessageValidationError.
+   *
+   * @param message - A human-readable description of the validation failure
+   * @param zodError - The underlying Zod error, if this is a schema validation failure.
+   *                   Pass `null` for JSON parse errors or other non-schema errors.
+   *
+   * @example
+   * // For schema validation failures
+   * const result = CDCBatchMessageSchema.safeParse(data);
+   * if (!result.success) {
+   *   throw new MessageValidationError(
+   *     `Invalid CDC batch: ${result.error.issues.map(i => i.message).join(', ')}`,
+   *     result.error
+   *   );
+   * }
+   *
+   * @example
+   * // For JSON parse failures
+   * try {
+   *   JSON.parse(rawMessage);
+   * } catch (parseError) {
+   *   throw new MessageValidationError(
+   *     `Failed to parse JSON: ${parseError.message}`,
+   *     null  // No Zod error for parse failures
+   *   );
+   * }
+   */
   constructor(message: string, zodError?: ZodError | null) {
     super(message);
     this.name = 'MessageValidationError';
@@ -327,7 +458,27 @@ export class MessageValidationError extends Error {
   }
 
   /**
-   * Get a human-readable description of validation errors
+   * Get a human-readable description of all validation errors.
+   *
+   * Returns a semicolon-separated string of field paths and their error messages.
+   * For JSON parse errors (when `zodError` is null), returns the original error message.
+   *
+   * @returns A formatted string describing all validation errors
+   *
+   * @example
+   * // For a message missing multiple required fields:
+   * error.getErrorDetails();
+   * // Returns: "sourceDoId: Required; events: Required; sequenceNumber: Required"
+   *
+   * @example
+   * // For type mismatches:
+   * error.getErrorDetails();
+   * // Returns: "timestamp: Expected number, received string; isRetry: Expected boolean"
+   *
+   * @example
+   * // For JSON parse errors:
+   * error.getErrorDetails();
+   * // Returns: "Failed to parse JSON: Unexpected token 'x' at position 5"
    */
   getErrorDetails(): string {
     if (!this.zodError) {

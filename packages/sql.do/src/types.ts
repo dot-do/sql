@@ -11,6 +11,83 @@
 // Re-export all shared types
 // =============================================================================
 
+/**
+ * Re-exported types from `@dotdo/shared-types` for unified type definitions.
+ *
+ * These types are the canonical definitions for the DoSQL ecosystem and are
+ * re-exported here for convenience. Importing from `@dotdo/sql.do` ensures
+ * type compatibility across the entire stack.
+ *
+ * ## Branded Types
+ *
+ * Branded types provide type-safe identifiers that cannot be accidentally
+ * assigned from raw primitives:
+ *
+ * - {@link TransactionId} - Unique identifier for database transactions
+ * - {@link LSN} - Log Sequence Number for WAL positioning and time travel
+ * - {@link StatementHash} - Hash for prepared statement caching
+ * - {@link ShardId} - Identifier for database shards
+ *
+ * ## Query Types
+ *
+ * Core types for executing SQL queries:
+ *
+ * - {@link QueryRequest} - Request structure for SQL queries
+ * - {@link QueryOptions} - Client-facing query options
+ * - {@link QueryResponse} - Server response with results
+ * - {@link QueryResult} - Client-facing result format
+ *
+ * ## CDC Types
+ *
+ * Change Data Capture types for real-time data streaming:
+ *
+ * - {@link CDCOperation} - Operation types (INSERT, UPDATE, DELETE, TRUNCATE)
+ * - {@link CDCEvent} - Change event with before/after row data
+ * - {@link CDCOperationCode} - Numeric codes for binary encoding
+ *
+ * ## Transaction Types
+ *
+ * Types for managing database transactions:
+ *
+ * - {@link IsolationLevel} - Transaction isolation levels
+ * - {@link TransactionOptions} - Options for beginning transactions
+ * - {@link TransactionState} - Current state of an active transaction
+ * - {@link TransactionHandle} - Handle returned after beginning a transaction
+ *
+ * ## RPC Types
+ *
+ * Types for the CapnWeb RPC protocol:
+ *
+ * - {@link RPCMethod} - Available RPC methods
+ * - {@link RPCRequest} - Request envelope
+ * - {@link RPCResponse} - Response envelope
+ * - {@link RPCError} - Error structure
+ * - {@link RPCErrorCode} - Standard error codes
+ *
+ * ## Schema Types
+ *
+ * Types for database schema definitions:
+ *
+ * - {@link ColumnDefinition} - Column structure and constraints
+ * - {@link IndexDefinition} - Index configuration
+ * - {@link ForeignKeyDefinition} - Foreign key relationships
+ * - {@link TableSchema} - Complete table definition
+ *
+ * ## Type Guards and Converters
+ *
+ * Utility functions for working with these types:
+ *
+ * - `isServerCDCEvent()` / `isClientCDCEvent()` - CDC event type guards
+ * - `serverToClientCDCEvent()` / `clientToServerCDCEvent()` - Format converters
+ * - `responseToResult()` / `resultToResponse()` - Query result converters
+ * - `isValidLSN()` / `isValidTransactionId()` etc. - Validation guards
+ *
+ * @see {@link https://github.com/dotdo/shared-types | @dotdo/shared-types} for canonical definitions
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
 export {
   // Branded Types
   type TransactionId,
@@ -141,6 +218,49 @@ import type {
 } from '@dotdo/shared-types';
 
 /**
+ * Transaction context for executing operations within a transaction.
+ *
+ * Provides a scoped interface for executing SQL statements within an active transaction.
+ * All operations performed through this context are automatically associated with the
+ * parent transaction. This interface is passed to the callback function in
+ * {@link SQLClient.transaction}.
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
+export interface TransactionContext {
+  /**
+   * The transaction ID for this context.
+   *
+   * Can be used for advanced scenarios where you need to pass the transaction ID
+   * to other code or for debugging purposes.
+   */
+  readonly transactionId: TransactionId;
+
+  /**
+   * Executes a SQL statement within this transaction.
+   *
+   * @param sql - The SQL statement to execute
+   * @param params - Optional array of parameter values for prepared statement placeholders
+   * @returns Promise resolving to the query result with affected row count
+   * @throws {SQLError} When statement execution fails
+   */
+  exec(sql: string, params?: SQLValue[]): Promise<QueryResult>;
+
+  /**
+   * Executes a SQL SELECT query within this transaction.
+   *
+   * @typeParam T - The expected shape of result rows (defaults to Record<string, SQLValue>)
+   * @param sql - The SQL SELECT query to execute
+   * @param params - Optional array of parameter values for prepared statement placeholders
+   * @returns Promise resolving to query result containing typed rows
+   * @throws {SQLError} When query execution fails
+   */
+  query<T = Record<string, SQLValue>>(sql: string, params?: SQLValue[]): Promise<QueryResult<T>>;
+}
+
+/**
  * SQL Client interface for sql.do.
  *
  * Provides a unified interface for executing SQL queries, managing transactions,
@@ -156,10 +276,11 @@ import type {
  * // Parameterized query
  * const user = await client.query<User>('SELECT * FROM users WHERE id = ?', [1]);
  *
- * // Transaction
- * const txState = await client.beginTransaction();
- * await client.exec('INSERT INTO users (name) VALUES (?)', ['Alice'], { transactionId: txState.id });
- * await client.commit(txState.id);
+ * // Transaction with auto commit/rollback
+ * await client.transaction(async (tx) => {
+ *   await tx.exec('INSERT INTO users (name) VALUES (?)', ['Alice']);
+ *   await tx.exec('UPDATE accounts SET balance = balance - 100 WHERE id = ?', [1]);
+ * });
  *
  * await client.close();
  * ```
@@ -291,6 +412,7 @@ export interface SQLClient {
    *
    * Returns a transaction state containing the transaction ID, which must be
    * passed to subsequent operations and eventually to {@link commit} or {@link rollback}.
+   * For simpler transaction management, consider using {@link transaction} instead.
    *
    * @param options - Optional transaction configuration (isolation level, read-only mode)
    * @returns Promise resolving to the transaction state
@@ -365,6 +487,69 @@ export interface SQLClient {
   rollback(transactionId: TransactionId): Promise<void>;
 
   /**
+   * Executes a function within a transaction with automatic commit/rollback.
+   *
+   * This is the recommended way to work with transactions. The transaction is
+   * automatically committed if the function completes successfully, or rolled
+   * back if an error is thrown.
+   *
+   * @typeParam T - The return type of the transaction function
+   * @param fn - Async function receiving a {@link TransactionContext} for executing queries
+   * @param options - Optional transaction configuration (isolation level, read-only mode)
+   * @returns Promise resolving to the return value of the transaction function
+   * @throws {SQLError} When transaction operations fail or commit/rollback fails
+   * @throws Re-throws any error thrown by the transaction function after rollback
+   *
+   * @example
+   * ```typescript
+   * // Transfer money between accounts
+   * const result = await client.transaction(async (tx) => {
+   *   await tx.exec('UPDATE accounts SET balance = balance - ? WHERE id = ?', [amount, fromId]);
+   *   await tx.exec('UPDATE accounts SET balance = balance + ? WHERE id = ?', [amount, toId]);
+   *   return { transferred: amount };
+   * });
+   *
+   * // Read-only transaction for consistent reads
+   * const report = await client.transaction(async (tx) => {
+   *   const orders = await tx.query<Order>('SELECT * FROM orders WHERE date > ?', [startDate]);
+   *   const total = await tx.query<{sum: number}>('SELECT SUM(amount) as sum FROM orders');
+   *   return { orders: orders.rows, total: total.rows[0].sum };
+   * }, { readOnly: true, isolationLevel: 'SNAPSHOT' });
+   * ```
+   */
+  transaction<T>(
+    fn: (tx: TransactionContext) => Promise<T>,
+    options?: TransactionOptions
+  ): Promise<T>;
+
+  /**
+   * Executes multiple SQL statements in a single batch request.
+   *
+   * Batch operations are more efficient than individual requests when you need
+   * to execute many statements. All statements are sent to the server in one
+   * network round-trip.
+   *
+   * Note: Batch operations are not transactional by default. For atomic operations,
+   * combine with {@link transaction} or wrap statements in explicit transaction commands.
+   *
+   * @param statements - Array of SQL statements with optional parameters
+   * @returns Promise resolving to an array of query results in the same order as inputs
+   * @throws {SQLError} When any statement fails (partial results may not be returned)
+   *
+   * @example
+   * ```typescript
+   * const results = await client.batch([
+   *   { sql: 'INSERT INTO logs (msg) VALUES (?)', params: ['event1'] },
+   *   { sql: 'INSERT INTO logs (msg) VALUES (?)', params: ['event2'] },
+   *   { sql: 'INSERT INTO logs (msg) VALUES (?)', params: ['event3'] },
+   * ]);
+   *
+   * console.log(`Inserted ${results.length} log entries`);
+   * ```
+   */
+  batch(statements: Array<{ sql: string; params?: SQLValue[] }>): Promise<QueryResult[]>;
+
+  /**
    * Retrieves the schema definition for a table.
    *
    * Returns column definitions, indexes, and foreign key constraints for
@@ -409,6 +594,63 @@ export interface SQLClient {
   ping(): Promise<{ latency: number }>;
 
   /**
+   * Explicitly establishes a WebSocket connection to the database.
+   *
+   * This method is optional - the client will automatically connect on first query
+   * if not already connected. However, calling connect() explicitly allows you to:
+   * - Pre-establish the connection before queries are needed
+   * - Handle connection errors separately from query errors
+   * - Wait for the connection to be ready
+   *
+   * If already connected, this method returns immediately without reconnecting.
+   * Multiple concurrent calls to connect() will share the same connection attempt.
+   *
+   * @returns Promise that resolves when the connection is established
+   * @throws {ConnectionError} When connection fails (network error, auth failure, etc.)
+   *
+   * @example
+   * ```typescript
+   * const client = createSQLClient({ url: 'https://sql.example.com' });
+   *
+   * // Pre-connect before queries
+   * try {
+   *   await client.connect();
+   *   console.log('Connected successfully');
+   * } catch (error) {
+   *   console.error('Failed to connect:', error);
+   * }
+   *
+   * // Now queries won't have connection latency
+   * const result = await client.query('SELECT 1');
+   * ```
+   */
+  connect(): Promise<void>;
+
+  /**
+   * Checks if the client is currently connected to the database.
+   *
+   * Returns true if a WebSocket connection is established and in the OPEN state.
+   * Note that this is a point-in-time check; the connection could change state
+   * immediately after this method returns.
+   *
+   * @returns `true` if connected, `false` otherwise
+   *
+   * @example
+   * ```typescript
+   * const client = createSQLClient({ url: 'https://sql.example.com' });
+   *
+   * console.log(client.isConnected()); // false (not connected yet)
+   *
+   * await client.connect();
+   * console.log(client.isConnected()); // true
+   *
+   * await client.close();
+   * console.log(client.isConnected()); // false
+   * ```
+   */
+  isConnected(): boolean;
+
+  /**
    * Closes the database connection and releases resources.
    *
    * After calling close(), the client instance should not be used.
@@ -427,4 +669,191 @@ export interface SQLClient {
    * ```
    */
   close(): Promise<void>;
+}
+
+// =============================================================================
+// Connection Pool Types (sql.do specific)
+// =============================================================================
+
+/**
+ * Backpressure strategy when pool is exhausted.
+ * @public
+ */
+export type BackpressureStrategy = 'reject' | 'queue';
+
+/**
+ * Configuration for the WebSocket connection pool.
+ * @public
+ */
+export interface PoolConfig {
+  /** Maximum number of connections in the pool (default: 10) */
+  maxSize?: number;
+  /** Minimum number of idle connections to maintain (default: 0) */
+  minIdle?: number;
+  /** Time in ms before an idle connection is closed (default: 30000) */
+  idleTimeout?: number;
+  /** Maximum time in ms a connection can live (default: 3600000 = 1 hour) */
+  maxLifetime?: number;
+  /** Time in ms to wait for a connection when pool is exhausted (default: 30000) */
+  waitTimeout?: number;
+  /** Interval in ms between health checks (default: 30000) */
+  healthCheckInterval?: number;
+  /** Whether to validate connections before borrowing (default: true) */
+  validateOnBorrow?: boolean;
+  /** Strategy when pool is exhausted: 'reject' throws immediately, 'queue' waits (default: 'queue') */
+  backpressureStrategy?: BackpressureStrategy;
+  /** Maximum number of waiting requests before applying backpressure (default: 100) */
+  maxWaitingRequests?: number;
+  /** Interval in ms for sending keepalive pings (default: 30000) */
+  keepAliveInterval?: number;
+  /** Tags to apply to connections for identification (default: []) */
+  connectionTags?: string[];
+}
+
+/**
+ * Default pool configuration values.
+ * @public
+ */
+export const DEFAULT_POOL_CONFIG: Required<Omit<PoolConfig, 'connectionTags'>> & { connectionTags: string[] } = {
+  maxSize: 10,
+  minIdle: 0,
+  idleTimeout: 30000,
+  maxLifetime: 3600000,
+  waitTimeout: 30000,
+  healthCheckInterval: 30000,
+  validateOnBorrow: true,
+  backpressureStrategy: 'queue',
+  maxWaitingRequests: 100,
+  keepAliveInterval: 30000,
+  connectionTags: [],
+};
+
+/**
+ * Statistics about the connection pool.
+ * @public
+ */
+export interface PoolStats {
+  /** Total number of connections in the pool */
+  totalConnections: number;
+  /** Number of connections currently in use */
+  activeConnections: number;
+  /** Number of idle connections available */
+  idleConnections: number;
+  /** Maximum pool size */
+  maxSize: number;
+  /** Number of requests waiting for a connection */
+  waitingRequests: number;
+  /** Total connections created since pool start */
+  connectionsCreated: number;
+  /** Total connections closed since pool start */
+  connectionsClosed: number;
+  /** Total requests served by the pool */
+  totalRequestsServed: number;
+  /** Ratio of reused connections (0-1) */
+  connectionReuseRatio: number;
+}
+
+/**
+ * Health status of the connection pool.
+ * @public
+ */
+export interface PoolHealth {
+  /** Whether the pool is healthy */
+  healthy: boolean;
+  /** Number of healthy connections */
+  healthyConnections: number;
+  /** Number of unhealthy connections */
+  unhealthyConnections: number;
+  /** Timestamp of last health check */
+  lastHealthCheck: Date | null;
+  /** Average latency across connections */
+  averageLatency: number;
+}
+
+/**
+ * Information about a single connection in the pool.
+ * @public
+ */
+export interface ConnectionInfo {
+  /** Unique connection identifier */
+  id: string;
+  /** When the connection was created */
+  createdAt: Date;
+  /** When the connection was last used */
+  lastUsedAt: Date;
+  /** Time in ms since last use (0 if active) */
+  idleTime: number;
+  /** Whether connection is currently in use */
+  active: boolean;
+  /** Tags associated with this connection */
+  tags: string[];
+  /** Last measured latency in ms */
+  latency: number | null;
+}
+
+/**
+ * Event data for pool:connection-created event.
+ * @public
+ */
+export interface PoolConnectionCreatedEvent {
+  connectionId: string;
+  timestamp: Date;
+}
+
+/**
+ * Event data for pool:connection-reused event.
+ * @public
+ */
+export interface PoolConnectionReusedEvent {
+  connectionId: string;
+  timestamp: Date;
+}
+
+/**
+ * Event data for pool:connection-closed event.
+ * @public
+ */
+export interface PoolConnectionClosedEvent {
+  connectionId: string;
+  reason: string;
+  timestamp: Date;
+}
+
+/**
+ * Event data for pool:backpressure event.
+ * @public
+ */
+export interface PoolBackpressureEvent {
+  waitingRequests: number;
+  activeConnections: number;
+}
+
+/**
+ * Event data for do:hibernating event.
+ * @public
+ */
+export interface DOHibernatingEvent {
+  timestamp: Date;
+}
+
+/**
+ * Event data for do:awake event.
+ * @public
+ */
+export interface DOAwakeEvent {
+  timestamp: Date;
+}
+
+/**
+ * Event map for pool events.
+ * @public
+ */
+export interface PoolEventMap {
+  'pool:connection-created': PoolConnectionCreatedEvent;
+  'pool:connection-reused': PoolConnectionReusedEvent;
+  'pool:connection-closed': PoolConnectionClosedEvent;
+  'pool:health-check': PoolHealth;
+  'pool:backpressure': PoolBackpressureEvent;
+  'do:hibernating': DOHibernatingEvent;
+  'do:awake': DOAwakeEvent;
 }

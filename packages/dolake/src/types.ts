@@ -777,11 +777,79 @@ export class ConnectionError extends DoLakeError {
 
 /**
  * Buffer overflow error
+ *
+ * Thrown when the CDC buffer cannot accept more events because it has reached
+ * its maximum configured size. This error includes detailed context about the
+ * buffer state and suggestions for handling.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   bufferManager.addBatch(sourceDoId, events, sequenceNumber);
+ * } catch (error) {
+ *   if (error instanceof BufferOverflowError) {
+ *     console.log(`Buffer full: ${error.currentSizeBytes}/${error.maxSizeBytes} bytes`);
+ *     console.log(`Utilization: ${(error.utilization * 100).toFixed(1)}%`);
+ *     // Wait for flush before retrying
+ *     await new Promise(r => setTimeout(r, 1000));
+ *   }
+ * }
+ * ```
  */
 export class BufferOverflowError extends DoLakeError {
-  constructor(message: string) {
+  /**
+   * Current buffer size in bytes at the time of the error
+   */
+  public readonly currentSizeBytes: number;
+
+  /**
+   * Maximum allowed buffer size in bytes
+   */
+  public readonly maxSizeBytes: number;
+
+  /**
+   * Size of the batch that was attempted to be added (in bytes)
+   */
+  public readonly attemptedBatchSizeBytes: number;
+
+  /**
+   * Current buffer utilization (0.0 - 1.0)
+   */
+  public readonly utilization: number;
+
+  constructor(options: {
+    currentSizeBytes: number;
+    maxSizeBytes: number;
+    attemptedBatchSizeBytes: number;
+  }) {
+    const { currentSizeBytes, maxSizeBytes, attemptedBatchSizeBytes } = options;
+    const utilization = currentSizeBytes / maxSizeBytes;
+    const requiredSize = currentSizeBytes + attemptedBatchSizeBytes;
+
+    const formatBytes = (bytes: number): string => {
+      if (bytes >= 1024 * 1024) {
+        return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+      }
+      if (bytes >= 1024) {
+        return `${(bytes / 1024).toFixed(2)} KB`;
+      }
+      return `${bytes} bytes`;
+    };
+
+    const message =
+      `Buffer overflow: cannot add batch of ${formatBytes(attemptedBatchSizeBytes)}. ` +
+      `Current buffer: ${formatBytes(currentSizeBytes)} / ${formatBytes(maxSizeBytes)} ` +
+      `(${(utilization * 100).toFixed(1)}% utilized). ` +
+      `Required: ${formatBytes(requiredSize)}. ` +
+      `Suggestions: (1) Wait for the buffer to flush before retrying, ` +
+      `(2) Reduce batch size, or (3) Increase flushThresholdBytes to trigger more frequent flushes.`;
+
     super(message, 'BUFFER_OVERFLOW', true);
     this.name = 'BufferOverflowError';
+    this.currentSizeBytes = currentSizeBytes;
+    this.maxSizeBytes = maxSizeBytes;
+    this.attemptedBatchSizeBytes = attemptedBatchSizeBytes;
+    this.utilization = utilization;
   }
 }
 

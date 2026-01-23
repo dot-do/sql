@@ -12,6 +12,7 @@ This guide covers advanced DoSQL features including vector search, time travel q
 - [Virtual Tables](#virtual-tables)
 - [Stored Procedures](#stored-procedures)
 - [Sharding](#sharding)
+- [Migrations](#migrations)
 
 ---
 
@@ -481,6 +482,443 @@ interface ChangeEvent {
 }
 ```
 
+### Error Recovery Patterns
+
+CDC streaming requires robust error handling to ensure data consistency and reliable event processing. Here are patterns for handling common failure scenarios:
+
+#### Retry with Exponential Backoff
+
+```typescript
+import { createCDC, CDCError, CDCConnectionError } from '@dotdo/dosql/cdc';
+
+interface RetryConfig {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  jitterFactor: number;
+}
+
+const defaultRetryConfig: RetryConfig = {
+  maxRetries: 5,
+  baseDelayMs: 1000,
+  maxDelayMs: 30000,
+  jitterFactor: 0.2,
+};
+
+function calculateBackoff(attempt: number, config: RetryConfig): number {
+  const exponentialDelay = Math.min(
+    config.baseDelayMs * Math.pow(2, attempt),
+    config.maxDelayMs
+  );
+  const jitter = exponentialDelay * config.jitterFactor * Math.random();
+  return exponentialDelay + jitter;
+}
+
+async function createResilientCDCConsumer(
+  backend: Backend,
+  slotName: string,
+  config: RetryConfig = defaultRetryConfig
+) {
+  const cdc = createCDC(backend);
+  let retryCount = 0;
+
+  async function connectWithRetry(): Promise<void> {
+    while (retryCount < config.maxRetries) {
+      try {
+        const subscription = await cdc.slots.subscribeFromSlot(slotName);
+        retryCount = 0; // Reset on successful connection
+
+        for await (const event of subscription.iterate()) {
+          await processEventWithRetry(event, config);
+          await cdc.slots.updateSlot(slotName, event.lsn);
+        }
+      } catch (error) {
+        if (error instanceof CDCConnectionError) {
+          retryCount++;
+          const delay = calculateBackoff(retryCount, config);
+          console.error(`Connection failed, retry ${retryCount}/${config.maxRetries} in ${delay}ms`);
+          await sleep(delay);
+        } else {
+          throw error; // Rethrow non-recoverable errors
+        }
+      }
+    }
+    throw new Error(`CDC connection failed after ${config.maxRetries} retries`);
+  }
+
+  return { connect: connectWithRetry };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+```
+
+#### Event Processing with Dead Letter Queue
+
+```typescript
+import { createCDC, ChangeEvent } from '@dotdo/dosql/cdc';
+
+interface DeadLetterEvent {
+  event: ChangeEvent;
+  error: string;
+  attempts: number;
+  lastAttempt: Date;
+}
+
+class CDCConsumerWithDLQ {
+  private cdc: ReturnType<typeof createCDC>;
+  private deadLetterQueue: DeadLetterEvent[] = [];
+  private maxProcessingAttempts = 3;
+
+  constructor(backend: Backend) {
+    this.cdc = createCDC(backend);
+  }
+
+  async processEventWithRetry(
+    event: ChangeEvent,
+    processor: (event: ChangeEvent) => Promise<void>
+  ): Promise<boolean> {
+    let attempts = 0;
+
+    while (attempts < this.maxProcessingAttempts) {
+      try {
+        await processor(event);
+        return true;
+      } catch (error) {
+        attempts++;
+        console.error(`Processing attempt ${attempts} failed for LSN ${event.lsn}:`, error);
+
+        if (attempts < this.maxProcessingAttempts) {
+          // Exponential backoff between processing retries
+          await sleep(Math.pow(2, attempts) * 100);
+        }
+      }
+    }
+
+    // Send to dead letter queue after all retries exhausted
+    this.deadLetterQueue.push({
+      event,
+      error: `Failed after ${attempts} attempts`,
+      attempts,
+      lastAttempt: new Date(),
+    });
+
+    console.error(`Event ${event.lsn} sent to dead letter queue`);
+    return false;
+  }
+
+  async consumeWithDLQ(
+    slotName: string,
+    processor: (event: ChangeEvent) => Promise<void>
+  ): Promise<void> {
+    const subscription = await this.cdc.slots.subscribeFromSlot(slotName);
+
+    for await (const event of subscription.iterate()) {
+      const success = await this.processEventWithRetry(event, processor);
+
+      // Always acknowledge to avoid blocking, DLQ handles failures
+      await this.cdc.slots.updateSlot(slotName, event.lsn);
+
+      if (!success) {
+        // Optionally persist DLQ to durable storage
+        await this.persistDeadLetterQueue();
+      }
+    }
+  }
+
+  async reprocessDeadLetterQueue(
+    processor: (event: ChangeEvent) => Promise<void>
+  ): Promise<{ processed: number; failed: number }> {
+    const results = { processed: 0, failed: 0 };
+    const remaining: DeadLetterEvent[] = [];
+
+    for (const dlqEvent of this.deadLetterQueue) {
+      try {
+        await processor(dlqEvent.event);
+        results.processed++;
+      } catch (error) {
+        dlqEvent.attempts++;
+        dlqEvent.lastAttempt = new Date();
+        dlqEvent.error = String(error);
+        remaining.push(dlqEvent);
+        results.failed++;
+      }
+    }
+
+    this.deadLetterQueue = remaining;
+    return results;
+  }
+
+  private async persistDeadLetterQueue(): Promise<void> {
+    // Implement persistence to R2, D1, or other durable storage
+  }
+
+  getDeadLetterQueue(): DeadLetterEvent[] {
+    return [...this.deadLetterQueue];
+  }
+}
+```
+
+#### Checkpoint-Based Recovery
+
+```typescript
+import { createCDC, createCDCSubscription } from '@dotdo/dosql/cdc';
+
+interface Checkpoint {
+  lsn: bigint;
+  processedCount: number;
+  timestamp: Date;
+  metadata?: Record<string, unknown>;
+}
+
+class CheckpointManager {
+  private checkpointInterval = 1000; // Checkpoint every N events
+  private processedSinceCheckpoint = 0;
+  private lastCheckpoint: Checkpoint | null = null;
+
+  constructor(
+    private storage: DurableObjectStorage,
+    private checkpointKey: string = 'cdc_checkpoint'
+  ) {}
+
+  async loadCheckpoint(): Promise<Checkpoint | null> {
+    const checkpoint = await this.storage.get<Checkpoint>(this.checkpointKey);
+    this.lastCheckpoint = checkpoint ?? null;
+    return this.lastCheckpoint;
+  }
+
+  async saveCheckpoint(checkpoint: Checkpoint): Promise<void> {
+    await this.storage.put(this.checkpointKey, checkpoint);
+    this.lastCheckpoint = checkpoint;
+    this.processedSinceCheckpoint = 0;
+  }
+
+  shouldCheckpoint(): boolean {
+    return this.processedSinceCheckpoint >= this.checkpointInterval;
+  }
+
+  incrementProcessed(): void {
+    this.processedSinceCheckpoint++;
+  }
+
+  getLastCheckpoint(): Checkpoint | null {
+    return this.lastCheckpoint;
+  }
+}
+
+async function createRecoverableCDCConsumer(
+  backend: Backend,
+  storage: DurableObjectStorage,
+  processor: (event: ChangeEvent) => Promise<void>
+): Promise<void> {
+  const cdc = createCDC(backend);
+  const checkpointManager = new CheckpointManager(storage);
+
+  // Recover from last checkpoint
+  const checkpoint = await checkpointManager.loadCheckpoint();
+  const startLSN = checkpoint?.lsn ?? 0n;
+
+  console.log(`Resuming CDC from LSN: ${startLSN}`);
+
+  const subscription = createCDCSubscription(backend, {
+    fromLSN: startLSN,
+  });
+
+  let processedCount = checkpoint?.processedCount ?? 0;
+
+  for await (const event of subscription.iterate()) {
+    // Skip events we've already processed (idempotency check)
+    if (checkpoint && event.lsn <= checkpoint.lsn) {
+      continue;
+    }
+
+    await processor(event);
+    processedCount++;
+    checkpointManager.incrementProcessed();
+
+    // Periodic checkpointing for crash recovery
+    if (checkpointManager.shouldCheckpoint()) {
+      await checkpointManager.saveCheckpoint({
+        lsn: event.lsn,
+        processedCount,
+        timestamp: new Date(),
+      });
+      console.log(`Checkpoint saved at LSN: ${event.lsn}`);
+    }
+  }
+}
+```
+
+#### Circuit Breaker Pattern
+
+```typescript
+enum CircuitState {
+  CLOSED = 'CLOSED',
+  OPEN = 'OPEN',
+  HALF_OPEN = 'HALF_OPEN',
+}
+
+interface CircuitBreakerConfig {
+  failureThreshold: number;
+  resetTimeoutMs: number;
+  halfOpenMaxAttempts: number;
+}
+
+class CDCCircuitBreaker {
+  private state: CircuitState = CircuitState.CLOSED;
+  private failures = 0;
+  private lastFailureTime: number = 0;
+  private halfOpenAttempts = 0;
+
+  constructor(private config: CircuitBreakerConfig) {}
+
+  async execute<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.state === CircuitState.OPEN) {
+      if (Date.now() - this.lastFailureTime >= this.config.resetTimeoutMs) {
+        this.state = CircuitState.HALF_OPEN;
+        this.halfOpenAttempts = 0;
+      } else {
+        throw new Error('Circuit breaker is OPEN');
+      }
+    }
+
+    try {
+      const result = await operation();
+      this.onSuccess();
+      return result;
+    } catch (error) {
+      this.onFailure();
+      throw error;
+    }
+  }
+
+  private onSuccess(): void {
+    if (this.state === CircuitState.HALF_OPEN) {
+      this.halfOpenAttempts++;
+      if (this.halfOpenAttempts >= this.config.halfOpenMaxAttempts) {
+        this.state = CircuitState.CLOSED;
+        this.failures = 0;
+      }
+    } else {
+      this.failures = 0;
+    }
+  }
+
+  private onFailure(): void {
+    this.failures++;
+    this.lastFailureTime = Date.now();
+
+    if (this.state === CircuitState.HALF_OPEN) {
+      this.state = CircuitState.OPEN;
+    } else if (this.failures >= this.config.failureThreshold) {
+      this.state = CircuitState.OPEN;
+    }
+  }
+
+  getState(): CircuitState {
+    return this.state;
+  }
+}
+
+// Usage with CDC
+async function consumeWithCircuitBreaker(
+  backend: Backend,
+  slotName: string,
+  processor: (event: ChangeEvent) => Promise<void>
+): Promise<void> {
+  const cdc = createCDC(backend);
+  const circuitBreaker = new CDCCircuitBreaker({
+    failureThreshold: 5,
+    resetTimeoutMs: 30000,
+    halfOpenMaxAttempts: 3,
+  });
+
+  const subscription = await cdc.slots.subscribeFromSlot(slotName);
+
+  for await (const event of subscription.iterate()) {
+    try {
+      await circuitBreaker.execute(() => processor(event));
+      await cdc.slots.updateSlot(slotName, event.lsn);
+    } catch (error) {
+      if (circuitBreaker.getState() === CircuitState.OPEN) {
+        console.error('Circuit breaker open, pausing consumption');
+        await sleep(5000); // Wait before retrying
+      }
+    }
+  }
+}
+```
+
+#### Graceful Shutdown Handler
+
+```typescript
+import { createCDC, CDCSubscription } from '@dotdo/dosql/cdc';
+
+class GracefulCDCConsumer {
+  private isShuttingDown = false;
+  private currentSubscription: CDCSubscription | null = null;
+  private pendingEvents: ChangeEvent[] = [];
+
+  constructor(
+    private backend: Backend,
+    private slotName: string
+  ) {}
+
+  async start(processor: (event: ChangeEvent) => Promise<void>): Promise<void> {
+    const cdc = createCDC(this.backend);
+    this.currentSubscription = await cdc.slots.subscribeFromSlot(this.slotName);
+
+    for await (const event of this.currentSubscription.iterate()) {
+      if (this.isShuttingDown) {
+        // Queue remaining events for processing during shutdown
+        this.pendingEvents.push(event);
+        break;
+      }
+
+      await processor(event);
+      await cdc.slots.updateSlot(this.slotName, event.lsn);
+    }
+  }
+
+  async shutdown(processor: (event: ChangeEvent) => Promise<void>): Promise<void> {
+    console.log('Initiating graceful shutdown...');
+    this.isShuttingDown = true;
+
+    // Process any pending events
+    const cdc = createCDC(this.backend);
+    for (const event of this.pendingEvents) {
+      try {
+        await processor(event);
+        await cdc.slots.updateSlot(this.slotName, event.lsn);
+      } catch (error) {
+        console.error(`Failed to process event ${event.lsn} during shutdown:`, error);
+      }
+    }
+
+    console.log(`Graceful shutdown complete. Processed ${this.pendingEvents.length} pending events.`);
+  }
+}
+
+// Usage in Durable Object
+export class CDCConsumerDO implements DurableObject {
+  private consumer: GracefulCDCConsumer;
+
+  constructor(state: DurableObjectState, env: Env) {
+    this.consumer = new GracefulCDCConsumer(backend, 'my-consumer');
+
+    // Register shutdown handler
+    state.blockConcurrencyWhile(async () => {
+      await this.consumer.shutdown(this.processEvent.bind(this));
+    });
+  }
+
+  private async processEvent(event: ChangeEvent): Promise<void> {
+    // Process the event
+  }
+}
+```
+
 ---
 
 ## CapnWeb RPC Integration
@@ -815,6 +1253,174 @@ await executor.transaction(async (tx) => {
   await tx.run('UPDATE accounts SET balance = balance - 100 WHERE id = ?', [1]);
   await tx.run('UPDATE accounts SET balance = balance + 100 WHERE id = ?', [2]);
 });
+```
+
+---
+
+## Migrations
+
+DoSQL provides schema management with type-safe migrations, including support for foreign key relationships.
+
+### ForeignKeySchema in Migrations
+
+The `ForeignKeySchema` interface defines foreign key constraints for referential integrity:
+
+```typescript
+import type { ForeignKeySchema, TableSchema } from '@dotdo/dosql/rpc';
+
+// Define a foreign key schema
+const orderUserFK: ForeignKeySchema = {
+  name: 'fk_orders_user_id',
+  columns: ['user_id'],
+  referencedTable: 'users',
+  referencedColumns: ['id'],
+  onDelete: 'CASCADE',
+  onUpdate: 'NO ACTION',
+};
+
+// Use in table schema
+const ordersTable: TableSchema = {
+  name: 'orders',
+  columns: [
+    { name: 'id', type: 'INTEGER', nullable: false, autoIncrement: true },
+    { name: 'user_id', type: 'INTEGER', nullable: false },
+    { name: 'total', type: 'DECIMAL(10,2)', nullable: false },
+    { name: 'created_at', type: 'TIMESTAMP', nullable: false, defaultValue: 'CURRENT_TIMESTAMP' },
+  ],
+  primaryKey: ['id'],
+  foreignKeys: [orderUserFK],
+};
+```
+
+### Creating a Migration with Foreign Keys
+
+```typescript
+import { DB } from '@dotdo/dosql';
+import type { ForeignKeySchema } from '@dotdo/dosql/rpc';
+
+async function createOrdersTableMigration(db: Awaited<ReturnType<typeof DB>>) {
+  // Define foreign key constraints
+  const foreignKeys: ForeignKeySchema[] = [
+    {
+      name: 'fk_orders_user_id',
+      columns: ['user_id'],
+      referencedTable: 'users',
+      referencedColumns: ['id'],
+      onDelete: 'CASCADE',
+      onUpdate: 'NO ACTION',
+    },
+    {
+      name: 'fk_orders_product_id',
+      columns: ['product_id'],
+      referencedTable: 'products',
+      referencedColumns: ['id'],
+      onDelete: 'RESTRICT',
+      onUpdate: 'CASCADE',
+    },
+  ];
+
+  // Build the CREATE TABLE statement with foreign keys
+  await db.run(`
+    CREATE TABLE orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      total DECIMAL(10,2) NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT ${foreignKeys[0].name}
+        FOREIGN KEY (${foreignKeys[0].columns.join(', ')})
+        REFERENCES ${foreignKeys[0].referencedTable} (${foreignKeys[0].referencedColumns.join(', ')})
+        ON DELETE ${foreignKeys[0].onDelete}
+        ON UPDATE ${foreignKeys[0].onUpdate},
+      CONSTRAINT ${foreignKeys[1].name}
+        FOREIGN KEY (${foreignKeys[1].columns.join(', ')})
+        REFERENCES ${foreignKeys[1].referencedTable} (${foreignKeys[1].referencedColumns.join(', ')})
+        ON DELETE ${foreignKeys[1].onDelete}
+        ON UPDATE ${foreignKeys[1].onUpdate}
+    )
+  `);
+}
+```
+
+### Migration Helper for Foreign Keys
+
+```typescript
+import type { ForeignKeySchema } from '@dotdo/dosql/rpc';
+
+/**
+ * Generate SQL constraint clause from ForeignKeySchema
+ */
+function foreignKeyToSQL(fk: ForeignKeySchema): string {
+  const parts = [
+    `CONSTRAINT ${fk.name}`,
+    `FOREIGN KEY (${fk.columns.join(', ')})`,
+    `REFERENCES ${fk.referencedTable} (${fk.referencedColumns.join(', ')})`,
+  ];
+
+  if (fk.onDelete) {
+    parts.push(`ON DELETE ${fk.onDelete}`);
+  }
+  if (fk.onUpdate) {
+    parts.push(`ON UPDATE ${fk.onUpdate}`);
+  }
+
+  return parts.join(' ');
+}
+
+// Usage in migration
+const fk: ForeignKeySchema = {
+  name: 'fk_comments_post_id',
+  columns: ['post_id'],
+  referencedTable: 'posts',
+  referencedColumns: ['id'],
+  onDelete: 'CASCADE',
+};
+
+const constraint = foreignKeyToSQL(fk);
+// Result: "CONSTRAINT fk_comments_post_id FOREIGN KEY (post_id) REFERENCES posts (id) ON DELETE CASCADE"
+```
+
+### ForeignKeySchema Interface
+
+```typescript
+interface ForeignKeySchema {
+  /** Constraint name */
+  name: string;
+  /** Source columns in the child table */
+  columns: string[];
+  /** Referenced (parent) table name */
+  referencedTable: string;
+  /** Referenced columns in the parent table */
+  referencedColumns: string[];
+  /** Action on delete: CASCADE, SET NULL, SET DEFAULT, RESTRICT, NO ACTION */
+  onDelete?: 'CASCADE' | 'SET NULL' | 'SET DEFAULT' | 'RESTRICT' | 'NO ACTION';
+  /** Action on update: CASCADE, SET NULL, SET DEFAULT, RESTRICT, NO ACTION */
+  onUpdate?: 'CASCADE' | 'SET NULL' | 'SET DEFAULT' | 'RESTRICT' | 'NO ACTION';
+}
+```
+
+### Querying Foreign Key Information
+
+```typescript
+import { createHttpClient, type ForeignKeySchema } from '@dotdo/dosql/rpc';
+
+const client = createHttpClient({ url: 'https://my-do.example.com/db' });
+
+// Get schema with foreign key information
+const schema = await client.getSchema({
+  tables: ['orders'],
+  includeForeignKeys: true,
+});
+
+// Access foreign keys
+const ordersTable = schema.tables.find(t => t.name === 'orders');
+const foreignKeys: ForeignKeySchema[] = ordersTable?.foreignKeys ?? [];
+
+for (const fk of foreignKeys) {
+  console.log(`${fk.name}: ${fk.columns.join(',')} -> ${fk.referencedTable}(${fk.referencedColumns.join(',')})`);
+}
 ```
 
 ---

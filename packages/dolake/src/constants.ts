@@ -10,38 +10,115 @@
 // =============================================================================
 
 /**
- * Rate limit configuration constants
+ * Rate limit configuration constants.
+ *
+ * These constants control DoLake's rate limiting behavior to protect against
+ * abuse, ensure fair resource allocation, and maintain system stability under load.
  */
 export const RATE_LIMIT = {
-  /** Maximum new connections per second */
+  /**
+   * Maximum new WebSocket connections accepted per second.
+   * Controls the rate at which new clients can establish connections.
+   * Prevents connection flood attacks and ensures graceful scaling.
+   */
   CONNECTIONS_PER_SECOND: 20,
-  /** Maximum messages per connection per second */
+
+  /**
+   * Maximum messages a single connection can send per second.
+   * Limits message throughput per client to prevent a single connection
+   * from monopolizing server resources or overwhelming downstream systems.
+   */
   MESSAGES_PER_SECOND: 100,
-  /** Token bucket capacity for burst handling */
+
+  /**
+   * Token bucket capacity for handling message bursts.
+   * Allows temporary spikes above the sustained rate limit.
+   * Clients can send up to this many messages instantly before being throttled.
+   */
   BURST_CAPACITY: 50,
-  /** Token refill rate per second */
+
+  /**
+   * Token refill rate per second for the token bucket algorithm.
+   * Determines how quickly capacity is restored after a burst.
+   * Lower values = stricter sustained rate limiting.
+   */
   REFILL_RATE: 10,
-  /** Maximum connections per source/client ID */
+
+  /**
+   * Maximum concurrent connections allowed per source/client ID.
+   * Prevents a single authenticated client from opening excessive connections.
+   * Helps ensure fair connection distribution across all clients.
+   */
   MAX_CONNECTIONS_PER_SOURCE: 5,
-  /** Maximum connections per IP */
+
+  /**
+   * Maximum concurrent connections allowed per IP address.
+   * Protects against connection exhaustion from a single IP.
+   * Set higher than per-source limit to allow multiple clients behind NAT.
+   */
   MAX_CONNECTIONS_PER_IP: 30,
-  /** Subnet-level rate limiting threshold for /24 subnet */
+
+  /**
+   * Connection threshold for /24 subnet-level rate limiting.
+   * When connections from a subnet exceed this threshold, stricter limits apply.
+   * Defends against distributed attacks from similar IP ranges.
+   */
   SUBNET_RATE_LIMIT_THRESHOLD: 100,
-  /** Rate limit window in milliseconds */
+
+  /**
+   * Sliding window duration for rate calculations in milliseconds.
+   * Defines the time period over which rates are measured.
+   * Shorter windows are more responsive but less stable.
+   */
   WINDOW_MS: 1000,
-  /** Buffer utilization threshold for backpressure signaling (0-1) */
+
+  /**
+   * Buffer utilization threshold (0-1) that triggers backpressure signaling.
+   * When buffer usage exceeds 80%, clients receive backpressure signals
+   * instructing them to slow down message transmission.
+   */
   BACKPRESSURE_THRESHOLD: 0.8,
-  /** Base retry delay for exponential backoff (ms) */
+
+  /**
+   * Base delay in milliseconds for exponential backoff retries.
+   * Starting point for retry delays when operations fail.
+   * Actual delay = BASE_RETRY_DELAY_MS * 2^attempt with jitter.
+   */
   BASE_RETRY_DELAY_MS: 100,
-  /** Maximum retry delay for exponential backoff (ms) */
+
+  /**
+   * Maximum delay in milliseconds for exponential backoff retries.
+   * Caps retry delays to prevent excessively long waits.
+   * Ensures clients eventually retry even after many failures.
+   */
   MAX_RETRY_DELAY_MS: 30000,
-  /** Number of size violations before connection close */
+
+  /**
+   * Number of message size violations before forcibly closing a connection.
+   * Allows for occasional accidental oversized messages while protecting
+   * against clients that persistently send invalid payloads.
+   */
   MAX_SIZE_VIOLATIONS: 3,
-  /** Maximum events per CDC poll */
+
+  /**
+   * Maximum number of CDC events returned per poll operation.
+   * Bounds the batch size for change data capture polling.
+   * Balances latency (smaller batches) vs throughput (larger batches).
+   */
   MAX_EVENTS_PER_POLL: 100,
-  /** CDC poll timeout in milliseconds */
+
+  /**
+   * Timeout in milliseconds for CDC poll operations.
+   * How long to wait for events before returning an empty response.
+   * Short timeout enables responsive long-polling behavior.
+   */
   CDC_POLL_TIMEOUT_MS: 100,
-  /** Maximum retry exponential backoff power */
+
+  /**
+   * Maximum exponent for exponential backoff calculations.
+   * Limits delay = BASE_RETRY_DELAY_MS * 2^(min(attempt, MAX_EXPONENTIAL_BACKOFF_POWER)).
+   * Prevents integer overflow and ensures MAX_RETRY_DELAY_MS is the effective cap.
+   */
   MAX_EXPONENTIAL_BACKOFF_POWER: 10,
 } as const;
 

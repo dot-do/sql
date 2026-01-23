@@ -36,6 +36,12 @@ import type {
 } from './types.js';
 import { TriggerError, TriggerErrorCode } from './types.js';
 import type { DatabaseContext, DatabaseSchema } from '../proc/types.js';
+import {
+  buildSandboxModule,
+  createOutboundRpcHandler,
+  type SandboxDatabaseContext,
+} from '../utils/sandbox.js';
+import { evaluateWhenClause } from '../utils/sql-eval.js';
 
 // =============================================================================
 // Executor Options
@@ -151,72 +157,6 @@ async function executeDirectly<T extends Record<string, unknown>>(
 // =============================================================================
 
 /**
- * Build module wrapper for sandboxed execution
- */
-function buildSandboxModule(
-  handlerCode: string,
-  tableNames: string[]
-): string {
-  const tableAccessors = tableNames.map(name => `
-    ${name}: {
-      async get(key) { return __dbCall('${name}', 'get', [key]); },
-      async where(predicate, options) {
-        if (typeof predicate === 'function') {
-          const all = await __dbCall('${name}', 'all', []);
-          return all.filter(predicate);
-        }
-        return __dbCall('${name}', 'where', [predicate, options]);
-      },
-      async all(options) { return __dbCall('${name}', 'all', [options]); },
-      async count(predicate) {
-        if (typeof predicate === 'function') {
-          const all = await __dbCall('${name}', 'all', []);
-          return all.filter(predicate).length;
-        }
-        return __dbCall('${name}', 'count', [predicate]);
-      },
-      async insert(record) { return __dbCall('${name}', 'insert', [record]); },
-      async update(predicate, changes) {
-        if (typeof predicate === 'function') {
-          throw new Error('Function predicates not supported for update');
-        }
-        return __dbCall('${name}', 'update', [predicate, changes]);
-      },
-      async delete(predicate) {
-        if (typeof predicate === 'function') {
-          throw new Error('Function predicates not supported for delete');
-        }
-        return __dbCall('${name}', 'delete', [predicate]);
-      },
-    }`).join(',\n');
-
-  return `
-async function __dbCall(table, method, args) {
-  const response = await fetch('db://internal/call', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table, method, args }),
-  });
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(\`Database error: \${error}\`);
-  }
-  return response.json();
-}
-
-const db = {
-  tables: { ${tableAccessors} },
-};
-
-${tableNames.map(name => `db.${name} = db.tables.${name};`).join('\n')}
-
-const handler = ${handlerCode};
-
-export default handler;
-`;
-}
-
-/**
  * Execute a trigger handler in a sandbox
  */
 async function executeSandboxed<T extends Record<string, unknown>>(
@@ -245,43 +185,8 @@ async function executeSandboxed<T extends Record<string, unknown>>(
     return handler(ctx);
   `;
 
-  // Create outbound RPC handler for database operations
-  const outboundRpc = (url: string, request: Request): Response | Promise<Response> | null => {
-    if (!url.startsWith('db://internal/')) {
-      return null;
-    }
-
-    const path = url.replace('db://internal/', '');
-
-    return (async (): Promise<Response> => {
-      try {
-        if (path === 'call') {
-          const body = await request.json() as { table: string; method: string; args: unknown[] };
-          const { table, method, args } = body;
-
-          const tableAccessor = db.tables[table as keyof typeof db.tables];
-          if (!tableAccessor) {
-            return new Response(`Table '${table}' not found`, { status: 404 });
-          }
-
-          const fn = (tableAccessor as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[method];
-          if (typeof fn !== 'function') {
-            return new Response(`Method '${method}' not found`, { status: 404 });
-          }
-
-          const result = await fn.apply(tableAccessor, args);
-          return new Response(JSON.stringify(result), {
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
-
-        return new Response(`Unknown path: ${path}`, { status: 404 });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return new Response(message, { status: 500 });
-      }
-    })();
-  };
+  // Use shared outbound RPC handler
+  const outboundRpc = createOutboundRpcHandler(db as unknown as SandboxDatabaseContext);
 
   const evalOptions: EvaluateOptions = {
     module: moduleCode,
@@ -861,85 +766,6 @@ function evaluateRaiseCondition<T extends Record<string, unknown>>(
   }
 
   return null;
-}
-
-/**
- * Evaluate a WHEN clause condition
- */
-function evaluateWhenClause<T extends Record<string, unknown>>(
-  whenClause: string,
-  oldRow: T | undefined,
-  newRow: T | undefined
-): boolean {
-  if (!whenClause) return true;
-
-  try {
-    // Create a simple expression evaluator for WHEN clauses
-    // Replace NEW.col and OLD.col with actual values
-    let expr = whenClause;
-
-    // Replace NEW references
-    if (newRow) {
-      for (const [key, value] of Object.entries(newRow)) {
-        const pattern = new RegExp(`\\bNEW\\.${key}\\b`, 'gi');
-        const replacement = typeof value === 'string' ? `'${value}'` : String(value);
-        expr = expr.replace(pattern, replacement);
-      }
-    }
-
-    // Replace OLD references
-    if (oldRow) {
-      for (const [key, value] of Object.entries(oldRow)) {
-        const pattern = new RegExp(`\\bOLD\\.${key}\\b`, 'gi');
-        const replacement = typeof value === 'string' ? `'${value}'` : String(value);
-        expr = expr.replace(pattern, replacement);
-      }
-    }
-
-    // Handle NOT LIKE pattern (convert to regex test)
-    // e.g., 'invalid' NOT LIKE '%@%' => !/.*@.*/.test('invalid')
-    expr = expr.replace(
-      /(['"]\w+['"]|\w+)\s+NOT\s+LIKE\s+['"](%?)([^%'"]+)(%?)['"]/gi,
-      (_, val, prefix, pattern, suffix) => {
-        const regexPattern = (prefix ? '.*' : '') + pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + (suffix ? '.*' : '');
-        return `!/${regexPattern}/.test(${val})`;
-      }
-    );
-
-    // Handle LIKE pattern (convert to regex test)
-    // e.g., 'test@example.com' LIKE '%@%' => /.*@.*/.test('test@example.com')
-    expr = expr.replace(
-      /(['"]\w+['"]|\w+)\s+LIKE\s+['"](%?)([^%'"]+)(%?)['"]/gi,
-      (_, val, prefix, pattern, suffix) => {
-        const regexPattern = (prefix ? '.*' : '') + pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + (suffix ? '.*' : '');
-        return `/${regexPattern}/.test(${val})`;
-      }
-    );
-
-    // Handle IS NULL
-    expr = expr.replace(/\bIS\s+NULL\b/gi, '=== null');
-    expr = expr.replace(/\bIS\s+NOT\s+NULL\b/gi, '!== null');
-
-    // Handle AND/OR
-    expr = expr.replace(/\bAND\b/gi, '&&');
-    expr = expr.replace(/\bOR\b/gi, '||');
-
-    // Handle NOT (but not NOT IN or NOT LIKE which are handled above)
-    expr = expr.replace(/\bNOT\s+(?!IN\b)/gi, '!');
-
-    // Handle SQL equality operators
-    expr = expr.replace(/!=/g, '!==');
-    expr = expr.replace(/(?<![!<>=])=(?!=)/g, '===');
-    expr = expr.replace(/<>/g, '!==');
-
-    // Evaluate the expression (simplified - production would need proper parser)
-    // eslint-disable-next-line no-new-func
-    const result = new Function(`return ${expr}`)();
-    return Boolean(result);
-  } catch {
-    // If evaluation fails, default to true (fire the trigger)
-    return true;
-  }
 }
 
 /**

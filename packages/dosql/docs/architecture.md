@@ -11,6 +11,7 @@ This document describes the architecture of the DoSQL ecosystem, a type-safe SQL
 - [Sharding Architecture](#sharding-architecture)
 - [RPC Protocol](#rpc-protocol)
 - [Sequence Diagrams](#sequence-diagrams)
+- [WebSocket Hibernation](#websocket-hibernation)
 
 ---
 
@@ -341,7 +342,7 @@ DoSQL implements a tiered storage architecture optimized for Cloudflare's infras
 |  |  - Historical B-tree      |   |  +-------+  +-------+  +-------+         |   |
 |  |  - Archive indexes        |   |  | Page  |  | Index |  | Blob  |         |   |
 |  |  - Large BLOBs            |   |  | Files |  | Files |  | Data  |         |   |
-|  +------------+--------------+   +-------+  +-------+  +-------+         |   |
+|  +------------+--------------+   |  +-------+  +-------+  +-------+         |   |
 |               |                  +-------------------------------------------+   |
 |               | CDC Stream (cdc/stream.ts -> dolake)                             |
 |               v                                                                  |
@@ -356,7 +357,7 @@ DoSQL implements a tiered storage architecture optimized for Cloudflare's infras
 |  |  - Historical snapshots   |   |  +-------+  +-------+  +-------+         |   |
 |  |  - Time travel data       |   |  |Parquet|  |Manifest|  | Meta  |         |   |
 |  |  - CDC archive            |   |  | Files |  | Lists  |  | JSON  |         |   |
-|  +---------------------------+   +-------+  +-------+  +-------+         |   |
+|  +---------------------------+   |  +-------+  +-------+  +-------+         |   |
 |                                  +-------------------------------------------+   |
 +---------------------------------------------------------------------------------+
 ```
@@ -380,6 +381,84 @@ interface TieredStorageConfig {
   };
 }
 ```
+
+### Performance Expectations by Tier
+
+Each storage tier has distinct latency and throughput characteristics optimized for its use case:
+
+#### Hot Tier (Durable Object Storage)
+
+| Metric | Expected Value | Notes |
+|--------|----------------|-------|
+| **Read Latency (p50)** | 0.5 - 1ms | Single key lookup |
+| **Read Latency (p99)** | 2 - 5ms | Under normal load |
+| **Write Latency (p50)** | 1 - 2ms | Single key write |
+| **Write Latency (p99)** | 5 - 10ms | Includes WAL sync |
+| **Throughput (reads)** | 10,000 - 50,000 ops/sec | Per DO instance |
+| **Throughput (writes)** | 1,000 - 5,000 ops/sec | WAL-bound |
+| **Max Value Size** | 2 MB | Cloudflare DO limit |
+| **Max Keys** | ~10,000 | Practical limit per DO |
+| **Consistency** | Strong | Single-leader guarantee |
+
+**Best For**: Active transactions, hot working set, WAL segments, B-tree root/branch pages
+
+#### Warm Tier (R2 with DO Cache)
+
+| Metric | Expected Value | Notes |
+|--------|----------------|-------|
+| **Read Latency (cache hit, p50)** | 1 - 2ms | Served from DO cache |
+| **Read Latency (cache hit, p99)** | 5 - 10ms | Under load |
+| **Read Latency (cache miss, p50)** | 30 - 50ms | R2 fetch required |
+| **Read Latency (cache miss, p99)** | 100 - 150ms | Cross-region or congestion |
+| **Write Latency (p50)** | 20 - 40ms | Direct R2 write |
+| **Write Latency (p99)** | 80 - 120ms | Under load |
+| **Throughput (reads)** | 1,000 - 10,000 ops/sec | Cache-dependent |
+| **Throughput (writes)** | 100 - 500 ops/sec | R2-bound |
+| **Max Object Size** | 5 GB | R2 single object limit |
+| **Consistency** | Eventual | Cache invalidation delay |
+
+**Best For**: Overflow pages, historical B-tree nodes, large BLOBs, archived indexes
+
+#### Cold Tier (Parquet/Iceberg on R2)
+
+| Metric | Expected Value | Notes |
+|--------|----------------|-------|
+| **Read Latency (metadata, p50)** | 50 - 100ms | Manifest/metadata fetch |
+| **Read Latency (data scan, p50)** | 100 - 300ms | Single Parquet file |
+| **Read Latency (p99)** | 500 - 1000ms | Large scans, cold start |
+| **Write Latency (flush, p50)** | 200 - 500ms | Parquet file write |
+| **Write Latency (commit, p50)** | 100 - 200ms | Iceberg metadata update |
+| **Scan Throughput** | 50 - 200 MB/sec | Parquet columnar reads |
+| **Write Throughput** | 10 - 50 MB/sec | Batched CDC flush |
+| **Target File Size** | 128 - 256 MB | Optimal Parquet files |
+| **Compression Ratio** | 3x - 10x | Depends on data entropy |
+| **Consistency** | Snapshot isolation | Iceberg ACID guarantees |
+
+**Best For**: Analytics queries, historical data, time travel, CDC archive, compliance retention
+
+#### Cross-Tier Summary
+
+```
++------------------+---------------+----------------+------------------+
+|     Metric       |   Hot (DO)    |  Warm (R2+$)   |  Cold (Iceberg)  |
++------------------+---------------+----------------+------------------+
+| Read Latency p50 |    0.5-1ms    |    1-50ms      |    100-300ms     |
+| Read Latency p99 |    2-5ms      |   100-150ms    |    500-1000ms    |
+| Write Latency    |    1-2ms      |    20-40ms     |    200-500ms     |
+| Throughput (r)   | 10K-50K ops/s |  1K-10K ops/s  |   50-200 MB/s    |
+| Throughput (w)   |  1K-5K ops/s  |  100-500 ops/s |   10-50 MB/s     |
+| Capacity         |    ~100MB     |   Unlimited    |    Unlimited     |
+| Consistency      |    Strong     |    Eventual    |    Snapshot      |
++------------------+---------------+----------------+------------------+
+```
+
+#### Latency Optimization Guidelines
+
+1. **Keep hot data hot**: Configure `hotTier.maxAge` to retain frequently accessed data
+2. **Warm cache sizing**: Size `warmTier.cacheSize` to fit your working set
+3. **Partition cold data**: Use time-based partitioning for efficient pruning
+4. **Batch CDC writes**: Configure flush thresholds to balance latency vs throughput
+5. **Prefetch on access patterns**: Use predictive loading for sequential scans
 
 ### Storage Flow
 
@@ -432,8 +511,9 @@ DoSQL provides native sharding inspired by Vitess, implemented in `src/sharding/
 |  |  | - unsharded      |  | - doNamespace    |  | - role (primary/ |      |      |
 |  |  | - reference      |  | - doId           |  |   replica/       |      |      |
 |  |  |                  |  | - replicas[]     |  |   analytics)     |      |      |
-|  |  +------------------+  +------------------+  | - region         |      |      |
-|  |                                              | - weight         |      |      |
+|  |  |                  |  |                  |  | - region         |      |      |
+|  |  |                  |  |                  |  | - weight         |      |      |
+|  |  +------------------+  +------------------+  +------------------+      |      |
 |  +-----------------------------------------------------------------------+      |
 |                                      |                                           |
 |                                      v                                           |
@@ -488,12 +568,12 @@ DoSQL provides native sharding inspired by Vitess, implemented in `src/sharding/
 |  |                                                                        |      |
 |  |  +----------+  +----------+  +----------+  +----------+               |      |
 |  |  | Shard 1  |  | Shard 2  |  | Shard 3  |  | Shard N  |               |      |
-|  |  | +------+ |  | +------+ |  | +------+ |  | +------+ |               |      |
-|  |  | |Primary| |  | |Primary| |  | |Primary| |  | |Primary| |               |      |
-|  |  | +------+ |  | +------+ |  | +------+ |  | +------+ |               |      |
-|  |  | +------+ |  | +------+ |  | +------+ |  | +------+ |               |      |
-|  |  | |Replica| |  | |Replica| |  | |Replica| |  | |Replica| |               |      |
-|  |  | +------+ |  | +------+ |  | +------+ |  | +------+ |               |      |
+|  |  | +-------+|  | +-------+|  | +-------+|  | +-------+|               |      |
+|  |  | |Primary||  | |Primary||  | |Primary||  | |Primary||               |      |
+|  |  | +-------+|  | +-------+|  | +-------+|  | +-------+|               |      |
+|  |  | +-------+|  | +-------+|  | +-------+|  | +-------+|               |      |
+|  |  | |Replica||  | |Replica||  | |Replica||  | |Replica||               |      |
+|  |  | +-------+|  | +-------+|  | +-------+|  | +-------+|               |      |
 |  |  +----------+  +----------+  +----------+  +----------+               |      |
 |  +-----------------------------------------------------------------------+      |
 |                                                                                  |
@@ -846,6 +926,212 @@ Compare to WASM alternatives:
 | Compaction | `src/compaction/` |
 | Shared Types | `../shared-types/src/` |
 | DoLake | `../dolake/src/` |
+
+---
+
+## WebSocket Hibernation
+
+DoSQL uses Cloudflare's WebSocket Hibernation API to maintain persistent connections at minimal cost. When a Durable Object has no active requests, it can "hibernate" to reduce compute charges by up to 95%, while keeping WebSocket connections open.
+
+### Hibernation Attachment Schema
+
+The key to hibernation support is the WebSocket attachment - a serializable state object that persists across hibernation cycles. When a DO wakes from hibernation, all in-memory state is lost, but WebSocket attachments are automatically restored.
+
+**DoSQL Session State Attachment:**
+
+```typescript
+/**
+ * Session state attached to WebSocket for persistence across hibernation.
+ * This state survives DO sleep/wake cycles.
+ *
+ * Defined in: packages/dosql/src/worker/hibernation.ts
+ */
+interface WebSocketSessionState {
+  /** Unique session identifier (UUID) */
+  sessionId: string;
+
+  /** Client identifier for monitoring/debugging (optional) */
+  clientId?: string;
+
+  /** Database name being accessed (optional) */
+  database?: string;
+
+  /** Branch being accessed for git-like branching (optional) */
+  branch?: string;
+
+  /** Unix timestamp (ms) when the connection was established */
+  connectedAt: number;
+
+  /** Unix timestamp (ms) of last activity (message sent/received) */
+  lastActivity: number;
+
+  /** Array of pending RPC request IDs awaiting response */
+  pendingRequests: string[];
+
+  /** Active transaction state if any (optional) */
+  transaction?: {
+    /** Transaction ID */
+    txId: string;
+    /** Unix timestamp (ms) when transaction started */
+    startedAt: number;
+    /** Transaction timeout in milliseconds */
+    timeout: number;
+  };
+
+  /** Prepared statement cache - array of [name, sql] pairs (optional) */
+  preparedStatements?: [string, string][];
+
+  /** Connection-level metrics */
+  metrics: {
+    /** Total number of queries executed on this connection */
+    totalQueries: number;
+    /** Total number of errors on this connection */
+    totalErrors: number;
+    /** Total bytes received on this connection */
+    bytesReceived: number;
+    /** Total bytes sent on this connection */
+    bytesSent: number;
+  };
+}
+```
+
+### What Data is Preserved During Hibernation
+
+| Field | Purpose | Restored On Wake |
+|-------|---------|------------------|
+| `sessionId` | Unique session tracking | Yes - for logging and correlation |
+| `clientId` | Client identification | Yes - for monitoring |
+| `database` | Current database context | Yes - for multi-tenant routing |
+| `branch` | Git-like branch context | Yes - for branch operations |
+| `connectedAt` | Connection age tracking | Yes - for idle timeout decisions |
+| `lastActivity` | Activity tracking | Yes - for idle detection |
+| `pendingRequests` | In-flight request IDs | Yes - for request resumption |
+| `transaction` | Active transaction state | Yes - critical for ACID guarantees |
+| `preparedStatements` | Statement cache | Yes - for prepared statement reuse |
+| `metrics` | Connection statistics | Yes - for observability |
+
+### WebSocket Tags
+
+DoSQL uses WebSocket tags to enable efficient connection management:
+
+```typescript
+type WebSocketTag =
+  | `client:${string}`    // Client identifier (e.g., "client:user-123")
+  | `database:${string}`  // Database name (e.g., "database:myapp")
+  | `branch:${string}`    // Branch name (e.g., "branch:feature-x")
+  | `tx:${string}`        // Transaction ID (e.g., "tx:abc-123")
+  | `session:${string}`   // Session ID (e.g., "session:uuid-here")
+  | `notify:${string}`;   // Notification channel (e.g., "notify:orders")
+```
+
+Tags enable:
+- Broadcasting to specific clients: `ctx.getWebSockets('database:myapp')`
+- Transaction coordination: `ctx.getWebSockets('tx:abc-123')`
+- Notification channels: `ctx.getWebSockets('notify:orders')`
+
+### Hibernation Mixin
+
+DoSQL provides a reusable `HibernationMixin` for adding hibernation support to any Durable Object:
+
+```typescript
+// Example usage
+export class MyDatabase extends HibernationMixin(DurableObject) {
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    const session = this.getSessionState(ws);
+    // Session is automatically restored from hibernation
+
+    // Process message...
+    const data = JSON.parse(message as string);
+
+    // Update session metrics
+    this.updateSessionState(ws, {
+      metrics: {
+        ...session.metrics,
+        totalQueries: session.metrics.totalQueries + 1,
+      },
+    });
+
+    // Send response
+    this.sendResponse(ws, { id: data.id, result: 'ok' });
+
+    // Allow hibernation after processing
+    this.scheduleHibernation();
+  }
+}
+```
+
+### Attachment Lifecycle
+
+1. **On WebSocket Accept**: Create initial session state
+   ```typescript
+   this.acceptWebSocket(ws, [`client:${clientId}`, `session:${sessionId}`], {
+     clientId,
+     database: params.get('database'),
+     branch: params.get('branch'),
+   });
+   ```
+
+2. **On Message Received**: Update session state
+   ```typescript
+   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+     const session = this.getSessionState(ws);
+     this.updateSessionState(ws, {
+       lastActivity: Date.now(),
+       metrics: {
+         ...session.metrics,
+         bytesReceived: session.metrics.bytesReceived + getMessageSize(message),
+       },
+     });
+   }
+   ```
+
+3. **On Hibernation Wake**: Restore session state
+   ```typescript
+   // Automatic - getSessionState() returns the persisted state
+   const session = this.getSessionState(ws);
+   // session.sessionId, session.transaction, etc. are all restored
+   ```
+
+4. **On Connection Close**: Clean up transaction state
+   ```typescript
+   async webSocketClose(ws: WebSocket, code: number, reason: string) {
+     const session = this.getSessionState(ws);
+     if (session?.transaction) {
+       // Rollback any active transaction
+       await this.rollbackTransaction(session.transaction.txId);
+     }
+   }
+   ```
+
+### Hibernation Statistics
+
+The `HibernationMixin` tracks hibernation statistics for monitoring:
+
+```typescript
+interface HibernationStats {
+  /** Total number of hibernation cycles (sleeps) */
+  totalSleeps: number;
+  /** Total number of wake-ups from hibernation */
+  totalWakes: number;
+  /** Average sleep duration in milliseconds */
+  averageSleepDuration: number;
+  /** Total time spent sleeping in milliseconds */
+  totalSleepTime: number;
+  /** Estimated CPU time saved in milliseconds */
+  cpuTimeSaved: number;
+}
+```
+
+### Cost Savings
+
+WebSocket Hibernation provides significant cost savings:
+
+| State | Billing | Use Case |
+|-------|---------|----------|
+| Active | Full compute charges | Processing queries, transactions |
+| Hibernating | 95% reduction | Idle connections waiting for messages |
+
+For applications with many concurrent but idle connections (e.g., real-time dashboards, collaboration tools), hibernation can reduce Durable Object costs by 80-95%.
 
 ---
 

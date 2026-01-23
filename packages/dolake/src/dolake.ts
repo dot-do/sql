@@ -214,23 +214,161 @@ export class DoLake implements DurableObject {
   /**
    * Creates a new DoLake instance.
    *
+   * DoLake is the main lakehouse Durable Object responsible for receiving CDC events
+   * from DoSQL instances, efficiently batching them, and persisting them as Parquet
+   * files with Iceberg metadata to R2 storage.
+   *
    * @param ctx - Durable Object state provided by the Cloudflare runtime.
-   *              Used for persistence, WebSocket management, and alarm scheduling.
-   * @param env - Environment bindings containing:
-   *              - `LAKEHOUSE_BUCKET`: R2 bucket for Parquet/Iceberg storage (required)
-   *              - `LAKEHOUSE_KV`: KV namespace for metadata caching (optional)
+   *              This is the primary interface for DO capabilities:
+   *
+   *              - **Persistent Storage**: `ctx.storage` provides transactional KV storage
+   *                for state persistence across hibernation cycles. DoLake uses this
+   *                to store buffer snapshots, state machine state, and recovery data.
+   *
+   *              - **WebSocket Management**: `ctx.getWebSockets()` retrieves all active
+   *                WebSocket connections. DoLake uses WebSocket hibernation to reduce
+   *                costs by 95% - connections persist even when the DO is hibernated.
+   *
+   *              - **Alarm Scheduling**: `ctx.storage.setAlarm()` schedules wake-up
+   *                alarms for periodic buffer flushes and recovery operations.
+   *
+   *              - **Hibernation API**: `ctx.acceptWebSocket()` and hibernation callbacks
+   *                (`webSocketMessage`, `webSocketClose`, `webSocketError`) enable
+   *                efficient long-lived connections without constant billing.
+   *
+   * @param env - Environment bindings containing required and optional services:
+   *
+   *              - **`LAKEHOUSE_BUCKET`** (R2Bucket, required): The R2 bucket where
+   *                all lakehouse data is stored. This includes:
+   *                - Parquet data files (compressed columnar format)
+   *                - Iceberg metadata files (manifest lists, manifests, snapshots)
+   *                - Table metadata JSON files
+   *                - Fallback storage for failed writes
+   *
+   *              - **`LAKEHOUSE_KV`** (KVNamespace, optional): KV namespace for
+   *                caching frequently accessed metadata. When provided, reduces
+   *                R2 read latency for:
+   *                - Table schema lookups
+   *                - Partition statistics
+   *                - Snapshot metadata
    *
    * @remarks
-   * The constructor initializes all internal components synchronously:
-   * - Core: buffer manager, R2 storage, catalog handler, compaction manager, rate limiter
-   * - State: state machine, persistence layer
-   * - Handlers: WebSocket handler, catalog router, flush manager, recovery handler
-   * - Scalability: partition manager, query engine, parallel write manager, etc.
-   * - Analytics: P2 durability handler
-   * - Cache: invalidation coordinator
+   * ## Component Initialization
    *
-   * After initialization, it restores state from hibernation and sets up
-   * WebSocket auto-response for ping/pong keep-alive.
+   * The constructor initializes all internal components synchronously in this order:
+   *
+   * ### Core Components
+   * - **CDCBufferManager**: In-memory buffer for batching CDC events by table/partition.
+   *   Implements deduplication using LSN (Log Sequence Number) tracking.
+   * - **R2IcebergStorage**: Adapter for writing Iceberg-formatted data to R2.
+   *   Handles manifest generation, snapshot commits, and atomic metadata updates.
+   * - **RestCatalogHandler**: Implements Iceberg REST Catalog API for external
+   *   query engine compatibility (Spark, Trino, DuckDB, etc.).
+   * - **CompactionManager**: Coordinates background compaction of small Parquet files
+   *   into larger, more efficient files.
+   * - **RateLimiter**: Token bucket rate limiter with per-IP and global limits
+   *   to prevent resource exhaustion.
+   *
+   * ### State Management
+   * - **DoLakeStateMachine**: Finite state machine tracking operational state
+   *   (idle, buffering, flushing, recovering, error).
+   * - **StatePersistence**: Handles saving/loading state to/from `ctx.storage`
+   *   for recovery after hibernation or crashes.
+   *
+   * ### Handlers
+   * - **WebSocketHandler**: Processes incoming WebSocket messages (CDC batches,
+   *   heartbeats, backpressure signals) from DoSQL instances.
+   * - **CatalogRouter**: HTTP router for REST Catalog API endpoints.
+   * - **FlushManager**: Coordinates buffer-to-R2 writes with retry logic and
+   *   fallback storage on failure.
+   * - **RecoveryHandler**: Replays events from fallback storage after failures.
+   *
+   * ### Scalability Components
+   * - **PartitionManager**: Routes events to appropriate partitions based on
+   *   partition spec (time-based, hash-based, etc.).
+   * - **QueryEngine**: Partition pruning and query planning for efficient reads.
+   * - **ParallelWriteManager**: Coordinates concurrent Parquet file writes.
+   * - **PartitionCompactionManager**: Partition-level compaction coordination.
+   * - **PartitionRebalancer**: Load balancing across partitions.
+   * - **LargeFileHandler**: Chunked processing for oversized payloads.
+   * - **HorizontalScalingManager**: Multi-DO coordination for horizontal scaling.
+   * - **MemoryEfficientProcessor**: Streaming processor for large datasets.
+   *
+   * ### Analytics & Caching
+   * - **AnalyticsEventHandler**: P2 durability handler for analytics workloads.
+   * - **CacheInvalidator**: Coordinates cache invalidation across downstream consumers.
+   *
+   * ## Post-Initialization
+   *
+   * After component initialization:
+   * 1. Restores buffer state from hibernation via `ctx.storage`
+   * 2. Sets up WebSocket auto-response for ping/pong keep-alive
+   *
+   * @example
+   * ```typescript
+   * // wrangler.toml configuration
+   * [[durable_objects.bindings]]
+   * name = "DOLAKE"
+   * class_name = "DoLake"
+   *
+   * [[r2_buckets]]
+   * binding = "LAKEHOUSE_BUCKET"
+   * bucket_name = "my-lakehouse"
+   *
+   * [[kv_namespaces]]
+   * binding = "LAKEHOUSE_KV"
+   * id = "abc123"
+   * ```
+   *
+   * @example
+   * ```typescript
+   * // Worker that routes requests to DoLake
+   * import { DoLake } from '@dotdo/dolake';
+   *
+   * export interface Env {
+   *   DOLAKE: DurableObjectNamespace;
+   *   LAKEHOUSE_BUCKET: R2Bucket;
+   *   LAKEHOUSE_KV?: KVNamespace;
+   * }
+   *
+   * export { DoLake };
+   *
+   * export default {
+   *   async fetch(request: Request, env: Env): Promise<Response> {
+   *     // Route to a named DoLake instance
+   *     const id = env.DOLAKE.idFromName('default');
+   *     const stub = env.DOLAKE.get(id);
+   *     return stub.fetch(request);
+   *   },
+   * };
+   * ```
+   *
+   * @example
+   * ```typescript
+   * // Connecting a DoSQL instance to DoLake via WebSocket
+   * const lakehouseId = env.DOLAKE.idFromName('default');
+   * const lakehouse = env.DOLAKE.get(lakehouseId);
+   *
+   * // Upgrade to WebSocket for CDC streaming
+   * const response = await lakehouse.fetch('https://dolake/ws', {
+   *   headers: { 'Upgrade': 'websocket' },
+   * });
+   *
+   * const ws = response.webSocket;
+   * if (ws) {
+   *   ws.accept();
+   *
+   *   // Send CDC events
+   *   ws.send(JSON.stringify({
+   *     type: 'cdc_batch',
+   *     sourceId: 'dosql-shard-1',
+   *     events: [
+   *       { table: 'users', op: 'INSERT', data: { id: 1, name: 'Alice' }, lsn: 1 },
+   *       { table: 'users', op: 'UPDATE', data: { id: 1, name: 'Alicia' }, lsn: 2 },
+   *     ],
+   *   }));
+   * }
+   * ```
    */
   constructor(ctx: DurableObjectState, env: DoLakeEnv) {
     this.ctx = ctx;

@@ -650,30 +650,29 @@ export class RateLimiter {
   // IP Handling
   // ===========================================================================
 
-  private getOrCreateIpState(ip: string): IpState {
-    let state = this.ipStates.get(ip);
+  /**
+   * Generic helper to get or create state in a map.
+   * Creates a new IpState with default values if the key doesn't exist.
+   */
+  private getOrCreateState(map: Map<string, IpState>, key: string): IpState {
+    let state = map.get(key);
     if (!state) {
       state = {
         connectionCount: 0,
         messageCount: 0,
         windowStart: Date.now(),
       };
-      this.ipStates.set(ip, state);
+      map.set(key, state);
     }
     return state;
   }
 
+  private getOrCreateIpState(ip: string): IpState {
+    return this.getOrCreateState(this.ipStates, ip);
+  }
+
   private getOrCreateSubnetState(subnet: string): IpState {
-    let state = this.subnetStates.get(subnet);
-    if (!state) {
-      state = {
-        connectionCount: 0,
-        messageCount: 0,
-        windowStart: Date.now(),
-      };
-      this.subnetStates.set(subnet, state);
-    }
-    return state;
+    return this.getOrCreateState(this.subnetStates, subnet);
   }
 
   private getSubnet(ip: string): string | null {
@@ -711,11 +710,26 @@ export class RateLimiter {
   /**
    * Check if an IP address is within a CIDR range using proper bitwise matching.
    *
+   * CIDR (Classless Inter-Domain Routing) notation specifies a network prefix.
+   * For example, '192.168.0.0/16' means:
+   *   - Network address: 192.168.0.0
+   *   - Prefix length: 16 bits (the first 16 bits identify the network)
+   *   - Host bits: 32 - 16 = 16 bits (can vary within the network)
+   *   - Range: 192.168.0.0 to 192.168.255.255 (65,536 addresses)
+   *
+   * The algorithm:
+   * 1. Convert both IP addresses to 32-bit integers
+   * 2. Create a bitmask with `prefix` leading 1s and `(32-prefix)` trailing 0s
+   * 3. Apply the mask to both IPs using bitwise AND
+   * 4. If the masked values are equal, the IP is in the CIDR range
+   *
    * @param ip - The IP address to check (e.g., '192.168.1.100')
    * @param cidr - The CIDR notation (e.g., '192.168.0.0/16')
    * @returns true if the IP is within the CIDR range
    */
   private isInCidr(ip: string, cidr: string): boolean {
+    // Split CIDR into network address and prefix length
+    // Example: '192.168.0.0/16' -> network='192.168.0.0', maskBits='16'
     const parts = cidr.split('/');
     const network = parts[0];
     const maskBits = parts[1];
@@ -724,30 +738,68 @@ export class RateLimiter {
     const mask = parseInt(maskBits, 10);
 
     // Validate mask is within valid range (0-32 for IPv4)
+    // /0 = all IPs, /32 = single IP (exact match)
     if (Number.isNaN(mask) || mask < 0 || mask > 32) return false;
 
-    // Parse the network address
+    // Parse the network address to a 32-bit integer
+    // Example: '192.168.0.0' -> 0xC0A80000 (3232235520)
     const networkInt = this.ipToInt(network);
     if (networkInt === null) return false;
 
     // Parse the IP address to check
+    // Example: '192.168.1.100' -> 0xC0A80164 (3232235876)
     const ipInt = this.ipToInt(ip);
     if (ipInt === null) return false;
 
-    // Special case: /0 matches all IPs
+    // Special case: /0 matches all IPs (no bits to compare)
     if (mask === 0) return true;
 
-    // Create the subnet mask (e.g., /24 = 0xFFFFFF00)
-    // Use >>> 0 to ensure unsigned 32-bit integer
+    // Create the subnet mask by left-shifting 1s and filling with 0s on the right
+    //
+    // How it works:
+    //   0xFFFFFFFF = 11111111 11111111 11111111 11111111 (all 32 bits set)
+    //   (32 - mask) = number of host bits (bits to ignore)
+    //   << (32 - mask) = shift left, pushing 0s into the low bits
+    //
+    // Examples:
+    //   /24: 0xFFFFFFFF << 8  = 0xFFFFFF00 = 11111111.11111111.11111111.00000000
+    //   /16: 0xFFFFFFFF << 16 = 0xFFFF0000 = 11111111.11111111.00000000.00000000
+    //   /8:  0xFFFFFFFF << 24 = 0xFF000000 = 11111111.00000000.00000000.00000000
+    //
+    // The >>> 0 converts to unsigned 32-bit integer (JavaScript quirk:
+    // bitwise ops return signed 32-bit ints, >>> 0 makes them unsigned)
     const subnetMask = mask === 32 ? 0xFFFFFFFF : ((0xFFFFFFFF << (32 - mask)) >>> 0);
 
-    // Apply mask and compare
-    // Use >>> 0 to ensure unsigned comparison
+    // Apply the mask to both addresses using bitwise AND, then compare
+    //
+    // The AND operation zeroes out the host bits, leaving only the network prefix.
+    // If the network prefixes match, the IP is in the CIDR range.
+    //
+    // Example with 192.168.1.100 and 192.168.0.0/16:
+    //   ipInt      = 0xC0A80164 = 11000000.10101000.00000001.01100100
+    //   networkInt = 0xC0A80000 = 11000000.10101000.00000000.00000000
+    //   subnetMask = 0xFFFF0000 = 11111111.11111111.00000000.00000000
+    //
+    //   ipInt & subnetMask      = 0xC0A80000 (network bits preserved, host bits zeroed)
+    //   networkInt & subnetMask = 0xC0A80000
+    //   Result: MATCH -> IP is in range
+    //
+    // >>> 0 ensures unsigned comparison (avoids signed int issues with high bit set)
     return ((ipInt & subnetMask) >>> 0) === ((networkInt & subnetMask) >>> 0);
   }
 
   /**
    * Convert an IPv4 address string to a 32-bit unsigned integer.
+   *
+   * IPv4 addresses are 4 octets (bytes), each 0-255. This function packs
+   * them into a single 32-bit integer for efficient bitwise comparisons.
+   *
+   * Example: '192.168.1.100'
+   *   Octet 1: 192 = 0xC0 -> shifted to bits 24-31
+   *   Octet 2: 168 = 0xA8 -> shifted to bits 16-23
+   *   Octet 3:   1 = 0x01 -> shifted to bits 8-15
+   *   Octet 4: 100 = 0x64 -> bits 0-7
+   *   Result: 0xC0A80164 = 3232235876
    *
    * @param ip - The IP address string (e.g., '192.168.1.100')
    * @returns The integer representation, or null if invalid
@@ -761,7 +813,19 @@ export class RateLimiter {
       const value = parseInt(octet, 10);
       // Validate octet is a valid number in range 0-255
       if (Number.isNaN(value) || value < 0 || value > 255) return null;
-      result = ((result << 8) | value) >>> 0; // >>> 0 ensures unsigned
+
+      // Shift existing bits left by 8 to make room for the new octet,
+      // then OR in the new octet value.
+      //
+      // Iteration 1 (192): result = (0 << 8) | 192     = 192         = 0x000000C0
+      // Iteration 2 (168): result = (192 << 8) | 168   = 49320       = 0x0000C0A8
+      // Iteration 3 (1):   result = (49320 << 8) | 1   = 12625921    = 0x00C0A801
+      // Iteration 4 (100): result = (12625921 << 8) | 100 = 3232235876 = 0xC0A80164
+      //
+      // >>> 0 converts to unsigned 32-bit integer (necessary because JavaScript
+      // bitwise operations return signed 32-bit integers, and IPs like 255.x.x.x
+      // would otherwise be interpreted as negative numbers)
+      result = ((result << 8) | value) >>> 0;
     }
 
     return result;
@@ -780,6 +844,35 @@ export class RateLimiter {
   // Helpers
   // ===========================================================================
 
+  /**
+   * Calculate the retry delay for a rate-limited connection using exponential backoff with jitter.
+   *
+   * Algorithm: Exponential Backoff with Decorrelated Jitter
+   *
+   * The delay is computed as:
+   *   delay = min(baseDelay * 2^n, maxRetryDelay) * jitter
+   *
+   * Where:
+   *   - baseDelay: The base retry delay from config (e.g., 100ms)
+   *   - n: Number of consecutive rate limits, capped at MAX_EXPONENTIAL_BACKOFF_POWER (10)
+   *        to prevent overflow (2^10 = 1024 max multiplier)
+   *   - maxRetryDelay: Upper bound on delay before jitter (e.g., 30000ms)
+   *   - jitter: Random multiplier in [JITTER_MIN, JITTER_MAX] (e.g., [0.5, 1.5])
+   *
+   * The jitter prevents "thundering herd" problems where many clients retry simultaneously
+   * after being rate limited at the same time. By randomizing the retry delay, clients
+   * spread their retries across a wider time window.
+   *
+   * Example progression (with baseDelay=100ms, maxRetryDelay=30000ms):
+   *   - 1st rate limit: 100 * 2^1 = 200ms * jitter -> ~100-300ms
+   *   - 2nd rate limit: 100 * 2^2 = 400ms * jitter -> ~200-600ms
+   *   - 3rd rate limit: 100 * 2^3 = 800ms * jitter -> ~400-1200ms
+   *   - ...
+   *   - 10th+ rate limit: capped at 30000ms * jitter -> ~15000-45000ms
+   *
+   * @param state - The connection state containing consecutiveRateLimits counter
+   * @returns The calculated retry delay in milliseconds
+   */
   private calculateRetryDelay(state: ConnectionState): number {
     // Exponential backoff
     const baseDelay = this.config.baseRetryDelayMs;
@@ -846,6 +939,37 @@ export class RateLimiter {
     };
   }
 
+  /**
+   * Update the system load level based on current connection utilization.
+   *
+   * Algorithm: Threshold-Based Load Classification
+   *
+   * The load level is determined by comparing the utilization ratio against
+   * predefined thresholds. The utilization ratio is calculated as:
+   *
+   *   utilizationRatio = activeConnections / (connectionsPerSecond * LOAD_CONNECTION_MULTIPLIER)
+   *
+   * This normalizes the active connection count against the expected capacity,
+   * where LOAD_CONNECTION_MULTIPLIER scales the connectionsPerSecond config
+   * to represent total expected connection capacity.
+   *
+   * Load Level Classification:
+   *   - 'critical' (ratio > 0.9): System is at capacity. Enables degraded mode
+   *      which triggers load shedding for non-priority traffic.
+   *   - 'high' (ratio > 0.7): System under heavy load. Enables degraded mode
+   *      as a precautionary measure.
+   *   - 'elevated' (ratio > 0.5): System moderately loaded. No degraded mode,
+   *      but monitoring is heightened.
+   *   - 'normal' (ratio <= 0.5): System operating normally with ample capacity.
+   *
+   * The degraded mode flag affects rate limiting behavior:
+   *   - When true: Load shedding is enabled for 'cdc_batch' messages from
+   *     non-high-priority connections (see checkMessage method)
+   *   - When false: All messages are processed normally
+   *
+   * This method is called whenever connections are registered or unregistered
+   * to keep the load level current.
+   */
   private updateLoadLevel(): void {
     const utilizationRatio =
       this.metrics.activeConnections / (this.config.connectionsPerSecond * THRESHOLDS.LOAD_CONNECTION_MULTIPLIER);

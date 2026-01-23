@@ -18,6 +18,7 @@ import { WebSocketPool, type PooledConnection } from './pool.js';
 /**
  * Connection event data for 'connected' event.
  * @public
+ * @since 0.2.0
  */
 export interface ConnectedEvent {
   url: string;
@@ -27,6 +28,7 @@ export interface ConnectedEvent {
 /**
  * Disconnection event data for 'disconnected' event.
  * @public
+ * @since 0.2.0
  */
 export interface DisconnectedEvent {
   url: string;
@@ -117,8 +119,8 @@ export class ConnectionManager {
   private pool: WebSocketPool | null = null;
   private pooledConnection: PooledConnection | null = null;
 
-  // Event listeners
-  private eventListeners: Map<keyof AllConnectionEventMap, Set<ConnectionEventListener<any>>> = new Map();
+  // Event listeners - internal map uses generic function type; public on/off API is properly typed
+  private eventListeners: Map<keyof AllConnectionEventMap, Set<(event: AllConnectionEventMap[keyof AllConnectionEventMap]) => void>> = new Map();
 
   // Message handler
   private messageHandler: MessageHandler | null = null;
@@ -156,7 +158,7 @@ export class ConnectionManager {
 
       // Forward pool events to manager event listeners
       poolEvents.forEach(event => {
-        this.pool!.on(event, (data: any) => {
+        this.pool!.on(event, (data) => {
           this.emit(event, data);
         });
       });
@@ -173,6 +175,8 @@ export class ConnectionManager {
    * @returns `true` if connected, `false` otherwise
    */
   isConnected(): boolean {
+    // WebSocket ready states: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+    // READY_STATE_OPEN (1) means connection is established and ready to communicate
     if (this.pool && this.pooledConnection) {
       return this.pooledConnection.ws.readyState === WebSocket.READY_STATE_OPEN;
     }
@@ -320,7 +324,9 @@ export class ConnectionManager {
   on<K extends keyof AllConnectionEventMap>(event: K, listener: ConnectionEventListener<K>): this {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
-      listeners.add(listener);
+      // Type assertion needed: listener is contravariant but TypeScript can't prove
+      // that ConnectionEventListener<K> is compatible with the union type in the Set
+      listeners.add(listener as (event: AllConnectionEventMap[keyof AllConnectionEventMap]) => void);
     }
     return this;
   }
@@ -335,7 +341,8 @@ export class ConnectionManager {
   off<K extends keyof AllConnectionEventMap>(event: K, listener: ConnectionEventListener<K>): this {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
-      listeners.delete(listener);
+      // Type assertion needed: same reason as on() method
+      listeners.delete(listener as (event: AllConnectionEventMap[keyof AllConnectionEventMap]) => void);
     }
     return this;
   }
@@ -406,6 +413,7 @@ export class ConnectionManager {
    * @internal
    */
   private async getSingleConnection(): Promise<WebSocket> {
+    // WebSocket.READY_STATE_OPEN = 1 means connection is established and ready to communicate
     if (this.ws && this.ws.readyState === WebSocket.READY_STATE_OPEN) {
       return this.ws;
     }
@@ -422,7 +430,7 @@ export class ConnectionManager {
       });
 
       this.ws.addEventListener('error', (event: Event) => {
-        reject(new ConnectionError(`WebSocket error: ${event}`));
+        reject(new ConnectionError(`WebSocket error: ${event}`, this.url));
       });
 
       this.ws.addEventListener('close', () => {
@@ -455,6 +463,7 @@ export class ConnectionManager {
    */
   private async getPooledConnection(): Promise<WebSocket> {
     // If we have a borrowed connection that's still open, use it
+    // WebSocket.READY_STATE_OPEN = 1 means connection is established and ready to communicate
     if (this.pooledConnection && this.pooledConnection.ws.readyState === WebSocket.READY_STATE_OPEN) {
       return this.pooledConnection.ws;
     }

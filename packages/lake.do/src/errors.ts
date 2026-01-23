@@ -13,6 +13,39 @@ import type { LakeRPCError } from './types.js';
 import { ErrorCode } from './constants.js';
 
 // =============================================================================
+// URL Masking Utility
+// =============================================================================
+
+/**
+ * Masks sensitive data in a URL for safe logging and error messages.
+ *
+ * @param url - The URL to mask
+ * @returns A masked version of the URL safe for logging
+ * @internal
+ */
+export function maskUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) {
+      parsed.password = '***';
+    }
+    const sensitiveParams = ['token', 'key', 'secret', 'password', 'auth', 'api_key', 'apikey', 'access_token'];
+    for (const param of sensitiveParams) {
+      if (parsed.searchParams.has(param)) {
+        parsed.searchParams.set(param, '***');
+      }
+    }
+    return parsed.toString();
+  } catch {
+    const match = url.match(/^(\w+:\/\/)([^/?#]+)/);
+    if (match) {
+      return `${match[1]}${match[2]}/***`;
+    }
+    return '[invalid-url]';
+  }
+}
+
+// =============================================================================
 // Base Error Class
 // =============================================================================
 
@@ -82,6 +115,7 @@ export class LakeError extends Error {
  *
  * @description Represents connection-related errors such as connection failures,
  * timeouts, or disconnections. Extends LakeError for consistent error handling.
+ * The error message includes the URL (with sensitive data masked) for debugging.
  *
  * Common error codes:
  * - `CONNECTION_ERROR`: General connection failure
@@ -96,6 +130,7 @@ export class LakeError extends Error {
  * } catch (error) {
  *   if (error instanceof ConnectionError) {
  *     console.error(`Connection failed [${error.code}]: ${error.message}`);
+ *     console.error(`URL: ${error.url}`);
  *     if (error.code === ErrorCode.CONNECTION_TIMEOUT) {
  *       // Handle timeout specifically
  *     }
@@ -109,13 +144,27 @@ export class LakeError extends Error {
  */
 export class ConnectionError extends LakeError {
   /**
+   * The URL that the connection was attempted to (masked for security).
+   * May be undefined if no URL was provided.
+   */
+  readonly url?: string;
+
+  /**
    * Creates a new ConnectionError instance.
    *
    * @param error - The error details
+   * @param url - Optional URL that the connection was attempted to (will be masked)
    */
-  constructor(error: LakeRPCError) {
-    super(error);
+  constructor(error: LakeRPCError, url?: string) {
+    const maskedUrl = url ? maskUrl(url) : undefined;
+    const errorWithUrl = maskedUrl
+      ? { ...error, message: `${error.message} (url: ${maskedUrl})` }
+      : error;
+    super(errorWithUrl);
     this.name = 'ConnectionError';
+    if (maskedUrl) {
+      this.url = maskedUrl;
+    }
   }
 
   /**
@@ -124,40 +173,44 @@ export class ConnectionError extends LakeError {
    * @param code - The error code
    * @param message - The error message
    * @param details - Optional additional details
+   * @param url - Optional URL that the connection was attempted to (will be masked)
    * @returns A new ConnectionError instance
    */
-  static create(code: string, message: string, details?: unknown): ConnectionError {
-    return new ConnectionError({ code, message, details });
+  static create(code: string, message: string, details?: unknown, url?: string): ConnectionError {
+    return new ConnectionError({ code, message, details }, url);
   }
 
   /**
    * Creates a connection closed error.
    *
    * @param message - Optional custom message
+   * @param url - Optional URL that the connection was attempted to (will be masked)
    * @returns A new ConnectionError instance
    */
-  static closed(message = 'Connection closed'): ConnectionError {
-    return ConnectionError.create(ErrorCode.CONNECTION_CLOSED, message);
+  static closed(message = 'Connection closed', url?: string): ConnectionError {
+    return ConnectionError.create(ErrorCode.CONNECTION_CLOSED, message, undefined, url);
   }
 
   /**
    * Creates a not connected error.
    *
    * @param message - Optional custom message
+   * @param url - Optional URL that the connection was attempted to (will be masked)
    * @returns A new ConnectionError instance
    */
-  static notConnected(message = 'WebSocket is not connected'): ConnectionError {
-    return ConnectionError.create(ErrorCode.NOT_CONNECTED, message);
+  static notConnected(message = 'WebSocket is not connected', url?: string): ConnectionError {
+    return ConnectionError.create(ErrorCode.NOT_CONNECTED, message, undefined, url);
   }
 
   /**
    * Creates a connection error.
    *
    * @param message - Optional custom message
+   * @param url - Optional URL that the connection was attempted to (will be masked)
    * @returns A new ConnectionError instance
    */
-  static failed(message = 'Connection failed'): ConnectionError {
-    return ConnectionError.create(ErrorCode.CONNECTION_ERROR, message);
+  static failed(message = 'Connection failed', url?: string): ConnectionError {
+    return ConnectionError.create(ErrorCode.CONNECTION_ERROR, message, undefined, url);
   }
 }
 

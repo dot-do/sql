@@ -57,10 +57,10 @@ try {
   await client.query('SELCT * FROM users'); // Typo in SELECT
 } catch (error) {
   if (error.code === 'SYNTAX_ERROR') {
-    // Parse the error message for suggestions
-    const match = error.message.match(/did you mean '(\w+)'/);
-    if (match) {
-      console.log(`Suggestion: Use '${match[1]}' instead`);
+    // Use the suggestion property for error recovery hints
+    if (error.suggestion) {
+      console.log(`Suggestion: ${error.suggestion}`);
+      // Output: "Suggestion: Did you mean 'SELECT'?"
     }
   }
 }
@@ -1762,25 +1762,134 @@ Invalid message format: Missing required field 'sql'
 | Property | Value |
 |----------|-------|
 | Code | N/A (Exception type) |
+| Class Location | `@dotdo/dolake` - `packages/dolake/src/schemas.ts` |
 | HTTP Status | 400 Bad Request |
+| WebSocket NACK Reason | `invalid_format` |
 | Retryable | No |
 
-**Description:** Zod schema validation failed for RPC message.
+**Description:** Zod schema validation failed for a WebSocket RPC message. This error is thrown when an incoming message fails validation against the defined Zod schemas, either due to missing fields, incorrect types, invalid enum values, or malformed JSON.
 
-**Common Causes:**
-- Invalid message type
-- Missing required fields
-- Type mismatches
+**When It's Thrown:**
+- When `validateClientMessage()` receives an invalid message
+- When `validateRpcMessage()` receives an invalid message
+- When type-specific validators fail (e.g., `validateCDCBatchMessage()`)
+- When JSON parsing fails during WebSocket message decoding
 
-**Example Error Message:**
+**Error Format (WebSocket NACK):**
+```json
+{
+  "type": "nack",
+  "timestamp": 1705329600000,
+  "sequenceNumber": 0,
+  "reason": "invalid_format",
+  "errorMessage": "sourceDoId: Required; events: Expected array, received object",
+  "shouldRetry": false
+}
 ```
-Invalid CDC batch message: events must be an array, timestamp is required
-```
+
+**Common Causes and Error Messages:**
+
+| Cause | Example Error |
+|-------|---------------|
+| Missing required field | `sourceDoId: Required` |
+| Wrong type | `timestamp: Expected number, received string` |
+| Invalid enum value | `operation: Invalid enum value. Expected 'INSERT' \| 'UPDATE' \| 'DELETE'` |
+| Invalid array | `events: Expected array, received object` |
+| Malformed JSON | `Failed to parse JSON: Unexpected token 'x' at position 5` |
+| Unknown message type | `Invalid discriminator value. Expected 'cdc_batch' \| 'connect' \| ...` |
+
+**Class Properties:**
+- `message`: Human-readable error summary
+- `name`: Always `'MessageValidationError'`
+- `zodError`: The underlying `ZodError` (null for JSON parse errors)
 
 **Resolution Steps:**
-1. Review message against schema
-2. Check field types
-3. Use `getErrorDetails()` method for specific issues
+1. Use `getErrorDetails()` method for field-by-field error information
+2. Review message structure against expected schema
+3. Check field types match (numbers vs strings, booleans vs strings)
+4. Validate enum values are exactly as specified (case-sensitive)
+5. Ensure JSON is well-formed before schema validation
+
+**Code Example - Handling the Error:**
+```typescript
+import {
+  validateClientMessage,
+  MessageValidationError,
+  CDCBatchMessageSchema,
+} from '@dotdo/dolake';
+
+// Method 1: Using validation functions
+try {
+  const message = validateClientMessage(rawData);
+  // Process valid message
+} catch (error) {
+  if (error instanceof MessageValidationError) {
+    // Get formatted error details
+    console.error('Validation failed:', error.getErrorDetails());
+    // Output: "sourceDoId: Required; events: Expected array, received object"
+
+    // Access individual Zod issues for programmatic handling
+    if (error.zodError) {
+      for (const issue of error.zodError.issues) {
+        console.log(`Field: ${issue.path.join('.')}`);
+        console.log(`Error: ${issue.message}`);
+        console.log(`Code: ${issue.code}`);
+      }
+    }
+
+    // Check if it's a JSON parse error vs schema validation
+    if (error.zodError === null) {
+      console.error('JSON parsing failed - check message format');
+    } else {
+      console.error('Schema validation failed - check field values');
+    }
+  }
+}
+
+// Method 2: Using schema directly (non-throwing)
+const result = CDCBatchMessageSchema.safeParse(data);
+if (!result.success) {
+  console.error('Validation errors:', result.error.issues);
+  // Handle errors without throwing
+} else {
+  // result.data is typed correctly
+  const validMessage = result.data;
+}
+```
+
+**Code Example - WebSocket Message Handling:**
+```typescript
+ws.onmessage = (event) => {
+  const response = JSON.parse(event.data);
+
+  if (response.type === 'nack' && response.reason === 'invalid_format') {
+    // MessageValidationError was thrown server-side
+    console.error('Message format error:', response.errorMessage);
+
+    // Parse individual field errors from errorMessage
+    const fieldErrors = response.errorMessage.split('; ').map(err => {
+      const [path, message] = err.split(': ');
+      return { path, message };
+    });
+
+    // Fix and retry with corrected message
+    const correctedMessage = fixValidationErrors(originalMessage, fieldErrors);
+    ws.send(JSON.stringify(correctedMessage));
+  }
+};
+```
+
+**Troubleshooting Checklist:**
+- [ ] Verify `type` field matches exactly: `'cdc_batch'`, `'connect'`, `'heartbeat'`, `'flush_request'`, `'disconnect'`
+- [ ] Check `timestamp` is a number (Unix epoch ms), not an ISO string
+- [ ] Ensure `sequenceNumber`, `firstEventSequence`, `lastEventSequence` are integers, not strings
+- [ ] Verify `events` is an array, not an object or null
+- [ ] Check `operation` values are uppercase: `'INSERT'`, `'UPDATE'`, `'DELETE'`
+- [ ] Ensure `capabilities` object has all required boolean and number fields
+- [ ] Verify JSON is valid (no trailing commas, proper quoting)
+- [ ] Check for BigInt values that need special serialization
+
+**Related Errors:** [INVALID_REQUEST](#invalid_request), [invalid_format](#invalid_format), [CDC_DECODE_ERROR](#cdc_decode_error)
 
 ---
 

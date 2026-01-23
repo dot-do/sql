@@ -84,8 +84,20 @@ export async function generateIdempotencyKey(
   params?: SQLValue[],
   prefix?: string
 ): Promise<string> {
+  // Timestamp (Unix ms): Provides temporal ordering for debugging and enables
+  // time-based key expiration policies. Also helps prevent collisions across
+  // different time windows without relying solely on randomness.
   const timestamp = Date.now();
+
+  // Random component (8 chars): Ensures uniqueness even when multiple keys are
+  // generated in the same millisecond for different logical operations. Uses
+  // cryptographic randomness to prevent guessability and collision attacks.
   const random = generateRandomString(8);
+
+  // Content hash (8 chars of SHA-256): Binds the key to specific SQL+params,
+  // enabling detection of accidental key reuse across different operations.
+  // Provides an additional layer of collision resistance and allows the server
+  // to verify that a retried request matches the original operation.
   const hashInput = sql + JSON.stringify(params ?? []);
   const hash = await hashString(hashInput, 8);
 

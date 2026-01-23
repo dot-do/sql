@@ -39,6 +39,10 @@ import {
   encodeValue,
   compareValues,
 } from './types.js';
+import { crc32 } from '../utils/crypto.js';
+
+// Re-export crc32 for backward compatibility
+export { crc32 } from '../utils/crypto.js';
 
 // =============================================================================
 // BIGINT-SAFE SERIALIZATION
@@ -71,36 +75,6 @@ function serializeValueKey(value: R2IndexValue): string {
     default:
       return `?:${String((value as R2IndexValue))}`;
   }
-}
-
-// =============================================================================
-// CRC32 CHECKSUM
-// =============================================================================
-
-/**
- * CRC32 lookup table
- */
-const CRC32_TABLE: Uint32Array = (() => {
-  const table = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let j = 0; j < 8; j++) {
-      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
-    }
-    table[i] = c;
-  }
-  return table;
-})();
-
-/**
- * Calculate CRC32 checksum
- */
-export function crc32(data: Uint8Array): number {
-  let crc = 0xFFFFFFFF;
-  for (let i = 0; i < data.length; i++) {
-    crc = CRC32_TABLE[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
 // =============================================================================

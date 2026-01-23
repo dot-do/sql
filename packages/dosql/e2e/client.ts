@@ -7,6 +7,8 @@
  * @packageDocumentation
  */
 
+import { calculatePercentile } from '../src/utils/math.js';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -69,6 +71,18 @@ export interface LatencyMeasurement {
   samples: number[];
 }
 
+/**
+ * E2E-specific CDCEvent type for DoSQL testing.
+ *
+ * NOTE: This differs from the canonical CDCEvent in @dotdo/sql.do:
+ * - Uses `oldRow/newRow` instead of `before/after` (matches E2E API responses)
+ * - Uses `txId` instead of `transactionId` (simplified field name)
+ * - Operation is a simple union rather than the CDCOperation branded type
+ * This is intentional - E2E tests work with the external API contract which
+ * may serialize/transform fields differently than internal types.
+ *
+ * @see @dotdo/sql.do for the canonical CDCEvent interface
+ */
 export interface CDCEvent {
   lsn: bigint;
   table: string;
@@ -337,20 +351,15 @@ export class DoSQLE2EClient {
     samples.sort((a, b) => a - b);
 
     return {
-      p50: this.percentile(samples, 50),
-      p95: this.percentile(samples, 95),
-      p99: this.percentile(samples, 99),
+      p50: calculatePercentile(samples, 50),
+      p95: calculatePercentile(samples, 95),
+      p99: calculatePercentile(samples, 99),
       min: samples[0],
       max: samples[samples.length - 1],
       avg: samples.reduce((a, b) => a + b, 0) / samples.length,
       count: samples.length,
       samples,
     };
-  }
-
-  private percentile(sorted: number[], p: number): number {
-    const index = Math.ceil((p / 100) * sorted.length) - 1;
-    return sorted[Math.max(0, index)];
   }
 
   /**
@@ -379,9 +388,9 @@ export class DoSQLE2EClient {
     samples.sort((a, b) => a - b);
 
     return {
-      p50: this.percentile(samples, 50),
-      p95: this.percentile(samples, 95),
-      p99: this.percentile(samples, 99),
+      p50: calculatePercentile(samples, 50),
+      p95: calculatePercentile(samples, 95),
+      p99: calculatePercentile(samples, 99),
       min: samples[0],
       max: samples[samples.length - 1],
       avg: samples.reduce((a, b) => a + b, 0) / samples.length,

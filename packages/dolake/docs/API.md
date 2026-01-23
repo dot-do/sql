@@ -172,6 +172,249 @@ dolake_dedup_duplicates 3
 
 ---
 
+### CDC Ingestion (HTTP)
+
+Ingest CDC events via HTTP POST for non-WebSocket clients. This endpoint provides a simpler alternative to WebSocket streaming for scenarios where persistent connections are not needed or available.
+
+```
+POST /cdc
+```
+
+**Request Body**
+
+```json
+{
+  "events": [
+    {
+      "sequence": 100,
+      "timestamp": 1705840000500,
+      "operation": "INSERT",
+      "table": "users",
+      "rowId": "user-1",
+      "after": {
+        "id": "user-1",
+        "name": "John Doe",
+        "email": "john@example.com"
+      }
+    },
+    {
+      "sequence": 101,
+      "timestamp": 1705840000600,
+      "operation": "UPDATE",
+      "table": "users",
+      "rowId": "user-2",
+      "before": {
+        "id": "user-2",
+        "name": "Jane Smith",
+        "email": "jane@old.com"
+      },
+      "after": {
+        "id": "user-2",
+        "name": "Jane Smith",
+        "email": "jane@new.com"
+      }
+    },
+    {
+      "sequence": 102,
+      "timestamp": 1705840000700,
+      "operation": "DELETE",
+      "table": "users",
+      "rowId": "user-3",
+      "before": {
+        "id": "user-3",
+        "name": "Bob Wilson",
+        "email": "bob@example.com"
+      }
+    }
+  ]
+}
+```
+
+**CDC Event Fields**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `sequence` | number | Yes | Monotonically increasing sequence number |
+| `timestamp` | number | Yes | Unix timestamp in milliseconds |
+| `operation` | string | Yes | Type of operation: `INSERT`, `UPDATE`, or `DELETE` |
+| `table` | string | Yes | Table name where the change occurred |
+| `rowId` | string | Yes | Primary key or row identifier |
+| `before` | object | No | Row data before the change (for `UPDATE`/`DELETE`) |
+| `after` | object | No | Row data after the change (for `INSERT`/`UPDATE`) |
+| `metadata` | object | No | Optional metadata about the change |
+
+**Response**
+
+```json
+{
+  "success": true,
+  "eventsReceived": 3,
+  "eventsAccepted": 3,
+  "isDuplicate": false
+}
+```
+
+**Response Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success` | boolean | Whether the request was processed successfully |
+| `eventsReceived` | number | Number of events in the request |
+| `eventsAccepted` | number | Number of events accepted into the buffer |
+| `isDuplicate` | boolean | Whether the batch was detected as a duplicate |
+
+**Error Responses**
+
+| Status | Error | Description |
+|--------|-------|-------------|
+| 400 | No events provided | Request body missing `events` array or array is empty |
+| 500 | Internal error | Server-side processing error |
+
+**Example Error Response (400)**
+
+```json
+{
+  "error": "No events provided"
+}
+```
+
+**Example Error Response (500)**
+
+```json
+{
+  "error": "Buffer overflow: maximum capacity reached"
+}
+```
+
+**Usage Notes**
+
+- Each request is assigned a unique source ID (`http-cdc-{timestamp}`) for tracking
+- Events are added to the internal buffer and will be flushed to R2 based on configured flush triggers
+- Cache invalidation is automatically triggered for affected tables
+- For high-throughput scenarios, prefer WebSocket connections which provide backpressure handling and acknowledgments
+- This endpoint does not support batching acknowledgments or sequence tracking like the WebSocket protocol
+
+**Example: cURL**
+
+```bash
+curl -X POST https://your-worker.workers.dev/lakehouse/cdc \
+  -H "Content-Type: application/json" \
+  -d '{
+    "events": [
+      {
+        "sequence": 1,
+        "timestamp": 1705840000000,
+        "operation": "INSERT",
+        "table": "orders",
+        "rowId": "order-123",
+        "after": {
+          "id": "order-123",
+          "customer_id": "cust-456",
+          "total": 99.99,
+          "status": "pending"
+        }
+      }
+    ]
+  }'
+```
+
+**Example: JavaScript/TypeScript**
+
+```typescript
+interface CDCEvent {
+  sequence: number;
+  timestamp: number;
+  operation: 'INSERT' | 'UPDATE' | 'DELETE';
+  table: string;
+  rowId: string;
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
+interface CDCResponse {
+  success: boolean;
+  eventsReceived: number;
+  eventsAccepted: number;
+  isDuplicate: boolean;
+}
+
+async function sendCDCEvents(events: CDCEvent[]): Promise<CDCResponse> {
+  const response = await fetch('https://your-worker.workers.dev/lakehouse/cdc', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ events }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error);
+  }
+
+  return response.json();
+}
+
+// Usage
+const result = await sendCDCEvents([
+  {
+    sequence: 1,
+    timestamp: Date.now(),
+    operation: 'INSERT',
+    table: 'users',
+    rowId: 'user-1',
+    after: { id: 'user-1', name: 'John Doe' },
+  },
+]);
+
+console.log(`Accepted ${result.eventsAccepted} of ${result.eventsReceived} events`);
+```
+
+---
+
+### Analytics Status
+
+Get the status of the analytics event handler, including P2 durability configuration and metrics.
+
+```
+GET /analytics/status
+```
+
+**Response**
+
+```json
+{
+  "durabilityTier": "P2",
+  "primaryStorage": "r2",
+  "fallbackStorage": "vfs",
+  "eventsBuffered": 0,
+  "batchesReceived": 15,
+  "eventsReceived": 1500,
+  "bytesReceived": 524288,
+  "r2Writes": 12,
+  "vfsFallbacks": 0,
+  "errors": 0
+}
+```
+
+**Response Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `durabilityTier` | string | The durability tier for analytics events (always `P2`) |
+| `primaryStorage` | string | Primary storage backend (`r2`) |
+| `fallbackStorage` | string | Fallback storage backend when primary is unavailable (`vfs`) |
+| `eventsBuffered` | number | Number of events currently buffered |
+| `batchesReceived` | number | Total number of batches received |
+| `eventsReceived` | number | Total number of events received |
+| `bytesReceived` | number | Total bytes received |
+| `r2Writes` | number | Number of successful writes to R2 |
+| `vfsFallbacks` | number | Number of times VFS fallback was used |
+| `errors` | number | Total number of errors encountered |
+
+---
+
 ## Iceberg REST Catalog API
 
 DoLake implements the [Iceberg REST Catalog specification](https://iceberg.apache.org/spec/#rest-catalog). All catalog endpoints are prefixed with `/v1/`.
@@ -879,6 +1122,110 @@ X-Shard-Name: <optional-shard-name>
   }
 }
 ```
+
+---
+
+## Rate Limiting
+
+DoLake implements rate limiting to protect against abuse and ensure fair resource usage. Rate limit information is communicated via standard HTTP headers on all responses.
+
+### Rate Limit Headers
+
+All API responses include rate limit headers:
+
+| Header | Type | Description |
+|--------|------|-------------|
+| `X-RateLimit-Limit` | integer | Maximum number of requests allowed per time window |
+| `X-RateLimit-Remaining` | integer | Number of requests remaining in the current window |
+| `X-RateLimit-Reset` | integer | Unix timestamp (seconds) when the rate limit window resets |
+| `Retry-After` | integer | Seconds to wait before retrying (only included when rate limited) |
+
+**Example Response Headers**
+
+```
+HTTP/1.1 200 OK
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 95
+X-RateLimit-Reset: 1705840060
+```
+
+**Rate Limited Response (429)**
+
+```
+HTTP/1.1 429 Too Many Requests
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1705840060
+Retry-After: 30
+```
+
+### Header Value Details
+
+- **X-RateLimit-Limit**: The maximum number of messages or connections allowed per second. This value is always a positive integer.
+
+- **X-RateLimit-Remaining**: The number of requests remaining before rate limiting kicks in. This value is always a non-negative integer and will never exceed the limit.
+
+- **X-RateLimit-Reset**: A Unix timestamp (in seconds, not milliseconds) indicating when the current rate limit window resets. Clients should use this to calculate how long to wait.
+
+- **Retry-After**: Only included when a request is rate limited (`allowed: false`). Contains the recommended number of seconds to wait before retrying. This value incorporates exponential backoff with jitter to prevent thundering herd problems.
+
+### Client Implementation Guidelines
+
+Clients should implement proper rate limit handling:
+
+1. **Monitor headers**: Check `X-RateLimit-Remaining` on every response to track usage.
+
+2. **Respect limits**: When `X-RateLimit-Remaining` reaches 0, pause requests until `X-RateLimit-Reset` time.
+
+3. **Handle 429 responses**: When rate limited:
+   - Stop sending requests immediately
+   - Wait for the duration specified in `Retry-After` header
+   - If `Retry-After` is not present, calculate wait time from `X-RateLimit-Reset`
+
+4. **Implement exponential backoff**: For repeated rate limiting, increase wait times exponentially:
+   ```
+   delay = min(baseDelay * 2^consecutiveFailures, maxDelay) * jitter
+   ```
+
+5. **Use jitter**: Add randomness to retry delays to prevent synchronized retries from multiple clients.
+
+**Example Client Code (JavaScript)**
+
+```javascript
+async function makeRequest(url, options) {
+  const response = await fetch(url, options);
+
+  // Read rate limit headers
+  const limit = parseInt(response.headers.get('X-RateLimit-Limit'), 10);
+  const remaining = parseInt(response.headers.get('X-RateLimit-Remaining'), 10);
+  const resetAt = parseInt(response.headers.get('X-RateLimit-Reset'), 10);
+
+  if (response.status === 429) {
+    // Rate limited - wait and retry
+    const retryAfter = parseInt(response.headers.get('Retry-After'), 10) ||
+                       Math.max(1, resetAt - Math.floor(Date.now() / 1000));
+    await sleep(retryAfter * 1000);
+    return makeRequest(url, options); // Retry
+  }
+
+  // Log remaining capacity for monitoring
+  console.log(`Rate limit: ${remaining}/${limit} remaining, resets at ${new Date(resetAt * 1000)}`);
+
+  return response;
+}
+```
+
+### Rate Limit Configuration
+
+Default rate limits for DoLake:
+
+| Resource | Limit | Description |
+|----------|-------|-------------|
+| Connections per second | 10 | Maximum new WebSocket connections per second |
+| Messages per second | 100 | Maximum messages per connection per second |
+| Burst capacity | 50 | Token bucket burst capacity |
+| Max connections per IP | 10 | Maximum concurrent connections from a single IP |
+| Max connections per source | 5 | Maximum concurrent connections per source ID |
 
 ---
 

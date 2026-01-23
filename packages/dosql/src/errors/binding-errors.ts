@@ -167,6 +167,21 @@ registerErrorClass('TypeCoercionError', TypeCoercionError);
 
 /**
  * Create a BindingError for missing named parameter
+ *
+ * @example
+ * ```typescript
+ * // When binding named parameters
+ * const sql = 'SELECT * FROM users WHERE name = :name AND age = :age';
+ * const params = { name: 'Alice' }; // missing :age
+ *
+ * for (const param of extractNamedParams(sql)) {
+ *   if (!(param in params)) {
+ *     throw createMissingNamedParamError(param);
+ *   }
+ * }
+ *
+ * // Error message: "Missing named parameter :age"
+ * ```
  */
 export function createMissingNamedParamError(name: string): MissingParameterError {
   return new MissingParameterError(name);
@@ -174,6 +189,20 @@ export function createMissingNamedParamError(name: string): MissingParameterErro
 
 /**
  * Create a BindingError for missing positional parameter
+ *
+ * @example
+ * ```typescript
+ * // When binding positional parameters
+ * const sql = 'SELECT * FROM users WHERE id = ? AND status = ?';
+ * const params = [1]; // missing second parameter
+ *
+ * const placeholderCount = (sql.match(/\?/g) || []).length;
+ * if (params.length < placeholderCount) {
+ *   throw createMissingPositionalParamError(params.length);
+ * }
+ *
+ * // Error message: "Missing positional parameter at index 1"
+ * ```
  */
 export function createMissingPositionalParamError(index: number): MissingParameterError {
   return new MissingParameterError(index);
@@ -181,6 +210,25 @@ export function createMissingPositionalParamError(index: number): MissingParamet
 
 /**
  * Create a BindingError for invalid type
+ *
+ * @example
+ * ```typescript
+ * // When validating parameter types
+ * function bindValue(value: unknown) {
+ *   const type = typeof value;
+ *   if (type === 'function' || type === 'symbol') {
+ *     throw createInvalidTypeError(type);
+ *   }
+ *   // ... bind logic
+ * }
+ *
+ * // For objects that can't be serialized
+ * if (value instanceof Map) {
+ *   throw createInvalidTypeError('Map');
+ * }
+ *
+ * // Error message: "Cannot bind value of type function"
+ * ```
  */
 export function createInvalidTypeError(valueType: string): TypeCoercionError {
   return new TypeCoercionError(valueType);
@@ -188,6 +236,20 @@ export function createInvalidTypeError(valueType: string): TypeCoercionError {
 
 /**
  * Create a BindingError for parameter count mismatch
+ *
+ * @example
+ * ```typescript
+ * // When validating parameter count
+ * const sql = 'INSERT INTO users (name, email, age) VALUES (?, ?, ?)';
+ * const params = ['Alice', 'alice@example.com']; // only 2 params, expected 3
+ *
+ * const expected = countPlaceholders(sql);
+ * if (params.length !== expected) {
+ *   throw createCountMismatchError(expected, params.length);
+ * }
+ *
+ * // Error message: "Expected 3 parameters, got 2"
+ * ```
  */
 export function createCountMismatchError(expected: number, got: number): BindingError {
   return new BindingError(
@@ -199,6 +261,19 @@ export function createCountMismatchError(expected: number, got: number): Binding
 
 /**
  * Create a BindingError when named parameters expected but positional provided
+ *
+ * @example
+ * ```typescript
+ * // When SQL uses named params but array is provided
+ * const sql = 'SELECT * FROM users WHERE name = :name';
+ * const params = ['Alice']; // array instead of object
+ *
+ * if (hasNamedParameters(sql) && Array.isArray(params)) {
+ *   throw createNamedExpectedError();
+ * }
+ *
+ * // Correct usage would be: { name: 'Alice' }
+ * ```
  */
 export function createNamedExpectedError(): BindingError {
   return new BindingError(
@@ -209,6 +284,21 @@ export function createNamedExpectedError(): BindingError {
 
 /**
  * Create a BindingError for non-finite number
+ *
+ * @example
+ * ```typescript
+ * // When validating numeric values
+ * function bindNumber(value: number) {
+ *   if (!Number.isFinite(value)) {
+ *     throw createNonFiniteNumberError(value);
+ *   }
+ *   return value;
+ * }
+ *
+ * bindNumber(Infinity);  // throws: "Cannot bind non-finite number: Infinity"
+ * bindNumber(NaN);       // throws: "Cannot bind non-finite number: NaN"
+ * bindNumber(-Infinity); // throws: "Cannot bind non-finite number: -Infinity"
+ * ```
  */
 export function createNonFiniteNumberError(value: number): BindingError {
   return new BindingError(

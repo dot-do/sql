@@ -23,6 +23,7 @@ import {
   isFlushRequestMessage,
   encodeCapabilities,
   generateUUID,
+  BufferOverflowError,
 } from './types.js';
 import {
   RateLimiter,
@@ -90,11 +91,49 @@ export interface WebSocketHandlerDeps {
 
 /**
  * Handles all WebSocket-related operations for DoLake
+ *
+ * @example
+ * ```typescript
+ * // Create a WebSocketHandler instance
+ * const handler = new WebSocketHandler({
+ *   ctx: durableObjectState,
+ *   buffer: cdcBufferManager,
+ *   rateLimiter: rateLimiter,
+ *   getState: () => currentState,
+ *   setState: (state) => { currentState = state; },
+ *   getCircuitBreakerState: () => circuitBreaker.state,
+ *   scheduleFlush: async (trigger) => { await scheduleFlushAlarm(trigger); },
+ *   flush: async (trigger) => { return await performFlush(trigger); },
+ * });
+ * ```
  */
 export class WebSocketHandler {
   private readonly deps: WebSocketHandlerDeps;
   private readonly rateLimitConfig: RateLimitConfig;
 
+  /**
+   * Create a new WebSocketHandler instance
+   *
+   * @param deps - Dependencies injected into the handler
+   * @param config - Optional configuration overrides
+   *
+   * @example
+   * ```typescript
+   * const handler = new WebSocketHandler(
+   *   {
+   *     ctx: durableObjectState,
+   *     buffer: new CDCBufferManager(),
+   *     rateLimiter: new RateLimiter(),
+   *     getState: () => this.state,
+   *     setState: (s) => { this.state = s; },
+   *     getCircuitBreakerState: () => 'closed',
+   *     scheduleFlush: async (trigger) => { /* schedule */ },
+   *     flush: async (trigger) => ({ success: true }),
+   *   },
+   *   { rateLimitConfig: { maxMessagesPerSecond: 100, maxPayloadSize: 1024 * 1024 } }
+   * );
+   * ```
+   */
   constructor(deps: WebSocketHandlerDeps, config?: Partial<WebSocketHandlerConfig>) {
     this.deps = deps;
     this.rateLimitConfig = config?.rateLimitConfig ?? DEFAULT_RATE_LIMIT_CONFIG;
@@ -105,7 +144,25 @@ export class WebSocketHandler {
   // ===========================================================================
 
   /**
-   * Handle WebSocket upgrade request
+   * Handle WebSocket upgrade request.
+   * Validates rate limits, creates the WebSocket pair, and registers the connection.
+   *
+   * @param request - The incoming HTTP request with WebSocket upgrade headers
+   * @returns A Response with status 101 for successful upgrade, or 429 if rate limited
+   *
+   * @example
+   * ```typescript
+   * // In a Durable Object fetch handler
+   * async fetch(request: Request): Promise<Response> {
+   *   const url = new URL(request.url);
+   *
+   *   if (url.pathname === '/ws' && request.headers.get('Upgrade') === 'websocket') {
+   *     return this.wsHandler.handleWebSocketUpgrade(request);
+   *   }
+   *
+   *   return new Response('Not found', { status: 404 });
+   * }
+   * ```
    */
   async handleWebSocketUpgrade(request: Request): Promise<Response> {
     // Extract client info
@@ -194,123 +251,263 @@ export class WebSocketHandler {
   // ===========================================================================
 
   /**
-   * Handle incoming WebSocket message
+   * Handle incoming WebSocket message.
+   * Acts as a dispatcher to focused handler methods.
+   * Validates the connection, payload size, and rate limits before dispatching.
+   *
+   * @param ws - The WebSocket connection that received the message
+   * @param message - The raw message data (string or binary)
+   *
+   * @example
+   * ```typescript
+   * // In a Durable Object webSocketMessage handler
+   * async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
+   *   await this.wsHandler.handleMessage(ws, message);
+   * }
+   * ```
    */
   async handleMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
-    const attachment = this.deserializeAttachment(ws) as ExtendedWebSocketAttachment | null;
+    // Validate connection attachment
+    const attachment = this.validateConnectionAttachment(ws);
     if (!attachment) {
-      ws.close(1008, 'Unknown connection');
       return;
     }
 
-    // CRITICAL: Calculate payload size BEFORE any parsing to prevent memory exhaustion
-    const payloadSize = typeof message === 'string'
+    // Calculate and validate payload size
+    const payloadSize = this.calculatePayloadSize(message);
+    if (!this.validatePayloadSize(ws, attachment, payloadSize)) {
+      return;
+    }
+
+    // Parse, validate, and dispatch the message
+    const handled = await this.parseAndDispatchMessage(ws, attachment, message, payloadSize);
+    if (!handled) {
+      return;
+    }
+
+    // Check if flush needed after message processing
+    await this.checkAndScheduleFlush();
+  }
+
+  // ===========================================================================
+  // Message Validation Methods
+  // ===========================================================================
+
+  /**
+   * Validate and retrieve the connection attachment.
+   * Closes the WebSocket if attachment is missing.
+   */
+  private validateConnectionAttachment(ws: WebSocket): ExtendedWebSocketAttachment | null {
+    const attachment = this.deserializeAttachment(ws) as ExtendedWebSocketAttachment | null;
+    if (!attachment) {
+      ws.close(1008, 'Unknown connection');
+      return null;
+    }
+    return attachment;
+  }
+
+  /**
+   * Calculate the payload size in bytes.
+   */
+  private calculatePayloadSize(message: ArrayBuffer | string): number {
+    return typeof message === 'string'
       ? new TextEncoder().encode(message).length
       : message.byteLength;
+  }
 
+  /**
+   * Validate payload size before parsing.
+   * Returns false if validation fails (NACK sent).
+   */
+  private validatePayloadSize(
+    ws: WebSocket,
+    attachment: ExtendedWebSocketAttachment,
+    payloadSize: number
+  ): boolean {
     // Check for empty message
     if (payloadSize === 0) {
       this.sendNack(ws, 0, 'invalid_format', 'Message is empty - no data received', false);
-      return;
+      return false;
     }
 
     // Pre-parse size validation: reject oversized messages BEFORE JSON.parse
     if (payloadSize > this.rateLimitConfig.maxPayloadSize) {
-      // Track size violation
-      const connectionState = this.deps.rateLimiter['connections'].get(attachment.connectionId);
-      if (connectionState) {
-        connectionState.sizeViolationCount++;
-      }
-      this.deps.rateLimiter['metrics'].payloadRejections++;
-
-      // Format human-readable size message
-      const actualSizeMB = (payloadSize / (1024 * 1024)).toFixed(2);
-      const maxSizeMB = (this.rateLimitConfig.maxPayloadSize / (1024 * 1024)).toFixed(2);
-
-      // Send nack with payload_too_large reason BEFORE parsing
-      this.sendPreParseNack(
-        ws,
-        0,
-        'payload_too_large',
-        `Payload size ${actualSizeMB} MB exceeded limit of ${maxSizeMB} MB`,
-        false,
-        this.rateLimitConfig.maxPayloadSize,
-        payloadSize
-      );
-
-      // Check if connection should be closed due to violations
-      if (this.deps.rateLimiter.shouldCloseConnection(attachment.connectionId)) {
-        ws.close(1008, 'Too many size violations');
-      }
-      return;
+      this.handleOversizedPayload(ws, attachment, payloadSize);
+      return false;
     }
 
+    return true;
+  }
+
+  /**
+   * Handle an oversized payload by tracking violations and sending NACK.
+   */
+  private handleOversizedPayload(
+    ws: WebSocket,
+    attachment: ExtendedWebSocketAttachment,
+    payloadSize: number
+  ): void {
+    // Track size violation
+    const connectionState = this.deps.rateLimiter['connections'].get(attachment.connectionId);
+    if (connectionState) {
+      connectionState.sizeViolationCount++;
+    }
+    this.deps.rateLimiter['metrics'].payloadRejections++;
+
+    // Format human-readable size message
+    const actualSizeMB = (payloadSize / (1024 * 1024)).toFixed(2);
+    const maxSizeMB = (this.rateLimitConfig.maxPayloadSize / (1024 * 1024)).toFixed(2);
+
+    // Send nack with payload_too_large reason BEFORE parsing
+    this.sendNackOptions({
+      ws,
+      sequenceNumber: 0,
+      reason: 'payload_too_large',
+      errorMessage: `Payload size ${actualSizeMB} MB exceeded limit of ${maxSizeMB} MB`,
+      shouldRetry: false,
+      maxSize: this.rateLimitConfig.maxPayloadSize,
+      actualSize: payloadSize,
+    });
+
+    // Check if connection should be closed due to violations
+    if (this.deps.rateLimiter.shouldCloseConnection(attachment.connectionId)) {
+      ws.close(1008, 'Too many size violations');
+    }
+  }
+
+  // ===========================================================================
+  // Message Parsing and Dispatch
+  // ===========================================================================
+
+  /**
+   * Parse the message, check rate limits, and dispatch to appropriate handler.
+   * Returns true if message was handled, false if an error occurred.
+   */
+  private async parseAndDispatchMessage(
+    ws: WebSocket,
+    attachment: ExtendedWebSocketAttachment,
+    message: ArrayBuffer | string,
+    payloadSize: number
+  ): Promise<boolean> {
     try {
       const rpcMessage = this.decodeMessage(message);
 
-      // Calculate event sizes for CDC batch (only after successful parse)
-      let eventSizes: number[] = [];
-      if (isCDCBatchMessage(rpcMessage)) {
-        const cdcMessage = rpcMessage as CDCBatchMessage;
-        eventSizes = cdcMessage.events.map(
-          (e) => JSON.stringify(e).length
-        );
+      // Check rate limit and handle rejection if needed
+      const rateLimitResult = this.checkMessageRateLimit(ws, attachment, rpcMessage, payloadSize);
+      if (!rateLimitResult) {
+        return false;
       }
 
-      // Check message rate limit (excluding size check which was done pre-parse)
-      const stats = this.deps.buffer.getStats();
-      const rateLimitResult = this.deps.rateLimiter.checkMessage(
-        attachment.connectionId,
-        rpcMessage.type,
-        payloadSize,
-        eventSizes,
-        stats.utilization
-      );
-
-      if (!rateLimitResult.allowed) {
-        // Handle rate limit rejection
-        const sequenceNumber = isCDCBatchMessage(rpcMessage)
-          ? (rpcMessage as CDCBatchMessage).sequenceNumber
-          : 0;
-
-        this.sendNackWithRateLimit(
-          ws,
-          sequenceNumber,
-          rateLimitResult.reason || 'rate_limited',
-          `Request ${rateLimitResult.reason || 'rate_limited'}`,
-          rateLimitResult.reason !== 'payload_too_large' &&
-            rateLimitResult.reason !== 'event_too_large',
-          rateLimitResult.retryDelayMs,
-          rateLimitResult.rateLimit,
-          rateLimitResult.maxSize
-        );
-
-        // Check if connection should be closed due to violations
-        if (this.deps.rateLimiter.shouldCloseConnection(attachment.connectionId)) {
-          ws.close(1008, 'Too many size violations');
-        }
-        return;
-      }
-
-      if (isCDCBatchMessage(rpcMessage)) {
-        await this.handleCDCBatch(ws, attachment, rpcMessage as CDCBatchMessage, rateLimitResult);
-      } else if (isConnectMessage(rpcMessage)) {
-        await this.handleConnect(ws, attachment, rpcMessage as ConnectMessage);
-      } else if (isHeartbeatMessage(rpcMessage)) {
-        await this.handleHeartbeat(ws, attachment, rpcMessage as HeartbeatMessage);
-      } else if (isFlushRequestMessage(rpcMessage)) {
-        await this.handleFlushRequestMessage(ws, attachment, rpcMessage as FlushRequestMessage);
-      }
+      // Dispatch to appropriate message handler
+      await this.dispatchMessage(ws, attachment, rpcMessage, rateLimitResult);
+      return true;
     } catch (error) {
-      console.error('Error handling message:', error);
-      // Provide detailed error message for validation failures
-      const errorMessage = error instanceof MessageValidationError
-        ? error.getErrorDetails()
-        : String(error);
-      this.sendNack(ws, 0, 'invalid_format', errorMessage, false);
+      this.handleMessageParseError(ws, error);
+      return false;
+    }
+  }
+
+  /**
+   * Check message rate limit and send NACK if rejected.
+   * Returns the rate limit result if allowed, null if rejected.
+   */
+  private checkMessageRateLimit(
+    ws: WebSocket,
+    attachment: ExtendedWebSocketAttachment,
+    rpcMessage: ValidatedClientRpcMessage,
+    payloadSize: number
+  ): RateLimitResult | null {
+    // Calculate event sizes for CDC batch (only after successful parse)
+    let eventSizes: number[] = [];
+    if (isCDCBatchMessage(rpcMessage)) {
+      const cdcMessage = rpcMessage as CDCBatchMessage;
+      eventSizes = cdcMessage.events.map((e) => JSON.stringify(e).length);
     }
 
-    // Check if flush needed
+    // Check message rate limit (excluding size check which was done pre-parse)
+    const stats = this.deps.buffer.getStats();
+    const rateLimitResult = this.deps.rateLimiter.checkMessage(
+      attachment.connectionId,
+      rpcMessage.type,
+      payloadSize,
+      eventSizes,
+      stats.utilization
+    );
+
+    if (!rateLimitResult.allowed) {
+      this.handleRateLimitRejection(ws, attachment, rpcMessage, rateLimitResult);
+      return null;
+    }
+
+    return rateLimitResult;
+  }
+
+  /**
+   * Handle a rate limit rejection by sending NACK and possibly closing connection.
+   */
+  private handleRateLimitRejection(
+    ws: WebSocket,
+    attachment: ExtendedWebSocketAttachment,
+    rpcMessage: ValidatedClientRpcMessage,
+    rateLimitResult: RateLimitResult
+  ): void {
+    const sequenceNumber = isCDCBatchMessage(rpcMessage)
+      ? (rpcMessage as CDCBatchMessage).sequenceNumber
+      : 0;
+
+    this.sendNackOptions({
+      ws,
+      sequenceNumber,
+      reason: rateLimitResult.reason || 'rate_limited',
+      errorMessage: `Request ${rateLimitResult.reason || 'rate_limited'}`,
+      shouldRetry: rateLimitResult.reason !== 'payload_too_large' &&
+        rateLimitResult.reason !== 'event_too_large',
+      retryDelayMs: rateLimitResult.retryDelayMs,
+      rateLimit: rateLimitResult.rateLimit,
+      maxSize: rateLimitResult.maxSize,
+    });
+
+    // Check if connection should be closed due to violations
+    if (this.deps.rateLimiter.shouldCloseConnection(attachment.connectionId)) {
+      ws.close(1008, 'Too many size violations');
+    }
+  }
+
+  /**
+   * Dispatch the parsed message to the appropriate handler based on message type.
+   */
+  private async dispatchMessage(
+    ws: WebSocket,
+    attachment: ExtendedWebSocketAttachment,
+    rpcMessage: ValidatedClientRpcMessage,
+    rateLimitResult: RateLimitResult
+  ): Promise<void> {
+    if (isCDCBatchMessage(rpcMessage)) {
+      await this.handleCDCBatch(ws, attachment, rpcMessage as CDCBatchMessage, rateLimitResult);
+    } else if (isConnectMessage(rpcMessage)) {
+      await this.handleConnect(ws, attachment, rpcMessage as ConnectMessage);
+    } else if (isHeartbeatMessage(rpcMessage)) {
+      await this.handleHeartbeat(ws, attachment, rpcMessage as HeartbeatMessage);
+    } else if (isFlushRequestMessage(rpcMessage)) {
+      await this.handleFlushRequestMessage(ws, attachment, rpcMessage as FlushRequestMessage);
+    }
+  }
+
+  /**
+   * Handle errors that occur during message parsing or validation.
+   */
+  private handleMessageParseError(ws: WebSocket, error: unknown): void {
+    console.error('Error handling message:', error);
+    const errorMessage = error instanceof MessageValidationError
+      ? error.getErrorDetails()
+      : String(error);
+    this.sendNack(ws, 0, 'invalid_format', errorMessage, false);
+  }
+
+  /**
+   * Check if a flush is needed and schedule it.
+   */
+  private async checkAndScheduleFlush(): Promise<void> {
     const trigger = this.deps.buffer.shouldFlush();
     if (trigger) {
       await this.deps.scheduleFlush(trigger);
@@ -318,7 +515,27 @@ export class WebSocketHandler {
   }
 
   /**
-   * Handle WebSocket close
+   * Handle WebSocket close.
+   * Unregisters the connection, cleans up rate limiter state, and triggers a flush
+   * if this was the last connection and the buffer has pending events.
+   *
+   * @param ws - The WebSocket connection that closed
+   * @param code - The WebSocket close code
+   * @param reason - The close reason string
+   * @param wasClean - Whether the close was clean
+   *
+   * @example
+   * ```typescript
+   * // In a Durable Object webSocketClose handler
+   * async webSocketClose(
+   *   ws: WebSocket,
+   *   code: number,
+   *   reason: string,
+   *   wasClean: boolean
+   * ): Promise<void> {
+   *   await this.wsHandler.handleClose(ws, code, reason, wasClean);
+   * }
+   * ```
    */
   async handleClose(
     ws: WebSocket,
@@ -350,7 +567,19 @@ export class WebSocketHandler {
   }
 
   /**
-   * Handle WebSocket error
+   * Handle WebSocket error.
+   * Logs the error and cleans up the connection state.
+   *
+   * @param ws - The WebSocket connection that encountered an error
+   * @param error - The error that occurred
+   *
+   * @example
+   * ```typescript
+   * // In a Durable Object webSocketError handler
+   * async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
+   *   await this.wsHandler.handleError(ws, error);
+   * }
+   * ```
    */
   async handleError(ws: WebSocket, error: unknown): Promise<void> {
     console.error('WebSocket error:', error);
@@ -391,7 +620,7 @@ export class WebSocketHandler {
       );
 
       if (result.isDuplicate) {
-        this.sendAckWithRateLimit(
+        this.sendAck(
           ws,
           message.sequenceNumber,
           'duplicate',
@@ -421,7 +650,7 @@ export class WebSocketHandler {
       const stats = this.deps.buffer.getStats();
       const status: AckMessage['status'] = stats.utilization > 0.8 ? 'buffered' : 'ok';
 
-      this.sendAckWithRateLimit(ws, message.sequenceNumber, status, message.correlationId, {
+      this.sendAck(ws, message.sequenceNumber, status, message.correlationId, {
         eventsProcessed: message.events.length,
         bufferUtilization: stats.utilization,
         timeUntilFlush: this.deps.buffer.getTimeUntilFlush(),
@@ -431,16 +660,18 @@ export class WebSocketHandler {
         circuitBreakerState: this.deps.getCircuitBreakerState(),
       }, rateLimitResult?.rateLimit);
     } catch (error) {
-      if (error instanceof Error && error.name === 'BufferOverflowError') {
-        this.sendNackWithRateLimit(
+      if (error instanceof BufferOverflowError) {
+        this.sendNackOptions({
           ws,
-          message.sequenceNumber,
-          'buffer_full',
-          'Buffer is full',
-          true,
-          5000,
-          rateLimitResult?.rateLimit
-        );
+          sequenceNumber: message.sequenceNumber,
+          reason: 'buffer_full',
+          errorMessage: error.message,
+          shouldRetry: true,
+          retryDelayMs: 5000,
+          rateLimit: rateLimitResult?.rateLimit,
+          // Include additional context in a custom field for advanced clients
+          maxSize: error.maxSizeBytes,
+        });
       } else {
         this.sendNack(
           ws,
@@ -521,25 +752,11 @@ export class WebSocketHandler {
   // Response Helpers
   // ===========================================================================
 
+  /**
+   * Send an ACK message to the WebSocket client.
+   * Consolidated helper that handles both basic ACKs and ACKs with rate limit info.
+   */
   private sendAck(
-    ws: WebSocket,
-    sequenceNumber: number,
-    status: AckMessage['status'],
-    correlationId?: string,
-    details?: AckMessage['details']
-  ): void {
-    const message: AckMessage = {
-      type: 'ack',
-      timestamp: Date.now(),
-      correlationId,
-      sequenceNumber,
-      status,
-      details,
-    };
-    ws.send(serialize(message));
-  }
-
-  private sendAckWithRateLimit(
     ws: WebSocket,
     sequenceNumber: number,
     status: AckMessage['status'],
@@ -559,6 +776,77 @@ export class WebSocketHandler {
     ws.send(serialize(message));
   }
 
+  /**
+   * Options for sendNack to consolidate all NACK variants.
+   */
+  private sendNackOptions(options: {
+    ws: WebSocket;
+    sequenceNumber: number;
+    reason: NackMessage['reason'];
+    errorMessage: string;
+    shouldRetry: boolean;
+    retryDelayMs?: number | undefined;
+    rateLimit?: RateLimitInfo | undefined;
+    maxSize?: number | undefined;
+    actualSize?: number | undefined;
+  }): void {
+    const message: NackMessage & { rateLimit?: RateLimitInfo; actualSize?: number; receivedSize?: number } = {
+      type: 'nack',
+      timestamp: Date.now(),
+      sequenceNumber: options.sequenceNumber,
+      reason: options.reason,
+      errorMessage: options.errorMessage,
+      shouldRetry: options.shouldRetry,
+    };
+    if (options.retryDelayMs !== undefined) {
+      message.retryDelayMs = options.retryDelayMs;
+    }
+    if (options.maxSize !== undefined) {
+      message.maxSize = options.maxSize;
+    }
+    if (options.rateLimit) {
+      message.rateLimit = options.rateLimit;
+    }
+    if (options.actualSize !== undefined) {
+      message.actualSize = options.actualSize;
+      message.receivedSize = options.actualSize;
+    }
+    options.ws.send(serialize(message));
+  }
+
+  /**
+   * Send a NACK message to the WebSocket client.
+   * Public method for basic NACK sending (maintains backward compatibility).
+   *
+   * @param ws - The WebSocket connection to send the NACK to
+   * @param sequenceNumber - The sequence number of the rejected message
+   * @param reason - The reason for the rejection
+   * @param errorMessage - Human-readable error description
+   * @param shouldRetry - Whether the client should retry the operation
+   * @param retryDelayMs - Optional delay before retrying (in milliseconds)
+   *
+   * @example
+   * ```typescript
+   * // Reject a message due to validation failure
+   * handler.sendNack(
+   *   ws,
+   *   message.sequenceNumber,
+   *   'invalid_format',
+   *   'Missing required field: events',
+   *   false
+   * );
+   *
+   * // Reject with retry suggestion
+   * handler.sendNack(
+   *   ws,
+   *   message.sequenceNumber,
+   *   'buffer_full',
+   *   'Buffer is at capacity',
+   *   true,
+   *   5000 // retry after 5 seconds
+   * );
+   * ```
+   */
   sendNack(
     ws: WebSocket,
     sequenceNumber: number,
@@ -567,71 +855,33 @@ export class WebSocketHandler {
     shouldRetry: boolean,
     retryDelayMs?: number
   ): void {
-    const message: NackMessage = {
-      type: 'nack',
-      timestamp: Date.now(),
+    this.sendNackOptions({
+      ws,
       sequenceNumber,
       reason,
       errorMessage,
       shouldRetry,
       retryDelayMs,
-    };
-    ws.send(serialize(message));
-  }
-
-  private sendNackWithRateLimit(
-    ws: WebSocket,
-    sequenceNumber: number,
-    reason: NackMessage['reason'],
-    errorMessage: string,
-    shouldRetry: boolean,
-    retryDelayMs?: number,
-    rateLimit?: RateLimitInfo,
-    maxSize?: number
-  ): void {
-    const message: NackMessage & { rateLimit?: RateLimitInfo } = {
-      type: 'nack',
-      timestamp: Date.now(),
-      sequenceNumber,
-      reason,
-      errorMessage,
-      shouldRetry,
-      retryDelayMs,
-      maxSize,
-    };
-    if (rateLimit) {
-      (message as any).rateLimit = rateLimit;
-    }
-    ws.send(serialize(message));
+    });
   }
 
   /**
-   * Send a NACK for pre-parse size rejections.
+   * Send a status message to the WebSocket client.
+   * Includes current state, buffer statistics, and connection info.
+   *
+   * @param ws - The WebSocket connection to send the status to
+   *
+   * @example
+   * ```typescript
+   * // Send status after a connect message
+   * handler.sendStatus(ws);
+   *
+   * // Send periodic status updates
+   * for (const ws of ctx.getWebSockets()) {
+   *   handler.sendStatus(ws);
+   * }
+   * ```
    */
-  private sendPreParseNack(
-    ws: WebSocket,
-    sequenceNumber: number,
-    reason: NackMessage['reason'],
-    errorMessage: string,
-    shouldRetry: boolean,
-    maxSize: number,
-    actualSize: number
-  ): void {
-    const message: NackMessage & { actualSize: number; receivedSize: number } = {
-      type: 'nack',
-      timestamp: Date.now(),
-      sequenceNumber,
-      reason,
-      errorMessage,
-      shouldRetry,
-      retryDelayMs: undefined,
-      maxSize,
-      actualSize,
-      receivedSize: actualSize,
-    };
-    ws.send(serialize(message));
-  }
-
   sendStatus(ws: WebSocket): void {
     const stats = this.deps.buffer.getStats();
     const sockets = this.deps.ctx.getWebSockets();

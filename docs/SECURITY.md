@@ -1192,7 +1192,108 @@ const query = `
 
 ### Emergency Procedures
 
-#### Immediate Credential Revocation
+#### 1. Identification - Detecting Security Incidents
+
+```typescript
+// Automated anomaly detection for security monitoring
+interface SecurityAlert {
+  type: 'auth_failure_spike' | 'unusual_query_pattern' | 'data_exfiltration' | 'injection_attempt';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  timestamp: Date;
+  details: Record<string, unknown>;
+}
+
+class SecurityMonitor {
+  private authFailures: Map<string, number[]> = new Map();
+  private readonly AUTH_FAILURE_THRESHOLD = 10; // failures per minute
+  private readonly QUERY_VOLUME_THRESHOLD = 1000; // queries per minute
+
+  // Track authentication failures by IP
+  recordAuthFailure(ip: string): SecurityAlert | null {
+    const now = Date.now();
+    const failures = this.authFailures.get(ip) || [];
+
+    // Clean old entries (older than 1 minute)
+    const recentFailures = failures.filter(t => now - t < 60000);
+    recentFailures.push(now);
+    this.authFailures.set(ip, recentFailures);
+
+    if (recentFailures.length >= this.AUTH_FAILURE_THRESHOLD) {
+      return {
+        type: 'auth_failure_spike',
+        severity: 'high',
+        timestamp: new Date(),
+        details: { ip, failureCount: recentFailures.length, windowMs: 60000 },
+      };
+    }
+    return null;
+  }
+
+  // Detect SQL injection attempts
+  detectInjectionAttempt(sql: string, userId: string): SecurityAlert | null {
+    const suspiciousPatterns = [
+      /;\s*(DROP|DELETE|TRUNCATE)\s+/i,
+      /UNION\s+SELECT/i,
+      /OR\s+['"]?\d+['"]?\s*=\s*['"]?\d+['"]?/i,
+      /--\s*$/,
+      /\/\*.*\*\//,
+      /SLEEP\s*\(/i,
+      /BENCHMARK\s*\(/i,
+    ];
+
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(sql)) {
+        return {
+          type: 'injection_attempt',
+          severity: 'critical',
+          timestamp: new Date(),
+          details: { userId, pattern: pattern.source, sqlSnippet: sql.slice(0, 200) },
+        };
+      }
+    }
+    return null;
+  }
+
+  // Detect unusual data access patterns (potential exfiltration)
+  detectExfiltration(
+    userId: string,
+    queryCount: number,
+    rowsAccessed: number
+  ): SecurityAlert | null {
+    if (queryCount > this.QUERY_VOLUME_THRESHOLD || rowsAccessed > 100000) {
+      return {
+        type: 'data_exfiltration',
+        severity: 'high',
+        timestamp: new Date(),
+        details: { userId, queryCount, rowsAccessed, windowMs: 60000 },
+      };
+    }
+    return null;
+  }
+}
+
+// Alert notification system
+async function sendSecurityAlert(alert: SecurityAlert, env: Env): Promise<void> {
+  // Log to audit system
+  console.error(`[SECURITY ALERT] ${alert.severity.toUpperCase()}: ${alert.type}`, alert.details);
+
+  // Send to alerting service (e.g., PagerDuty, Slack)
+  if (alert.severity === 'critical' || alert.severity === 'high') {
+    await fetch(env.ALERT_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: `Security Alert: ${alert.type}`,
+        severity: alert.severity,
+        timestamp: alert.timestamp.toISOString(),
+        details: alert.details,
+      }),
+    });
+  }
+}
+```
+
+#### 2. Containment - Immediate Response Actions
 
 ```typescript
 // Emergency API key revocation
@@ -1207,12 +1308,128 @@ export async function revokeAllApiKeys(env: Env): Promise<void> {
   console.log(`Emergency revocation: ${keys.keys.length} API keys revoked`);
 }
 
+// Revoke specific API key by ID
+export async function revokeApiKey(keyId: string, env: Env): Promise<boolean> {
+  const keyData = await env.API_KEYS.get(`apikey:${keyId}`);
+  if (!keyData) return false;
+
+  const apiKey = JSON.parse(keyData);
+  await env.API_KEYS.delete(`apikey:${keyId}`);
+  await env.API_KEYS.delete(`hash:${apiKey.hashedKey}`);
+
+  console.log(`API key revoked: ${keyId}`);
+  return true;
+}
+
 // Emergency JWT secret rotation
 // Update JWT_SECRET via wrangler secret put JWT_SECRET
 // All existing tokens will become invalid
+
+// Block suspicious IP address
+export async function blockIP(
+  ip: string,
+  reason: string,
+  env: Env
+): Promise<void> {
+  // Add to local blocklist (checked in Worker)
+  await env.BLOCKED_IPS.put(ip, JSON.stringify({
+    blockedAt: new Date().toISOString(),
+    reason,
+    expiresAt: null, // Permanent until manual removal
+  }));
+
+  // Also block at Cloudflare WAF level for immediate effect
+  await fetch(
+    `https://api.cloudflare.com/client/v4/zones/${env.CF_ZONE_ID}/firewall/access_rules/rules`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mode: 'block',
+        configuration: { target: 'ip', value: ip },
+        notes: `Security incident: ${reason} at ${new Date().toISOString()}`,
+      }),
+    }
+  );
+
+  console.log(`IP blocked: ${ip} - Reason: ${reason}`);
+}
+
+// Block entire IP range (for coordinated attacks)
+export async function blockIPRange(
+  cidr: string,
+  reason: string,
+  env: Env
+): Promise<void> {
+  await fetch(
+    `https://api.cloudflare.com/client/v4/zones/${env.CF_ZONE_ID}/firewall/access_rules/rules`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mode: 'block',
+        configuration: { target: 'ip_range', value: cidr },
+        notes: `Security incident: ${reason} at ${new Date().toISOString()}`,
+      }),
+    }
+  );
+
+  console.log(`IP range blocked: ${cidr} - Reason: ${reason}`);
+}
+
+// Terminate all active sessions for a user
+export async function terminateUserSessions(
+  userId: string,
+  db: Database,
+  env: Env
+): Promise<number> {
+  // Delete from sessions table
+  const result = db.prepare('DELETE FROM user_sessions WHERE user_id = ?').run(userId);
+
+  // Also invalidate any cached session tokens
+  const sessionKeys = await env.SESSION_CACHE.list({ prefix: `session:${userId}:` });
+  for (const key of sessionKeys.keys) {
+    await env.SESSION_CACHE.delete(key.name);
+  }
+
+  console.log(`Terminated ${result.changes} sessions for user: ${userId}`);
+  return result.changes;
+}
+
+// Enable maintenance mode (read-only access)
+export async function enableMaintenanceMode(
+  env: Env,
+  message: string = 'System under maintenance'
+): Promise<void> {
+  await env.CONFIG_KV.put('maintenance_mode', JSON.stringify({
+    enabled: true,
+    message,
+    enabledAt: new Date().toISOString(),
+    allowReadOnly: true,
+  }));
+
+  console.log('Maintenance mode enabled - write operations blocked');
+}
+
+// Complete lockdown (no access)
+export async function enableLockdown(env: Env, reason: string): Promise<void> {
+  await env.CONFIG_KV.put('lockdown_mode', JSON.stringify({
+    enabled: true,
+    reason,
+    enabledAt: new Date().toISOString(),
+  }));
+
+  console.log(`LOCKDOWN enabled - Reason: ${reason}`);
+}
 ```
 
-#### Emergency Rate Limiting
+#### 3. Emergency Rate Limiting
 
 ```typescript
 // Emergency rate limit override
@@ -1224,6 +1441,559 @@ const EMERGENCY_RATE_LIMIT: Partial<RateLimitConfig> = {
 
 // Apply during incident
 const rateLimiter = new RateLimiter(EMERGENCY_RATE_LIMIT);
+
+// Dynamic rate limit adjustment based on threat level
+type ThreatLevel = 'normal' | 'elevated' | 'high' | 'critical';
+
+const RATE_LIMITS_BY_THREAT: Record<ThreatLevel, Partial<RateLimitConfig>> = {
+  normal: {
+    connectionsPerSecond: 20,
+    messagesPerSecond: 100,
+    maxConnectionsPerIp: 30,
+  },
+  elevated: {
+    connectionsPerSecond: 10,
+    messagesPerSecond: 50,
+    maxConnectionsPerIp: 15,
+  },
+  high: {
+    connectionsPerSecond: 5,
+    messagesPerSecond: 20,
+    maxConnectionsPerIp: 5,
+  },
+  critical: {
+    connectionsPerSecond: 1,
+    messagesPerSecond: 5,
+    maxConnectionsPerIp: 2,
+  },
+};
+
+export async function setThreatLevel(
+  level: ThreatLevel,
+  env: Env
+): Promise<void> {
+  await env.CONFIG_KV.put('threat_level', JSON.stringify({
+    level,
+    setAt: new Date().toISOString(),
+    rateLimits: RATE_LIMITS_BY_THREAT[level],
+  }));
+
+  console.log(`Threat level set to: ${level}`);
+}
+
+// Get current threat level in Worker
+export async function getCurrentRateLimits(env: Env): Promise<RateLimitConfig> {
+  const threatData = await env.CONFIG_KV.get('threat_level');
+  if (threatData) {
+    const { rateLimits } = JSON.parse(threatData);
+    return { ...DEFAULT_RATE_LIMIT_CONFIG, ...rateLimits };
+  }
+  return DEFAULT_RATE_LIMIT_CONFIG;
+}
+```
+
+#### 4. Eradication - Root Cause Analysis and Fix
+
+```typescript
+// Collect forensic data for incident investigation
+interface ForensicData {
+  incidentId: string;
+  collectedAt: Date;
+  affectedUsers: string[];
+  affectedTables: string[];
+  suspiciousQueries: Array<{ sql: string; userId: string; timestamp: Date }>;
+  accessLogs: Array<{ ip: string; userId: string; action: string; timestamp: Date }>;
+  systemState: Record<string, unknown>;
+}
+
+export async function collectForensicData(
+  incidentId: string,
+  timeRangeMs: number,
+  db: Database,
+  env: Env
+): Promise<ForensicData> {
+  const cutoffTime = Date.now() - timeRangeMs;
+  const cutoffDate = new Date(cutoffTime).toISOString();
+
+  // Collect suspicious queries from audit logs
+  const suspiciousQueries = db.prepare(`
+    SELECT sql, user_id as userId, timestamp
+    FROM audit_logs
+    WHERE timestamp > ?
+      AND (event_type = 'error' OR action LIKE '%injection%')
+    ORDER BY timestamp DESC
+    LIMIT 1000
+  `).all(cutoffDate) as Array<{ sql: string; userId: string; timestamp: Date }>;
+
+  // Collect access logs
+  const accessLogs = db.prepare(`
+    SELECT ip_address as ip, user_id as userId, action, timestamp
+    FROM audit_logs
+    WHERE timestamp > ?
+    ORDER BY timestamp DESC
+    LIMIT 5000
+  `).all(cutoffDate) as Array<{ ip: string; userId: string; action: string; timestamp: Date }>;
+
+  // Identify affected users
+  const affectedUsers = [...new Set(suspiciousQueries.map(q => q.userId))];
+
+  // Identify affected tables from query analysis
+  const affectedTables = extractTablesFromQueries(suspiciousQueries.map(q => q.sql));
+
+  return {
+    incidentId,
+    collectedAt: new Date(),
+    affectedUsers,
+    affectedTables,
+    suspiciousQueries,
+    accessLogs,
+    systemState: {
+      maintenanceMode: await env.CONFIG_KV.get('maintenance_mode'),
+      threatLevel: await env.CONFIG_KV.get('threat_level'),
+      activeConnections: await getActiveConnectionCount(env),
+    },
+  };
+}
+
+function extractTablesFromQueries(queries: string[]): string[] {
+  const tablePattern = /(?:FROM|INTO|UPDATE|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)/gi;
+  const tables = new Set<string>();
+
+  for (const sql of queries) {
+    let match;
+    while ((match = tablePattern.exec(sql)) !== null) {
+      tables.add(match[1].toLowerCase());
+    }
+  }
+
+  return Array.from(tables);
+}
+
+// Store forensic data for later analysis
+export async function storeForensicData(
+  data: ForensicData,
+  env: Env
+): Promise<string> {
+  const path = `forensics/${data.incidentId}/${data.collectedAt.toISOString()}.json`;
+
+  await env.AUDIT_BUCKET.put(path, JSON.stringify(data, null, 2), {
+    customMetadata: {
+      incidentId: data.incidentId,
+      affectedUserCount: String(data.affectedUsers.length),
+      suspiciousQueryCount: String(data.suspiciousQueries.length),
+    },
+  });
+
+  console.log(`Forensic data stored: ${path}`);
+  return path;
+}
+
+// Verify fix deployment
+export async function verifySecurityFix(
+  testCases: Array<{ input: string; shouldBlock: boolean }>,
+  endpoint: string,
+  env: Env
+): Promise<{ passed: boolean; results: Array<{ input: string; expected: boolean; actual: boolean }> }> {
+  const results = [];
+
+  for (const testCase of testCases) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: testCase.input }),
+      });
+
+      const wasBlocked = response.status === 400 || response.status === 403;
+
+      results.push({
+        input: testCase.input,
+        expected: testCase.shouldBlock,
+        actual: wasBlocked,
+      });
+    } catch (error) {
+      results.push({
+        input: testCase.input,
+        expected: testCase.shouldBlock,
+        actual: true, // Connection error counts as blocked
+      });
+    }
+  }
+
+  const passed = results.every(r => r.expected === r.actual);
+  return { passed, results };
+}
+```
+
+#### 5. Recovery - Restoring Normal Operations
+
+```typescript
+// Gradual recovery process
+interface RecoveryPlan {
+  incidentId: string;
+  phases: RecoveryPhase[];
+  currentPhase: number;
+  startedAt: Date;
+  completedAt?: Date;
+}
+
+interface RecoveryPhase {
+  name: string;
+  description: string;
+  actions: Array<() => Promise<void>>;
+  verifications: Array<() => Promise<boolean>>;
+  completed: boolean;
+}
+
+export async function executeRecoveryPlan(
+  plan: RecoveryPlan,
+  env: Env
+): Promise<void> {
+  console.log(`Starting recovery for incident: ${plan.incidentId}`);
+
+  for (let i = plan.currentPhase; i < plan.phases.length; i++) {
+    const phase = plan.phases[i];
+    console.log(`Executing recovery phase ${i + 1}: ${phase.name}`);
+
+    // Execute all actions in the phase
+    for (const action of phase.actions) {
+      await action();
+    }
+
+    // Verify phase completion
+    const allVerified = await Promise.all(phase.verifications.map(v => v()));
+    if (!allVerified.every(Boolean)) {
+      console.error(`Verification failed for phase: ${phase.name}`);
+      throw new Error(`Recovery verification failed at phase: ${phase.name}`);
+    }
+
+    phase.completed = true;
+    plan.currentPhase = i + 1;
+
+    // Store progress
+    await env.CONFIG_KV.put(`recovery:${plan.incidentId}`, JSON.stringify(plan));
+
+    console.log(`Phase ${i + 1} completed: ${phase.name}`);
+  }
+
+  plan.completedAt = new Date();
+  await env.CONFIG_KV.put(`recovery:${plan.incidentId}`, JSON.stringify(plan));
+  console.log(`Recovery completed for incident: ${plan.incidentId}`);
+}
+
+// Create standard recovery plan
+export function createStandardRecoveryPlan(
+  incidentId: string,
+  env: Env,
+  db: Database
+): RecoveryPlan {
+  return {
+    incidentId,
+    phases: [
+      {
+        name: 'Verify Fix Deployment',
+        description: 'Ensure security patches are deployed to all instances',
+        actions: [
+          async () => console.log('Verifying deployment status...'),
+        ],
+        verifications: [
+          async () => {
+            // Check deployment version
+            const version = await env.CONFIG_KV.get('deployment_version');
+            return version !== null;
+          },
+        ],
+        completed: false,
+      },
+      {
+        name: 'Restore Read Access',
+        description: 'Enable read-only access for monitoring',
+        actions: [
+          async () => {
+            await env.CONFIG_KV.put('maintenance_mode', JSON.stringify({
+              enabled: true,
+              allowReadOnly: true,
+              message: 'System recovering - read-only mode',
+            }));
+          },
+        ],
+        verifications: [
+          async () => {
+            // Test read operation
+            const result = db.prepare('SELECT 1').get();
+            return result !== undefined;
+          },
+        ],
+        completed: false,
+      },
+      {
+        name: 'Restore Write Access',
+        description: 'Enable full read/write access',
+        actions: [
+          async () => {
+            await env.CONFIG_KV.delete('maintenance_mode');
+          },
+        ],
+        verifications: [
+          async () => {
+            // Test write operation
+            try {
+              db.prepare('INSERT INTO health_check (timestamp) VALUES (?)').run(Date.now());
+              return true;
+            } catch {
+              return false;
+            }
+          },
+        ],
+        completed: false,
+      },
+      {
+        name: 'Restore Normal Rate Limits',
+        description: 'Return rate limits to normal levels',
+        actions: [
+          async () => {
+            await setThreatLevel('normal', env);
+          },
+        ],
+        verifications: [
+          async () => {
+            const limits = await getCurrentRateLimits(env);
+            return limits.connectionsPerSecond >= 20;
+          },
+        ],
+        completed: false,
+      },
+      {
+        name: 'Unblock Legitimate IPs',
+        description: 'Review and unblock any legitimate IPs that were blocked',
+        actions: [
+          async () => console.log('Review blocked IPs manually via Cloudflare dashboard'),
+        ],
+        verifications: [
+          async () => true, // Manual verification
+        ],
+        completed: false,
+      },
+    ],
+    currentPhase: 0,
+    startedAt: new Date(),
+  };
+}
+
+// Disable maintenance mode
+export async function disableMaintenanceMode(env: Env): Promise<void> {
+  await env.CONFIG_KV.delete('maintenance_mode');
+  console.log('Maintenance mode disabled - full access restored');
+}
+
+// Disable lockdown
+export async function disableLockdown(env: Env): Promise<void> {
+  await env.CONFIG_KV.delete('lockdown_mode');
+  console.log('Lockdown disabled - access restored');
+}
+
+// Unblock IP address
+export async function unblockIP(ip: string, env: Env): Promise<void> {
+  // Remove from local blocklist
+  await env.BLOCKED_IPS.delete(ip);
+
+  // Remove from Cloudflare WAF
+  // First, find the rule ID
+  const rulesResponse = await fetch(
+    `https://api.cloudflare.com/client/v4/zones/${env.CF_ZONE_ID}/firewall/access_rules/rules?configuration.value=${ip}`,
+    {
+      headers: { 'Authorization': `Bearer ${env.CF_API_TOKEN}` },
+    }
+  );
+  const rules = await rulesResponse.json();
+
+  for (const rule of rules.result || []) {
+    await fetch(
+      `https://api.cloudflare.com/client/v4/zones/${env.CF_ZONE_ID}/firewall/access_rules/rules/${rule.id}`,
+      {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${env.CF_API_TOKEN}` },
+      }
+    );
+  }
+
+  console.log(`IP unblocked: ${ip}`);
+}
+```
+
+#### 6. Post-Incident - Documentation and Improvement
+
+```typescript
+// Post-incident report structure
+interface IncidentReport {
+  incidentId: string;
+  title: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  status: 'open' | 'contained' | 'resolved' | 'closed';
+
+  // Timeline
+  detectedAt: Date;
+  containedAt?: Date;
+  resolvedAt?: Date;
+  closedAt?: Date;
+
+  // Impact assessment
+  impact: {
+    affectedUsers: number;
+    affectedTenants: string[];
+    dataCompromised: boolean;
+    serviceDowntimeMinutes: number;
+  };
+
+  // Root cause
+  rootCause: string;
+  attackVector: string;
+
+  // Response
+  actionsToken: string[];
+  lessonsLearned: string[];
+  preventiveMeasures: string[];
+
+  // Participants
+  incidentCommander: string;
+  responders: string[];
+}
+
+// Generate incident report
+export async function generateIncidentReport(
+  incidentId: string,
+  forensicData: ForensicData,
+  env: Env
+): Promise<IncidentReport> {
+  const report: IncidentReport = {
+    incidentId,
+    title: `Security Incident ${incidentId}`,
+    severity: 'high',
+    status: 'resolved',
+    detectedAt: forensicData.collectedAt,
+    impact: {
+      affectedUsers: forensicData.affectedUsers.length,
+      affectedTenants: [], // Populate from forensic data
+      dataCompromised: false, // Determine from investigation
+      serviceDowntimeMinutes: 0, // Calculate from logs
+    },
+    rootCause: 'To be determined during post-mortem',
+    attackVector: 'To be determined during post-mortem',
+    actionsToken: [],
+    lessonsLearned: [],
+    preventiveMeasures: [],
+    incidentCommander: '',
+    responders: [],
+  };
+
+  // Store report
+  await env.AUDIT_BUCKET.put(
+    `incidents/${incidentId}/report.json`,
+    JSON.stringify(report, null, 2)
+  );
+
+  return report;
+}
+
+// Track remediation items
+interface RemediationItem {
+  id: string;
+  incidentId: string;
+  title: string;
+  description: string;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  status: 'open' | 'in_progress' | 'completed' | 'verified';
+  assignee?: string;
+  dueDate?: Date;
+  completedAt?: Date;
+}
+
+export async function createRemediationItems(
+  incidentId: string,
+  items: Omit<RemediationItem, 'id' | 'incidentId' | 'status'>[],
+  env: Env
+): Promise<RemediationItem[]> {
+  const remediations: RemediationItem[] = items.map(item => ({
+    ...item,
+    id: crypto.randomUUID(),
+    incidentId,
+    status: 'open',
+  }));
+
+  await env.CONFIG_KV.put(
+    `remediation:${incidentId}`,
+    JSON.stringify(remediations)
+  );
+
+  console.log(`Created ${remediations.length} remediation items for incident: ${incidentId}`);
+  return remediations;
+}
+
+// Example: Create remediation items after SQL injection incident
+export async function createSQLInjectionRemediations(
+  incidentId: string,
+  env: Env
+): Promise<RemediationItem[]> {
+  return createRemediationItems(incidentId, [
+    {
+      title: 'Audit all SQL queries for parameterization',
+      description: 'Review codebase to ensure all SQL queries use parameterized queries',
+      priority: 'critical',
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 1 week
+    },
+    {
+      title: 'Add SQL injection detection to WAF',
+      description: 'Configure Cloudflare WAF rules to detect and block SQL injection attempts',
+      priority: 'high',
+      dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3 days
+    },
+    {
+      title: 'Implement query analysis in audit logging',
+      description: 'Add automated detection of suspicious SQL patterns to audit system',
+      priority: 'medium',
+      dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 2 weeks
+    },
+    {
+      title: 'Conduct security training for developers',
+      description: 'Schedule and conduct training on secure SQL practices',
+      priority: 'medium',
+      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 1 month
+    },
+    {
+      title: 'Add automated SQL injection tests to CI/CD',
+      description: 'Implement automated security testing in deployment pipeline',
+      priority: 'high',
+      dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 2 weeks
+    },
+  ], env);
+}
+
+// Schedule post-mortem meeting
+export async function schedulePostMortem(
+  incidentId: string,
+  participants: string[],
+  env: Env
+): Promise<void> {
+  const postMortDateTime = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours from now
+
+  await env.CONFIG_KV.put(`postmortem:${incidentId}`, JSON.stringify({
+    incidentId,
+    scheduledAt: postMortDateTime.toISOString(),
+    participants,
+    agenda: [
+      'Timeline review',
+      'Root cause analysis',
+      'Impact assessment',
+      'Response evaluation',
+      'Lessons learned',
+      'Action items',
+    ],
+    status: 'scheduled',
+  }));
+
+  // Notify participants (integrate with your notification system)
+  console.log(`Post-mortem scheduled for incident ${incidentId} at ${postMortDateTime.toISOString()}`);
+}
 ```
 
 ---
@@ -1289,6 +2059,44 @@ function addSecurityHeaders(response: Response): Response {
   });
 }
 ```
+
+---
+
+## Cloudflare Security Documentation References
+
+DoSQL and DoLake leverage Cloudflare's security infrastructure. For comprehensive understanding of the underlying security model, consult these official Cloudflare resources:
+
+### Durable Objects Security
+
+- [Durable Objects Overview](https://developers.cloudflare.com/durable-objects/) - Core architecture and isolation model
+- [Durable Objects Security Model](https://developers.cloudflare.com/durable-objects/reference/security-model/) - How DOs provide tenant isolation and data protection
+- [Durable Objects Storage Limits](https://developers.cloudflare.com/durable-objects/platform/limits/) - Storage constraints and rate limiting
+- [Jurisdictional Restrictions](https://developers.cloudflare.com/durable-objects/reference/data-location/) - Data residency and geographic controls
+
+### R2 Access Control
+
+- [R2 Overview](https://developers.cloudflare.com/r2/) - Object storage fundamentals
+- [R2 Authentication](https://developers.cloudflare.com/r2/api/s3/tokens/) - API tokens and access credentials
+- [R2 Bucket Access](https://developers.cloudflare.com/r2/buckets/public-buckets/) - Public vs private bucket configurations
+- [R2 Encryption](https://developers.cloudflare.com/r2/reference/data-security/) - Server-side encryption at rest
+- [R2 Access Policies](https://developers.cloudflare.com/r2/api/s3/iam-policies/) - IAM-style access policies for fine-grained control
+
+### Workers Security Model
+
+- [Workers Security](https://developers.cloudflare.com/workers/platform/security/) - Runtime isolation and sandboxing
+- [Workers Runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) - Secure cryptographic APIs available in Workers
+- [Cloudflare Access Integration](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/) - Zero-trust authentication for Workers
+- [mTLS Authentication](https://developers.cloudflare.com/cloudflare-one/identity/devices/mutual-tls-authentication/) - Mutual TLS for service-to-service security
+- [Web Application Firewall (WAF)](https://developers.cloudflare.com/waf/) - Request filtering and threat protection
+- [DDoS Protection](https://developers.cloudflare.com/ddos-protection/) - Automatic DDoS mitigation for Workers endpoints
+- [Secrets Management](https://developers.cloudflare.com/workers/configuration/secrets/) - Secure storage of API keys and credentials
+
+### Additional Security Resources
+
+- [Cloudflare Security Center](https://developers.cloudflare.com/security-center/) - Security posture monitoring
+- [Cloudflare Zero Trust](https://developers.cloudflare.com/cloudflare-one/) - Enterprise security and access control
+- [Bot Management](https://developers.cloudflare.com/bots/) - Protection against automated threats
+- [Rate Limiting](https://developers.cloudflare.com/waf/rate-limiting-rules/) - Advanced rate limiting rules
 
 ---
 

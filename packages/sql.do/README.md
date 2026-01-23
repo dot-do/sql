@@ -13,7 +13,7 @@ Client SDK for DoSQL - SQL database on Cloudflare Workers with CapnWeb RPC.
 
 | Property | Value |
 |----------|-------|
-| Current version | 0.1.0-alpha |
+| Current version | 0.1.0 |
 | Stability | Experimental |
 | Breaking changes | Expected before 1.0 |
 
@@ -24,6 +24,7 @@ Client SDK for DoSQL - SQL database on Cloudflare Workers with CapnWeb RPC.
 - [API Reference](#api-reference)
   - [createSQLClient](#createsqlclientconfig)
   - [DoSQLClient](#dosqlclient)
+  - [Event Types](#event-types)
   - [TransactionContext](#transactioncontext)
   - [SQLError](#sqlerror)
 - [Type Reference](#type-reference)
@@ -47,21 +48,27 @@ Client SDK for DoSQL - SQL database on Cloudflare Workers with CapnWeb RPC.
 
 ## Stability
 
-### Stable APIs
+### Stability Legend
 
-- Core query execution (`query`, `exec`)
-- Transaction management (`transaction`, `beginTransaction`, `commit`, `rollback`)
-- Prepared statements (`prepare`, `execute`)
-- Connection management (`createSQLClient`, `close`, `ping`)
-- Batch operations (`batch`)
+- :green_circle: **Stable** - API is stable and unlikely to change. Safe for production use.
+- :yellow_circle: **Beta** - API is mostly stable but may have minor changes. Use with caution in production.
+- :red_circle: **Experimental** - API is under active development and may change significantly. Not recommended for production.
 
-### Experimental APIs
+### API Stability by Category
 
-- Time travel queries (`asOf` option)
-- Schema introspection (`getSchema`)
-- CDC (Change Data Capture) types and utilities
-- Sharding types
-- Client capabilities
+| API | Methods | Stability |
+|-----|---------|-----------|
+| Core query execution | `query`, `exec` | :green_circle: Stable |
+| Transaction management | `transaction`, `beginTransaction`, `commit`, `rollback` | :green_circle: Stable |
+| Prepared statements | `prepare`, `execute` | :green_circle: Stable |
+| Connection management | `createSQLClient`, `connect`, `isConnected`, `close`, `ping` | :green_circle: Stable |
+| Event listeners | `on`, `off` | :green_circle: Stable |
+| Batch operations | `batch` | :green_circle: Stable |
+| Time travel queries | `asOf` option | :red_circle: Experimental |
+| Schema introspection | `getSchema` | :red_circle: Experimental |
+| CDC types and utilities | CDC-related exports | :red_circle: Experimental |
+| Sharding types | Shard-related types | :red_circle: Experimental |
+| Client capabilities | Capability types | :red_circle: Experimental |
 
 ## Version Compatibility
 
@@ -212,7 +219,7 @@ const expensive = await client.query<Product>(
 const snapshot = await client.query<Product>(
   'SELECT * FROM products',
   [],
-  { asOf: new Date('2024-01-01') }
+  { asOf: new Date('2025-01-01') }
 );
 ```
 
@@ -478,12 +485,220 @@ if (latency > 1000) {
 
 ---
 
+#### `connect()`
+
+Explicitly establish a WebSocket connection to the database.
+
+```typescript
+async connect(): Promise<void>;
+```
+
+This method is optional - the client will automatically connect on first query if not already connected. However, calling `connect()` explicitly allows you to:
+- Pre-establish the connection before queries are needed
+- Handle connection errors separately from query errors
+- Wait for the connection to be ready
+
+If already connected, this method returns immediately without reconnecting. Multiple concurrent calls to `connect()` will share the same connection attempt.
+
+**Throws:** `ConnectionError` when connection fails (network error, auth failure, etc.)
+
+**Example:**
+
+```typescript
+const client = createSQLClient({
+  url: 'https://sql.example.com',
+  token: 'your-token',
+});
+
+// Pre-connect before queries
+try {
+  await client.connect();
+  console.log('Connected successfully');
+} catch (error) {
+  if (error instanceof ConnectionError) {
+    console.error('Failed to connect:', error.message);
+  }
+}
+
+// Now queries won't have connection latency
+const result = await client.query('SELECT 1');
+```
+
+---
+
+#### `isConnected()`
+
+Check if the client is currently connected to the database.
+
+```typescript
+isConnected(): boolean;
+```
+
+Returns `true` if a WebSocket connection is established and in the OPEN state. Note that this is a point-in-time check; the connection could change state immediately after this method returns.
+
+**Returns:** `true` if connected, `false` otherwise
+
+**Example:**
+
+```typescript
+const client = createSQLClient({ url: 'https://sql.example.com' });
+
+console.log(client.isConnected()); // false (not connected yet)
+
+await client.connect();
+console.log(client.isConnected()); // true
+
+await client.close();
+console.log(client.isConnected()); // false
+```
+
+---
+
 #### `close()`
 
 Close the connection and release resources.
 
 ```typescript
 async close(): Promise<void>;
+```
+
+---
+
+#### `on(event, listener)`
+
+Register an event listener for client events.
+
+```typescript
+on<K extends keyof ClientEventMap>(event: K, listener: ClientEventListener<K>): this;
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `event` | `'connected' \| 'disconnected' \| 'error'` | The event name to listen for |
+| `listener` | `(event: ClientEventMap[K]) => void` | Callback function invoked when the event occurs |
+
+**Returns:** The client instance (for method chaining)
+
+**Example:**
+
+```typescript
+const client = createSQLClient({ url: 'wss://sql.example.com' });
+
+// Listen for connection events
+client.on('connected', (event) => {
+  console.log(`Connected to ${event.url} at ${event.timestamp}`);
+});
+
+// Listen for disconnection events
+client.on('disconnected', (event) => {
+  console.log(`Disconnected from ${event.url}: ${event.reason}`);
+});
+
+// Listen for error events
+client.on('error', (event) => {
+  console.error(`Error in ${event.context}:`, event.error);
+  if (event.requestId) {
+    console.error(`Request ID: ${event.requestId}`);
+  }
+});
+
+await client.connect();
+```
+
+---
+
+#### `off(event, listener)`
+
+Remove a previously registered event listener.
+
+```typescript
+off<K extends keyof ClientEventMap>(event: K, listener: ClientEventListener<K>): this;
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `event` | `'connected' \| 'disconnected' \| 'error'` | The event name to stop listening for |
+| `listener` | `(event: ClientEventMap[K]) => void` | The callback function to remove |
+
+**Returns:** The client instance (for method chaining)
+
+**Example:**
+
+```typescript
+const onConnected = (event: ConnectedEvent): void => {
+  console.log(`Connected to ${event.url}`);
+};
+
+// Register listener
+client.on('connected', onConnected);
+
+// Later, remove the listener
+client.off('connected', onConnected);
+```
+
+---
+
+### Event Types
+
+#### `ClientEventMap`
+
+Map of event names to their event data types.
+
+```typescript
+interface ClientEventMap {
+  connected: ConnectedEvent;
+  disconnected: DisconnectedEvent;
+  error: ErrorEvent;
+}
+```
+
+#### `ConnectedEvent`
+
+Event data emitted when a WebSocket connection is established.
+
+```typescript
+interface ConnectedEvent {
+  /** The URL that was connected to */
+  url: string;
+  /** Timestamp when the connection was established */
+  timestamp: Date;
+}
+```
+
+#### `DisconnectedEvent`
+
+Event data emitted when a WebSocket connection is closed.
+
+```typescript
+interface DisconnectedEvent {
+  /** The URL that was disconnected from */
+  url: string;
+  /** Timestamp when the disconnection occurred */
+  timestamp: Date;
+  /** Optional reason for the disconnection */
+  reason?: string;
+}
+```
+
+#### `ErrorEvent`
+
+Event data emitted when an error occurs.
+
+```typescript
+interface ErrorEvent {
+  /** The error that occurred */
+  error: Error;
+  /** Timestamp when the error occurred */
+  timestamp: Date;
+  /** Context about where the error occurred */
+  context: 'message_parse' | 'connection' | 'rpc';
+  /** Optional request ID if the error was associated with a specific request */
+  requestId?: string;
+}
 ```
 
 ---
@@ -874,16 +1089,15 @@ const stats = await client.query<UserStats>(`
 #### Optimistic Locking
 
 ```typescript
-async function updateWithVersion<T extends { version: number }>(
+async function updateWithVersion(
   client: SQLClient,
-  table: string,
   id: number,
-  updates: Partial<T>,
+  newName: string,
   currentVersion: number
 ): Promise<boolean> {
   const result = await client.exec(
-    `UPDATE ${table} SET version = version + 1, ...updates WHERE id = ? AND version = ?`,
-    [id, currentVersion]
+    'UPDATE users SET name = ?, version = version + 1 WHERE id = ? AND version = ?',
+    [newName, id, currentVersion]
   );
 
   if (result.rowsAffected === 0) {
@@ -981,7 +1195,7 @@ Query historical data using point-in-time snapshots:
 const historicalUsers = await client.query<User>(
   'SELECT * FROM users',
   [],
-  { asOf: new Date('2024-01-01T00:00:00Z') }
+  { asOf: new Date('2025-01-01T00:00:00Z') }
 );
 
 // Query at a specific LSN
@@ -1264,11 +1478,11 @@ class UserRepository {
   }
 
   async create(name: string, email: string): Promise<User> {
-    const result = await this.client.exec(
+    const result = await this.client.query<User>(
       'INSERT INTO users (name, email) VALUES (?, ?) RETURNING *',
       [name, email]
     );
-    return result.rows[0] as User;
+    return result.rows[0];
   }
 
   async update(id: number, updates: Partial<Omit<User, 'id'>>): Promise<User | null> {
@@ -1276,12 +1490,12 @@ class UserRepository {
     const values = Object.values(updates);
 
     const setClause = fields.map(f => `${f} = ?`).join(', ');
-    const result = await this.client.exec(
+    const result = await this.client.query<User>(
       `UPDATE users SET ${setClause} WHERE id = ? RETURNING *`,
       [...values, id]
     );
 
-    return result.rows[0] as User ?? null;
+    return result.rows[0] ?? null;
   }
 
   async delete(id: number): Promise<boolean> {
@@ -1414,6 +1628,233 @@ import {
 ```
 
 > **Warning**: Experimental features may change or be removed without notice. Use with caution in production.
+
+---
+
+## Troubleshooting
+
+### Connection Errors
+
+**Symptoms**: `ConnectionError` when calling `connect()` or executing queries
+
+| Error Code | Cause | Solution |
+|------------|-------|----------|
+| `CONNECTION_FAILED` | Network issue or invalid URL | Verify URL is correct; check network connectivity |
+| `CONNECTION_CLOSED` | WebSocket connection dropped | Implement reconnection logic; check for server issues |
+| `UNAUTHORIZED` | Invalid or expired token | Refresh authentication token |
+
+```typescript
+import { ConnectionError, SQLError } from '@dotdo/sql.do';
+
+// Handle connection errors gracefully
+client.on('error', (event) => {
+  if (event.context === 'connection') {
+    console.error('Connection error:', event.error.message);
+    // Attempt reconnection after delay
+    setTimeout(() => client.connect(), 5000);
+  }
+});
+
+// Pre-connect with error handling
+try {
+  await client.connect();
+} catch (error) {
+  if (error instanceof ConnectionError) {
+    console.error(`Connection failed: ${error.message}`);
+    // Handle based on error type
+  }
+}
+```
+
+### Rate Limiting Errors
+
+**Symptoms**: Queries fail with `RESOURCE_EXHAUSTED` or slow response times
+
+| Error Code | Cause | Solution |
+|------------|-------|----------|
+| `RESOURCE_EXHAUSTED` | Too many concurrent requests | Implement request queuing; reduce parallelism |
+| `TIMEOUT` | Server under heavy load | Increase timeout; retry with backoff |
+| `UNAVAILABLE` | Service temporarily unavailable | Retry with exponential backoff |
+
+```typescript
+// Configure retry for rate limiting
+const client = createSQLClient({
+  url: 'https://sql.example.com',
+  token: 'your-token',
+  retry: {
+    maxRetries: 5,
+    baseDelayMs: 200,
+    maxDelayMs: 10000,
+  },
+});
+
+// Manual retry for specific errors
+import { SQLError, isRetryableError } from '@dotdo/sql.do';
+
+async function queryWithRetry<T>(sql: string, params: unknown[]): Promise<T[]> {
+  for (let i = 0; i < 3; i++) {
+    try {
+      const result = await client.query<T>(sql, params);
+      return result.rows;
+    } catch (error) {
+      if (error instanceof SQLError && isRetryableError(error)) {
+        await new Promise(r => setTimeout(r, 100 * Math.pow(2, i)));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('Query failed after retries');
+}
+```
+
+### Transaction Errors
+
+**Symptoms**: Transactions fail to commit or produce unexpected results
+
+| Error Code | Cause | Solution |
+|------------|-------|----------|
+| `TRANSACTION_NOT_FOUND` | Invalid transaction ID | Ensure transaction is still active |
+| `TRANSACTION_ABORTED` | Transaction was rolled back | Check for constraint violations; retry |
+| `DEADLOCK_DETECTED` | Concurrent lock conflict | Retry transaction; use consistent ordering |
+| `SERIALIZATION_FAILURE` | Isolation conflict | Retry with exponential backoff |
+
+```typescript
+// Safe transaction pattern with retry
+async function safeTransaction<T>(
+  fn: (tx: TransactionContext) => Promise<T>
+): Promise<T> {
+  const retryableCodes = ['DEADLOCK_DETECTED', 'SERIALIZATION_FAILURE'];
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await client.transaction(fn);
+    } catch (error) {
+      if (error instanceof SQLError && retryableCodes.includes(error.code)) {
+        await new Promise(r => setTimeout(r, 50 * Math.pow(2, attempt)));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('Transaction failed after retries');
+}
+
+// Usage
+await safeTransaction(async (tx) => {
+  await tx.exec('UPDATE accounts SET balance = balance - ? WHERE id = ?', [100, 1]);
+  await tx.exec('UPDATE accounts SET balance = balance + ? WHERE id = ?', [100, 2]);
+});
+```
+
+### SQL Errors
+
+**Symptoms**: `SQLError` with various error codes
+
+| Error Code | Cause | Solution |
+|------------|-------|----------|
+| `SYNTAX_ERROR` | Invalid SQL syntax | Check SQL statement for typos |
+| `CONSTRAINT_VIOLATION` | Unique/FK constraint failed | Handle duplicate key; check foreign keys |
+| `TABLE_NOT_FOUND` | Table does not exist | Run migrations; check table name spelling |
+| `COLUMN_NOT_FOUND` | Column does not exist | Verify column name matches schema |
+
+```typescript
+import { SQLError } from '@dotdo/sql.do';
+
+try {
+  await client.exec('INSERT INTO users (id, email) VALUES (?, ?)', [1, 'test@example.com']);
+} catch (error) {
+  if (error instanceof SQLError) {
+    switch (error.code) {
+      case 'CONSTRAINT_VIOLATION':
+        // Handle duplicate key
+        console.log('User already exists');
+        break;
+      case 'TABLE_NOT_FOUND':
+        // Handle missing table
+        console.error('Users table not found - run migrations');
+        break;
+      case 'SYNTAX_ERROR':
+        // Log for debugging
+        console.error('SQL syntax error:', error.message);
+        break;
+      default:
+        throw error;
+    }
+  }
+}
+```
+
+### Common Configuration Mistakes
+
+| Issue | Symptom | Fix |
+|-------|---------|-----|
+| Wrong URL scheme | Connection fails silently | Use `https://` for HTTP or `wss://` for WebSocket |
+| Missing token | `UNAUTHORIZED` error | Set `token` in client configuration |
+| Timeout too short | `TIMEOUT` on complex queries | Increase `timeout` (default: 30000ms) |
+| No retry config | Transient failures not handled | Add `retry` configuration |
+
+```typescript
+// Complete configuration example
+const client = createSQLClient({
+  // Required
+  url: 'https://sql.example.com',  // or wss:// for WebSocket
+
+  // Authentication
+  token: process.env.DOSQL_TOKEN,
+
+  // Database selection (optional)
+  database: 'production',
+
+  // Timeouts
+  timeout: 60000,  // 60 seconds for complex queries
+
+  // Retry configuration
+  retry: {
+    maxRetries: 3,
+    baseDelayMs: 100,
+    maxDelayMs: 5000,
+  },
+
+  // Idempotency for mutations (prevents duplicates on retry)
+  idempotency: {
+    enabled: true,
+    keyPrefix: 'my-service',
+  },
+});
+```
+
+### Performance Issues
+
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| Slow queries | Missing indexes | Add indexes; use `EXPLAIN` to analyze |
+| High latency | Network round-trips | Use `batch()` for multiple operations |
+| Memory issues | Large result sets | Use pagination with `LIMIT`/`OFFSET` |
+| Connection overhead | New connection per request | Reuse client instance; use connection pooling |
+
+```typescript
+// Batch operations for efficiency
+const results = await client.batch([
+  { sql: 'INSERT INTO logs (msg) VALUES (?)', params: ['event1'] },
+  { sql: 'INSERT INTO logs (msg) VALUES (?)', params: ['event2'] },
+  { sql: 'INSERT INTO logs (msg) VALUES (?)', params: ['event3'] },
+]);
+
+// Pagination for large datasets
+async function* fetchAllUsers(pageSize = 1000): AsyncGenerator<User[]> {
+  let offset = 0;
+  while (true) {
+    const result = await client.query<User>(
+      'SELECT * FROM users ORDER BY id LIMIT ? OFFSET ?',
+      [pageSize, offset]
+    );
+    if (result.rows.length === 0) break;
+    yield result.rows;
+    offset += pageSize;
+  }
+}
+```
 
 ---
 

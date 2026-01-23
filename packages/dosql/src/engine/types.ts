@@ -14,9 +14,67 @@ import { PlanningContext, getDefaultPlanningContext, resetDefaultPlanningContext
 // =============================================================================
 
 /**
- * Re-export branded types from shared-types for backward compatibility.
- * These types use TypeScript's structural typing to create nominal types
- * that cannot be accidentally assigned from raw primitives.
+ * Re-exported branded types from `@dotdo/shared-types` (via `@dotdo/sql.do`).
+ *
+ * These types provide type-safe identifiers using TypeScript's branded types pattern.
+ * Branded types prevent accidental assignment from raw primitives, catching type
+ * errors at compile time rather than runtime.
+ *
+ * ## Branded Types
+ *
+ * - {@link LSN} - Log Sequence Number (bigint branded type)
+ *   Represents a position in the write-ahead log. Used for time travel queries,
+ *   CDC positioning, and replication.
+ *
+ * - {@link TransactionId} - Transaction Identifier (string branded type)
+ *   Uniquely identifies a database transaction. Used for transaction management
+ *   and query context.
+ *
+ * - {@link ShardId} - Shard Identifier (string branded type)
+ *   Identifies a specific database shard in distributed deployments.
+ *   Maximum length is 255 characters.
+ *
+ * ## Factory Functions
+ *
+ * Use these to create branded type instances with validation:
+ *
+ * - `createLSN(bigint)` - Create a validated LSN
+ * - `createTransactionId(string)` - Create a validated TransactionId
+ * - `createShardId(string)` - Create a validated ShardId
+ *
+ * ## LSN Utilities
+ *
+ * Helper functions for working with Log Sequence Numbers:
+ *
+ * - `compareLSN(a, b)` - Compare two LSNs (-1, 0, or 1)
+ * - `incrementLSN(lsn, amount?)` - Increment an LSN
+ * - `lsnValue(lsn)` - Extract raw bigint value
+ *
+ * ## Validation Guards
+ *
+ * Type guards for runtime validation:
+ *
+ * - `isValidLSN(value)` - Check if value is a valid LSN (bigint >= 0)
+ * - `isValidTransactionId(value)` - Check if value is a valid TransactionId (non-empty string)
+ * - `isValidShardId(value)` - Check if value is a valid ShardId (non-empty string, max 255 chars)
+ *
+ * @example
+ * ```typescript
+ * import { createLSN, compareLSN, LSN } from './types.js';
+ *
+ * const lsn1: LSN = createLSN(100n);
+ * const lsn2: LSN = createLSN(200n);
+ *
+ * if (compareLSN(lsn1, lsn2) < 0) {
+ *   console.log('lsn1 is before lsn2');
+ * }
+ * ```
+ *
+ * @see {@link https://github.com/dotdo/shared-types | @dotdo/shared-types} for canonical definitions
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
  */
 export type { LSN, TransactionId, ShardId } from '@dotdo/sql.do';
 export {

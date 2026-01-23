@@ -25,7 +25,51 @@
  *   CDCBatch,
  *   CompactionConfig,
  *   LakeMetrics,
+ *   CDCOperationCode,
+ *   isServerCDCEvent,
+ *   serverToClientCDCEvent,
  * } from '@dotdo/lake.do/experimental';
+ *
+ * // Configure CDC streaming options
+ * const streamOptions: CDCStreamOptions = {
+ *   startFromSnapshot: true,
+ *   batchSize: 1000,
+ *   includeMetadata: true,
+ * };
+ *
+ * // Process CDC batches from a stream
+ * async function processCDCStream(batches: AsyncIterable<CDCBatch>) {
+ *   for await (const batch of batches) {
+ *     for (const event of batch.events) {
+ *       if (isServerCDCEvent(event)) {
+ *         const clientEvent = serverToClientCDCEvent(event);
+ *         switch (clientEvent.op) {
+ *           case CDCOperationCode.INSERT:
+ *             console.log('Insert:', clientEvent.after);
+ *             break;
+ *           case CDCOperationCode.UPDATE:
+ *             console.log('Update:', clientEvent.before, '->', clientEvent.after);
+ *             break;
+ *           case CDCOperationCode.DELETE:
+ *             console.log('Delete:', clientEvent.before);
+ *             break;
+ *         }
+ *       }
+ *     }
+ *   }
+ * }
+ *
+ * // Configure compaction for a table
+ * const compactionConfig: CompactionConfig = {
+ *   targetFileSizeMB: 128,
+ *   minFilesToCompact: 5,
+ *   maxFilesToCompact: 20,
+ * };
+ *
+ * // Monitor lakehouse metrics
+ * function logMetrics(metrics: LakeMetrics) {
+ *   console.log(`Files: ${metrics.totalFiles}, Size: ${metrics.totalSizeBytes} bytes`);
+ * }
  * ```
  *
  * @packageDocumentation

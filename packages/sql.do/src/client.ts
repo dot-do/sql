@@ -23,6 +23,7 @@ import type {
   RetryConfig,
 } from './types.js';
 import { createTransactionId, createLSN, createStatementHash, DEFAULT_IDEMPOTENCY_CONFIG, DEFAULT_RETRY_CONFIG } from './types.js';
+import { MessageParseError } from './errors.js';
 
 // =============================================================================
 // Idempotency Key Generation
@@ -332,6 +333,32 @@ class LRUCache<K, V> {
 }
 
 // =============================================================================
+// Pending Request Type
+// =============================================================================
+
+/**
+ * Represents a pending RPC request awaiting a response.
+ *
+ * This interface provides proper type constraints for the resolve/reject callbacks
+ * used in the pendingRequests Map. The generic parameter allows the Map to be
+ * properly typed while still supporting multiple concurrent requests with different
+ * response types through type erasure at storage time.
+ *
+ * @typeParam T - The expected response type (defaults to unknown for storage flexibility)
+ * @internal
+ */
+interface PendingRequest<T = unknown> {
+  /** Resolves the promise with the RPC response value */
+  resolve: (value: T) => void;
+  /** Rejects the promise with an error */
+  reject: (error: Error) => void;
+  /** Timeout handle for request expiration */
+  timeout: ReturnType<typeof setTimeout>;
+  /** Optional idempotency key for mutation deduplication */
+  idempotencyKey?: string;
+}
+
+// =============================================================================
 // Client Configuration
 // =============================================================================
 
@@ -416,6 +443,7 @@ export interface SQLClientConfig {
 /**
  * Connection event data for 'connected' event.
  * @public
+ * @since 0.2.0
  */
 export interface ConnectedEvent {
   url: string;
@@ -425,6 +453,7 @@ export interface ConnectedEvent {
 /**
  * Disconnection event data for 'disconnected' event.
  * @public
+ * @since 0.2.0
  */
 export interface DisconnectedEvent {
   url: string;
@@ -433,19 +462,121 @@ export interface DisconnectedEvent {
 }
 
 /**
- * Event types for DoSQLClient.
+ * Error event data for 'error' event.
  * @public
+ * @since 0.3.0
+ */
+export interface ErrorEvent {
+  /** The error that occurred */
+  error: Error;
+  /** Timestamp when the error occurred */
+  timestamp: Date;
+  /** Context about where the error occurred */
+  context: 'message_parse' | 'connection' | 'rpc';
+  /** Optional request ID if the error was associated with a specific request */
+  requestId?: string;
+}
+
+/**
+ * Event types for DoSQLClient.
+ *
+ * Maps event names to their corresponding event data types. This interface
+ * enables type-safe event handling with the {@link DoSQLClient.on} and
+ * {@link DoSQLClient.off} methods.
+ *
+ * @example
+ * ```typescript
+ * // Type-safe event handling
+ * const client = createSQLClient({ url: 'wss://sql.example.com' });
+ *
+ * // Handle connection established
+ * client.on('connected', (event) => {
+ *   // event is typed as ConnectedEvent
+ *   console.log(`Connected to ${event.url} at ${event.timestamp.toISOString()}`);
+ * });
+ *
+ * // Handle disconnection
+ * client.on('disconnected', (event) => {
+ *   // event is typed as DisconnectedEvent
+ *   console.log(`Disconnected: ${event.reason ?? 'unknown reason'}`);
+ * });
+ *
+ * // Handle errors
+ * client.on('error', (event) => {
+ *   // event is typed as ErrorEvent
+ *   console.error(`[${event.context}] ${event.error.message}`);
+ *   if (event.requestId) {
+ *     console.error(`Request ID: ${event.requestId}`);
+ *   }
+ * });
+ * ```
+ *
+ * @public
+ * @since 0.2.0
  */
 export interface ClientEventMap {
   connected: ConnectedEvent;
   disconnected: DisconnectedEvent;
+  error: ErrorEvent;
 }
 
 /**
- * Event listener callback type.
+ * Event listener callback type for DoSQLClient events.
+ *
+ * A generic type that maps event names to their corresponding callback signatures.
+ * The callback receives the appropriate event data type based on the event name.
+ *
+ * @typeParam K - The event name key from {@link ClientEventMap}
+ *
+ * @example
+ * ```typescript
+ * // Define typed event handlers
+ * const onConnected: ClientEventListener<'connected'> = (event) => {
+ *   console.log(`Connected to ${event.url}`);
+ * };
+ *
+ * const onDisconnected: ClientEventListener<'disconnected'> = (event) => {
+ *   console.log(`Disconnected: ${event.reason}`);
+ * };
+ *
+ * const onError: ClientEventListener<'error'> = (event) => {
+ *   console.error(`Error in ${event.context}: ${event.error.message}`);
+ * };
+ *
+ * // Register handlers
+ * client.on('connected', onConnected);
+ * client.on('disconnected', onDisconnected);
+ * client.on('error', onError);
+ *
+ * // Later, remove specific handlers
+ * client.off('connected', onConnected);
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Create a reconnection handler
+ * const reconnectHandler: ClientEventListener<'disconnected'> = async (event) => {
+ *   console.log(`Lost connection to ${event.url}, attempting reconnect...`);
+ *   await sleep(1000);
+ *   await client.connect();
+ * };
+ *
+ * client.on('disconnected', reconnectHandler);
+ * ```
+ *
  * @public
+ * @since 0.2.0
  */
 export type ClientEventListener<K extends keyof ClientEventMap> = (event: ClientEventMap[K]) => void;
+
+/**
+ * Type-safe storage for event listeners, mapping each event name to its specific listener set.
+ * This avoids the need for `any` when storing heterogeneous listener types.
+ * @internal
+ */
+type EventListenerStore = {
+  [K in keyof ClientEventMap]: Set<ClientEventListener<K>>;
+};
 
 // =============================================================================
 // CapnWeb RPC Client
@@ -506,18 +637,17 @@ export class DoSQLClient implements SQLClient {
   /** @internal */
   private ws: WebSocket | null = null;
   /** @internal */
-  private pendingRequests = new Map<string, {
-    resolve: (value: unknown) => void;
-    reject: (error: Error) => void;
-    timeout: ReturnType<typeof setTimeout>;
-    idempotencyKey?: string;
-  }>();
+  private pendingRequests = new Map<string, PendingRequest>();
   /** @internal LRU cache of request content hash to idempotency key for retry consistency */
   private idempotencyKeyCache!: LRUCache<string, string>;
   /** @internal Cleanup timer for periodic cache cleanup */
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   /** @internal Event listeners for connection events */
-  private eventListeners: Map<keyof ClientEventMap, Set<ClientEventListener<any>>> = new Map();
+  private eventListeners: EventListenerStore = {
+    connected: new Set(),
+    disconnected: new Set(),
+    error: new Set(),
+  };
   /** @internal Flag to track if connection is being established */
   private connecting: boolean = false;
   /** @internal Promise that resolves when connection is established (for concurrent connect() calls) */
@@ -558,10 +688,6 @@ export class DoSQLClient implements SQLClient {
         this.idempotencyKeyCache.cleanup();
       }, cleanupIntervalMs);
     }
-
-    // Initialize event listeners map
-    this.eventListeners.set('connected', new Set());
-    this.eventListeners.set('disconnected', new Set());
   }
 
   // ===========================================================================
@@ -594,6 +720,7 @@ export class DoSQLClient implements SQLClient {
    * @since 0.2.0
    */
   isConnected(): boolean {
+    // WebSocket.READY_STATE_OPEN = 1 means connection is established and ready to communicate
     return this.ws !== null && this.ws.readyState === WebSocket.READY_STATE_OPEN;
   }
 
@@ -693,10 +820,7 @@ export class DoSQLClient implements SQLClient {
    * @since 0.2.0
    */
   on<K extends keyof ClientEventMap>(event: K, listener: ClientEventListener<K>): this {
-    const listeners = this.eventListeners.get(event);
-    if (listeners) {
-      listeners.add(listener);
-    }
+    this.eventListeners[event].add(listener);
     return this;
   }
 
@@ -720,10 +844,7 @@ export class DoSQLClient implements SQLClient {
    * @since 0.2.0
    */
   off<K extends keyof ClientEventMap>(event: K, listener: ClientEventListener<K>): this {
-    const listeners = this.eventListeners.get(event);
-    if (listeners) {
-      listeners.delete(listener);
-    }
+    this.eventListeners[event].delete(listener);
     return this;
   }
 
@@ -732,14 +853,12 @@ export class DoSQLClient implements SQLClient {
    * @internal
    */
   private emit<K extends keyof ClientEventMap>(event: K, data: ClientEventMap[K]): void {
-    const listeners = this.eventListeners.get(event);
-    if (listeners) {
-      for (const listener of listeners) {
-        try {
-          listener(data);
-        } catch (error) {
-          console.error(`Error in ${event} listener:`, error);
-        }
+    const listeners = this.eventListeners[event];
+    for (const listener of listeners) {
+      try {
+        (listener as ClientEventListener<K>)(data);
+      } catch (error) {
+        console.error(`Error in ${event} listener:`, error);
       }
     }
   }
@@ -884,6 +1003,7 @@ export class DoSQLClient implements SQLClient {
   // ===========================================================================
 
   private async ensureConnection(): Promise<WebSocket> {
+    // WebSocket.READY_STATE_OPEN = 1 means connection is established and ready to communicate
     if (this.ws && this.ws.readyState === WebSocket.READY_STATE_OPEN) {
       return this.ws;
     }
@@ -891,67 +1011,219 @@ export class DoSQLClient implements SQLClient {
     return new Promise((resolve, reject) => {
       const wsUrl = this.config.url.replace(/^http/, 'ws');
       this.ws = new WebSocket(wsUrl);
-
-      this.ws.addEventListener('open', () => {
-        // Emit connected event
-        this.emit('connected', {
-          url: wsUrl,
-          timestamp: new Date(),
-        });
-        resolve(this.ws!);
-      });
-
-      this.ws.addEventListener('error', (event: Event) => {
-        reject(new ConnectionError(`WebSocket error: ${event}`));
-      });
-
-      this.ws.addEventListener('close', () => {
-        const closedWs = this.ws;
-        this.ws = null;
-
-        // Emit disconnected event
-        this.emit('disconnected', {
-          url: wsUrl,
-          timestamp: new Date(),
-          reason: 'Connection closed',
-        });
-
-        // Reject all pending requests
-        for (const [id, pending] of this.pendingRequests) {
-          clearTimeout(pending.timeout);
-          pending.reject(new ConnectionError('Connection closed'));
-          this.pendingRequests.delete(id);
-        }
-      });
-
-      this.ws.addEventListener('message', (event: MessageEvent) => {
-        this.handleMessage(event.data as string | ArrayBuffer);
-      });
+      this.setupWebSocketHandlers(this.ws, wsUrl, resolve, reject);
     });
   }
 
-  private handleMessage(data: string | ArrayBuffer): void {
-    try {
-      const message = typeof data === 'string' ? data : new TextDecoder().decode(data);
-      const response: RPCResponse = JSON.parse(message);
+  /**
+   * Sets up WebSocket event handlers for the connection.
+   * @internal
+   */
+  private setupWebSocketHandlers(
+    ws: WebSocket,
+    wsUrl: string,
+    resolve: (ws: WebSocket) => void,
+    reject: (error: Error) => void
+  ): void {
+    ws.addEventListener('open', () => {
+      this.emit('connected', {
+        url: wsUrl,
+        timestamp: new Date(),
+      });
+      resolve(ws);
+    });
 
-      const pending = this.pendingRequests.get(response.id);
-      if (pending) {
+    ws.addEventListener('error', (event: Event) => {
+      reject(new ConnectionError(`WebSocket error: ${event}`, wsUrl));
+    });
+
+    ws.addEventListener('close', () => {
+      this.ws = null;
+
+      this.emit('disconnected', {
+        url: wsUrl,
+        timestamp: new Date(),
+        reason: 'Connection closed',
+      });
+
+      for (const [id, pending] of this.pendingRequests) {
         clearTimeout(pending.timeout);
-        this.pendingRequests.delete(response.id);
+        pending.reject(new ConnectionError('Connection closed', wsUrl));
+        this.pendingRequests.delete(id);
+      }
+    });
 
-        if (response.error) {
-          pending.reject(new SQLError(response.error));
-        } else {
-          pending.resolve(response.result);
+    ws.addEventListener('message', (event: MessageEvent) => {
+      this.handleMessage(event.data as string | ArrayBuffer);
+    });
+  }
+
+  /**
+   * Handles incoming WebSocket messages with comprehensive error boundaries.
+   *
+   * This method implements robust error handling to prevent silent failures:
+   * 1. Catches and reports JSON parsing errors
+   * 2. Validates response structure before processing
+   * 3. Emits error events for monitoring and debugging
+   * 4. Rejects associated pending requests with meaningful errors
+   *
+   * @param data - Raw message data from the WebSocket
+   * @internal
+   */
+  private handleMessage(data: string | ArrayBuffer): void {
+    let rawMessage: string | undefined;
+    let responseId: string | undefined;
+
+    try {
+      // Step 1: Convert binary data to string if needed
+      try {
+        rawMessage = typeof data === 'string' ? data : new TextDecoder().decode(data);
+      } catch (decodeError) {
+        const parseError = new MessageParseError(
+          'Failed to decode WebSocket message as UTF-8',
+          undefined,
+          decodeError instanceof Error ? decodeError : new Error(String(decodeError))
+        );
+        this.emitError(parseError, 'message_parse');
+        return;
+      }
+
+      // Step 2: Parse JSON with explicit error handling
+      let response: RPCResponse;
+      try {
+        response = JSON.parse(rawMessage);
+      } catch (jsonError) {
+        const parseError = new MessageParseError(
+          'Failed to parse WebSocket message as JSON',
+          rawMessage,
+          jsonError instanceof Error ? jsonError : new Error(String(jsonError))
+        );
+        this.emitError(parseError, 'message_parse');
+        return;
+      }
+
+      // Step 3: Validate response structure
+      if (response === null || typeof response !== 'object') {
+        const parseError = new MessageParseError(
+          'WebSocket message is not a valid RPC response object',
+          rawMessage
+        );
+        this.emitError(parseError, 'message_parse');
+        return;
+      }
+
+      // Step 4: Validate response ID
+      if (typeof response.id !== 'string' || response.id === '') {
+        const parseError = new MessageParseError(
+          'WebSocket message missing or invalid response ID',
+          rawMessage
+        );
+        this.emitError(parseError, 'message_parse');
+        return;
+      }
+
+      responseId = response.id;
+
+      // Step 5: Match to pending request
+      const pending = this.pendingRequests.get(response.id);
+      if (!pending) {
+        // This could happen if the request timed out before the response arrived
+        // or if the server sent an unsolicited message - log but don't throw
+        console.warn(`Received response for unknown request ID: ${response.id}`);
+        return;
+      }
+
+      // Step 6: Clear timeout and remove from pending
+      clearTimeout(pending.timeout);
+      this.pendingRequests.delete(response.id);
+
+      // Step 7: Resolve or reject based on response content
+      if (response.error) {
+        // Validate error structure
+        if (typeof response.error !== 'object' || response.error === null) {
+          const parseError = new MessageParseError(
+            'RPC response error field is not a valid error object',
+            rawMessage
+          );
+          this.emitError(parseError, 'message_parse', response.id);
+          pending.reject(new SQLError({
+            code: 'INVALID_RESPONSE',
+            message: 'Server returned malformed error response',
+          }));
+          return;
         }
+        pending.reject(new SQLError(response.error));
+      } else {
+        pending.resolve(response.result);
       }
     } catch (error) {
-      console.error('Failed to parse RPC response:', error);
+      // Catch-all for any unexpected errors during message handling
+      const unexpectedError = error instanceof Error ? error : new Error(String(error));
+      const parseError = new MessageParseError(
+        `Unexpected error handling WebSocket message: ${unexpectedError.message}`,
+        rawMessage,
+        unexpectedError
+      );
+      this.emitError(parseError, 'message_parse', responseId);
+
+      // If we identified a pending request, reject it
+      if (responseId) {
+        const pending = this.pendingRequests.get(responseId);
+        if (pending) {
+          clearTimeout(pending.timeout);
+          this.pendingRequests.delete(responseId);
+          pending.reject(new SQLError({
+            code: 'MESSAGE_PARSE_ERROR',
+            message: `Failed to process server response: ${unexpectedError.message}`,
+          }));
+        }
+      }
     }
   }
 
-  private async rpc<T>(method: string, params: unknown): Promise<T> {
+  /**
+   * Emits an error event to all registered listeners.
+   * @internal
+   */
+  private emitError(error: Error, context: 'message_parse' | 'connection' | 'rpc', requestId?: string): void {
+    // Always log errors to console for debugging
+    console.error(`[DoSQLClient] ${context} error:`, error);
+
+    // Build error event, only including requestId if it's defined
+    const errorEvent: ErrorEvent = {
+      error,
+      timestamp: new Date(),
+      context,
+    };
+    if (requestId !== undefined) {
+      errorEvent.requestId = requestId;
+    }
+
+    // Emit error event to listeners
+    this.emit('error', errorEvent);
+  }
+
+  /**
+   * Maps an RPC method name to a TimeoutOperationType.
+   * @internal
+   */
+  private mapMethodToOperationType(method: string): TimeoutOperationType {
+    switch (method) {
+      case 'query':
+        return 'query';
+      case 'exec':
+      case 'execute':
+        return 'exec';
+      case 'beginTransaction':
+      case 'commit':
+      case 'rollback':
+        return 'transaction';
+      default:
+        return 'rpc';
+    }
+  }
+
+  private async rpc<TResponse, TRequest = unknown>(method: string, params: TRequest): Promise<TResponse> {
     const ws = await this.ensureConnection();
     const id = `${++this.requestId}`;
 
@@ -961,10 +1233,12 @@ export class DoSQLClient implements SQLClient {
       params,
     };
 
-    return new Promise<T>((resolve, reject) => {
+    return new Promise<TResponse>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
-        reject(new TimeoutError(`Request timeout: ${method}`, this.config.timeout));
+        // Map RPC method names to operation types
+        const operationType = this.mapMethodToOperationType(method);
+        reject(new TimeoutError(operationType, this.config.timeout));
       }, this.config.timeout);
 
       this.pendingRequests.set(id, {
@@ -1625,10 +1899,40 @@ export class SQLError extends Error {
 }
 
 /**
+ * Masks sensitive data in a URL for safe logging and error messages.
+ *
+ * @param url - The URL to mask
+ * @returns A masked version of the URL safe for logging
+ * @internal
+ */
+function maskUrlForClient(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) {
+      parsed.password = '***';
+    }
+    const sensitiveParams = ['token', 'key', 'secret', 'password', 'auth', 'api_key', 'apikey', 'access_token'];
+    for (const param of sensitiveParams) {
+      if (parsed.searchParams.has(param)) {
+        parsed.searchParams.set(param, '***');
+      }
+    }
+    return parsed.toString();
+  } catch {
+    const match = url.match(/^(\w+:\/\/)([^/?#]+)/);
+    if (match) {
+      return `${match[1]}${match[2]}/***`;
+    }
+    return '[invalid-url]';
+  }
+}
+
+/**
  * Error thrown when a connection to the database fails.
  *
  * This error is typically retryable as it indicates a network or infrastructure
- * issue rather than a problem with the SQL statement itself.
+ * issue rather than a problem with the SQL statement itself. The error message
+ * includes the URL (with sensitive data masked) for debugging purposes.
  *
  * @example
  * ```typescript
@@ -1637,6 +1941,7 @@ export class SQLError extends Error {
  * } catch (error) {
  *   if (error instanceof ConnectionError) {
  *     console.log(`Connection failed: ${error.message}`);
+ *     console.log(`URL: ${error.url}`);
  *     console.log(`Retryable: ${error.retryable}`);
  *   }
  * }
@@ -1658,21 +1963,40 @@ export class ConnectionError extends Error {
   readonly retryable = true;
 
   /**
+   * The URL that the connection was attempted to (masked for security).
+   * May be undefined if no URL was provided.
+   */
+  readonly url?: string;
+
+  /**
    * Creates a new ConnectionError.
    *
    * @param message - Description of the connection failure
+   * @param url - Optional URL that the connection was attempted to (will be masked)
    */
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, url?: string) {
+    const maskedUrl = url ? maskUrlForClient(url) : undefined;
+    const fullMessage = maskedUrl ? `${message} (url: ${maskedUrl})` : message;
+    super(fullMessage);
     this.name = 'ConnectionError';
+    if (maskedUrl) {
+      this.url = maskedUrl;
+    }
   }
 }
+
+/**
+ * The type of operation that timed out.
+ * @public
+ */
+export type TimeoutOperationType = 'query' | 'exec' | 'transaction' | 'rpc';
 
 /**
  * Error thrown when an operation times out.
  *
  * This error is typically retryable as the timeout may have been due to
- * transient network issues or server load.
+ * transient network issues or server load. The error includes the operation
+ * type for easier programmatic handling.
  *
  * @example
  * ```typescript
@@ -1680,7 +2004,7 @@ export class ConnectionError extends Error {
  *   await client.query('SELECT * FROM large_table');
  * } catch (error) {
  *   if (error instanceof TimeoutError) {
- *     console.log(`Query timed out after ${error.timeoutMs}ms`);
+ *     console.log(`${error.operationType} timed out after ${error.timeoutMs}ms`);
  *     console.log(`Retryable: ${error.retryable}`);
  *   }
  * }
@@ -1707,15 +2031,21 @@ export class TimeoutError extends Error {
   readonly timeoutMs: number;
 
   /**
+   * The type of operation that timed out (query, exec, transaction, or rpc).
+   */
+  readonly operationType: TimeoutOperationType;
+
+  /**
    * Creates a new TimeoutError.
    *
-   * @param message - Description of the timeout
+   * @param operationType - The type of operation that timed out
    * @param timeoutMs - The timeout duration in milliseconds
    */
-  constructor(message: string, timeoutMs: number) {
-    super(message);
+  constructor(operationType: TimeoutOperationType, timeoutMs: number) {
+    super(`${operationType} timeout after ${timeoutMs}ms`);
     this.name = 'TimeoutError';
     this.timeoutMs = timeoutMs;
+    this.operationType = operationType;
   }
 }
 

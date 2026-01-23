@@ -69,3 +69,33 @@ export {
   type SqlValue as AggregateSqlValue,
   type AggregateState,
 } from './aggregate.js';
+
+export {
+  // Sandbox module builders
+  buildSandboxModule,
+  buildProcedureModule,
+  buildCustomSandboxModule,
+
+  // Code generation helpers
+  buildTableAccessorCode,
+  buildDbCallCode,
+  buildSqlCode,
+  buildTransactionCode,
+
+  // RPC handlers
+  createOutboundRpcHandler,
+  createExtendedOutboundRpcHandler,
+
+  // Types
+  type SandboxDatabaseContext,
+  type SandboxModuleOptions,
+  type SandboxExecutionOptions,
+} from './sandbox.js';
+
+export {
+  // SQL expression evaluation
+  evaluateWhenClause,
+  sqlEquals,
+  sqlLike,
+  sqlTruthy,
+} from './sql-eval.js';

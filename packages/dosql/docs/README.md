@@ -147,7 +147,7 @@ const current = await db.query('SELECT * FROM metrics');
 
 // Query data as of 1 hour ago
 const historical = await db.query(
-  "SELECT * FROM metrics FOR SYSTEM_TIME AS OF TIMESTAMP '2024-01-01 10:00:00'"
+  "SELECT * FROM metrics FOR SYSTEM_TIME AS OF TIMESTAMP '2025-01-01 10:00:00'"
 );
 
 // Query data at specific LSN

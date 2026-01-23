@@ -333,37 +333,223 @@ export interface TransactionOptions {
 
 /**
  * Transaction-specific error codes
+ *
+ * Each error code includes recovery hints to help diagnose and resolve issues.
  */
 export enum TransactionErrorCode {
-  /** No transaction is active */
+  /**
+   * No transaction is currently active.
+   *
+   * @description Thrown when attempting to commit, rollback, or perform
+   * transaction-specific operations without an active transaction.
+   *
+   * @recovery
+   * - Call `begin()` to start a new transaction before performing operations
+   * - Check if a previous transaction was already committed or rolled back
+   * - Verify that auto-commit mode is disabled if you expect manual transaction control
+   */
   NO_ACTIVE_TRANSACTION = 'TXN_NO_ACTIVE',
-  /** Transaction already active */
+
+  /**
+   * A transaction is already in progress.
+   *
+   * @description Thrown when attempting to begin a new transaction while
+   * another transaction is already active on the same connection.
+   *
+   * @recovery
+   * - Commit or rollback the existing transaction before starting a new one
+   * - Use savepoints for nested transaction semantics instead of nested BEGIN
+   * - Check for unfinished transactions from previous operations
+   */
   TRANSACTION_ALREADY_ACTIVE = 'TXN_ALREADY_ACTIVE',
-  /** Savepoint not found */
+
+  /**
+   * The specified savepoint does not exist.
+   *
+   * @description Thrown when attempting to release or rollback to a savepoint
+   * that was never created or has already been released.
+   *
+   * @recovery
+   * - Verify the savepoint name is spelled correctly (names are case-sensitive)
+   * - Ensure the savepoint was created in the current transaction
+   * - Check if the savepoint was already released or rolled back
+   * - List active savepoints to confirm available names
+   */
   SAVEPOINT_NOT_FOUND = 'TXN_SAVEPOINT_NOT_FOUND',
-  /** Duplicate savepoint name */
+
+  /**
+   * A savepoint with the same name already exists.
+   *
+   * @description Thrown when attempting to create a savepoint with a name
+   * that is already in use within the current transaction.
+   *
+   * @recovery
+   * - Use a unique name for the new savepoint
+   * - Release the existing savepoint first if you want to reuse the name
+   * - Consider using auto-generated savepoint names (e.g., with timestamps)
+   */
   DUPLICATE_SAVEPOINT = 'TXN_DUPLICATE_SAVEPOINT',
-  /** Lock acquisition failed */
+
+  /**
+   * Failed to acquire the requested lock.
+   *
+   * @description Thrown when a lock cannot be acquired due to conflicts
+   * with other transactions holding incompatible locks.
+   *
+   * @recovery
+   * - Retry the operation after a brief delay
+   * - Use a lower isolation level if consistency requirements allow
+   * - Reduce the scope of locked resources
+   * - Consider using IMMEDIATE mode to acquire locks upfront
+   * - Check for long-running transactions that may be holding locks
+   */
   LOCK_FAILED = 'TXN_LOCK_FAILED',
-  /** Lock timeout */
+
+  /**
+   * Lock acquisition timed out.
+   *
+   * @description Thrown when the lock wait time exceeds the configured
+   * timeout threshold.
+   *
+   * @recovery
+   * - Increase the lock timeout via `lockTimeout` in TransactionOptions
+   * - Retry the operation with exponential backoff
+   * - Investigate and resolve blocking transactions
+   * - Consider breaking large transactions into smaller units
+   * - Use `NOWAIT` semantics to fail fast if immediate lock is required
+   */
   LOCK_TIMEOUT = 'TXN_LOCK_TIMEOUT',
-  /** Deadlock detected */
+
+  /**
+   * A deadlock was detected between transactions.
+   *
+   * @description Thrown when two or more transactions are waiting for
+   * locks held by each other, creating a circular dependency.
+   *
+   * @recovery
+   * - Retry the entire transaction from the beginning
+   * - Access resources in a consistent order across all transactions
+   * - Use shorter transactions to reduce deadlock probability
+   * - Consider using EXCLUSIVE mode to prevent concurrent access
+   * - Implement application-level retry logic with backoff
+   */
   DEADLOCK = 'TXN_DEADLOCK',
-  /** Serialization failure (MVCC conflict) */
+
+  /**
+   * Serialization failure due to MVCC conflict.
+   *
+   * @description Thrown when concurrent transactions modify the same data
+   * in a way that violates serializable isolation guarantees.
+   *
+   * @recovery
+   * - Retry the entire transaction from the beginning
+   * - Use a lower isolation level (e.g., READ_COMMITTED) if acceptable
+   * - Reduce transaction duration to minimize conflict windows
+   * - Partition data access patterns to avoid overlapping writes
+   * - Implement optimistic concurrency control at the application level
+   */
   SERIALIZATION_FAILURE = 'TXN_SERIALIZATION_FAILURE',
-  /** Transaction aborted */
+
+  /**
+   * The transaction was aborted.
+   *
+   * @description Thrown when a transaction is forcefully terminated,
+   * either by the system or due to an unrecoverable error.
+   *
+   * @recovery
+   * - Start a new transaction and retry the operations
+   * - Check for system-level issues (memory, disk space, etc.)
+   * - Review transaction logs for the underlying cause
+   * - Ensure proper error handling in transaction callbacks
+   */
   ABORTED = 'TXN_ABORTED',
-  /** Read-only violation */
+
+  /**
+   * Attempted to write in a read-only transaction.
+   *
+   * @description Thrown when INSERT, UPDATE, DELETE, or other write
+   * operations are attempted within a read-only transaction.
+   *
+   * @recovery
+   * - Start a new read-write transaction for write operations
+   * - Remove the `readOnly: true` option from TransactionOptions
+   * - Verify the transaction mode matches the intended operations
+   * - Use separate transactions for read and write workloads
+   */
   READ_ONLY_VIOLATION = 'TXN_READ_ONLY_VIOLATION',
-  /** Invalid state transition */
+
+  /**
+   * Invalid state transition attempted.
+   *
+   * @description Thrown when an operation is attempted that is not valid
+   * for the current transaction state (e.g., commit after rollback).
+   *
+   * @recovery
+   * - Check the current transaction state before operations
+   * - Ensure proper sequencing of transaction lifecycle methods
+   * - Do not reuse a transaction context after commit or rollback
+   * - Review the transaction state machine: NONE -> ACTIVE -> (SAVEPOINT) -> NONE
+   */
   INVALID_STATE = 'TXN_INVALID_STATE',
-  /** WAL integration failure */
+
+  /**
+   * Write-ahead log (WAL) operation failed.
+   *
+   * @description Thrown when the transaction cannot write to or read from
+   * the WAL, potentially compromising durability guarantees.
+   *
+   * @recovery
+   * - Check disk space and I/O availability
+   * - Verify WAL file permissions and accessibility
+   * - Inspect WAL configuration and file system health
+   * - Consider a system restart if WAL is corrupted
+   * - Contact support if the issue persists
+   */
   WAL_FAILURE = 'TXN_WAL_FAILURE',
-  /** Rollback failed */
+
+  /**
+   * Failed to rollback the transaction.
+   *
+   * @description Thrown when the rollback operation itself encounters
+   * an error, leaving the database in a potentially inconsistent state.
+   *
+   * @recovery
+   * - This is a critical error - investigate immediately
+   * - Check WAL integrity and available disk space
+   * - Review system logs for underlying I/O or memory errors
+   * - A database recovery procedure may be required
+   * - Consider restoring from backup if data integrity is compromised
+   */
   ROLLBACK_FAILED = 'TXN_ROLLBACK_FAILED',
-  /** Transaction timeout */
+
+  /**
+   * Transaction exceeded the maximum allowed duration.
+   *
+   * @description Thrown when a transaction runs longer than the configured
+   * timeout period, triggering automatic termination.
+   *
+   * @recovery
+   * - Increase `timeoutMs` in TransactionOptions if longer duration is needed
+   * - Break large transactions into smaller, faster units
+   * - Optimize slow queries within the transaction
+   * - Use batch processing for bulk operations
+   * - Check for external blocking factors (network, locks)
+   */
   TIMEOUT = 'TXN_TIMEOUT',
-  /** I/O operation timeout */
+
+  /**
+   * I/O operation timed out.
+   *
+   * @description Thrown when a read or write operation to storage exceeds
+   * the allowed time, typically due to system resource constraints.
+   *
+   * @recovery
+   * - Retry the operation after a brief delay
+   * - Check storage system health and responsiveness
+   * - Verify network connectivity for remote storage
+   * - Reduce I/O load by batching or throttling requests
+   * - Increase I/O timeout thresholds if storage latency is expected
+   */
   IO_TIMEOUT = 'IO_TIMEOUT',
 }
 

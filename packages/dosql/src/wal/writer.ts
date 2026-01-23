@@ -28,36 +28,10 @@ import {
   type HLCEventType,
   type HLCEventHandler,
 } from '../hlc.js';
+import { crc32 } from '../utils/crypto.js';
 
-// =============================================================================
-// CRC32 Implementation
-// =============================================================================
-
-/**
- * CRC32 lookup table for checksum calculation
- */
-const CRC32_TABLE: Uint32Array = (() => {
-  const table = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let crc = i;
-    for (let j = 0; j < 8; j++) {
-      crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
-    }
-    table[i] = crc >>> 0;
-  }
-  return table;
-})();
-
-/**
- * Calculate CRC32 checksum for data integrity
- */
-export function crc32(data: Uint8Array): number {
-  let crc = 0xffffffff;
-  for (let i = 0; i < data.length; i++) {
-    crc = CRC32_TABLE[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
+// Re-export crc32 for backward compatibility
+export { crc32 } from '../utils/crypto.js';
 
 // =============================================================================
 // WAL Encoder Implementation
@@ -517,6 +491,9 @@ export function generateTxnId(): string {
 
 /**
  * Create a new transaction
+ *
+ * @param writer - The WAL writer instance to use for recording transaction entries
+ * @returns A new WALTransaction instance with an auto-generated transaction ID
  */
 export function createTransaction(writer: WALWriter): WALTransaction {
   return new WALTransaction(generateTxnId(), writer);

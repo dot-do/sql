@@ -87,7 +87,7 @@ export interface LakeClientConfig {
   retry?: RetryConfig;
 }
 
-// RetryConfig is imported from @dotdo/shared-types via ./types.js
+// RetryConfig controls exponential backoff behavior for transient failures (network errors, rate limits)
 
 // =============================================================================
 // CapnWeb RPC Client
@@ -406,7 +406,7 @@ export class DoLakeClient implements LakeClient {
         const error = new ConnectionError({
           code: 'CONNECTION_ERROR',
           message: `WebSocket error: ${event}`,
-        });
+        }, wsUrl);
         this.emit('error', error);
         reject(error);
       });
@@ -427,7 +427,7 @@ export class DoLakeClient implements LakeClient {
           pending.reject(new ConnectionError({
             code: 'CONNECTION_CLOSED',
             message: 'Connection closed',
-          }));
+          }, wsUrl));
           this.pendingRequests.delete(id);
         }
         // Close CDC stream
@@ -1363,10 +1363,37 @@ export class LakeError extends Error {
 }
 
 /**
+ * Masks sensitive data in a URL for safe logging and error messages.
+ * @internal
+ */
+function maskUrlForClient(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) {
+      parsed.password = '***';
+    }
+    const sensitiveParams = ['token', 'key', 'secret', 'password', 'auth', 'api_key', 'apikey', 'access_token'];
+    for (const param of sensitiveParams) {
+      if (parsed.searchParams.has(param)) {
+        parsed.searchParams.set(param, '***');
+      }
+    }
+    return parsed.toString();
+  } catch {
+    const match = url.match(/^(\w+:\/\/)([^/?#]+)/);
+    if (match) {
+      return `${match[1]}${match[2]}/***`;
+    }
+    return '[invalid-url]';
+  }
+}
+
+/**
  * Error thrown when a connection operation fails.
  *
  * @description Represents connection-related errors such as connection failures,
  * timeouts, or disconnections. Extends LakeError for consistent error handling.
+ * The error message includes the URL (with sensitive data masked) for debugging.
  *
  * Common error codes:
  * - `CONNECTION_ERROR`: General connection failure
@@ -1380,6 +1407,7 @@ export class LakeError extends Error {
  * } catch (error) {
  *   if (error instanceof ConnectionError) {
  *     console.error(`Connection failed [${error.code}]: ${error.message}`);
+ *     console.error(`URL: ${error.url}`);
  *   }
  * }
  * ```
@@ -1390,13 +1418,27 @@ export class LakeError extends Error {
  */
 export class ConnectionError extends LakeError {
   /**
+   * The URL that the connection was attempted to (masked for security).
+   * May be undefined if no URL was provided.
+   */
+  readonly url?: string;
+
+  /**
    * Creates a new ConnectionError instance.
    *
    * @param error - The error details
+   * @param url - Optional URL that the connection was attempted to (will be masked)
    */
-  constructor(error: LakeRPCError) {
-    super(error);
+  constructor(error: LakeRPCError, url?: string) {
+    const maskedUrl = url ? maskUrlForClient(url) : undefined;
+    const errorWithUrl = maskedUrl
+      ? { ...error, message: `${error.message} (url: ${maskedUrl})` }
+      : error;
+    super(errorWithUrl);
     this.name = 'ConnectionError';
+    if (maskedUrl) {
+      this.url = maskedUrl;
+    }
   }
 }
 

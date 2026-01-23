@@ -1212,8 +1212,44 @@ await env.KV.put('maintenance_mode', 'true');
 
 - [ARCHITECTURE_REVIEW.md](./ARCHITECTURE_REVIEW.md) - System architecture details
 - [USE_CASES.md](./USE_CASES.md) - Common usage patterns
-- [Cloudflare Workers Security](https://developers.cloudflare.com/workers/platform/security/)
-- [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)
+
+---
+
+## Cloudflare Security Documentation References
+
+DoSQL leverages Cloudflare's security infrastructure. For comprehensive understanding of the underlying security model, consult these official Cloudflare resources:
+
+### Durable Objects Security
+
+- [Durable Objects Overview](https://developers.cloudflare.com/durable-objects/) - Core architecture and isolation model
+- [Durable Objects Security Model](https://developers.cloudflare.com/durable-objects/reference/security-model/) - How DOs provide tenant isolation and data protection
+- [Durable Objects Storage Limits](https://developers.cloudflare.com/durable-objects/platform/limits/) - Storage constraints and rate limiting
+- [Jurisdictional Restrictions](https://developers.cloudflare.com/durable-objects/reference/data-location/) - Data residency and geographic controls
+
+### R2 Access Control
+
+- [R2 Overview](https://developers.cloudflare.com/r2/) - Object storage fundamentals
+- [R2 Authentication](https://developers.cloudflare.com/r2/api/s3/tokens/) - API tokens and access credentials
+- [R2 Bucket Access](https://developers.cloudflare.com/r2/buckets/public-buckets/) - Public vs private bucket configurations
+- [R2 Encryption](https://developers.cloudflare.com/r2/reference/data-security/) - Server-side encryption at rest
+- [R2 Access Policies](https://developers.cloudflare.com/r2/api/s3/iam-policies/) - IAM-style access policies for fine-grained control
+
+### Workers Security Model
+
+- [Workers Security](https://developers.cloudflare.com/workers/platform/security/) - Runtime isolation and sandboxing
+- [Workers Runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/) - Secure cryptographic APIs available in Workers
+- [Cloudflare Access Integration](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/) - Zero-trust authentication for Workers
+- [mTLS Authentication](https://developers.cloudflare.com/cloudflare-one/identity/devices/mutual-tls-authentication/) - Mutual TLS for service-to-service security
+- [Web Application Firewall (WAF)](https://developers.cloudflare.com/waf/) - Request filtering and threat protection
+- [DDoS Protection](https://developers.cloudflare.com/ddos-protection/) - Automatic DDoS mitigation for Workers endpoints
+- [Secrets Management](https://developers.cloudflare.com/workers/configuration/secrets/) - Secure storage of API keys and credentials
+
+### Additional Security Resources
+
+- [Cloudflare Security Center](https://developers.cloudflare.com/security-center/) - Security posture monitoring
+- [Cloudflare Zero Trust](https://developers.cloudflare.com/cloudflare-one/) - Enterprise security and access control
+- [Bot Management](https://developers.cloudflare.com/bots/) - Protection against automated threats
+- [Rate Limiting](https://developers.cloudflare.com/waf/rate-limiting-rules/) - Advanced rate limiting rules
 
 ---
 

@@ -50,6 +50,18 @@ export interface CDCWriteResult {
   error?: string;
 }
 
+/**
+ * E2E-specific CDCEvent type for DoLake testing.
+ *
+ * NOTE: This differs from the canonical CDCEvent in @dotdo/sql.do:
+ * - Includes `id` field (E2E-specific event identifier for test assertions)
+ * - Operation is a simple union rather than the CDCOperation branded type
+ * - Missing optional fields like `transactionId`, `sequence`, `metadata`
+ * This is intentional - E2E tests work with the external API contract which
+ * exposes a simplified event structure for testing purposes.
+ *
+ * @see @dotdo/sql.do for the canonical CDCEvent interface
+ */
 export interface CDCEvent {
   id: string;
   table: string;
@@ -81,6 +93,10 @@ export interface LatencyMeasurement {
 export class DoLakeE2EClient {
   private config: Required<Omit<E2EClientConfig, 'token'>> & { token?: string };
 
+  /**
+   * Creates a new DoLakeE2EClient instance
+   * @param config - Client configuration options
+   */
   constructor(config: E2EClientConfig) {
     this.config = {
       timeoutMs: 30_000,
@@ -92,6 +108,8 @@ export class DoLakeE2EClient {
 
   /**
    * Get the full URL for a lakehouse endpoint
+   * @param path - The endpoint path to append to the base lakehouse URL
+   * @returns The complete URL for the lakehouse endpoint
    */
   private getLakeUrl(path: string): string {
     return `${this.config.baseUrl}/lake/${this.config.lakehouseName}${path}`;
@@ -99,6 +117,13 @@ export class DoLakeE2EClient {
 
   /**
    * Make an HTTP request with timeout and error handling
+   * @param url - The full URL to make the request to
+   * @param options - Fetch request options (method, body, headers, etc.)
+   * @returns The parsed JSON response from the server
+   *
+   * @throws {Error} When request times out after configured timeoutMs
+   * @throws {Error} When network request fails (fetch error)
+   * @throws {Error} When response JSON parsing fails
    */
   private async request<T>(
     url: string,
@@ -159,6 +184,9 @@ export class DoLakeE2EClient {
 
   /**
    * Check worker health
+   * @returns Health status of the worker including service name, version, and initialization state
+   *
+   * @throws {Error} When request times out or network fails
    */
   async health(): Promise<HealthResponse> {
     return this.request<HealthResponse>(`${this.config.baseUrl}/health`);
@@ -166,6 +194,9 @@ export class DoLakeE2EClient {
 
   /**
    * Check lakehouse health
+   * @returns Health status of the lakehouse including service name, version, and initialization state
+   *
+   * @throws {Error} When request times out or network fails
    */
   async lakehouseHealth(): Promise<HealthResponse> {
     return this.request<HealthResponse>(this.getLakeUrl('/health'));
@@ -173,6 +204,10 @@ export class DoLakeE2EClient {
 
   /**
    * Wait for the lakehouse to be ready
+   * @param timeoutMs - Maximum time to wait in milliseconds (default: 30000)
+   * @returns Resolves when the lakehouse is ready
+   *
+   * @throws {Error} When lakehouse is not ready after timeoutMs elapsed
    */
   async waitForReady(timeoutMs = 30_000): Promise<void> {
     const startTime = Date.now();
@@ -195,6 +230,9 @@ export class DoLakeE2EClient {
 
   /**
    * Ping the lakehouse and measure latency
+   * @returns Object containing the round-trip latency in milliseconds
+   *
+   * @throws {Error} When request times out or network fails
    */
   async ping(): Promise<{ latency: number }> {
     const start = performance.now();
@@ -208,6 +246,11 @@ export class DoLakeE2EClient {
 
   /**
    * Write a CDC batch to the lakehouse
+   * @param events - Array of CDC events to write
+   * @returns Result of the write operation including success status, events written count, and sequence number
+   *
+   * @throws {Error} When request times out or network fails
+   * @throws {Error} When server returns an error response
    */
   async writeCDCBatch(events: CDCEvent[]): Promise<CDCWriteResult> {
     return this.request<CDCWriteResult>(this.getLakeUrl('/cdc/write'), {
@@ -218,6 +261,10 @@ export class DoLakeE2EClient {
 
   /**
    * Acknowledge CDC events up to a sequence number
+   * @param sequenceNumber - The sequence number up to which events are acknowledged
+   * @returns Object indicating whether the acknowledgment was successful
+   *
+   * @throws {Error} When request times out or network fails
    */
   async ackCDC(sequenceNumber: number): Promise<{ success: boolean }> {
     return this.request<{ success: boolean }>(this.getLakeUrl('/cdc/ack'), {
@@ -228,6 +275,9 @@ export class DoLakeE2EClient {
 
   /**
    * Get CDC stream state
+   * @returns Current CDC stream state including last sequence number, last acked sequence number, and pending events count
+   *
+   * @throws {Error} When request times out or network fails
    */
   async getCDCState(): Promise<{
     lastSequenceNumber: number;
@@ -243,6 +293,12 @@ export class DoLakeE2EClient {
 
   /**
    * Execute a SQL query against the lakehouse
+   * @param sql - The SQL query string to execute
+   * @param options - Query options including time travel (asOf) and partition filtering
+   * @returns Query result containing rows of type T and metadata
+   *
+   * @throws {Error} When request times out or network fails
+   * @throws {Error} When SQL query is invalid or execution fails
    */
   async query<T = Record<string, unknown>>(
     sql: string,
@@ -264,6 +320,11 @@ export class DoLakeE2EClient {
 
   /**
    * Get table metadata
+   * @param tableName - The name of the table to get metadata for
+   * @returns Metadata for the specified table including schema, partitioning, and properties
+   *
+   * @throws {Error} When request times out or network fails
+   * @throws {Error} When table does not exist
    */
   async getMetadata(tableName: string): Promise<TableMetadata> {
     return this.request<TableMetadata>(this.getLakeUrl(`/tables/${tableName}/metadata`));
@@ -271,6 +332,9 @@ export class DoLakeE2EClient {
 
   /**
    * List all tables
+   * @returns Array of table names in the lakehouse
+   *
+   * @throws {Error} When request times out or network fails
    */
   async listTables(): Promise<string[]> {
     const result = await this.request<{ tables: string[] }>(this.getLakeUrl('/tables'));
@@ -279,6 +343,11 @@ export class DoLakeE2EClient {
 
   /**
    * List partitions for a table
+   * @param tableName - The name of the table to list partitions for
+   * @returns Array of partition information for the specified table
+   *
+   * @throws {Error} When request times out or network fails
+   * @throws {Error} When table does not exist
    */
   async listPartitions(tableName: string): Promise<PartitionInfo[]> {
     return this.request<PartitionInfo[]>(this.getLakeUrl(`/tables/${tableName}/partitions`));
@@ -286,6 +355,11 @@ export class DoLakeE2EClient {
 
   /**
    * List snapshots for a table
+   * @param tableName - The name of the table to list snapshots for
+   * @returns Array of snapshots for the specified table
+   *
+   * @throws {Error} When request times out or network fails
+   * @throws {Error} When table does not exist
    */
   async listSnapshots(tableName: string): Promise<Snapshot[]> {
     return this.request<Snapshot[]>(this.getLakeUrl(`/tables/${tableName}/snapshots`));
@@ -297,6 +371,14 @@ export class DoLakeE2EClient {
 
   /**
    * Trigger compaction for a partition
+   * @param tableName - The name of the table containing the partition
+   * @param partitionKey - The partition key to compact
+   * @param config - Optional compaction configuration (target file size, max files)
+   * @returns The compaction job that was created
+   *
+   * @throws {Error} When request times out or network fails
+   * @throws {Error} When table or partition does not exist
+   * @throws {Error} When compaction job creation fails
    */
   async compact(
     tableName: string,
@@ -314,6 +396,11 @@ export class DoLakeE2EClient {
 
   /**
    * Get compaction job status
+   * @param jobId - The ID of the compaction job to check
+   * @returns Current status of the compaction job
+   *
+   * @throws {Error} When request times out or network fails
+   * @throws {Error} When compaction job does not exist
    */
   async getCompactionStatus(jobId: string): Promise<CompactionJob> {
     return this.request<CompactionJob>(this.getLakeUrl(`/compaction/${jobId}`));
@@ -325,6 +412,11 @@ export class DoLakeE2EClient {
 
   /**
    * Measure latency for an operation
+   * @param operation - The async operation to measure
+   * @param iterations - Number of times to run the operation (default: 100)
+   * @returns Latency statistics including percentiles (p50, p95, p99), min, max, avg, and all samples
+   *
+   * @throws {Error} When the provided operation throws an error
    */
   async measureLatency(
     operation: () => Promise<unknown>,
@@ -354,6 +446,12 @@ export class DoLakeE2EClient {
     };
   }
 
+  /**
+   * Calculate a percentile value from a sorted array
+   * @param sorted - The sorted array of numbers
+   * @param p - The percentile to calculate (0-100)
+   * @returns The value at the specified percentile
+   */
   private percentile(sorted: number[], p: number): number {
     const index = Math.ceil((p / 100) * sorted.length) - 1;
     return sorted[Math.max(0, index)];
@@ -361,6 +459,10 @@ export class DoLakeE2EClient {
 
   /**
    * Measure cold start latency
+   * @param iterations - Number of cold start measurements to take (default: 5)
+   * @returns Latency statistics for cold starts including percentiles (p50, p95, p99), min, max, avg, and all samples
+   *
+   * @throws {Error} When network request fails
    */
   async measureColdStart(iterations = 5): Promise<LatencyMeasurement> {
     const samples: number[] = [];
@@ -408,6 +510,10 @@ export class DoLakeWebSocketClient {
   private waitingResolvers: Array<(batch: CDCBatch) => void> = [];
   private connected = false;
 
+  /**
+   * Creates a new DoLakeWebSocketClient instance
+   * @param config - Client configuration options
+   */
   constructor(config: E2EClientConfig) {
     this.config = {
       timeoutMs: 30_000,
@@ -419,6 +525,10 @@ export class DoLakeWebSocketClient {
 
   /**
    * Connect to the WebSocket endpoint
+   * @returns Resolves when the WebSocket connection is established
+   *
+   * @throws {Error} When connection times out after configured timeoutMs
+   * @throws {Error} When WebSocket connection fails
    */
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -487,6 +597,10 @@ export class DoLakeWebSocketClient {
 
   /**
    * Subscribe to CDC events
+   * @param options - Subscription options for filtering CDC events
+   * @returns Resolves when the subscription message has been sent
+   *
+   * @throws {Error} When WebSocket is not connected
    */
   async subscribe(options: CDCStreamOptions = {}): Promise<void> {
     if (!this.ws || !this.connected) {
@@ -503,6 +617,7 @@ export class DoLakeWebSocketClient {
 
   /**
    * Unsubscribe from CDC events
+   * @returns Resolves when the unsubscription message has been sent (no-op if not connected)
    */
   async unsubscribe(): Promise<void> {
     if (!this.ws || !this.connected) {
@@ -514,6 +629,10 @@ export class DoLakeWebSocketClient {
 
   /**
    * Wait for the next CDC batch
+   * @param timeoutMs - Maximum time to wait for a batch in milliseconds (default: 10000)
+   * @returns The next CDC batch received from the stream
+   *
+   * @throws {Error} When timeout expires before receiving a batch
    */
   async nextBatch(timeoutMs = 10_000): Promise<CDCBatch> {
     // Check queue first
@@ -541,6 +660,8 @@ export class DoLakeWebSocketClient {
 
   /**
    * Collect batches for a duration
+   * @param durationMs - Duration in milliseconds to collect batches
+   * @returns Array of CDC batches collected during the specified duration
    */
   async collectBatches(durationMs: number): Promise<CDCBatch[]> {
     const batches: CDCBatch[] = [...this.messageQueue];
@@ -562,6 +683,7 @@ export class DoLakeWebSocketClient {
 
   /**
    * Check if connected
+   * @returns True if the WebSocket is currently connected
    */
   isConnected(): boolean {
     return this.connected;
@@ -569,6 +691,7 @@ export class DoLakeWebSocketClient {
 
   /**
    * Close the connection
+   * @returns void
    */
   close(): void {
     if (this.ws) {
@@ -587,6 +710,10 @@ export class DoLakeWebSocketClient {
 
 /**
  * Create a new E2E client for a test lakehouse
+ * @param baseUrl - The base URL of the DoLake worker
+ * @param testName - A name for this test (used to generate unique lakehouse name)
+ * @param options - Optional configuration (debug mode, auth token)
+ * @returns A configured DoLakeE2EClient instance with a unique lakehouse name for testing
  */
 export function createTestClient(
   baseUrl: string,
@@ -604,6 +731,16 @@ export function createTestClient(
 
 /**
  * Retry an operation with exponential backoff
+ * @param operation - The async operation to retry
+ * @param options - Retry configuration options
+ * @param options.maxAttempts - Maximum number of retry attempts (default: 3)
+ * @param options.initialDelayMs - Initial delay between retries in milliseconds (default: 100)
+ * @param options.maxDelayMs - Maximum delay between retries in milliseconds (default: 5000)
+ * @param options.retryOn - Predicate function to determine if error should trigger retry
+ * @returns The result of the operation if successful
+ *
+ * @throws {Error} When max attempts exceeded and operation still fails
+ * @throws {Error} When retryOn predicate returns false for an error
  */
 export async function retry<T>(
   operation: () => Promise<T>,
@@ -644,6 +781,10 @@ export async function retry<T>(
 
 /**
  * Generate mock CDC events for testing
+ * @param table - The table name for the generated events
+ * @param count - Number of events to generate
+ * @param operation - The CDC operation type (default: 'INSERT')
+ * @returns Array of mock CDC events with sequential timestamps and LSN values
  */
 export function generateCDCEvents(
   table: string,

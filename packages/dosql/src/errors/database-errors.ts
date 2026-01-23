@@ -159,6 +159,26 @@ registerErrorClass('ReadOnlyError', ReadOnlyError);
 
 /**
  * Create a DatabaseError for a closed database
+ *
+ * @example
+ * ```typescript
+ * // Basic usage
+ * throw createClosedDatabaseError();
+ *
+ * // With database name for context
+ * throw createClosedDatabaseError('my_app.db');
+ *
+ * // In a database wrapper
+ * class Database {
+ *   private closed = false;
+ *
+ *   ensureOpen() {
+ *     if (this.closed) {
+ *       throw createClosedDatabaseError(this.name);
+ *     }
+ *   }
+ * }
+ * ```
  */
 export function createClosedDatabaseError(databaseName?: string): DatabaseError {
   const error = new DatabaseError(
@@ -173,6 +193,23 @@ export function createClosedDatabaseError(databaseName?: string): DatabaseError 
 
 /**
  * Create a DatabaseError for savepoint not found
+ *
+ * @example
+ * ```typescript
+ * // When releasing a non-existent savepoint
+ * const savepointName = 'sp_backup';
+ * if (!savepoints.has(savepointName)) {
+ *   throw createSavepointNotFoundError(savepointName);
+ * }
+ *
+ * // In transaction management
+ * function releaseSavepoint(name: string) {
+ *   if (!this.activeSavepoints.includes(name)) {
+ *     throw createSavepointNotFoundError(name);
+ *   }
+ *   // ... release logic
+ * }
+ * ```
  */
 export function createSavepointNotFoundError(name: string): DatabaseError {
   return new DatabaseError(

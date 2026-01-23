@@ -173,9 +173,11 @@ export class CDCBufferManager {
     // Check buffer capacity
     const currentSize = this.getTotalSizeBytes();
     if (currentSize + sizeBytes > this.config.maxBufferSize) {
-      throw new BufferOverflowError(
-        `Buffer full: ${currentSize + sizeBytes} > ${this.config.maxBufferSize}`
-      );
+      throw new BufferOverflowError({
+        currentSizeBytes: currentSize,
+        maxSizeBytes: this.config.maxBufferSize,
+        attemptedBatchSizeBytes: sizeBytes,
+      });
     }
 
     // Create buffered batch

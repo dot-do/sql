@@ -160,6 +160,31 @@ registerErrorClass('ExecuteError', ExecuteError);
 
 /**
  * Create a StatementError for finalized statement
+ *
+ * @example
+ * ```typescript
+ * // Guard against using finalized statements
+ * class PreparedStatement {
+ *   private finalized = false;
+ *
+ *   run() {
+ *     if (this.finalized) {
+ *       throw createFinalizedStatementError(this.sql);
+ *     }
+ *     // ... execute
+ *   }
+ *
+ *   finalize() {
+ *     this.finalized = true;
+ *   }
+ * }
+ *
+ * // Without SQL context
+ * throw createFinalizedStatementError();
+ *
+ * // With SQL context for debugging
+ * throw createFinalizedStatementError('SELECT * FROM users WHERE id = ?');
+ * ```
  */
 export function createFinalizedStatementError(sql?: string): StatementError {
   return new StatementError(
@@ -171,6 +196,29 @@ export function createFinalizedStatementError(sql?: string): StatementError {
 
 /**
  * Create a StatementError for table not found
+ *
+ * @example
+ * ```typescript
+ * // When validating table existence
+ * function validateTable(tableName: string) {
+ *   if (!tableExists(tableName)) {
+ *     throw createTableNotFoundError(tableName);
+ *   }
+ * }
+ *
+ * // With SQL context
+ * const sql = 'SELECT * FROM nonexistent_table';
+ * throw createTableNotFoundError('nonexistent_table', sql);
+ *
+ * // In query execution
+ * try {
+ *   executeQuery(sql);
+ * } catch (e) {
+ *   if (isTableMissing(e)) {
+ *     throw createTableNotFoundError(extractTableName(sql), sql);
+ *   }
+ * }
+ * ```
  */
 export function createTableNotFoundError(tableName: string, sql?: string): StatementError {
   return new StatementError(
@@ -183,6 +231,25 @@ export function createTableNotFoundError(tableName: string, sql?: string): State
 
 /**
  * Create a StatementError for unsupported SQL
+ *
+ * @example
+ * ```typescript
+ * // When encountering unsupported SQL features
+ * function validateSQL(sql: string) {
+ *   if (sql.includes('RECURSIVE')) {
+ *     throw createUnsupportedSqlError(sql);
+ *   }
+ * }
+ *
+ * // In a parser/executor
+ * switch (statement.type) {
+ *   case 'SELECT':
+ *   case 'INSERT':
+ *     return execute(statement);
+ *   default:
+ *     throw createUnsupportedSqlError(sql);
+ * }
+ * ```
  */
 export function createUnsupportedSqlError(sql: string): StatementError {
   return new StatementError(

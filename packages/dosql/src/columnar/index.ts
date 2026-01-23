@@ -4,6 +4,64 @@
  * A columnar OLAP storage engine for analytics queries.
  * Supports multiple encodings, zone map filtering, and projection/predicate pushdown.
  *
+ * @example OLAP Query with Projection Pushdown
+ * ```typescript
+ * import {
+ *   ColumnarWriter,
+ *   ColumnarReader,
+ *   type ColumnarTableSchema,
+ *   type ReadRequest,
+ * } from '@dotdo/dosql/columnar';
+ *
+ * // Define schema for sales analytics
+ * const schema: ColumnarTableSchema = {
+ *   columns: [
+ *     { name: 'order_id', type: 'int64' },
+ *     { name: 'product_id', type: 'int32' },
+ *     { name: 'customer_id', type: 'int32' },
+ *     { name: 'quantity', type: 'int32' },
+ *     { name: 'unit_price', type: 'float64' },
+ *     { name: 'region', type: 'string' },
+ *     { name: 'order_date', type: 'int64' }, // Unix timestamp
+ *   ],
+ * };
+ *
+ * // Write columnar data with automatic encoding selection
+ * const writer = new ColumnarWriter(fsx, schema, {
+ *   targetRowGroupSize: 64 * 1024, // 64KB row groups
+ *   autoSelectEncoding: true,       // Dictionary, RLE, or Delta based on data
+ * });
+ *
+ * await writer.write({
+ *   tableName: 'sales',
+ *   rows: salesData,
+ * });
+ *
+ * // OLAP query with projection pushdown - only reads 'region' and 'quantity' columns
+ * // Predicate pushdown uses zone maps to skip row groups where region != 'WEST'
+ * const reader = new ColumnarReader(fsx, schema);
+ *
+ * const request: ReadRequest = {
+ *   tableName: 'sales',
+ *   // Projection pushdown: only load these columns from storage
+ *   projection: ['region', 'quantity'],
+ *   // Predicate pushdown: skip row groups using zone map min/max stats
+ *   predicates: [
+ *     { column: 'region', op: 'eq', value: 'WEST' },
+ *     { column: 'quantity', op: 'gte', value: 10 },
+ *   ],
+ * };
+ *
+ * const result = await reader.scan(request);
+ *
+ * // Aggregate directly from column stats when possible (no row scan needed)
+ * const totalQuantity = aggregateSumFromStats(result.metadata, 'quantity');
+ * const orderCount = aggregateCountFromStats(result.metadata);
+ * const { min: minQty, max: maxQty } = aggregateMinMaxFromStats(result.metadata, 'quantity');
+ *
+ * console.log(`WEST region: ${orderCount} orders, ${totalQuantity} units (${minQty}-${maxQty} per order)`);
+ * ```
+ *
  * @packageDocumentation
  */
 

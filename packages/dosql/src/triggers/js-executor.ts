@@ -26,6 +26,11 @@ import type {
 } from './types.js';
 import { TriggerError, TriggerErrorCode } from './types.js';
 import type { DatabaseContext, DatabaseSchema } from '../proc/types.js';
+import {
+  buildSandboxModule,
+  createOutboundRpcHandler,
+  type SandboxDatabaseContext,
+} from '../utils/sandbox.js';
 
 // =============================================================================
 // Executor Options
@@ -140,71 +145,8 @@ export async function executeDirectly<T extends Record<string, unknown>>(
 // Sandboxed Execution
 // =============================================================================
 
-/**
- * Build module wrapper for sandboxed execution
- */
-export function buildSandboxModule(
-  handlerCode: string,
-  tableNames: string[]
-): string {
-  const tableAccessors = tableNames.map(name => `
-    ${name}: {
-      async get(key) { return __dbCall('${name}', 'get', [key]); },
-      async where(predicate, options) {
-        if (typeof predicate === 'function') {
-          const all = await __dbCall('${name}', 'all', []);
-          return all.filter(predicate);
-        }
-        return __dbCall('${name}', 'where', [predicate, options]);
-      },
-      async all(options) { return __dbCall('${name}', 'all', [options]); },
-      async count(predicate) {
-        if (typeof predicate === 'function') {
-          const all = await __dbCall('${name}', 'all', []);
-          return all.filter(predicate).length;
-        }
-        return __dbCall('${name}', 'count', [predicate]);
-      },
-      async insert(record) { return __dbCall('${name}', 'insert', [record]); },
-      async update(predicate, changes) {
-        if (typeof predicate === 'function') {
-          throw new Error('Function predicates not supported for update');
-        }
-        return __dbCall('${name}', 'update', [predicate, changes]);
-      },
-      async delete(predicate) {
-        if (typeof predicate === 'function') {
-          throw new Error('Function predicates not supported for delete');
-        }
-        return __dbCall('${name}', 'delete', [predicate]);
-      },
-    }`).join(',\n');
-
-  return `
-async function __dbCall(table, method, args) {
-  const response = await fetch('db://internal/call', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table, method, args }),
-  });
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(\`Database error: \${error}\`);
-  }
-  return response.json();
-}
-
-const db = {
-  tables: { ${tableAccessors} },
-};
-
-${tableNames.map(name => `db.${name} = db.tables.${name};`).join('\n')}
-
-const handler = ${handlerCode};
-
-export default handler;
-`;
-}
+// Re-export buildSandboxModule for backward compatibility
+export { buildSandboxModule } from '../utils/sandbox.js';
 
 /**
  * Execute a trigger handler in a sandbox
@@ -235,43 +177,8 @@ export async function executeSandboxed<T extends Record<string, unknown>>(
     return handler(ctx);
   `;
 
-  // Create outbound RPC handler for database operations
-  const outboundRpc = (url: string, request: Request): Response | Promise<Response> | null => {
-    if (!url.startsWith('db://internal/')) {
-      return null;
-    }
-
-    const path = url.replace('db://internal/', '');
-
-    return (async (): Promise<Response> => {
-      try {
-        if (path === 'call') {
-          const body = await request.json() as { table: string; method: string; args: unknown[] };
-          const { table, method, args } = body;
-
-          const tableAccessor = db.tables[table as keyof typeof db.tables];
-          if (!tableAccessor) {
-            return new Response(`Table '${table}' not found`, { status: 404 });
-          }
-
-          const fn = (tableAccessor as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[method];
-          if (typeof fn !== 'function') {
-            return new Response(`Method '${method}' not found`, { status: 404 });
-          }
-
-          const result = await fn.apply(tableAccessor, args);
-          return new Response(JSON.stringify(result), {
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
-
-        return new Response(`Unknown path: ${path}`, { status: 404 });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return new Response(message, { status: 500 });
-      }
-    })();
-  };
+  // Use shared outbound RPC handler
+  const outboundRpc = createOutboundRpcHandler(db as unknown as SandboxDatabaseContext);
 
   const evalOptions: EvaluateOptions = {
     module: moduleCode,

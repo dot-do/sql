@@ -28,6 +28,88 @@ import type {
 // Re-export Unified Types from shared-types
 // =============================================================================
 
+/**
+ * Re-exported types from `@dotdo/sql.do` (which re-exports from `@dotdo/shared-types`).
+ *
+ * These types are re-exported for server-side RPC implementation. Using the same
+ * type definitions ensures wire-level compatibility between clients and servers.
+ *
+ * ## Column Types
+ *
+ * Types for SQL column definitions and conversions:
+ *
+ * - {@link ColumnType} - Unified column type (SQL and JS representations)
+ * - {@link SQLColumnType} - SQL-style types (INTEGER, TEXT, etc.)
+ * - {@link JSColumnType} - JavaScript-style types (string, number, etc.)
+ * - `SQL_TO_JS_TYPE_MAP` / `JS_TO_SQL_TYPE_MAP` - Type mappings
+ * - `sqlToJsType()` / `jsToSqlType()` - Type conversion functions
+ *
+ * ## Query Types
+ *
+ * Core types for query execution:
+ *
+ * - {@link QueryRequest} - Request structure for SQL queries
+ * - {@link QueryResponse} - Server response with results
+ * - {@link QueryResult} - Client-facing result format
+ * - {@link QueryOptions} - Query execution options
+ *
+ * ## CDC Types
+ *
+ * Change Data Capture types for replication:
+ *
+ * - {@link CDCOperation} - Operation types (INSERT, UPDATE, DELETE, TRUNCATE)
+ * - {@link CDCEvent} - Change event with before/after data
+ * - `CDCOperationCode` - Numeric codes for binary encoding
+ *
+ * ## Transaction Types
+ *
+ * Types for transaction management:
+ *
+ * - {@link IsolationLevel} - All isolation levels
+ * - {@link ServerIsolationLevel} - Server-supported isolation levels
+ * - {@link TransactionOptions} - Options for beginning transactions
+ * - {@link TransactionState} - Current transaction state
+ * - {@link TransactionHandle} - Handle returned after begin
+ *
+ * ## RPC Types
+ *
+ * Types for the RPC protocol:
+ *
+ * - `RPCErrorCode` - Standard error codes enum
+ * - {@link RPCError} - Error structure
+ * - {@link RPCRequest} - Request envelope
+ * - {@link RPCResponse} - Response envelope
+ *
+ * ## Client Capabilities
+ *
+ * Protocol negotiation types:
+ *
+ * - {@link ClientCapabilities} - Client capability flags
+ * - `DEFAULT_CLIENT_CAPABILITIES` - Default capability values
+ *
+ * ## Connection Types
+ *
+ * Types for connection management:
+ *
+ * - {@link ConnectionOptions} - Connection configuration
+ * - {@link ConnectionStats} - Connection statistics
+ *
+ * ## Type Guards and Converters
+ *
+ * Utility functions for type checking and conversion:
+ *
+ * - `isServerCDCEvent()` / `isClientCDCEvent()` - CDC format detection
+ * - `isDateTimestamp()` / `isNumericTimestamp()` - Timestamp format detection
+ * - `serverToClientCDCEvent()` / `clientToServerCDCEvent()` - CDC format conversion
+ * - `responseToResult()` / `resultToResponse()` - Query result conversion
+ *
+ * @see {@link https://github.com/dotdo/sql.do | @dotdo/sql.do} for client types
+ * @see {@link https://github.com/dotdo/shared-types | @dotdo/shared-types} for canonical definitions
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
 export {
   // Column Types
   type ColumnType,
@@ -92,6 +174,27 @@ export {
  *
  * Used for large result sets that should be streamed
  * rather than returned in a single response.
+ *
+ * @example
+ * ```typescript
+ * // Stream large query results in chunks of 1000 rows
+ * const streamRequest: StreamRequest = {
+ *   sql: 'SELECT * FROM events WHERE timestamp > ?',
+ *   params: ['2024-01-01'],
+ *   chunkSize: 1000,
+ *   maxRows: 100000,
+ *   branch: 'main'
+ * };
+ *
+ * // Process chunks as they arrive
+ * for await (const chunk of client.queryStream(streamRequest)) {
+ *   console.log(`Received chunk ${chunk.chunkIndex} with ${chunk.rowCount} rows`);
+ *   processRows(chunk.rows);
+ *   if (chunk.isLast) {
+ *     console.log(`Stream complete: ${chunk.totalRowsSoFar} total rows`);
+ *   }
+ * }
+ * ```
  */
 export interface StreamRequest {
   /** SQL query string */

@@ -65,22 +65,72 @@ export interface StoredBlob {
 // =============================================================================
 
 /**
- * Branch metadata
+ * Branch metadata representing an isolated line of development.
+ *
+ * Branches in COW-FSX provide git-like isolation where changes are tracked independently
+ * until explicitly merged. Key characteristics:
+ *
+ * ## Copy-on-Write Semantics
+ *
+ * When a branch is created, it shares all existing blobs with its parent branch via
+ * references (no data is copied). Only when a blob is modified does a new copy get
+ * created for that specific blob. This makes branch creation O(1) regardless of data size.
+ *
+ * ## Branch Hierarchy and Merge Ancestry
+ *
+ * Branches form a tree structure via the `parent` field:
+ *
+ * ```
+ *           main (parent: null)
+ *          /    \
+ *    feature1   feature2
+ *        |
+ *    sub-feature
+ * ```
+ *
+ * The `parent` and `baseSnapshot` fields are crucial for merge operations:
+ * - `parent`: Defines the branch hierarchy for finding common ancestors
+ * - `baseSnapshot`: The exact point-in-time state this branch forked from
+ *
+ * When merging, the common ancestor is determined by walking up the parent chain
+ * and using the baseSnapshot to know the exact state at fork time.
+ *
+ * ## Version Tracking
+ *
+ * `headVersion` is incremented on every write operation to the branch. This enables:
+ * - Optimistic concurrency control (compare-and-swap)
+ * - Efficient change detection (version differs = content differs)
+ * - Snapshot creation at specific versions
+ *
+ * ## Read-Only Branches
+ *
+ * When `readonly` is true, the branch is archived and cannot receive writes.
+ * Useful for:
+ * - Creating stable release branches
+ * - Preserving historical states
+ * - Preventing accidental modifications
+ *
+ * Attempting to write to a readonly branch throws COWError with BRANCH_READONLY code.
+ *
+ * @see BranchOptions - Options when creating a branch
+ * @see MergeStrategy - How conflicts are resolved when merging branches
+ * @see FSXWithCOW.branch - Method to create a new branch
+ * @see FSXWithCOW.merge - Method to merge branches
  */
 export interface Branch {
-  /** Branch name */
+  /** Unique branch name (e.g., 'main', 'feature/auth', 'experiment-1') */
   name: string;
-  /** Parent branch (null for root/main) */
+  /** Parent branch name, or null for the root branch (typically 'main') */
   parent: string | null;
-  /** Snapshot ID this branch was created from */
+  /** Snapshot ID capturing the exact state when this branch was created */
   baseSnapshot: SnapshotId | null;
-  /** Creation timestamp */
+  /** Unix timestamp (ms) when the branch was created */
   createdAt: number;
-  /** Last modified timestamp */
+  /** Unix timestamp (ms) of the most recent write to this branch */
   modifiedAt: number;
-  /** Head version number */
+  /** Monotonically increasing version, incremented on each write */
   headVersion: number;
-  /** Whether branch is read-only (archived) */
+  /** If true, branch is archived and rejects all write operations */
   readonly: boolean;
 }
 
@@ -173,63 +223,259 @@ export interface SnapshotManifest {
 // =============================================================================
 
 /**
- * Strategy for resolving merge conflicts
+ * Strategy for resolving merge conflicts when merging branches.
+ *
+ * Merge conflicts occur when the same path has been modified in both the source
+ * and target branches since they diverged from their common ancestor. The merge
+ * strategy determines how these conflicts are automatically resolved.
+ *
+ * ## Strategy Details
+ *
+ * ### 'ours'
+ * Always keeps the target branch's version when a conflict occurs.
+ * - Use when: The target branch is authoritative and source changes should not override
+ * - Example: Merging experimental changes into a stable branch where stability is paramount
+ * - Behavior: Source-only additions are merged, but conflicting modifications use target's version
+ *
+ * ### 'theirs'
+ * Always keeps the source branch's version when a conflict occurs.
+ * - Use when: The source branch has the desired state and should override target
+ * - Example: Merging a reviewed feature branch where all changes are intentional
+ * - Behavior: Target-only additions are preserved, but conflicting modifications use source's version
+ *
+ * ### 'last-write-wins'
+ * Keeps whichever version was modified most recently based on modifiedAt timestamp.
+ * - Use when: Temporal ordering is a reasonable proxy for intent (common in real-time systems)
+ * - Example: Syncing distributed caches where the latest write represents current truth
+ * - Behavior: Each conflict is resolved independently based on modification timestamps
+ * - Note: Requires accurate, synchronized clocks across writers for reliable results
+ *
+ * ### 'fail-on-conflict'
+ * Aborts the merge if any conflicts are detected, leaving both branches unchanged.
+ * - Use when: Manual review of conflicts is required before proceeding
+ * - Example: Production deployments where unexpected conflicts indicate coordination issues
+ * - Behavior: Returns MergeResult with success=false and populated conflicts array
+ * - Recommended: Use diff() first to preview conflicts before attempting merge
+ *
+ * ## Conflict Resolution Flow
+ *
+ * ```
+ * 1. Compute common ancestor (base) from branch history
+ * 2. Three-way diff: base vs source, base vs target
+ * 3. For each path:
+ *    - Changed in source only -> apply source change
+ *    - Changed in target only -> keep target change
+ *    - Changed in both (CONFLICT) -> apply strategy
+ *    - Deleted in one, modified in other (CONFLICT) -> apply strategy
+ * 4. If strategy='fail-on-conflict' and conflicts exist -> abort
+ * 5. Otherwise -> create merged snapshot
+ * ```
+ *
+ * @see MergeConflict - Structure representing a detected conflict
+ * @see MergeResult - Result of a merge operation including any conflicts
+ * @see FSXWithCOW.merge - Method that performs the merge using this strategy
+ * @see FSXWithCOW.diff - Method to preview differences before merging
  */
 export type MergeStrategy =
-  | 'ours'           // Keep our version
-  | 'theirs'         // Keep their version
-  | 'last-write-wins' // Keep most recently modified
-  | 'fail-on-conflict'; // Fail if any conflicts exist
+  | 'ours'
+  | 'theirs'
+  | 'last-write-wins'
+  | 'fail-on-conflict';
 
 /**
- * Result of comparing two branches
+ * Result of comparing two branches, categorizing all paths by their state.
+ *
+ * This is returned by the diff() operation and provides a complete picture of
+ * how two branches have diverged. It's useful for:
+ * - Previewing merge operations before executing them
+ * - Understanding what changes a merge will introduce
+ * - Identifying potential conflicts (paths in 'modified' may conflict)
+ *
+ * ## Category Definitions
+ *
+ * - **added**: Paths that exist in source but not in target. These will be
+ *   copied to target during merge.
+ *
+ * - **removed**: Paths that exist in target but not in source. During merge,
+ *   behavior depends on whether target modified these since the common ancestor.
+ *
+ * - **modified**: Paths that exist in both branches but have different content
+ *   (different version numbers or hashes). These are potential conflict sites.
+ *
+ * - **unchanged**: Paths that are identical in both branches. No action needed
+ *   during merge.
+ *
+ * ## Example Usage
+ *
+ * ```typescript
+ * const diff = await fsx.diff('feature-branch', 'main');
+ *
+ * console.log(`New files: ${diff.added.length}`);
+ * console.log(`Deleted files: ${diff.removed.length}`);
+ * console.log(`Potential conflicts: ${diff.modified.length}`);
+ *
+ * if (diff.modified.length > 0) {
+ *   console.log('Modified paths that may conflict:', diff.modified);
+ *   // Consider using 'fail-on-conflict' strategy to review
+ * }
+ * ```
+ *
+ * @see MergeStrategy - How to resolve conflicts in modified paths
+ * @see FSXWithCOW.diff - Method that produces this diff
  */
 export interface BranchDiff {
-  /** Paths that exist only in source */
+  /** Paths that exist only in source branch (will be added to target on merge) */
   added: string[];
-  /** Paths that exist only in target */
+  /** Paths that exist only in target branch (source deletions or target additions) */
   removed: string[];
-  /** Paths that exist in both but differ */
+  /** Paths that exist in both branches but have different content (potential conflicts) */
   modified: string[];
-  /** Paths that are identical */
+  /** Paths that are identical in both branches (no merge action needed) */
   unchanged: string[];
 }
 
 /**
- * A merge conflict
+ * Represents a merge conflict between two branches.
+ *
+ * A conflict occurs when the same path has been modified in both the source and
+ * target branches since they diverged from their common ancestor. This structure
+ * provides all the information needed to understand and resolve the conflict.
+ *
+ * ## Conflict Detection
+ *
+ * Conflicts are detected using three-way merge semantics:
+ *
+ * ```
+ *        base (common ancestor)
+ *       /                      \
+ *      v                        v
+ *   source                   target
+ * (sourceVersion)         (targetVersion)
+ * ```
+ *
+ * A conflict exists when:
+ * 1. Path exists in both source and target
+ * 2. Both versions differ from base (both branches modified the path)
+ * 3. Source version differs from target version
+ *
+ * ## Using Conflict Information
+ *
+ * - **baseVersion**: If present, this was the version before either branch modified
+ *   the path. Useful for understanding what changed on each side.
+ *
+ * - **sourceModifiedAt / targetModifiedAt**: Timestamps when each branch last
+ *   modified the path. Used by 'last-write-wins' strategy. Also useful for
+ *   manual conflict resolution to understand timing.
+ *
+ * - **sourceVersion / targetVersion**: The version numbers in each branch.
+ *   Higher versions indicate more writes, which may be relevant for resolution.
+ *
+ * ## Example: Manual Conflict Resolution
+ *
+ * ```typescript
+ * const result = await fsx.merge('feature', 'main', 'fail-on-conflict');
+ *
+ * if (!result.success) {
+ *   for (const conflict of result.conflicts) {
+ *     const sourceData = await fsx.readFrom(conflict.path, 'feature');
+ *     const targetData = await fsx.readFrom(conflict.path, 'main');
+ *
+ *     // Compare data and decide which to keep, or merge manually
+ *     const resolved = manuallyMerge(sourceData, targetData);
+ *     await fsx.writeTo(conflict.path, resolved, 'main');
+ *   }
+ *
+ *   // Retry merge after manual resolution
+ *   await fsx.merge('feature', 'main', 'ours');
+ * }
+ * ```
+ *
+ * @see MergeStrategy - Automatic conflict resolution strategies
+ * @see MergeResult - Contains array of conflicts when merge fails or has resolved conflicts
  */
 export interface MergeConflict {
-  /** Path with conflict */
+  /** Path where the conflict occurred */
   path: string;
-  /** Source branch version */
+  /** Version number of this path in the source branch */
   sourceVersion: number;
-  /** Target branch version */
+  /** Version number of this path in the target branch */
   targetVersion: number;
-  /** Base version (common ancestor) */
+  /** Version number at the common ancestor (if determinable) */
   baseVersion?: number;
-  /** Source modification time */
+  /** Timestamp when source branch last modified this path */
   sourceModifiedAt: number;
-  /** Target modification time */
+  /** Timestamp when target branch last modified this path */
   targetModifiedAt: number;
 }
 
 /**
- * Result of a merge operation
+ * Result of a merge operation, containing outcome details and any conflicts.
+ *
+ * This structure provides complete information about what happened during a merge,
+ * whether it succeeded or failed, and what changes were applied.
+ *
+ * ## Success vs Failure
+ *
+ * - **success=true**: Merge completed. All conflicts (if any) were resolved using
+ *   the specified strategy. A new snapshot was created on the target branch.
+ *
+ * - **success=false**: Merge aborted. Only happens with 'fail-on-conflict' strategy
+ *   when conflicts exist. Both branches remain unchanged. The conflicts array
+ *   contains all detected conflicts for review.
+ *
+ * ## Understanding the Result
+ *
+ * ```typescript
+ * const result = await fsx.merge('feature', 'main', 'last-write-wins');
+ *
+ * if (result.success) {
+ *   console.log(`Merged ${result.merged} blobs`);
+ *   console.log(`Updated paths: ${result.updated.join(', ')}`);
+ *   console.log(`Deleted paths: ${result.deleted.join(', ')}`);
+ *   console.log(`New snapshot: ${result.snapshot}`);
+ *
+ *   if (result.conflicts.length > 0) {
+ *     // Conflicts were auto-resolved using the strategy
+ *     console.log(`Auto-resolved ${result.conflicts.length} conflicts`);
+ *     for (const c of result.conflicts) {
+ *       console.log(`  ${c.path}: kept version from ${
+ *         c.sourceModifiedAt > c.targetModifiedAt ? 'source' : 'target'
+ *       }`);
+ *     }
+ *   }
+ * } else {
+ *   // Only happens with 'fail-on-conflict'
+ *   console.log('Merge failed due to conflicts:');
+ *   for (const c of result.conflicts) {
+ *     console.log(`  ${c.path}: source v${c.sourceVersion} vs target v${c.targetVersion}`);
+ *   }
+ * }
+ * ```
+ *
+ * ## Idempotency
+ *
+ * If a merge would result in no changes (branches are identical or source has no
+ * new changes), the merge still succeeds with merged=0 and empty updated/deleted arrays.
+ * No new snapshot is created in this case (snapshot will be undefined).
+ *
+ * @see MergeStrategy - Available strategies for conflict resolution
+ * @see MergeConflict - Structure of individual conflicts
+ * @see FSXWithCOW.merge - Method that produces this result
  */
 export interface MergeResult {
-  /** Whether merge succeeded */
+  /** Whether the merge completed successfully */
   success: boolean;
-  /** Number of blobs merged */
+  /** Total number of blobs that were merged (added + updated + deleted) */
   merged: number;
-  /** Conflicts (if any) */
+  /** Conflicts detected during merge (resolved if success=true, unresolved if success=false) */
   conflicts: MergeConflict[];
-  /** Strategy used */
+  /** The strategy that was used for conflict resolution */
   strategy: MergeStrategy;
-  /** Resulting snapshot (if successful) */
+  /** Snapshot ID created for the merged state (undefined if no changes or merge failed) */
   snapshot?: SnapshotId;
-  /** Paths that were updated */
+  /** Paths that were added or updated in the target branch */
   updated: string[];
-  /** Paths that were deleted */
+  /** Paths that were deleted from the target branch */
   deleted: string[];
 }
 

@@ -850,7 +850,7 @@ export function createWALRetentionManager(
   getWALStats(): Promise<WALStats>;
   getCleanupLatencyHistogram(): Promise<CleanupLatencyHistogram>;
   getGrowthStats(): Promise<GrowthStats>;
-  registerCheckpointListener(checkpointMgr: any): void;
+  registerCheckpointListener(checkpointMgr: CheckpointManagerForRetention): void;
   onSizeWarning?: (current: number, max: number) => void;
 } {
   // Validate policy
@@ -2247,7 +2247,7 @@ export function createWALRetentionManager(
     /**
      * Register checkpoint listener for auto-cleanup
      */
-    registerCheckpointListener(checkpointMgr: any): void {
+    registerCheckpointListener(checkpointMgr: CheckpointManagerForRetention): void {
       // Store original createCheckpoint method
       const originalCreateCheckpoint = checkpointMgr.createCheckpoint.bind(checkpointMgr);
 

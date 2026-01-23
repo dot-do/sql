@@ -1222,10 +1222,30 @@ describe('Network Error Handling', () => {
     // TimeoutError is exported
     expect(TimeoutError).toBeDefined();
 
-    const error = new TimeoutError('Request timed out', 30000);
+    const error = new TimeoutError('query', 30000);
     expect(error.code).toBe('TIMEOUT');
     expect(error.timeoutMs).toBe(30000);
+    expect(error.operationType).toBe('query');
     expect(error.retryable).toBe(true);
+    expect(error.message).toBe('query timeout after 30000ms');
+  });
+
+  it('should include operation type in TimeoutError for all operation types', () => {
+    const queryError = new TimeoutError('query', 5000);
+    expect(queryError.operationType).toBe('query');
+    expect(queryError.message).toBe('query timeout after 5000ms');
+
+    const execError = new TimeoutError('exec', 10000);
+    expect(execError.operationType).toBe('exec');
+    expect(execError.message).toBe('exec timeout after 10000ms');
+
+    const txError = new TimeoutError('transaction', 15000);
+    expect(txError.operationType).toBe('transaction');
+    expect(txError.message).toBe('transaction timeout after 15000ms');
+
+    const rpcError = new TimeoutError('rpc', 20000);
+    expect(rpcError.operationType).toBe('rpc');
+    expect(rpcError.message).toBe('rpc timeout after 20000ms');
   });
 
   /**

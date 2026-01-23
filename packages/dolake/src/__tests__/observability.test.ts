@@ -119,6 +119,15 @@ interface ObservableDoLake {
   flushWithTracing(trigger: string): Promise<{ span: Span; result: FlushResult }>;
 }
 
+/**
+ * Test-specific CDCBatchMessage mock.
+ *
+ * NOTE: This differs from the canonical CDCBatchMessage in dolake/src/types.ts:
+ * - Simplified structure for observability testing (missing sequenceNumber, sizeBytes, etc.)
+ * - Includes `table` field at batch level (canonical has it per-event only)
+ * This is intentional for RED phase TDD - tests document expected observability behavior
+ * without coupling to the full production type.
+ */
 interface CDCBatchMessage {
   type: 'cdc_batch';
   batchId: string;
@@ -128,6 +137,15 @@ interface CDCBatchMessage {
   timestamp: number;
 }
 
+/**
+ * Test-specific CDCEvent mock.
+ *
+ * NOTE: This differs from the canonical CDCEvent in @dotdo/sql.do and lake.do:
+ * - Uses `operation: string` instead of the stricter CDCOperation union type
+ * - Includes `rowId` field which is specific to observability span attributes
+ * This is intentional - observability tests need a simplified mock that focuses
+ * on tracing attributes rather than full CDC semantics.
+ */
 interface CDCEvent {
   sequence: number;
   timestamp: number;

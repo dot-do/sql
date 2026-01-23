@@ -18,6 +18,32 @@ import { ConnectionEventEmitter } from './event-emitter.js';
 // =============================================================================
 
 /**
+ * Masks sensitive data in a URL for safe logging and error messages.
+ * @internal
+ */
+function maskUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) {
+      parsed.password = '***';
+    }
+    const sensitiveParams = ['token', 'key', 'secret', 'password', 'auth', 'api_key', 'apikey', 'access_token'];
+    for (const param of sensitiveParams) {
+      if (parsed.searchParams.has(param)) {
+        parsed.searchParams.set(param, '***');
+      }
+    }
+    return parsed.toString();
+  } catch {
+    const match = url.match(/^(\w+:\/\/)([^/?#]+)/);
+    if (match) {
+      return `${match[1]}${match[2]}/***`;
+    }
+    return '[invalid-url]';
+  }
+}
+
+/**
  * Error thrown when a connection operation fails.
  *
  * @public
@@ -27,12 +53,18 @@ import { ConnectionEventEmitter } from './event-emitter.js';
 export class ConnectionError extends Error {
   readonly code: string;
   readonly details?: unknown;
+  readonly url?: string;
 
-  constructor(error: LakeRPCError) {
-    super(error.message);
+  constructor(error: LakeRPCError, url?: string) {
+    const maskedUrl = url ? maskUrl(url) : undefined;
+    const fullMessage = maskedUrl ? `${error.message} (url: ${maskedUrl})` : error.message;
+    super(fullMessage);
     this.name = 'ConnectionError';
     this.code = error.code;
     this.details = error.details;
+    if (maskedUrl) {
+      this.url = maskedUrl;
+    }
   }
 }
 
@@ -174,7 +206,7 @@ export class WebSocketConnectionManager {
         const error = new ConnectionError({
           code: 'CONNECTION_ERROR',
           message: `WebSocket error: ${event}`,
-        });
+        }, wsUrl);
         this.events.emit('error', error);
         reject(error);
       });
@@ -194,7 +226,7 @@ export class WebSocketConnectionManager {
           pending.reject(new ConnectionError({
             code: 'CONNECTION_CLOSED',
             message: 'Connection closed',
-          }));
+          }, wsUrl));
           this.pendingRequests.delete(id);
         }
       });
@@ -237,7 +269,7 @@ export class WebSocketConnectionManager {
       throw new ConnectionError({
         code: 'NOT_CONNECTED',
         message: 'WebSocket is not connected',
-      });
+      }, this.config.url);
     }
     this.ws.send(data);
   }

@@ -15,6 +15,11 @@
 // Types
 // =============================================================================
 
+/**
+ * Connection types for WebSocket management.
+ * @public
+ * @stability stable
+ */
 export type {
   ConnectionEventType,
   ConnectionEventHandler,
@@ -26,12 +31,22 @@ export type {
 // Event Emitter
 // =============================================================================
 
+/**
+ * Event emitter for connection lifecycle events.
+ * @public
+ * @stability stable
+ */
 export { ConnectionEventEmitter } from './event-emitter.js';
 
 // =============================================================================
 // Connection Manager
 // =============================================================================
 
+/**
+ * WebSocket connection manager and error types.
+ * @public
+ * @stability stable
+ */
 export {
   WebSocketConnectionManager,
   ConnectionError,

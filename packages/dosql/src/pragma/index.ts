@@ -2,9 +2,25 @@
  * DoSQL PRAGMA Module
  *
  * Exports PRAGMA parsing and execution functionality for SQLite compatibility.
+ *
+ * ## Stability
+ *
+ * This module follows semantic versioning. Exports are marked with stability annotations:
+ *
+ * - **stable**: No breaking changes in minor versions. Safe for production use.
+ * - **experimental**: May change in any version. Use with caution.
+ *
+ * @packageDocumentation
+ * @stability stable
  */
 
 // Parser exports
+
+/**
+ * PRAGMA parser utilities.
+ * @public
+ * @stability stable
+ */
 export {
   parsePragma,
   tryParsePragma,
@@ -13,6 +29,12 @@ export {
 } from './parser.js';
 
 // Executor exports
+
+/**
+ * PRAGMA execution utilities.
+ * @public
+ * @stability stable
+ */
 export {
   createPragmaExecutor,
   createDatabaseState,
@@ -31,6 +53,12 @@ export {
 } from './executor.js';
 
 // Type exports
+
+/**
+ * PRAGMA value and statement types.
+ * @public
+ * @stability stable
+ */
 export type {
   // Value types
   PragmaValue,
@@ -74,6 +102,12 @@ export type {
 } from './types.js';
 
 // Type guard exports
+
+/**
+ * PRAGMA type guards and constants.
+ * @public
+ * @stability stable
+ */
 export {
   isSchemaIntrospectionPragma,
   isConfigurationPragma,

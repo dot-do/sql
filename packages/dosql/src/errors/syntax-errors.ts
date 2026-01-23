@@ -685,6 +685,23 @@ registerErrorClass('InvalidIdentifierError', InvalidIdentifierError);
 
 /**
  * Create error from caught exception
+ *
+ * @example
+ * ```typescript
+ * // Wrapping external parser errors
+ * try {
+ *   externalParser.parse(sql);
+ * } catch (e) {
+ *   throw createErrorFromException(e, sql);
+ * }
+ *
+ * // Converts unknown errors to SQLSyntaxError with location extraction
+ * const error = createErrorFromException(
+ *   new Error('syntax error at line 5, column 10'),
+ *   sql
+ * );
+ * console.log(error.location); // { line: 5, column: 10, offset: ... }
+ * ```
  */
 export function createErrorFromException(
   error: unknown,
@@ -735,6 +752,20 @@ export function createErrorFromException(
 
 /**
  * Create an unexpected token error with auto-suggestion
+ *
+ * @example
+ * ```typescript
+ * // In a parser when encountering wrong token
+ * const sql = 'SELECT * FORM users';
+ * const offset = 9; // position of 'FORM'
+ *
+ * throw createUnexpectedTokenError('FORM', 'FROM', sql, offset);
+ * // Error with suggestion: "Did you mean 'FROM'?"
+ *
+ * // With multiple expected tokens
+ * throw createUnexpectedTokenError('foo', ['SELECT', 'INSERT', 'UPDATE'], sql, 0);
+ * // "Unexpected token 'foo', expected SELECT or INSERT or UPDATE"
+ * ```
  */
 export function createUnexpectedTokenError(
   token: string,
@@ -749,6 +780,19 @@ export function createUnexpectedTokenError(
 
 /**
  * Create an unexpected EOF error
+ *
+ * @example
+ * ```typescript
+ * // When SQL ends unexpectedly
+ * const sql = 'SELECT * FROM users WHERE';
+ *
+ * // Parser reaches end but expected more tokens
+ * throw createUnexpectedEOFError('expression', sql);
+ * // "Unexpected end of input, expected expression at line 1, column 26"
+ *
+ * // With multiple expected tokens
+ * throw createUnexpectedEOFError([')', 'AND', 'OR'], sql);
+ * ```
  */
 export function createUnexpectedEOFError(
   expected: string | string[] | undefined,
@@ -761,6 +805,21 @@ export function createUnexpectedEOFError(
 
 /**
  * Create a missing keyword error
+ *
+ * @example
+ * ```typescript
+ * // When a required keyword is missing
+ * const sql = 'SELECT * users'; // missing FROM
+ * const offset = 9; // where FROM should be
+ *
+ * throw createMissingKeywordError('FROM', sql, offset);
+ * // "Missing required keyword 'FROM' at line 1, column 10"
+ *
+ * // In parser validation
+ * if (currentToken !== 'FROM') {
+ *   throw createMissingKeywordError('FROM', sql, this.position);
+ * }
+ * ```
  */
 export function createMissingKeywordError(
   keyword: string,
@@ -773,6 +832,20 @@ export function createMissingKeywordError(
 
 /**
  * Create an invalid identifier error
+ *
+ * @example
+ * ```typescript
+ * // When identifier contains invalid characters
+ * const sql = 'SELECT * FROM 123table';
+ * const offset = 14;
+ *
+ * throw createInvalidIdentifierError('123table', 'cannot start with digit', sql, offset);
+ * // "Invalid identifier '123table': cannot start with digit at line 1, column 15"
+ *
+ * // Without specific reason
+ * throw createInvalidIdentifierError('@invalid', undefined, sql, offset);
+ * // "Invalid identifier '@invalid' at line 1, column 15"
+ * ```
  */
 export function createInvalidIdentifierError(
   identifier: string,
@@ -786,6 +859,24 @@ export function createInvalidIdentifierError(
 
 /**
  * Create a generic syntax error with location
+ *
+ * @example
+ * ```typescript
+ * // For custom syntax error messages
+ * const sql = 'SELECT * FROM users LIMIT -1';
+ * const offset = 26;
+ *
+ * throw createSyntaxError('LIMIT must be non-negative', sql, offset, '-1');
+ *
+ * // In validation logic
+ * if (limitValue < 0) {
+ *   throw createSyntaxError(
+ *     `Invalid LIMIT value: ${limitValue}`,
+ *     sql,
+ *     limitOffset
+ *   );
+ * }
+ * ```
  */
 export function createSyntaxError(
   message: string,

@@ -4,6 +4,7 @@ This guide covers installation, basic usage, CRUD operations, migrations, and de
 
 ## Table of Contents
 
+- [Prerequisites](#prerequisites)
 - [Quickstart](#quickstart)
 - [Hello World](#hello-world)
 - [Installation](#installation)
@@ -16,6 +17,61 @@ This guide covers installation, basic usage, CRUD operations, migrations, and de
 - [Deploying to Cloudflare Workers](#deploying-to-cloudflare-workers)
 - [Troubleshooting](#troubleshooting)
 - [Next Steps](#next-steps)
+
+---
+
+## Prerequisites
+
+Before you begin, ensure you have the following requirements met:
+
+### Cloudflare Account Requirements
+
+1. **Cloudflare Account** - Create a free account at [dash.cloudflare.com](https://dash.cloudflare.com)
+2. **Workers Paid Plan** - Durable Objects require at least a Workers Paid plan ($5/month)
+   - Go to Workers & Pages > Plans to upgrade
+3. **Durable Objects Enabled** - Should be automatically available on paid plans
+   - If not visible, contact Cloudflare support
+
+### R2 Bucket Setup (Optional for DoSQL, Required for DoLake)
+
+If using cold storage with R2:
+
+```bash
+# Login to Cloudflare
+wrangler login
+
+# Create R2 bucket
+wrangler r2 bucket create my-data-bucket
+```
+
+### Development Tools
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| Node.js | 18+ | Runtime environment |
+| npm/pnpm | Latest | Package manager |
+| Wrangler | 3.0+ | Cloudflare CLI |
+| TypeScript | 5.3+ | Type checking (optional) |
+
+```bash
+# Install Wrangler CLI
+npm install -g wrangler
+
+# Verify installation
+wrangler --version
+
+# Login to Cloudflare
+wrangler login
+```
+
+### Verify Your Setup
+
+```bash
+# Check Wrangler authentication
+wrangler whoami
+
+# Expected output: Your Cloudflare account email and account ID
+```
 
 ---
 
@@ -1246,6 +1302,50 @@ your-project/
 
 ### Wrangler Configuration
 
+DoSQL supports both `wrangler.toml` and `wrangler.jsonc` configuration formats. Choose whichever format you prefer.
+
+#### Using wrangler.toml
+
+```toml
+# wrangler.toml
+name = "my-app"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# Durable Objects bindings
+[[durable_objects.bindings]]
+name = "DOSQL_DB"
+class_name = "TenantDatabase"
+
+# Durable Object migrations (required when adding new DO classes)
+[[migrations]]
+tag = "v1"
+new_classes = ["TenantDatabase"]
+
+# Optional: R2 bucket for cold storage (DoLake)
+[[r2_buckets]]
+binding = "DATA_BUCKET"
+bucket_name = "my-data-bucket"
+
+# Optional: Multiple Durable Object classes
+# [[durable_objects.bindings]]
+# name = "USERS_DB"
+# class_name = "UsersDatabase"
+#
+# [[durable_objects.bindings]]
+# name = "ORDERS_DB"
+# class_name = "OrdersDatabase"
+
+# Optional: Environment-specific configuration
+# [env.production]
+# name = "my-app-production"
+# [[env.production.r2_buckets]]
+# binding = "DATA_BUCKET"
+# bucket_name = "my-data-bucket-prod"
+```
+
+#### Using wrangler.jsonc
+
 ```jsonc
 // wrangler.jsonc
 {
@@ -1272,6 +1372,17 @@ your-project/
   ]
 }
 ```
+
+#### Configuration Reference
+
+| Setting | Required | Description |
+|---------|----------|-------------|
+| `name` | Yes | Your worker name (used in deployment URL) |
+| `main` | Yes | Entry point file for your worker |
+| `compatibility_date` | Yes | Cloudflare Workers compatibility date |
+| `durable_objects.bindings` | Yes | Durable Object namespace bindings for DoSQL |
+| `migrations` | Yes | DO class migrations (tracks new/renamed/deleted classes) |
+| `r2_buckets` | No | R2 bucket bindings for cold storage (DoLake) |
 
 ### Worker Implementation
 
@@ -1381,6 +1492,341 @@ npx wrangler tail
 
 # View DO analytics
 npx wrangler durable-objects list
+```
+
+---
+
+## Error Handling for Common Setup Failures
+
+This section covers errors you may encounter during initial setup and how to resolve them.
+
+### Installation Errors
+
+#### "Cannot find module '@dotdo/dosql'"
+
+**Cause:** The package is not installed or there's a module resolution issue.
+
+**Solutions:**
+
+```bash
+# Verify the package is installed
+npm list @dotdo/dosql
+
+# If not installed, install it
+npm install @dotdo/dosql
+
+# Clear npm cache if installation fails
+npm cache clean --force
+npm install @dotdo/dosql
+
+# If using a monorepo, ensure you're in the correct workspace
+npm install @dotdo/dosql --workspace=your-app
+```
+
+#### "Module not found: @cloudflare/workers-types"
+
+**Cause:** TypeScript cannot find Cloudflare type definitions.
+
+**Solution:**
+
+```bash
+# Install the types package
+npm install @cloudflare/workers-types --save-dev
+
+# Verify tsconfig.json includes the types
+# Add to compilerOptions.types: ["@cloudflare/workers-types"]
+```
+
+### Wrangler Setup Errors
+
+#### "Error: You must be logged in to use this command"
+
+**Cause:** Wrangler is not authenticated with your Cloudflare account.
+
+**Solution:**
+
+```bash
+# Login to Cloudflare
+wrangler login
+
+# Verify authentication
+wrangler whoami
+
+# If login fails, try with API token
+wrangler login --api-token YOUR_API_TOKEN
+```
+
+#### "Error: A compatibility_date is required"
+
+**Cause:** Your wrangler configuration is missing the required compatibility_date field.
+
+**Solution:**
+
+Add the compatibility_date to your wrangler.toml or wrangler.jsonc:
+
+```toml
+# wrangler.toml
+compatibility_date = "2024-01-01"
+```
+
+```jsonc
+// wrangler.jsonc
+{
+  "compatibility_date": "2024-01-01"
+}
+```
+
+#### "Error: Could not find wrangler.toml"
+
+**Cause:** Wrangler cannot find your configuration file.
+
+**Solution:**
+
+```bash
+# Check if the file exists
+ls -la wrangler.toml wrangler.jsonc
+
+# Create wrangler.jsonc if missing
+cat > wrangler.jsonc << 'EOF'
+{
+  "name": "my-dosql-app",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-01-01"
+}
+EOF
+
+# Or specify the config file path
+npx wrangler dev --config ./path/to/wrangler.jsonc
+```
+
+### Durable Object Setup Errors
+
+#### "Error: No Durable Object bindings found"
+
+**Cause:** Durable Object bindings are not configured in wrangler configuration.
+
+**Solution:**
+
+Add the durable_objects section to your configuration:
+
+```jsonc
+// wrangler.jsonc
+{
+  "durable_objects": {
+    "bindings": [
+      { "name": "MY_DATABASE", "class_name": "MyDatabase" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_classes": ["MyDatabase"] }
+  ]
+}
+```
+
+#### "Error: class_name 'MyDatabase' not found in exports"
+
+**Cause:** The Durable Object class is not exported from your worker entry point.
+
+**Solution:**
+
+```typescript
+// src/index.ts
+import { MyDatabase } from './database';
+
+// Export the class so Wrangler can find it
+export { MyDatabase };
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    // ...
+  },
+};
+```
+
+#### "Error: Durable Objects require a Workers Paid plan"
+
+**Cause:** Your Cloudflare account is on the free tier, which doesn't include Durable Objects.
+
+**Solution:**
+
+1. Go to [dash.cloudflare.com](https://dash.cloudflare.com)
+2. Navigate to Workers & Pages > Plans
+3. Upgrade to the Workers Paid plan ($5/month)
+4. Wait a few minutes for the change to propagate
+5. Run `wrangler deploy` again
+
+### Migration Setup Errors
+
+#### "Error: Migration folder not found: .do/migrations"
+
+**Cause:** The migrations directory doesn't exist or the path is incorrect.
+
+**Solution:**
+
+```bash
+# Create the migrations directory
+mkdir -p .do/migrations
+
+# Create your first migration file
+cat > .do/migrations/001_init.sql << 'EOF'
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+EOF
+```
+
+#### "Error: Invalid migration file format"
+
+**Cause:** Migration files don't follow the expected naming convention.
+
+**Solution:**
+
+Migration files must follow the pattern `NNN_description.sql`:
+
+```bash
+# Correct naming
+001_init.sql
+002_add_users.sql
+003_add_indexes.sql
+
+# Incorrect naming (will cause errors)
+init.sql           # Missing number prefix
+1_init.sql         # Number should be 3 digits
+001-init.sql       # Use underscore, not hyphen
+001_init.txt       # Must use .sql extension
+```
+
+### R2 Bucket Setup Errors
+
+#### "Error: R2 bucket 'my-bucket' not found"
+
+**Cause:** The R2 bucket doesn't exist or the binding name is incorrect.
+
+**Solution:**
+
+```bash
+# List existing buckets
+wrangler r2 bucket list
+
+# Create the bucket if it doesn't exist
+wrangler r2 bucket create my-data-bucket
+
+# Verify the binding name matches your configuration
+# wrangler.jsonc should have:
+# "r2_buckets": [{ "binding": "DATA_BUCKET", "bucket_name": "my-data-bucket" }]
+```
+
+#### "Error: R2 is not enabled for this account"
+
+**Cause:** R2 storage is not enabled on your Cloudflare account.
+
+**Solution:**
+
+1. Go to [dash.cloudflare.com](https://dash.cloudflare.com)
+2. Navigate to R2 in the sidebar
+3. Accept the R2 terms and enable the service
+4. Create your bucket
+
+### TypeScript Configuration Errors
+
+#### "Cannot find name 'DurableObject'"
+
+**Cause:** TypeScript doesn't know about Cloudflare Workers types.
+
+**Solution:**
+
+Update your tsconfig.json:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["@cloudflare/workers-types"],
+    "lib": ["ES2022"]
+  }
+}
+```
+
+#### "Property 'storage' does not exist on type 'DurableObjectState'"
+
+**Cause:** Outdated @cloudflare/workers-types version.
+
+**Solution:**
+
+```bash
+# Update to the latest version
+npm install @cloudflare/workers-types@latest --save-dev
+
+# If using a specific version, ensure it's 4.0.0 or higher
+npm install @cloudflare/workers-types@^4.0.0 --save-dev
+```
+
+### Local Development Errors
+
+#### "Error: Port 8787 is already in use"
+
+**Cause:** Another process is using the default wrangler dev port.
+
+**Solution:**
+
+```bash
+# Find and kill the process using port 8787
+lsof -i :8787
+kill -9 <PID>
+
+# Or use a different port
+npx wrangler dev --port 8788
+```
+
+#### "Error: Could not connect to local Durable Object"
+
+**Cause:** Local development environment is not properly initialized.
+
+**Solution:**
+
+```bash
+# Clear wrangler's local state
+rm -rf .wrangler
+
+# Restart wrangler dev
+npx wrangler dev
+
+# If issues persist, try with --local flag
+npx wrangler dev --local
+```
+
+### Quick Setup Validation Checklist
+
+Run through this checklist to verify your setup is correct:
+
+```bash
+# 1. Verify Wrangler installation
+wrangler --version
+# Expected: 3.0.0 or higher
+
+# 2. Verify authentication
+wrangler whoami
+# Expected: Your Cloudflare account email
+
+# 3. Verify package installation
+npm list @dotdo/dosql
+# Expected: Package version listed
+
+# 4. Verify migrations directory exists
+ls -la .do/migrations/
+# Expected: SQL migration files
+
+# 5. Verify TypeScript compiles
+npx tsc --noEmit
+# Expected: No errors
+
+# 6. Verify local dev server starts
+npx wrangler dev
+# Expected: Server running on localhost:8787
 ```
 
 ---

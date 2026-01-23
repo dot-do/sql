@@ -21,7 +21,16 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 /**
- * Mock CDCBatch for testing purposes
+ * Mock CDCBatch for testing purposes.
+ *
+ * NOTE: This differs from the canonical CDCBatch in lake.do/src/types.ts:
+ * - Includes `type: 'cdc_batch'` discriminator (canonical doesn't have type field)
+ * - Missing `timestamp` and `sourceDoId` fields from canonical
+ * - Events are inline anonymous types rather than CDCEvent references
+ * This simplified structure is intentional for testing queue bounds and backpressure
+ * behavior without coupling to the full production CDC types.
+ *
+ * @see lake.do/src/types.ts for the canonical CDCBatch interface
  */
 interface CDCBatch {
   type: 'cdc_batch';

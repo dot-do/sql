@@ -19,6 +19,15 @@ import type {
 } from './types.js';
 import { DEFAULT_POOL_CONFIG } from './types.js';
 
+/**
+ * Generic pool event listener type.
+ * This is used internally for the event listener map since TypeScript's Map
+ * doesn't support heterogeneous key-value relationships. The public on/off
+ * methods provide full type safety for external callers.
+ * @internal
+ */
+type PoolEventListener = (event: PoolEventMap[keyof PoolEventMap]) => void;
+
 // =============================================================================
 // Pooled Connection
 // =============================================================================
@@ -228,8 +237,8 @@ export class WebSocketPool {
   private idleCheckTimer: ReturnType<typeof setInterval> | null = null;
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 
-  // Event listeners
-  private eventListeners: Map<keyof PoolEventMap, Set<(event: any) => void>> = new Map();
+  // Event listeners - internal map uses generic function type; public API (on/off) is properly typed
+  private eventListeners: Map<keyof PoolEventMap, Set<PoolEventListener>> = new Map();
 
   // State
   private closed = false;
@@ -447,7 +456,9 @@ export class WebSocketPool {
   ): this {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
-      listeners.add(listener);
+      // Type assertion needed: listener is contravariant but TypeScript can't prove
+      // that (data: PoolEventMap[K]) => void is compatible with PoolEventListener
+      listeners.add(listener as PoolEventListener);
     }
     return this;
   }
@@ -461,7 +472,8 @@ export class WebSocketPool {
   ): this {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
-      listeners.delete(listener);
+      // Type assertion needed: same reason as on() method
+      listeners.delete(listener as PoolEventListener);
     }
     return this;
   }
@@ -512,8 +524,9 @@ export class WebSocketPool {
       }
 
       // Validate on borrow if enabled
+      // WebSocket ready states: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
       if (this.config.validateOnBorrow) {
-        if (conn.ws.readyState !== WebSocket.READY_STATE_OPEN) {
+        if (conn.ws.readyState !== WebSocket.READY_STATE_OPEN) { // READY_STATE_OPEN = 1
           this.closeConnection(conn, 'Connection not open');
           continue;
         }
@@ -622,8 +635,10 @@ export class WebSocketPool {
     this.connections.delete(conn.id);
 
     try {
-      if (conn.ws.readyState === WebSocket.READY_STATE_OPEN ||
-          conn.ws.readyState === WebSocket.READY_STATE_CONNECTING) {
+      // WebSocket ready states: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+      // Only attempt close if connection is still active (CONNECTING or OPEN)
+      if (conn.ws.readyState === WebSocket.READY_STATE_OPEN ||       // 1 = established
+          conn.ws.readyState === WebSocket.READY_STATE_CONNECTING) { // 0 = in progress
         conn.ws.close();
       }
     } catch {
@@ -702,7 +717,8 @@ export class WebSocketPool {
     for (const conn of this.connections.values()) {
       if (conn.borrowed) continue;
 
-      // Check WebSocket state
+      // Check WebSocket state - must be OPEN (1) to be healthy
+      // WebSocket ready states: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
       if (conn.ws.readyState !== WebSocket.READY_STATE_OPEN) {
         conn.healthy = false;
         this.closeConnection(conn, 'Health check: connection not open');
@@ -782,19 +798,42 @@ export class WebSocketPool {
 }
 
 // Export WebSocket ready states for environments where they're not defined
+// These constants represent the WebSocket connection lifecycle states per RFC 6455
 declare global {
   interface WebSocket {
+    /** 0 = CONNECTING: Socket created, connection not yet established */
     readonly READY_STATE_CONNECTING: number;
+    /** 1 = OPEN: Connection established, ready to send/receive data */
     readonly READY_STATE_OPEN: number;
+    /** 2 = CLOSING: Close handshake in progress */
     readonly READY_STATE_CLOSING: number;
+    /** 3 = CLOSED: Connection closed or failed to open */
     readonly READY_STATE_CLOSED: number;
+  }
+
+  // Extend the WebSocket constructor to include static ready state properties
+  interface WebSocketConstructorWithReadyStates {
+    /** 0 = CONNECTING: Socket created, connection not yet established */
+    READY_STATE_CONNECTING: number;
+    /** 1 = OPEN: Connection established, ready to send/receive data */
+    READY_STATE_OPEN: number;
+    /** 2 = CLOSING: Close handshake in progress */
+    READY_STATE_CLOSING: number;
+    /** 3 = CLOSED: Connection closed or failed to open */
+    READY_STATE_CLOSED: number;
   }
 }
 
 // Define ready states if not available
+// WebSocket ready states per RFC 6455:
+// - 0 = CONNECTING: Socket has been created but connection not yet established
+// - 1 = OPEN: Connection is established and communication is possible
+// - 2 = CLOSING: Connection is going through the closing handshake
+// - 3 = CLOSED: Connection has been closed or could not be opened
 if (typeof WebSocket !== 'undefined') {
-  (WebSocket as any).READY_STATE_CONNECTING = 0;
-  (WebSocket as any).READY_STATE_OPEN = 1;
-  (WebSocket as any).READY_STATE_CLOSING = 2;
-  (WebSocket as any).READY_STATE_CLOSED = 3;
+  const ws = WebSocket as typeof WebSocket & WebSocketConstructorWithReadyStates;
+  ws.READY_STATE_CONNECTING = 0; // Connection not yet established
+  ws.READY_STATE_OPEN = 1;       // Connection established, ready to communicate
+  ws.READY_STATE_CLOSING = 2;    // Connection closing handshake in progress
+  ws.READY_STATE_CLOSED = 3;     // Connection closed or could not be opened
 }

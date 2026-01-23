@@ -270,6 +270,58 @@ export function createCompactionJobId(id: string): CompactionJobId {
 // Re-export common types from sql.do (which uses shared-types)
 // =============================================================================
 
+/**
+ * Re-exported types from `@dotdo/sql.do` (which re-exports from `@dotdo/shared-types`).
+ *
+ * These types are re-exported for convenience when building lakehouse clients.
+ * They maintain type compatibility across the DoSQL ecosystem.
+ *
+ * ## Type Re-exports
+ *
+ * The following types are re-exported from the shared type definitions:
+ *
+ * - {@link TransactionId} - Unique identifier for database transactions
+ * - {@link LSN} - Log Sequence Number for WAL positioning
+ * - {@link SQLValue} - Union of valid SQL parameter/result values
+ * - {@link CDCOperation} - CDC operation types (INSERT, UPDATE, DELETE, TRUNCATE)
+ * - {@link CDCEvent} - Change Data Capture event with row data
+ * - {@link ClientCDCOperation} - Client-facing CDC operations (excludes TRUNCATE)
+ * - {@link ClientCapabilities} - Protocol capabilities advertised by client
+ * - {@link RetryConfig} - Configuration for retry behavior
+ *
+ * ## Value Re-exports
+ *
+ * The following values and functions are re-exported:
+ *
+ * - `CDCOperationCode` - Numeric codes for efficient binary CDC encoding
+ * - `DEFAULT_CLIENT_CAPABILITIES` - Default client capability settings
+ * - `DEFAULT_RETRY_CONFIG` - Default retry configuration
+ * - `isRetryConfig()` / `createRetryConfig()` - Retry config utilities
+ * - `setDevMode()` / `isDevMode()` - Development mode configuration
+ *
+ * ## Type Guards
+ *
+ * Functions for runtime type checking:
+ *
+ * - `isServerCDCEvent()` - Check if event has server-side format (txId)
+ * - `isClientCDCEvent()` - Check if event has client-side format (transactionId)
+ * - `isDateTimestamp()` - Check if timestamp is a Date object
+ * - `isNumericTimestamp()` - Check if timestamp is a Unix timestamp number
+ *
+ * ## Type Converters
+ *
+ * Functions for converting between formats:
+ *
+ * - `serverToClientCDCEvent()` - Convert server CDC event to client format
+ * - `clientToServerCDCEvent()` - Convert client CDC event to server format
+ *
+ * @see {@link https://github.com/dotdo/sql.do | @dotdo/sql.do} for client types
+ * @see {@link https://github.com/dotdo/shared-types | @dotdo/shared-types} for canonical definitions
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
 export type {
   TransactionId,
   LSN,

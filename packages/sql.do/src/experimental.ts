@@ -11,6 +11,61 @@
  * - Their API may change in breaking ways
  * - They may have bugs or incomplete implementations
  *
+ * ## Feature Overview
+ *
+ * ### Idempotency Utilities
+ *
+ * Functions for generating and managing idempotency keys to ensure at-most-once
+ * execution semantics for mutation operations. Useful for building reliable
+ * distributed systems that can safely retry failed requests.
+ *
+ * - {@link generateIdempotencyKey} - Generate unique keys for mutation deduplication
+ * - {@link isMutationQuery} - Detect INSERT/UPDATE/DELETE statements
+ *
+ * ### CDC (Change Data Capture) Types
+ *
+ * Types and utilities for working with real-time change data capture streams.
+ * CDC enables applications to react to database changes as they happen, useful
+ * for event sourcing, cache invalidation, and data synchronization.
+ *
+ * - {@link CDCOperation} - Operation types (INSERT, UPDATE, DELETE, TRUNCATE)
+ * - {@link CDCEvent} - Change event with before/after row data
+ * - {@link CDCOperationCode} - Numeric codes for efficient binary encoding
+ * - Type guards: `isServerCDCEvent()`, `isClientCDCEvent()`
+ * - Converters: `serverToClientCDCEvent()`, `clientToServerCDCEvent()`
+ *
+ * ### Sharding Types
+ *
+ * Types for configuring and querying sharded database deployments.
+ * Sharding enables horizontal scaling by distributing data across multiple
+ * database instances based on a partition key.
+ *
+ * - {@link ShardConfig} - Sharding strategy configuration
+ * - {@link ShardInfo} - Runtime shard location information
+ *
+ * ### Client Capabilities
+ *
+ * Types for protocol negotiation between client and server, enabling
+ * feature detection and graceful degradation.
+ *
+ * - {@link ClientCapabilities} - Client feature flags
+ * - {@link DEFAULT_CLIENT_CAPABILITIES} - Default capability settings
+ *
+ * ### Connection Types
+ *
+ * Types for managing database connections and monitoring connection health.
+ *
+ * - {@link ConnectionOptions} - Connection configuration
+ * - {@link ConnectionStats} - Connection pool statistics
+ *
+ * ### Response/Result Converters
+ *
+ * Utilities for converting between internal server response format and
+ * client-facing result format.
+ *
+ * - {@link responseToResult} - Convert server response to client result
+ * - {@link resultToResponse} - Convert client result to server response
+ *
  * ## Feedback
  *
  * If you're using experimental features, please provide feedback:
@@ -20,10 +75,40 @@
  * @example
  * ```typescript
  * // Import experimental features explicitly
- * import { generateIdempotencyKey, isMutationQuery } from '@dotdo/sql.do/experimental';
+ * import {
+ *   generateIdempotencyKey,
+ *   isMutationQuery,
+ *   CDCOperationCode,
+ *   isServerCDCEvent,
+ *   serverToClientCDCEvent,
+ * } from '@dotdo/sql.do/experimental';
  *
  * // Generate idempotency key for mutation requests
  * const key = await generateIdempotencyKey('INSERT INTO users (name) VALUES (?)', ['Alice']);
+ *
+ * // Check if a query is a mutation
+ * if (isMutationQuery(sql)) {
+ *   const key = await generateIdempotencyKey(sql, params);
+ *   // Include key in request for deduplication
+ * }
+ *
+ * // Process CDC events from a stream
+ * for await (const event of cdcStream) {
+ *   if (isServerCDCEvent(event)) {
+ *     const clientEvent = serverToClientCDCEvent(event);
+ *     switch (clientEvent.operation) {
+ *       case 'INSERT':
+ *         handleInsert(clientEvent.after);
+ *         break;
+ *       case 'UPDATE':
+ *         handleUpdate(clientEvent.before, clientEvent.after);
+ *         break;
+ *       case 'DELETE':
+ *         handleDelete(clientEvent.before);
+ *         break;
+ *     }
+ *   }
+ * }
  * ```
  *
  * @packageDocumentation
