@@ -73,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Strict mode: `setStrictMode()`, `isStrictMode()`
 
 - **Wrapper Cache Management**:
-  - `getWrapperMapStats()`, `clearWrapperMaps()`, `runWrapperCacheCleanup()`
+  - `getWrapperMapStats()`, `clearWrapperMaps()`
   - LRU eviction for bounded memory usage
 
 - **Prepared Statements**: `PreparedStatement` interface

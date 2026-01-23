@@ -660,7 +660,7 @@ function formatTimestamp(ts: Date | number): string {
 
 ```typescript
 import { sql } from '@dotdo/sql.do';
-import type { QueryResult, LSN, TransactionId } from '@dotdo/shared-types';
+import type { QueryResult, LSN, TransactionState } from '@dotdo/shared-types';
 
 const client = sql('https://your-db.sql.do');
 
@@ -673,13 +673,13 @@ if (result.lsn) {
   console.log('Query executed at LSN:', result.lsn);
 }
 
-// Transaction with typed ID
-const txId: TransactionId = await client.beginTransaction();
+// Transaction with typed state
+const tx: TransactionState = await client.beginTransaction();
 try {
-  await client.query('INSERT INTO logs (msg) VALUES (?)', ['action'], { transactionId: txId });
-  await client.commit(txId);
+  await client.query('INSERT INTO logs (msg) VALUES (?)', ['action'], { transactionId: tx.id });
+  await client.commit(tx.id);
 } catch (e) {
-  await client.rollback(txId);
+  await client.rollback(tx.id);
 }
 ```
 
@@ -753,6 +753,39 @@ All packages in the DoSQL ecosystem should use compatible versions of `@dotdo/sh
 | `CDCOperationCode` | Numeric codes for CDC operations |
 | `DEFAULT_IDEMPOTENCY_CONFIG` | Default idempotency settings |
 | `DEFAULT_CLIENT_CAPABILITIES` | Default client capability settings |
+
+### Runtime Utilities
+
+| Function | Description |
+|----------|-------------|
+| `getWrapperMapStats()` | Get statistics about internal wrapper maps (size counts for memory monitoring) |
+| `clearWrapperMaps()` | Clear internal wrapper maps (useful for testing or memory management) |
+| `setDevMode(boolean)` | Enable/disable development mode for extra validation |
+| `isDevMode()` | Check if development mode is enabled |
+| `setStrictMode(boolean)` | Enable/disable strict mode for format validation |
+| `isStrictMode()` | Check if strict mode is enabled |
+
+```typescript
+import {
+  getWrapperMapStats,
+  clearWrapperMaps,
+  setDevMode,
+  isDevMode
+} from '@dotdo/shared-types';
+
+// Check wrapper map memory usage
+const stats = getWrapperMapStats();
+console.log('Wrapper map sizes:', stats);
+
+// Clear maps in test teardown
+afterEach(() => {
+  clearWrapperMaps();
+});
+
+// Enable dev mode for extra validation
+setDevMode(true);
+console.log('Dev mode:', isDevMode()); // true
+```
 
 ## License
 
