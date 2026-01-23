@@ -84,6 +84,25 @@ import {
 } from '../reader.js';
 
 // ============================================================================
+// EXTENDED TYPES FOR TESTING (Access to private methods)
+// ============================================================================
+
+/**
+ * Extended ColumnarWriter interface exposing private methods for testing
+ */
+interface ExtendedColumnarWriter extends ColumnarWriter {
+  bufferRow(row: Record<string, unknown>): void;
+  flush(): Promise<RowGroup>;
+}
+
+/**
+ * Extended ColumnarReader interface exposing private methods for testing
+ */
+interface ExtendedColumnarReader extends ColumnarReader {
+  decodeColumns(rowGroup: RowGroup, columnNames: string[]): Map<string, unknown[]>;
+}
+
+// ============================================================================
 // TEST FIXTURES
 // ============================================================================
 
@@ -1012,11 +1031,11 @@ describe('Chunk Serialization', () => {
 
     const writer = new ColumnarWriter(schema);
     for (const row of rows) {
-      (writer as any).bufferRow(row);
+      (writer as unknown as ExtendedColumnarWriter).bufferRow(row);
     }
 
     // flush() is async, need to await it
-    const rowGroup = await (writer as any).flush();
+    const rowGroup = await (writer as unknown as ExtendedColumnarWriter).flush();
 
     // Verify row group structure
     expect(rowGroup).toBeDefined();
@@ -1080,11 +1099,11 @@ describe('Chunk Serialization', () => {
     const writer = new ColumnarWriter(schema);
 
     for (const row of generateTestRows(50)) {
-      (writer as any).bufferRow(row);
+      (writer as unknown as ExtendedColumnarWriter).bufferRow(row);
     }
 
     // flush() is async, need to await it
-    const rowGroup = await (writer as any).flush();
+    const rowGroup = await (writer as unknown as ExtendedColumnarWriter).flush();
     const serialized = serializeRowGroup(rowGroup);
 
     const metadata = extractMetadataFast(serialized);
@@ -1745,11 +1764,11 @@ describe('Size Estimation', () => {
     const writer = new ColumnarWriter(schema);
 
     for (const row of generateTestRows(100)) {
-      (writer as any).bufferRow(row);
+      (writer as unknown as ExtendedColumnarWriter).bufferRow(row);
     }
 
     // flush() is async, need to await it
-    const rowGroup = await (writer as any).flush();
+    const rowGroup = await (writer as unknown as ExtendedColumnarWriter).flush();
     const estimated = estimateRowGroupSize(rowGroup);
     const actual = serializeRowGroup(rowGroup).length;
 
@@ -1875,7 +1894,7 @@ describe('Edge Cases', () => {
     // Verify binary data was preserved
     const fsx = createInMemoryFSX();
     const reader = new ColumnarReader(fsx);
-    const decodedColumns = (reader as any).decodeColumns(deserialized, ['data']);
+    const decodedColumns = (reader as unknown as ExtendedColumnarReader).decodeColumns(deserialized, ['data']);
 
     expect(decodedColumns.get('data')![0]).toEqual(binaryData);
     expect(decodedColumns.get('data')![1]).toBe(null);

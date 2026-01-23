@@ -83,10 +83,10 @@ interface LogSink {
  * Expected structured logger interface
  */
 interface StructuredLogger {
-  debug(message: string, context?: Record<string, unknown>): void;
-  info(message: string, context?: Record<string, unknown>): void;
-  warn(message: string, context?: Record<string, unknown>): void;
-  error(message: string, error?: Error, context?: Record<string, unknown>): void;
+  debug(message: string | (() => string), context?: Record<string, unknown>): void;
+  info(message: string | (() => string), context?: Record<string, unknown>): void;
+  warn(message: string | (() => string), context?: Record<string, unknown>): void;
+  error(message: string | (() => string), error?: Error, context?: Record<string, unknown>): void;
 
   /** Create a child logger with additional context */
   child(context: Record<string, unknown>): StructuredLogger;
@@ -97,8 +97,99 @@ interface StructuredLogger {
   /** Set a new trace ID */
   setTraceId(traceId: string): void;
 
+  /** Set the log level */
+  setLevel?(level: LogLevel): void;
+
+  /** Get the current log level */
+  getLevel?(): LogLevel;
+
   /** Flush any buffered log entries */
   flush(): Promise<void>;
+}
+
+// =============================================================================
+// MODULE INTERFACES (for TDD - features don't exist yet)
+// =============================================================================
+
+/**
+ * Extended LogEntry with source location
+ */
+interface ExtendedLogEntry extends LogEntry {
+  source?: {
+    file: string;
+    line: number;
+  };
+}
+
+/**
+ * Extended logger config with future features
+ */
+interface ExtendedLoggerConfig extends LoggerConfig {
+  traceId?: string;
+  usePooling?: boolean;
+  highResolutionTimestamp?: boolean;
+  includeSourceLocation?: boolean;
+  fallbackSink?: LogSink;
+}
+
+/**
+ * Error with code property
+ */
+interface ErrorWithCode extends Error {
+  code?: string;
+}
+
+/**
+ * Async storage for trace context
+ */
+interface AsyncStorageLike {
+  run<T>(store: { traceId: string }, callback: () => T): T;
+}
+
+/**
+ * Expected logging module exports (not implemented yet)
+ */
+interface LoggingModule {
+  createLogger(config?: ExtendedLoggerConfig): StructuredLogger;
+  extractTraceId?(request: Request, headerNames?: string[]): string;
+  withTraceId?(error: Error, traceId: string): Error & { context?: { traceId: string } };
+  withTraceContext?<T>(traceId: string, fn: () => Promise<T>): Promise<T>;
+  LogLevel?: { DEBUG: number; INFO: number; WARN: number; ERROR: number };
+  compareLogLevels?(a: LogLevel, b: LogLevel): number;
+  getLogLevelFromEnv?(): LogLevel;
+  JsonSink?: new (opts: { write: (json: string) => void; prettyPrint?: boolean }) => LogSink;
+  MultiSink?: new (sinks: LogSink[]) => LogSink;
+  BatchingSink?: new (opts: { batchSize: number; flushInterval: number; onBatch: (entries: LogEntry[]) => void }) => LogSink & { flush(): Promise<void> };
+  ConsoleSink?: new (opts: { colorize?: boolean }) => LogSink;
+  FileSink?: new (opts: { path: string; maxSize: string; maxFiles: number; compress: boolean }) => LogSink & { flush(): Promise<void>; close(): Promise<void>; getStats(): { entriesWritten: number } };
+  FilteringSink?: new (sink: LogSink, opts: { filter: (entry: LogEntry) => boolean }) => LogSink;
+  NoOpSink?: new () => LogSink;
+  SamplingSink?: new (sink: LogSink, opts: { sampleRate: Record<LogLevel, number> }) => LogSink;
+  AsyncBufferingSink?: new (sink: LogSink, opts: { bufferSize: number; flushThreshold: number }) => LogSink & { flush(): Promise<void> };
+  RedactingSink?: new (sink: LogSink, opts: { redactFields: string[]; redactPatterns?: RegExp[] }) => LogSink;
+  LoggerAsyncStorage?: AsyncStorageLike;
+  StandardContext?: new () => {
+    withUserId(id: string): StandardContext;
+    withRequestId(id: string): StandardContext;
+    withDuration(ms: number): StandardContext;
+    withDatabase(db: string): StandardContext;
+    withTable(table: string): StandardContext;
+    withRowsAffected(count: number): StandardContext;
+    build(): Record<string, unknown>;
+  };
+  formatMessage?(template: string, context: Record<string, unknown>): string;
+  getLogEntryPoolStats?(): { totalAllocated: number; poolHits: number };
+  runLoggerBenchmark?(logger: StructuredLogger, opts: { iterations: number; warmupIterations: number; messageSize: string }): Promise<{ avgLatencyMs: number; p99LatencyMs: number; throughputPerSecond: number; memoryUsageMB: number }>;
+}
+
+// Type alias for StandardContext (used in tests)
+type StandardContext = LoggingModule['StandardContext'] extends new () => infer T ? T : never;
+
+/**
+ * Helper to import the logging module (which may not exist yet in TDD)
+ */
+async function importLoggingModule(): Promise<LoggingModule> {
+  return await import('../logging/index.js') as unknown as LoggingModule;
 }
 
 // =============================================================================
@@ -108,7 +199,7 @@ interface StructuredLogger {
 describe('Structured Logging - Trace ID Inclusion [RED]', () => {
   it.fails('should include trace ID in all log entries', async () => {
     // GAP: No structured logger exists
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -130,7 +221,7 @@ describe('Structured Logging - Trace ID Inclusion [RED]', () => {
 
   it.fails('should auto-generate trace ID if not provided', async () => {
     // GAP: No auto-generation of trace IDs
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -149,7 +240,7 @@ describe('Structured Logging - Trace ID Inclusion [RED]', () => {
 
   it.fails('should allow trace ID to be set from incoming request headers', async () => {
     // GAP: No integration with request context
-    const { createLogger, extractTraceId } = await import('../logging/index.js') as any;
+    const { createLogger, extractTraceId } = await importLoggingModule();
 
     const mockRequest = new Request('http://example.com', {
       headers: {
@@ -167,7 +258,7 @@ describe('Structured Logging - Trace ID Inclusion [RED]', () => {
 
   it.fails('should support multiple trace ID header names', async () => {
     // GAP: No configurable trace ID header names
-    const { createLogger, extractTraceId } = await import('../logging/index.js') as any;
+    const { createLogger, extractTraceId } = await importLoggingModule();
 
     // Test with x-request-id
     const request1 = new Request('http://example.com', {
@@ -185,7 +276,7 @@ describe('Structured Logging - Trace ID Inclusion [RED]', () => {
 
   it.fails('should include trace ID in error context', async () => {
     // GAP: Errors don't carry trace ID
-    const { createLogger, withTraceId } = await import('../logging/index.js') as any;
+    const { createLogger, withTraceId } = await importLoggingModule();
     const { DoSQLError } = await import('../errors/index.js');
 
     const logger = createLogger();
@@ -205,7 +296,7 @@ describe('Structured Logging - Trace ID Inclusion [RED]', () => {
 describe('Structured Logging - Log Levels [RED]', () => {
   it.fails('should support all standard log levels (debug, info, warn, error)', async () => {
     // GAP: No structured logger with log levels
-    const { createLogger, LogLevel } = await import('../logging/index.js') as any;
+    const { createLogger, LogLevel } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -228,7 +319,7 @@ describe('Structured Logging - Log Levels [RED]', () => {
 
   it.fails('should filter logs below configured minimum level', async () => {
     // GAP: No log level filtering
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -250,7 +341,7 @@ describe('Structured Logging - Log Levels [RED]', () => {
 
   it.fails('should allow runtime log level changes', async () => {
     // GAP: No runtime log level modification
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -271,7 +362,7 @@ describe('Structured Logging - Log Levels [RED]', () => {
 
   it.fails('should support log level from environment variable', async () => {
     // GAP: No environment-based log level configuration
-    const { createLogger, getLogLevelFromEnv } = await import('../logging/index.js') as any;
+    const { createLogger, getLogLevelFromEnv } = await importLoggingModule();
 
     // Simulate environment variable
     const originalEnv = process.env.LOG_LEVEL;
@@ -290,7 +381,7 @@ describe('Structured Logging - Log Levels [RED]', () => {
 
   it.fails('should support numeric log levels for comparison', async () => {
     // GAP: No numeric log level comparison
-    const { LogLevel, compareLogLevels } = await import('../logging/index.js') as any;
+    const { LogLevel, compareLogLevels } = await importLoggingModule();
 
     // Numeric values: debug=0, info=1, warn=2, error=3
     expect(compareLogLevels('debug', 'info')).toBeLessThan(0);
@@ -311,7 +402,7 @@ describe('Structured Logging - Log Levels [RED]', () => {
 describe('Structured Logging - JSON Output Format [RED]', () => {
   it.fails('should output logs in structured JSON format', async () => {
     // GAP: No JSON structured output
-    const { createLogger, JsonSink } = await import('../logging/index.js') as any;
+    const { createLogger, JsonSink } = await importLoggingModule();
 
     const output: string[] = [];
     const jsonSink = new JsonSink({
@@ -335,7 +426,7 @@ describe('Structured Logging - JSON Output Format [RED]', () => {
 
   it.fails('should output valid ISO 8601 timestamps', async () => {
     // GAP: No ISO timestamp formatting
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -358,7 +449,7 @@ describe('Structured Logging - JSON Output Format [RED]', () => {
 
   it.fails('should support pretty-printed JSON for development', async () => {
     // GAP: No pretty print option
-    const { createLogger, JsonSink } = await import('../logging/index.js') as any;
+    const { createLogger, JsonSink } = await importLoggingModule();
 
     const output: string[] = [];
     const jsonSink = new JsonSink({
@@ -377,7 +468,7 @@ describe('Structured Logging - JSON Output Format [RED]', () => {
 
   it.fails('should escape special characters in JSON output', async () => {
     // GAP: No proper JSON escaping
-    const { createLogger, JsonSink } = await import('../logging/index.js') as any;
+    const { createLogger, JsonSink } = await importLoggingModule();
 
     const output: string[] = [];
     const jsonSink = new JsonSink({
@@ -396,7 +487,7 @@ describe('Structured Logging - JSON Output Format [RED]', () => {
 
   it.fails('should handle circular references gracefully', async () => {
     // GAP: No circular reference handling
-    const { createLogger, JsonSink } = await import('../logging/index.js') as any;
+    const { createLogger, JsonSink } = await importLoggingModule();
 
     const output: string[] = [];
     const jsonSink = new JsonSink({
@@ -419,7 +510,7 @@ describe('Structured Logging - JSON Output Format [RED]', () => {
 
   it.fails('should include source location (file, line) in debug mode', async () => {
     // GAP: No source location tracking
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -444,7 +535,7 @@ describe('Structured Logging - JSON Output Format [RED]', () => {
 describe('Structured Logging - Async Trace ID Propagation [RED]', () => {
   it.fails('should propagate trace ID across await boundaries', async () => {
     // GAP: No async context propagation
-    const { createLogger, withTraceContext } = await import('../logging/index.js') as any;
+    const { createLogger, withTraceContext } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -473,7 +564,7 @@ describe('Structured Logging - Async Trace ID Propagation [RED]', () => {
 
   it.fails('should maintain trace ID across Promise.all boundaries', async () => {
     // GAP: No Promise.all trace propagation
-    const { createLogger, withTraceContext } = await import('../logging/index.js') as any;
+    const { createLogger, withTraceContext } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -505,7 +596,7 @@ describe('Structured Logging - Async Trace ID Propagation [RED]', () => {
 
   it.fails('should isolate trace IDs between concurrent requests', async () => {
     // GAP: No request isolation
-    const { createLogger, withTraceContext } = await import('../logging/index.js') as any;
+    const { createLogger, withTraceContext } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -540,7 +631,7 @@ describe('Structured Logging - Async Trace ID Propagation [RED]', () => {
 
   it.fails('should support AsyncLocalStorage for trace propagation', async () => {
     // GAP: No AsyncLocalStorage integration
-    const { createLogger, LoggerAsyncStorage } = await import('../logging/index.js') as any;
+    const { createLogger, LoggerAsyncStorage } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -564,7 +655,7 @@ describe('Structured Logging - Async Trace ID Propagation [RED]', () => {
 
   it.fails('should propagate trace ID to child loggers', async () => {
     // GAP: No child logger with trace propagation
-    const { createLogger, withTraceContext } = await import('../logging/index.js') as any;
+    const { createLogger, withTraceContext } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -600,7 +691,7 @@ describe('Structured Logging - Async Trace ID Propagation [RED]', () => {
 describe('Structured Logging - Custom Sink Configuration [RED]', () => {
   it.fails('should support custom log sink implementation', async () => {
     // GAP: No custom sink support
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const customLogs: LogEntry[] = [];
 
@@ -623,7 +714,7 @@ describe('Structured Logging - Custom Sink Configuration [RED]', () => {
 
   it.fails('should support multiple sinks (fan-out)', async () => {
     // GAP: No multi-sink support
-    const { createLogger, MultiSink } = await import('../logging/index.js') as any;
+    const { createLogger, MultiSink } = await importLoggingModule();
 
     const sink1Logs: LogEntry[] = [];
     const sink2Logs: LogEntry[] = [];
@@ -642,7 +733,7 @@ describe('Structured Logging - Custom Sink Configuration [RED]', () => {
 
   it.fails('should support async sinks with batching', async () => {
     // GAP: No async sink with batching
-    const { createLogger, BatchingSink } = await import('../logging/index.js') as any;
+    const { createLogger, BatchingSink } = await importLoggingModule();
 
     const batches: LogEntry[][] = [];
 
@@ -670,7 +761,7 @@ describe('Structured Logging - Custom Sink Configuration [RED]', () => {
 
   it.fails('should support console sink for development', async () => {
     // GAP: No built-in console sink
-    const { createLogger, ConsoleSink } = await import('../logging/index.js') as any;
+    const { createLogger, ConsoleSink } = await importLoggingModule();
 
     const consoleSpy = vi.spyOn(console, 'log');
 
@@ -685,7 +776,7 @@ describe('Structured Logging - Custom Sink Configuration [RED]', () => {
 
   it.fails('should support file sink with rotation', async () => {
     // GAP: No file sink implementation
-    const { createLogger, FileSink } = await import('../logging/index.js') as any;
+    const { createLogger, FileSink } = await importLoggingModule();
 
     const fileSink = new FileSink({
       path: '/tmp/dosql-test.log',
@@ -706,7 +797,7 @@ describe('Structured Logging - Custom Sink Configuration [RED]', () => {
 
   it.fails('should handle sink errors gracefully', async () => {
     // GAP: No sink error handling
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const failingSink: LogSink = {
       write() {
@@ -733,7 +824,7 @@ describe('Structured Logging - Custom Sink Configuration [RED]', () => {
 
   it.fails('should support sink filtering', async () => {
     // GAP: No sink-level filtering
-    const { createLogger, FilteringSink } = await import('../logging/index.js') as any;
+    const { createLogger, FilteringSink } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const baseSink: LogSink = {
@@ -763,7 +854,7 @@ describe('Structured Logging - Custom Sink Configuration [RED]', () => {
 describe('Structured Logging - Performance Overhead [RED]', () => {
   it.fails('should have minimal overhead when logging is disabled', async () => {
     // GAP: No performance optimization for disabled logging
-    const { createLogger, NoOpSink } = await import('../logging/index.js') as any;
+    const { createLogger, NoOpSink } = await importLoggingModule();
 
     const logger = createLogger({ sink: new NoOpSink(), level: 'error' });
 
@@ -784,7 +875,7 @@ describe('Structured Logging - Performance Overhead [RED]', () => {
 
   it.fails('should support lazy message evaluation', async () => {
     // GAP: No lazy evaluation support
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -811,7 +902,7 @@ describe('Structured Logging - Performance Overhead [RED]', () => {
 
   it.fails('should use object pooling for log entries', async () => {
     // GAP: No object pooling for log entries
-    const { createLogger, getLogEntryPoolStats } = await import('../logging/index.js') as any;
+    const { createLogger, getLogEntryPoolStats } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -834,7 +925,7 @@ describe('Structured Logging - Performance Overhead [RED]', () => {
 
   it.fails('should support sampling for high-volume logging', async () => {
     // GAP: No sampling support
-    const { createLogger, SamplingSink } = await import('../logging/index.js') as any;
+    const { createLogger, SamplingSink } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const baseSink: LogSink = {
@@ -859,7 +950,7 @@ describe('Structured Logging - Performance Overhead [RED]', () => {
 
   it.fails('should have benchmark mode for performance testing', async () => {
     // GAP: No benchmark mode
-    const { createLogger, runLoggerBenchmark } = await import('../logging/index.js') as any;
+    const { createLogger, runLoggerBenchmark } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -886,7 +977,7 @@ describe('Structured Logging - Performance Overhead [RED]', () => {
 
   it.fails('should not block on async sink writes', async () => {
     // GAP: No non-blocking async writes
-    const { createLogger, AsyncBufferingSink } = await import('../logging/index.js') as any;
+    const { createLogger, AsyncBufferingSink } = await importLoggingModule();
 
     let writeCount = 0;
     const slowSink: LogSink = {
@@ -927,7 +1018,7 @@ describe('Structured Logging - Performance Overhead [RED]', () => {
 describe('Structured Logging - Log Entry Structure [RED]', () => {
   it.fails('should include all required fields in log entries', async () => {
     // GAP: No structured log entries
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -958,7 +1049,7 @@ describe('Structured Logging - Log Entry Structure [RED]', () => {
 
   it.fails('should include error details in error logs', async () => {
     // GAP: No error detail extraction
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -967,9 +1058,9 @@ describe('Structured Logging - Log Entry Structure [RED]', () => {
 
     const logger = createLogger({ sink });
 
-    const error = new Error('Something went wrong');
+    const error: ErrorWithCode = new Error('Something went wrong');
     error.name = 'ValidationError';
-    (error as any).code = 'VALIDATION_FAILED';
+    error.code = 'VALIDATION_FAILED';
 
     logger.error('Operation failed', error, { operation: 'save' });
 
@@ -986,7 +1077,7 @@ describe('Structured Logging - Log Entry Structure [RED]', () => {
 
   it.fails('should support context inheritance from child loggers', async () => {
     // GAP: No context inheritance
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -1011,7 +1102,7 @@ describe('Structured Logging - Log Entry Structure [RED]', () => {
 
   it.fails('should support structured context with standard fields', async () => {
     // GAP: No standard context fields
-    const { createLogger, StandardContext } = await import('../logging/index.js') as any;
+    const { createLogger, StandardContext } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -1045,7 +1136,7 @@ describe('Structured Logging - Log Entry Structure [RED]', () => {
 
   it.fails('should redact sensitive fields in context', async () => {
     // GAP: No sensitive field redaction
-    const { createLogger, RedactingSink } = await import('../logging/index.js') as any;
+    const { createLogger, RedactingSink } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const baseSink: LogSink = {
@@ -1077,7 +1168,7 @@ describe('Structured Logging - Log Entry Structure [RED]', () => {
 
   it.fails('should support message templates with placeholders', async () => {
     // GAP: No message templates
-    const { createLogger, formatMessage } = await import('../logging/index.js') as any;
+    const { createLogger, formatMessage } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {
@@ -1104,7 +1195,7 @@ describe('Structured Logging - Log Entry Structure [RED]', () => {
 
   it.fails('should support high-resolution timestamps', async () => {
     // GAP: No high-resolution timestamps
-    const { createLogger } = await import('../logging/index.js') as any;
+    const { createLogger } = await importLoggingModule();
 
     const logs: LogEntry[] = [];
     const sink: LogSink = {

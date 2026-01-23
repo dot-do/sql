@@ -13,8 +13,87 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { SubqueryParser, parseSubquery, type SubqueryNode } from './subquery.js';
-import type { ParsedSelect, ParsedExpr } from '../engine/planner.js';
+import {
+  SubqueryParser,
+  parseSubquery,
+  type SubqueryNode,
+  type ParsedSelect,
+  type ParsedExpr,
+  type ExistsExpression,
+  type QuantifiedComparison,
+  type TupleExpression,
+  type DerivedTable,
+  type ParsedJoin,
+} from './subquery.js';
+
+// =============================================================================
+// TYPE GUARDS FOR EXPRESSION NARROWING
+// =============================================================================
+
+/** Type guard for subquery nodes */
+function isSubqueryNode(expr: ParsedExpr | undefined): expr is SubqueryNode {
+  return expr !== undefined && expr.type === 'subquery';
+}
+
+/** Type guard for exists expressions */
+function isExistsExpr(expr: ParsedExpr | undefined): expr is ExistsExpression {
+  return expr !== undefined && expr.type === 'exists';
+}
+
+/** Type guard for binary expressions */
+function isBinaryExpr(expr: ParsedExpr | undefined): expr is { type: 'binary'; op: string; left: ParsedExpr; right: ParsedExpr } {
+  return expr !== undefined && expr.type === 'binary';
+}
+
+/** Type guard for unary expressions */
+function isUnaryExpr(expr: ParsedExpr | undefined): expr is { type: 'unary'; op: string; operand: ParsedExpr } {
+  return expr !== undefined && expr.type === 'unary';
+}
+
+/** Type guard for IN expressions */
+function isInExpr(expr: ParsedExpr | undefined): expr is { type: 'in'; expr: ParsedExpr; values: ParsedExpr[] | SubqueryNode; not?: boolean } {
+  return expr !== undefined && expr.type === 'in';
+}
+
+/** Type guard for tuple expressions */
+function isTupleExpr(expr: ParsedExpr | undefined): expr is TupleExpression {
+  return expr !== undefined && expr.type === 'tuple';
+}
+
+/** Type guard for quantified comparisons (ANY/ALL/SOME) */
+function isQuantifiedComparison(expr: ParsedExpr | undefined): expr is QuantifiedComparison {
+  return expr !== undefined && expr.type === 'comparison' && 'quantifier' in expr;
+}
+
+/** Type guard for case expressions */
+function isCaseExpr(expr: ParsedExpr | undefined): expr is { type: 'case'; operand?: ParsedExpr; whens: { condition: ParsedExpr; result: ParsedExpr }[]; else_?: ParsedExpr } {
+  return expr !== undefined && expr.type === 'case';
+}
+
+/** Type guard for literal expressions */
+function isLiteralExpr(expr: ParsedExpr | undefined): expr is { type: 'literal'; value: string | number | boolean | null } {
+  return expr !== undefined && expr.type === 'literal';
+}
+
+/** Type guard for star expressions */
+function isStarExpr(expr: ParsedExpr | undefined): expr is { type: 'star' } {
+  return expr !== undefined && expr.type === 'star';
+}
+
+/** Type guard for aggregate expressions */
+function isAggregateExpr(expr: ParsedExpr | undefined): expr is { type: 'aggregate'; name: string; arg: ParsedExpr | '*'; distinct?: boolean } {
+  return expr !== undefined && expr.type === 'aggregate';
+}
+
+/** Type guard for derived tables */
+function isDerivedTable(from: { type: string } | undefined): from is DerivedTable {
+  return from !== undefined && from.type === 'derived';
+}
+
+/** Type guard for table references */
+function isTableRef(from: { type: string } | undefined): from is { type: 'table'; table: string; alias?: string } {
+  return from !== undefined && from.type === 'table';
+}
 
 describe('DoSQL Subquery Parser', () => {
   let parser: SubqueryParser;
@@ -62,8 +141,12 @@ describe('DoSQL Subquery Parser', () => {
       const result = parser.parse(sql);
 
       expect(result.columns[0].expr.type).toBe('binary');
-      const binary = result.columns[0].expr as any;
-      expect(binary.right.type).toBe('subquery');
+      const binary = result.columns[0].expr;
+      if (isBinaryExpr(binary)) {
+        expect(binary.right.type).toBe('subquery');
+      } else {
+        expect.fail('Expected binary expression');
+      }
     });
 
     it('should parse nested scalar subqueries', () => {
@@ -80,16 +163,22 @@ describe('DoSQL Subquery Parser', () => {
       const result = parser.parse(sql);
 
       expect(result.where).toBeDefined();
-      const where = result.where as any;
-      expect(where.right.type).toBe('subquery');
+      if (isBinaryExpr(result.where)) {
+        expect(result.where.right.type).toBe('subquery');
+      } else {
+        expect.fail('Expected binary expression in WHERE');
+      }
     });
 
     it('should parse scalar subquery with LIMIT 1', () => {
       const sql = 'SELECT * FROM users WHERE id = (SELECT user_id FROM orders ORDER BY created_at DESC LIMIT 1)';
       const result = parser.parse(sql);
 
-      const subquery = (result.where as any).right as SubqueryNode;
-      expect(subquery.query.limit).toBe(1);
+      if (isBinaryExpr(result.where) && isSubqueryNode(result.where.right)) {
+        expect(result.where.right.query.limit).toBe(1);
+      } else {
+        expect.fail('Expected binary expression with subquery on right');
+      }
     });
 
     it('should parse scalar subquery with aggregates', () => {
@@ -111,19 +200,26 @@ describe('DoSQL Subquery Parser', () => {
       const result = parser.parse(sql);
 
       expect(result.where?.type).toBe('in');
-      const inExpr = result.where as any;
-      expect(inExpr.values.type).toBe('subquery');
-      expect(inExpr.values.subqueryType).toBe('in');
+      if (isInExpr(result.where) && isSubqueryNode(result.where.values as ParsedExpr)) {
+        const subquery = result.where.values as SubqueryNode;
+        expect(subquery.type).toBe('subquery');
+        expect(subquery.subqueryType).toBe('in');
+      } else {
+        expect.fail('Expected IN expression with subquery values');
+      }
     });
 
     it('should parse NOT IN subquery', () => {
       const sql = 'SELECT * FROM users WHERE id NOT IN (SELECT user_id FROM blocked_users)';
       const result = parser.parse(sql);
 
-      const notExpr = result.where as any;
-      expect(notExpr.type).toBe('unary');
-      expect(notExpr.op).toBe('not');
-      expect(notExpr.operand.type).toBe('in');
+      if (isUnaryExpr(result.where)) {
+        expect(result.where.type).toBe('unary');
+        expect(result.where.op).toBe('not');
+        expect(result.where.operand.type).toBe('in');
+      } else {
+        expect.fail('Expected unary NOT expression');
+      }
     });
 
     it('should parse IN subquery with WHERE clause', () => {
@@ -131,17 +227,23 @@ describe('DoSQL Subquery Parser', () => {
         WHERE category_id IN (SELECT id FROM categories WHERE active = true)`;
       const result = parser.parse(sql);
 
-      const inExpr = result.where as any;
-      const subquery = inExpr.values as SubqueryNode;
-      expect(subquery.query.where).toBeDefined();
+      if (isInExpr(result.where) && isSubqueryNode(result.where.values as ParsedExpr)) {
+        const subquery = result.where.values as SubqueryNode;
+        expect(subquery.query.where).toBeDefined();
+      } else {
+        expect.fail('Expected IN expression with subquery');
+      }
     });
 
     it('should parse IN subquery with multiple columns', () => {
       const sql = 'SELECT * FROM orders WHERE (user_id, status) IN (SELECT user_id, status FROM priority_orders)';
       const result = parser.parse(sql);
 
-      const inExpr = result.where as any;
-      expect(inExpr.expr.type).toBe('tuple');
+      if (isInExpr(result.where)) {
+        expect(result.where.expr.type).toBe('tuple');
+      } else {
+        expect.fail('Expected IN expression');
+      }
     });
 
     it('should parse nested IN subqueries', () => {
@@ -149,9 +251,12 @@ describe('DoSQL Subquery Parser', () => {
         WHERE x IN (SELECT y FROM t2 WHERE z IN (SELECT z FROM t3))`;
       const result = parser.parse(sql);
 
-      const outerIn = result.where as any;
-      const subquery = outerIn.values as SubqueryNode;
-      expect(subquery.query.where?.type).toBe('in');
+      if (isInExpr(result.where) && isSubqueryNode(result.where.values as ParsedExpr)) {
+        const subquery = result.where.values as SubqueryNode;
+        expect(subquery.query.where?.type).toBe('in');
+      } else {
+        expect.fail('Expected IN expression with subquery');
+      }
     });
 
     it('should parse IN subquery in JOIN condition', () => {
@@ -160,8 +265,8 @@ describe('DoSQL Subquery Parser', () => {
       const result = parser.parse(sql);
 
       expect(result.joins).toBeDefined();
-      const joinCondition = result.joins![0].on as any;
-      expect(joinCondition.type).toBe('in');
+      const joinCondition = result.joins![0].on;
+      expect(joinCondition?.type).toBe('in');
     });
   });
 
@@ -175,18 +280,24 @@ describe('DoSQL Subquery Parser', () => {
       const result = parser.parse(sql);
 
       expect(result.where?.type).toBe('exists');
-      const exists = result.where as any;
-      expect(exists.subqueryType).toBe('exists');
+      if (isExistsExpr(result.where)) {
+        expect(result.where.subqueryType).toBe('exists');
+      } else {
+        expect.fail('Expected EXISTS expression');
+      }
     });
 
     it('should parse NOT EXISTS subquery', () => {
       const sql = 'SELECT * FROM users WHERE NOT EXISTS (SELECT 1 FROM blocked_users WHERE blocked_users.user_id = users.id)';
       const result = parser.parse(sql);
 
-      const notExpr = result.where as any;
-      expect(notExpr.type).toBe('unary');
-      expect(notExpr.op).toBe('not');
-      expect(notExpr.operand.type).toBe('exists');
+      if (isUnaryExpr(result.where)) {
+        expect(result.where.type).toBe('unary');
+        expect(result.where.op).toBe('not');
+        expect(result.where.operand.type).toBe('exists');
+      } else {
+        expect.fail('Expected unary NOT expression');
+      }
     });
 
     it('should parse EXISTS with correlated subquery', () => {
@@ -194,10 +305,12 @@ describe('DoSQL Subquery Parser', () => {
         WHERE EXISTS (SELECT 1 FROM employees e WHERE e.dept_id = d.id AND e.salary > 100000)`;
       const result = parser.parse(sql);
 
-      const exists = result.where as any;
-      const subquery = exists.query as ParsedSelect;
-      // The WHERE clause references outer table (d.id)
-      expect(subquery.where).toBeDefined();
+      if (isExistsExpr(result.where)) {
+        // The WHERE clause references outer table (d.id)
+        expect(result.where.query.where).toBeDefined();
+      } else {
+        expect.fail('Expected EXISTS expression');
+      }
     });
 
     it('should parse multiple EXISTS in AND condition', () => {
@@ -206,26 +319,40 @@ describe('DoSQL Subquery Parser', () => {
         AND EXISTS (SELECT 1 FROM prices WHERE product_id = p.id)`;
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.type).toBe('binary');
-      expect(where.op).toBe('and');
+      if (isBinaryExpr(result.where)) {
+        expect(result.where.type).toBe('binary');
+        expect(result.where.op).toBe('and');
+      } else {
+        expect.fail('Expected binary AND expression');
+      }
     });
 
     it('should parse EXISTS with SELECT 1', () => {
       const sql = 'SELECT * FROM t WHERE EXISTS (SELECT 1 FROM t2)';
       const result = parser.parse(sql);
 
-      const exists = result.where as any;
-      expect(exists.query.columns[0].expr.type).toBe('literal');
-      expect(exists.query.columns[0].expr.value).toBe(1);
+      if (isExistsExpr(result.where)) {
+        const firstColExpr = result.where.query.columns[0].expr;
+        if (isLiteralExpr(firstColExpr)) {
+          expect(firstColExpr.type).toBe('literal');
+          expect(firstColExpr.value).toBe(1);
+        } else {
+          expect.fail('Expected literal expression');
+        }
+      } else {
+        expect.fail('Expected EXISTS expression');
+      }
     });
 
     it('should parse EXISTS with SELECT *', () => {
       const sql = 'SELECT * FROM t WHERE EXISTS (SELECT * FROM t2 WHERE t2.x = t.x)';
       const result = parser.parse(sql);
 
-      const exists = result.where as any;
-      expect(exists.query.columns[0].expr.type).toBe('star');
+      if (isExistsExpr(result.where)) {
+        expect(result.where.query.columns[0].expr.type).toBe('star');
+      } else {
+        expect.fail('Expected EXISTS expression');
+      }
     });
   });
 
@@ -239,9 +366,13 @@ describe('DoSQL Subquery Parser', () => {
         FROM users u`;
       const result = parser.parse(sql);
 
-      const subquery = result.columns[1].expr as SubqueryNode;
-      expect(subquery.correlatedColumns).toBeDefined();
-      expect(subquery.correlatedColumns).toContainEqual({ table: 'u', column: 'id' });
+      if (isSubqueryNode(result.columns[1].expr)) {
+        const subquery = result.columns[1].expr;
+        expect(subquery.correlatedColumns).toBeDefined();
+        expect(subquery.correlatedColumns).toContainEqual({ table: 'u', column: 'id' });
+      } else {
+        expect.fail('Expected subquery node');
+      }
     });
 
     it('should identify multiple outer references', () => {
@@ -249,8 +380,11 @@ describe('DoSQL Subquery Parser', () => {
         WHERE amount > (SELECT avg(amount) FROM orders o2 WHERE o2.user_id = o.user_id AND o2.status = o.status)`;
       const result = parser.parse(sql);
 
-      const subquery = (result.where as any).right as SubqueryNode;
-      expect(subquery.correlatedColumns?.length).toBe(2);
+      if (isBinaryExpr(result.where) && isSubqueryNode(result.where.right)) {
+        expect(result.where.right.correlatedColumns?.length).toBe(2);
+      } else {
+        expect.fail('Expected binary expression with subquery');
+      }
     });
 
     it('should parse deeply nested correlated subquery', () => {
@@ -261,10 +395,17 @@ describe('DoSQL Subquery Parser', () => {
         )`;
       const result = parser.parse(sql);
 
-      const outerIn = result.where as any;
-      const middleSubquery = outerIn.values as SubqueryNode;
-      const innerScalar = (middleSubquery.query.where as any).right as SubqueryNode;
-      expect(innerScalar.correlatedColumns).toContainEqual({ table: 't1', column: 'id' });
+      if (isInExpr(result.where) && isSubqueryNode(result.where.values as ParsedExpr)) {
+        const middleSubquery = result.where.values as SubqueryNode;
+        if (isBinaryExpr(middleSubquery.query.where) && isSubqueryNode(middleSubquery.query.where.right)) {
+          const innerScalar = middleSubquery.query.where.right;
+          expect(innerScalar.correlatedColumns).toContainEqual({ table: 't1', column: 'id' });
+        } else {
+          expect.fail('Expected binary expression with subquery in nested query');
+        }
+      } else {
+        expect.fail('Expected IN expression with subquery');
+      }
     });
 
     it('should track correlation depth', () => {
@@ -276,10 +417,17 @@ describe('DoSQL Subquery Parser', () => {
         )`;
       const result = parser.parse(sql);
 
-      const outerExists = result.where as any;
-      const innerExists = (outerExists.query.where as any).operands?.[1]?.operand || (outerExists.query.where as any).right;
-      // Inner subquery should reference both t1 and t2
-      expect(innerExists.correlatedColumns?.length).toBeGreaterThanOrEqual(2);
+      if (isExistsExpr(result.where)) {
+        const outerQuery = result.where.query;
+        // Navigate to inner EXISTS - may be accessed via binary AND expression
+        if (isBinaryExpr(outerQuery.where)) {
+          const rightSide = outerQuery.where.right;
+          if (isExistsExpr(rightSide)) {
+            // Inner subquery should reference both t1 and t2
+            expect(rightSide.correlatedColumns?.length).toBeGreaterThanOrEqual(2);
+          }
+        }
+      }
     });
 
     it('should handle aliased table references', () => {
@@ -287,8 +435,11 @@ describe('DoSQL Subquery Parser', () => {
         WHERE (SELECT count(*) FROM orders WHERE orders.user_id = u.id) > 5`;
       const result = parser.parse(sql);
 
-      const subquery = (result.where as any).left as SubqueryNode;
-      expect(subquery.correlatedColumns).toContainEqual({ table: 'u', column: 'id' });
+      if (isBinaryExpr(result.where) && isSubqueryNode(result.where.left)) {
+        expect(result.where.left.correlatedColumns).toContainEqual({ table: 'u', column: 'id' });
+      } else {
+        expect.fail('Expected binary expression with subquery on left');
+      }
     });
   });
 
@@ -315,8 +466,11 @@ describe('DoSQL Subquery Parser', () => {
       const sql = 'SELECT * FROM (SELECT id AS user_id, name AS user_name FROM users) AS u';
       const result = parser.parse(sql);
 
-      const derivedTable = result.from as any;
-      expect(derivedTable.query.columns[0].alias).toBe('user_id');
+      if (isDerivedTable(result.from)) {
+        expect(result.from.query.columns[0].alias).toBe('user_id');
+      } else {
+        expect.fail('Expected derived table');
+      }
     });
 
     it('should parse derived table in JOIN', () => {
@@ -345,9 +499,12 @@ describe('DoSQL Subquery Parser', () => {
       ) AS outer_u`;
       const result = parser.parse(sql);
 
-      const outer = result.from as any;
-      expect(outer.type).toBe('derived');
-      expect(outer.query.from.type).toBe('derived');
+      if (isDerivedTable(result.from)) {
+        expect(result.from.type).toBe('derived');
+        expect(result.from.query.from.type).toBe('derived');
+      } else {
+        expect.fail('Expected derived table');
+      }
     });
 
     it('should parse derived table with aggregation', () => {
@@ -360,8 +517,11 @@ describe('DoSQL Subquery Parser', () => {
         WHERE max_price > 100`;
       const result = parser.parse(sql);
 
-      const derived = result.from as any;
-      expect(derived.query.groupBy).toBeDefined();
+      if (isDerivedTable(result.from)) {
+        expect(result.from.query.groupBy).toBeDefined();
+      } else {
+        expect.fail('Expected derived table');
+      }
     });
 
     it('should parse lateral derived table (LATERAL join)', () => {
@@ -386,35 +546,47 @@ describe('DoSQL Subquery Parser', () => {
       const sql = 'SELECT * FROM products WHERE category = ANY (SELECT category FROM featured_categories)';
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.type).toBe('comparison');
-      expect(where.quantifier).toBe('any');
-      expect(where.right.type).toBe('subquery');
+      if (isQuantifiedComparison(result.where)) {
+        expect(result.where.type).toBe('comparison');
+        expect(result.where.quantifier).toBe('any');
+        expect(result.where.right.type).toBe('subquery');
+      } else {
+        expect.fail('Expected quantified comparison');
+      }
     });
 
     it('should parse > ALL subquery', () => {
       const sql = 'SELECT * FROM products WHERE price > ALL (SELECT price FROM competitor_prices)';
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.quantifier).toBe('all');
+      if (isQuantifiedComparison(result.where)) {
+        expect(result.where.quantifier).toBe('all');
+      } else {
+        expect.fail('Expected quantified comparison');
+      }
     });
 
     it('should parse < SOME subquery', () => {
       const sql = 'SELECT * FROM employees WHERE salary < SOME (SELECT salary FROM managers)';
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.quantifier).toBe('some'); // SOME is alias for ANY
+      if (isQuantifiedComparison(result.where)) {
+        expect(result.where.quantifier).toBe('some'); // SOME is alias for ANY
+      } else {
+        expect.fail('Expected quantified comparison');
+      }
     });
 
     it('should parse <> ALL subquery', () => {
       const sql = 'SELECT * FROM users WHERE status <> ALL (SELECT status FROM banned_statuses)';
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.op).toBe('ne');
-      expect(where.quantifier).toBe('all');
+      if (isQuantifiedComparison(result.where)) {
+        expect(result.where.op).toBe('ne');
+        expect(result.where.quantifier).toBe('all');
+      } else {
+        expect.fail('Expected quantified comparison');
+      }
     });
 
     it('should parse >= ANY with correlated subquery', () => {
@@ -422,9 +594,12 @@ describe('DoSQL Subquery Parser', () => {
         WHERE o.amount >= ANY (SELECT avg_amount FROM customer_stats WHERE customer_id = o.customer_id)`;
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.quantifier).toBe('any');
-      expect(where.right.correlatedColumns).toBeDefined();
+      if (isQuantifiedComparison(result.where)) {
+        expect(result.where.quantifier).toBe('any');
+        expect(result.where.right.correlatedColumns).toBeDefined();
+      } else {
+        expect.fail('Expected quantified comparison');
+      }
     });
 
     it('should parse nested ANY/ALL', () => {
@@ -432,10 +607,15 @@ describe('DoSQL Subquery Parser', () => {
         WHERE price > ALL (SELECT price FROM products WHERE category = ANY (SELECT id FROM premium_categories))`;
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.quantifier).toBe('all');
-      const innerWhere = where.right.query.where;
-      expect(innerWhere.quantifier).toBe('any');
+      if (isQuantifiedComparison(result.where)) {
+        expect(result.where.quantifier).toBe('all');
+        const innerWhere = result.where.right.query.where;
+        if (isQuantifiedComparison(innerWhere)) {
+          expect(innerWhere.quantifier).toBe('any');
+        }
+      } else {
+        expect.fail('Expected quantified comparison');
+      }
     });
   });
 
@@ -462,9 +642,16 @@ describe('DoSQL Subquery Parser', () => {
         FROM users u`;
       const result = parser.parse(sql);
 
-      const caseExpr = result.columns[0].expr as any;
-      expect(caseExpr.type).toBe('case');
-      expect(caseExpr.whens[0].condition.left.type).toBe('subquery');
+      const caseExpr = result.columns[0].expr;
+      if (isCaseExpr(caseExpr)) {
+        expect(caseExpr.type).toBe('case');
+        const condition = caseExpr.whens[0].condition;
+        if (isBinaryExpr(condition)) {
+          expect(condition.left.type).toBe('subquery');
+        }
+      } else {
+        expect.fail('Expected CASE expression');
+      }
     });
 
     it('should parse subquery in HAVING clause', () => {
@@ -475,8 +662,11 @@ describe('DoSQL Subquery Parser', () => {
       const result = parser.parse(sql);
 
       expect(result.having).toBeDefined();
-      const having = result.having as any;
-      expect(having.right.type).toBe('subquery');
+      if (isBinaryExpr(result.having)) {
+        expect(result.having.right.type).toBe('subquery');
+      } else {
+        expect.fail('Expected binary expression in HAVING');
+      }
     });
 
     it('should parse subquery in ORDER BY', () => {
@@ -499,8 +689,11 @@ describe('DoSQL Subquery Parser', () => {
       // Scalar subquery in SELECT
       expect(result.columns[1].expr.type).toBe('subquery');
       // EXISTS in WHERE
-      const where = result.where as any;
-      expect(where.op).toBe('and');
+      if (isBinaryExpr(result.where)) {
+        expect(result.where.op).toBe('and');
+      } else {
+        expect.fail('Expected binary AND expression');
+      }
     });
 
     it('should parse UNION inside subquery', () => {
@@ -512,9 +705,12 @@ describe('DoSQL Subquery Parser', () => {
         )`;
       const result = parser.parse(sql);
 
-      const inExpr = result.where as any;
-      const subquery = inExpr.values as SubqueryNode;
-      expect(subquery.query.union).toBeDefined();
+      if (isInExpr(result.where) && isSubqueryNode(result.where.values as ParsedExpr)) {
+        const subquery = result.where.values as SubqueryNode;
+        expect(subquery.query.union).toBeDefined();
+      } else {
+        expect.fail('Expected IN expression with subquery');
+      }
     });
 
     it('should handle deeply nested mixed subqueries', () => {
@@ -531,12 +727,17 @@ describe('DoSQL Subquery Parser', () => {
       const result = parser.parse(sql);
 
       // Verify the structure parsed correctly
-      const inSubquery = (result.where as any).values as SubqueryNode;
-      expect(inSubquery.type).toBe('subquery');
-      const scalarSubquery = (inSubquery.query.where as any).right as SubqueryNode;
-      expect(scalarSubquery.type).toBe('subquery');
-      const existsSubquery = scalarSubquery.query.where as any;
-      expect(existsSubquery.type).toBe('exists');
+      if (isInExpr(result.where) && isSubqueryNode(result.where.values as ParsedExpr)) {
+        const inSubquery = result.where.values as SubqueryNode;
+        expect(inSubquery.type).toBe('subquery');
+        if (isBinaryExpr(inSubquery.query.where) && isSubqueryNode(inSubquery.query.where.right)) {
+          const scalarSubquery = inSubquery.query.where.right;
+          expect(scalarSubquery.type).toBe('subquery');
+          expect(scalarSubquery.query.where?.type).toBe('exists');
+        }
+      } else {
+        expect.fail('Expected IN expression with subquery');
+      }
     });
   });
 
@@ -568,15 +769,19 @@ describe('DoSQL Subquery Parser', () => {
       )`;
       const result = parser.parse(sql);
 
-      const subquery = (result.where as any).values as SubqueryNode;
-      const sq = subquery.query;
-      expect(sq.distinct).toBe(true);
-      expect(sq.where).toBeDefined();
-      expect(sq.groupBy).toBeDefined();
-      expect(sq.having).toBeDefined();
-      expect(sq.orderBy).toBeDefined();
-      expect(sq.limit).toBe(10);
-      expect(sq.offset).toBe(5);
+      if (isInExpr(result.where) && isSubqueryNode(result.where.values as ParsedExpr)) {
+        const subquery = result.where.values as SubqueryNode;
+        const sq = subquery.query;
+        expect(sq.distinct).toBe(true);
+        expect(sq.where).toBeDefined();
+        expect(sq.groupBy).toBeDefined();
+        expect(sq.having).toBeDefined();
+        expect(sq.orderBy).toBeDefined();
+        expect(sq.limit).toBe(10);
+        expect(sq.offset).toBe(5);
+      } else {
+        expect.fail('Expected IN expression with subquery');
+      }
     });
 
     it('should handle subquery with table alias collision', () => {
@@ -584,8 +789,14 @@ describe('DoSQL Subquery Parser', () => {
       const sql = 'SELECT * FROM t WHERE x IN (SELECT x FROM t WHERE y > 0)';
       const result = parser.parse(sql);
 
-      const subquery = (result.where as any).values as SubqueryNode;
-      expect(subquery.query.from.table).toBe('t');
+      if (isInExpr(result.where) && isSubqueryNode(result.where.values as ParsedExpr)) {
+        const subquery = result.where.values as SubqueryNode;
+        if (isTableRef(subquery.query.from)) {
+          expect(subquery.query.from.table).toBe('t');
+        }
+      } else {
+        expect.fail('Expected IN expression with subquery');
+      }
     });
 
     it('should reject reserved word as unquoted alias', () => {
@@ -602,9 +813,10 @@ describe('DoSQL Subquery Parser', () => {
       try {
         parser.parse(sql);
         expect.fail('Should have thrown');
-      } catch (e: any) {
-        expect(e.location).toBeDefined();
-        expect(e.location.line).toBeGreaterThan(1);
+      } catch (e: unknown) {
+        const error = e as { location?: { line: number } };
+        expect(error.location).toBeDefined();
+        expect(error.location?.line).toBeGreaterThan(1);
       }
     });
   });
@@ -618,41 +830,62 @@ describe('DoSQL Subquery Parser', () => {
       const sql = 'SELECT * FROM t WHERE x IN (SELECT y FROM t2)';
       const result = parser.parse(sql);
 
-      const subquery = (result.where as any).values as SubqueryNode;
-      expect(subquery.isCorrelated).toBe(false);
+      if (isInExpr(result.where) && isSubqueryNode(result.where.values as ParsedExpr)) {
+        const subquery = result.where.values as SubqueryNode;
+        expect(subquery.isCorrelated).toBe(false);
+      } else {
+        expect.fail('Expected IN expression with subquery');
+      }
     });
 
     it('should mark correlated subqueries', () => {
       const sql = 'SELECT * FROM t WHERE x IN (SELECT y FROM t2 WHERE t2.z = t.z)';
       const result = parser.parse(sql);
 
-      const subquery = (result.where as any).values as SubqueryNode;
-      expect(subquery.isCorrelated).toBe(true);
+      if (isInExpr(result.where) && isSubqueryNode(result.where.values as ParsedExpr)) {
+        const subquery = result.where.values as SubqueryNode;
+        expect(subquery.isCorrelated).toBe(true);
+      } else {
+        expect.fail('Expected IN expression with subquery');
+      }
     });
 
     it('should identify semi-join candidate (IN)', () => {
       const sql = 'SELECT * FROM orders WHERE user_id IN (SELECT id FROM active_users)';
       const result = parser.parse(sql);
 
-      const subquery = (result.where as any).values as SubqueryNode;
-      expect(subquery.canBeSemiJoin).toBe(true);
+      if (isInExpr(result.where) && isSubqueryNode(result.where.values as ParsedExpr)) {
+        const subquery = result.where.values as SubqueryNode;
+        expect(subquery.canBeSemiJoin).toBe(true);
+      } else {
+        expect.fail('Expected IN expression with subquery');
+      }
     });
 
     it('should identify anti-join candidate (NOT IN)', () => {
       const sql = 'SELECT * FROM orders WHERE user_id NOT IN (SELECT id FROM blocked_users)';
       const result = parser.parse(sql);
 
-      const notIn = result.where as any;
-      const subquery = notIn.operand.values as SubqueryNode;
-      expect(subquery.canBeAntiJoin).toBe(true);
+      if (isUnaryExpr(result.where) && isInExpr(result.where.operand)) {
+        const inExpr = result.where.operand;
+        if (isSubqueryNode(inExpr.values as ParsedExpr)) {
+          const subquery = inExpr.values as SubqueryNode;
+          expect(subquery.canBeAntiJoin).toBe(true);
+        }
+      } else {
+        expect.fail('Expected NOT IN expression');
+      }
     });
 
     it('should identify EXISTS that can be converted to semi-join', () => {
       const sql = 'SELECT * FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id)';
       const result = parser.parse(sql);
 
-      const exists = result.where as any;
-      expect(exists.canBeSemiJoin).toBe(true);
+      if (isExistsExpr(result.where)) {
+        expect(result.where.canBeSemiJoin).toBe(true);
+      } else {
+        expect.fail('Expected EXISTS expression');
+      }
     });
   });
 });

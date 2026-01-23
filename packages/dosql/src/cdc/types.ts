@@ -8,6 +8,13 @@
  */
 
 import type { WALEntry, WALOperation, WALReader } from '../wal/types.js';
+import {
+  DoSQLError,
+  ErrorCategory,
+  registerErrorClass,
+  type ErrorContext,
+  type SerializedError,
+} from '../errors/base.js';
 
 // =============================================================================
 // Re-export Unified CDC Types from shared-types via sql.do
@@ -371,19 +378,159 @@ export enum CDCErrorCode {
 }
 
 /**
- * Custom error class for CDC operations
+ * Error class for CDC (Change Data Capture) operations
+ *
+ * Extends DoSQLError to provide consistent error handling with:
+ * - Machine-readable error codes
+ * - Error categories for API layer handling
+ * - Recovery hints for developers
+ * - LSN context for debugging streaming issues
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const subscription = await cdcManager.subscribe({ fromLSN: 1000n });
+ * } catch (error) {
+ *   if (error instanceof CDCError) {
+ *     if (error.code === CDCErrorCode.LSN_NOT_FOUND) {
+ *       // LSN too old, need to perform full sync
+ *       console.log('LSN not found:', error.lsn);
+ *     }
+ *     if (error.isRetryable()) {
+ *       // Retry the subscription
+ *     }
+ *   }
+ * }
+ * ```
  */
-export class CDCError extends Error {
+export class CDCError extends DoSQLError {
+  readonly code: CDCErrorCode;
+  readonly category: ErrorCategory;
+  readonly lsn?: bigint;
+
   constructor(
-    public readonly code: CDCErrorCode,
+    code: CDCErrorCode,
     message: string,
-    public readonly lsn?: bigint,
-    public readonly cause?: Error
+    options?: {
+      cause?: Error;
+      context?: ErrorContext;
+      lsn?: bigint;
+    }
   ) {
-    super(message);
+    super(message, { cause: options?.cause, context: options?.context });
     this.name = 'CDCError';
+    this.code = code;
+    this.lsn = options?.lsn;
+
+    // Set category based on error code
+    this.category = this.determineCategory();
+
+    // Include LSN in context
+    if (this.lsn !== undefined) {
+      this.context = {
+        ...this.context,
+        metadata: {
+          ...this.context?.metadata,
+          lsn: String(this.lsn),
+        },
+      };
+    }
+
+    // Set recovery hints
+    this.setRecoveryHint();
+  }
+
+  private determineCategory(): ErrorCategory {
+    switch (this.code) {
+      case CDCErrorCode.LSN_NOT_FOUND:
+      case CDCErrorCode.SLOT_NOT_FOUND:
+        return ErrorCategory.RESOURCE;
+      case CDCErrorCode.SLOT_EXISTS:
+        return ErrorCategory.CONFLICT;
+      case CDCErrorCode.BUFFER_OVERFLOW:
+        return ErrorCategory.RESOURCE;
+      case CDCErrorCode.DECODE_ERROR:
+        return ErrorCategory.VALIDATION;
+      case CDCErrorCode.SUBSCRIPTION_FAILED:
+        return ErrorCategory.CONNECTION;
+      default:
+        return ErrorCategory.EXECUTION;
+    }
+  }
+
+  private setRecoveryHint(): void {
+    switch (this.code) {
+      case CDCErrorCode.SUBSCRIPTION_FAILED:
+        this.recoveryHint = 'Verify CDC is enabled and WAL is available. Retry with exponential backoff.';
+        break;
+      case CDCErrorCode.LSN_NOT_FOUND:
+        this.recoveryHint = 'The requested LSN has been compacted. Start from the oldest available LSN or perform a full table sync.';
+        break;
+      case CDCErrorCode.SLOT_NOT_FOUND:
+        this.recoveryHint = 'Create the replication slot before subscribing. Use createSlot() to create it.';
+        break;
+      case CDCErrorCode.SLOT_EXISTS:
+        this.recoveryHint = 'Use a different slot name or delete the existing slot if it is no longer needed.';
+        break;
+      case CDCErrorCode.BUFFER_OVERFLOW:
+        this.recoveryHint = 'Consumer is not keeping up. Increase buffer size or speed up event processing.';
+        break;
+      case CDCErrorCode.DECODE_ERROR:
+        this.recoveryHint = 'Check event format and decoder compatibility. Verify schema matches expected format.';
+        break;
+    }
+  }
+
+  /**
+   * Check if this error is retryable
+   */
+  isRetryable(): boolean {
+    return [
+      CDCErrorCode.SUBSCRIPTION_FAILED,
+      CDCErrorCode.BUFFER_OVERFLOW,
+    ].includes(this.code);
+  }
+
+  /**
+   * Get a user-friendly error message
+   */
+  toUserMessage(): string {
+    switch (this.code) {
+      case CDCErrorCode.SUBSCRIPTION_FAILED:
+        return 'Failed to start CDC subscription. Please try again.';
+      case CDCErrorCode.LSN_NOT_FOUND:
+        return 'The requested log position is no longer available. A full sync may be required.';
+      case CDCErrorCode.SLOT_NOT_FOUND:
+        return 'The replication slot does not exist.';
+      case CDCErrorCode.SLOT_EXISTS:
+        return 'A replication slot with this name already exists.';
+      case CDCErrorCode.BUFFER_OVERFLOW:
+        return 'CDC buffer is full. Please slow down or increase buffer capacity.';
+      case CDCErrorCode.DECODE_ERROR:
+        return 'Failed to decode CDC event data.';
+      default:
+        return this.message;
+    }
+  }
+
+  /**
+   * Deserialize from JSON
+   */
+  static fromJSON(json: SerializedError): CDCError {
+    const lsnStr = json.context?.metadata?.lsn as string | undefined;
+    return new CDCError(
+      json.code as CDCErrorCode,
+      json.message,
+      {
+        context: json.context,
+        lsn: lsnStr !== undefined ? BigInt(lsnStr) : undefined,
+      }
+    );
   }
 }
+
+// Register for deserialization
+registerErrorClass('CDCError', CDCError);
 
 // =============================================================================
 // Lakehouse Streaming Types

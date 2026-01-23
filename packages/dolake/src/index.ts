@@ -474,17 +474,49 @@ export {
 // =============================================================================
 
 export {
+  // Types
   DurabilityTier,
-  DurabilityWriter,
-  classifyEvent,
-  classifyEvents,
-  defaultDurabilityWriter,
   type WriteResult,
   type DurabilityConfig,
   type R2Storage,
   type KVStorage,
   type VFSStorage,
   DEFAULT_DURABILITY_CONFIG,
+
+  // Classification
+  classifyEvent,
+  classifyEvents,
+  isTableInTier,
+  getTablesInTier,
+
+  // WriteBuffer (Single-responsibility class for buffering writes)
+  WriteBuffer,
+  type PendingEvent,
+  type WriteBufferConfig,
+  DEFAULT_WRITE_BUFFER_CONFIG,
+
+  // FlushStrategy (Single-responsibility class for flush timing and policies)
+  FlushStrategy,
+  type FlushStrategyConfig,
+  type FlushDecision,
+  type RetryContext,
+  DEFAULT_FLUSH_STRATEGY_CONFIG,
+
+  // PersistenceManager (Single-responsibility class for storage persistence)
+  PersistenceManager,
+  type PersistenceManagerConfig,
+  type WriteOperationResult,
+  type TierMetrics,
+  type P0Metrics,
+  type P1Metrics,
+  type P2Metrics,
+  type P3Metrics,
+  type AllTierMetrics,
+  DEFAULT_PERSISTENCE_MANAGER_CONFIG,
+
+  // DurabilityWriter (Facade composing the above classes)
+  DurabilityWriter,
+  defaultDurabilityWriter,
 } from './durability.js';
 
 // =============================================================================

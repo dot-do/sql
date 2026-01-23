@@ -1496,3 +1496,55 @@ export function createTypedShardingClient<Schema extends Record<string, { column
 ): ShardingClient {
   return createShardingClient(config);
 }
+
+// =============================================================================
+// PARSER MODULE EXPORTS
+// =============================================================================
+
+/**
+ * SQL tokenization and parsing utilities.
+ *
+ * The parser module provides low-level access to SQL tokenization
+ * and parsing for advanced use cases.
+ *
+ * @example Using the tokenizer
+ * ```typescript
+ * import { tokenizeSQL, stripComments, SQLTokenizer } from '@dosql/sharding';
+ *
+ * // Simple tokenization
+ * const tokens = tokenizeSQL('SELECT * FROM users WHERE id = 1');
+ *
+ * // Strip comments before parsing
+ * const cleanTokens = stripComments(tokens);
+ *
+ * // Use the tokenizer class directly
+ * const tokenizer = new SQLTokenizer();
+ * const allTokens = tokenizer.tokenize(sql);
+ * ```
+ */
+export {
+  // Tokenizer types
+  type TokenType,
+  type SQLToken,
+
+  // Tokenizer class
+  SQLTokenizer,
+
+  // Helper functions
+  tokenizeSQL,
+  stripComments,
+  getMeaningfulTokens,
+  findKeyword,
+  findKeywordIndex,
+  getTokensBetweenKeywords,
+
+  // Shard key extraction
+  extractShardKeyFromTokens,
+
+  // Condition parsing
+  type ParsedCondition,
+  extractConditionsFromTokens,
+
+  // Parser types
+  type WhereOperator,
+} from './parser/index.js';

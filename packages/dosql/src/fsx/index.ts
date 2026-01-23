@@ -127,6 +127,29 @@ export {
 } from './tiered.js';
 
 // =============================================================================
+// Tier Migration Module
+// =============================================================================
+
+export {
+  // Migration types
+  type TierIndexEntry,
+  type MigrationHistoryEntry,
+  type MigrateToR2Options,
+  type PromoteToHotOptions,
+  type MigrationPolicy,
+  type HotBackendWithIndex,
+  type ColdBackendWithBatch,
+
+  // Migration classes
+  TierMigrator,
+  MigrationProgressTracker,
+
+  // Factory functions
+  createTierMigrator,
+  createProgressTracker,
+} from './tier-migration.js';
+
+// =============================================================================
 // Copy-on-Write (COW) Backend
 // =============================================================================
 

@@ -40,6 +40,74 @@ import {
 } from '../../transaction/types.js';
 
 // =============================================================================
+// EXTENDED TYPES FOR TDD (Expected Future API)
+// =============================================================================
+
+/**
+ * Wait-for graph representation
+ */
+interface WaitForGraph {
+  nodes: string[];
+  edges: Array<{ from: string; to: string; resource: string }>;
+  hasCycle: boolean;
+  cycle?: string[];
+}
+
+/**
+ * Deadlock statistics
+ */
+interface DeadlockStats {
+  detected: number;
+  prevented: number;
+  lastDetectedAt?: number;
+}
+
+/**
+ * Deadlock history entry
+ */
+interface DeadlockHistoryEntry {
+  timestamp: number;
+  cycle: string[];
+  victimTxnId: string;
+  resources: string[];
+}
+
+/**
+ * Extended LockManager interface for TDD tests
+ * These methods document expected future API
+ */
+interface ExtendedLockManager extends LockManager {
+  getWaitForGraph?(): WaitForGraph;
+  setTransactionCost?(txnId: string, cost: number): void;
+  markReadOnly?(txnId: string, readOnly: boolean): void;
+  getDeadlockStats?(): DeadlockStats;
+  getDeadlockHistory?(): DeadlockHistoryEntry[];
+}
+
+/**
+ * Extended configuration options for TDD tests
+ */
+interface ExtendedLockManagerConfig {
+  defaultTimeout?: number;
+  detectDeadlocks?: boolean;
+  onDeadlock?: (deadlock: DeadlockEvent) => void;
+  deadlockTimeout?: number;
+  deadlockDetectionInterval?: number;
+  victimSelection?: 'youngest' | 'leastWork' | 'roundRobin' | 'preferReadOnly';
+  deadlockPrevention?: 'none' | 'waitDie' | 'woundWait' | 'lockOrdering' | 'noWait';
+  enableLockUpgradeCheck?: boolean;
+  deadlockRetry?: boolean;
+  maxRetries?: number;
+}
+
+interface DeadlockEvent {
+  timestamp: number;
+  cycle: string[];
+  victimTxnId: string;
+  resources: string[];
+}
+
+// =============================================================================
 // DOCUMENTED GAPS - Features that should be implemented
 // =============================================================================
 //
@@ -271,7 +339,7 @@ describe('Wait-For Graph Construction', () => {
     await delay(10);
 
     // GAP: getWaitForGraph() method should exist
-    const waitForGraph = (lockManager as any).getWaitForGraph?.();
+    const waitForGraph = (lockManager as unknown as ExtendedLockManager).getWaitForGraph?.();
     expect(waitForGraph).toBeDefined();
     expect(waitForGraph.hasEdge('txn1', 'txn2')).toBe(true);
 
@@ -292,7 +360,7 @@ describe('Wait-For Graph Construction', () => {
     await delay(10);
 
     // GAP: hasCycle() should work before deadlock is triggered
-    const waitForGraph = (lockManager as any).getWaitForGraph?.();
+    const waitForGraph = (lockManager as unknown as ExtendedLockManager).getWaitForGraph?.();
     expect(waitForGraph).toBeDefined();
     expect(waitForGraph.hasCycle()).toBe(false);
 
@@ -313,7 +381,7 @@ describe('Wait-For Graph Construction', () => {
     );
     await delay(10);
 
-    const waitForGraph = (lockManager as any).getWaitForGraph?.();
+    const waitForGraph = (lockManager as unknown as ExtendedLockManager).getWaitForGraph?.();
     expect(waitForGraph).toBeDefined();
     // GAP: getWaitReason() should indicate lock upgrade
     expect(waitForGraph.getWaitReason?.('txn1', 'txn2')).toBe('lockUpgrade');
@@ -337,7 +405,7 @@ describe('Wait-For Graph Construction', () => {
     );
     await delay(5);
 
-    const waitForGraph = (lockManager as any).getWaitForGraph?.();
+    const waitForGraph = (lockManager as unknown as ExtendedLockManager).getWaitForGraph?.();
     expect(waitForGraph).toBeDefined();
     expect(waitForGraph.getEdgeCount()).toBe(2); // txn2->txn1, txn3->txn1
 
@@ -360,7 +428,7 @@ describe('Deadlock Timeout Configuration', () => {
     const lockManager = createLockManager({
       detectDeadlocks: true,
       deadlockDetectionInterval: 100,
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     expect(lockManager).toBeDefined();
   });
@@ -374,7 +442,7 @@ describe('Deadlock Timeout Configuration', () => {
       defaultTimeout: 10000,
       detectDeadlocks: true,
       deadlockTimeout: 500,
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     expect(lockManager).toBeDefined();
   });
@@ -420,7 +488,7 @@ describe('Victim Selection Policies', () => {
     const lockManager = createLockManager({
       detectDeadlocks: true,
       victimSelection: 'youngest',
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     // txn1 starts first (older)
     await lockManager.acquire(lockRequest('txn1', 'A', LockType.EXCLUSIVE));
@@ -453,14 +521,14 @@ describe('Victim Selection Policies', () => {
     const lockManager = createLockManager({
       detectDeadlocks: true,
       victimSelection: 'leastWork',
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     await lockManager.acquire(lockRequest('txn1', 'A', LockType.EXCLUSIVE));
     await lockManager.acquire(lockRequest('txn2', 'B', LockType.EXCLUSIVE));
 
     // GAP: setTransactionCost() should exist
-    (lockManager as any).setTransactionCost?.('txn1', 1000);
-    (lockManager as any).setTransactionCost?.('txn2', 100);
+    (lockManager as unknown as ExtendedLockManager).setTransactionCost?.('txn1', 1000);
+    (lockManager as unknown as ExtendedLockManager).setTransactionCost?.('txn2', 100);
 
     const p1 = lockManager.acquire(
       lockRequest('txn1', 'B', LockType.EXCLUSIVE, 5000)
@@ -487,7 +555,7 @@ describe('Victim Selection Policies', () => {
     const lockManager = createLockManager({
       detectDeadlocks: true,
       victimSelection: 'roundRobin',
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     const victims: string[] = [];
 
@@ -531,13 +599,13 @@ describe('Victim Selection Policies', () => {
     const lockManager = createLockManager({
       detectDeadlocks: true,
       victimSelection: 'preferReadOnly',
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     await lockManager.acquire(lockRequest('txn1', 'A', LockType.EXCLUSIVE));
     await lockManager.acquire(lockRequest('txn2', 'B', LockType.SHARED));
 
     // GAP: markReadOnly() should exist
-    (lockManager as any).markReadOnly?.('txn2', true);
+    (lockManager as unknown as ExtendedLockManager).markReadOnly?.('txn2', true);
 
     const p1 = lockManager.acquire(
       lockRequest('txn1', 'B', LockType.EXCLUSIVE, 5000)
@@ -569,7 +637,7 @@ describe('Deadlock Prevention Schemes', () => {
     const lockManager = createLockManager({
       detectDeadlocks: false,
       deadlockPrevention: 'waitDie',
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     // txn1 is older
     await lockManager.acquire(lockRequest('txn1', 'A', LockType.EXCLUSIVE));
@@ -601,7 +669,7 @@ describe('Deadlock Prevention Schemes', () => {
     const lockManager = createLockManager({
       detectDeadlocks: false,
       deadlockPrevention: 'woundWait',
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     // txn1 (older) registers first
     await lockManager.acquire(lockRequest('txn1', 'A', LockType.EXCLUSIVE));
@@ -631,7 +699,7 @@ describe('Deadlock Prevention Schemes', () => {
     const lockManager = createLockManager({
       detectDeadlocks: false,
       deadlockPrevention: 'lockOrdering',
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     // txn1 acquires C then D (correct order: C < D alphabetically)
     await lockManager.acquire(lockRequest('txn1', 'C', LockType.EXCLUSIVE));
@@ -658,7 +726,7 @@ describe('Deadlock Prevention Schemes', () => {
     const lockManager = createLockManager({
       detectDeadlocks: false,
       deadlockPrevention: 'noWait',
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     await lockManager.acquire(lockRequest('txn1', 'A', LockType.EXCLUSIVE));
 
@@ -899,7 +967,7 @@ describe('Deadlock Reporting and Logging', () => {
     const lockManager = createLockManager({
       detectDeadlocks: true,
       onDeadlock: (info: any) => deadlockEvents.push(info),
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     await lockManager.acquire(lockRequest('txn1', 'A', LockType.EXCLUSIVE));
     await lockManager.acquire(lockRequest('txn2', 'B', LockType.EXCLUSIVE));
@@ -935,7 +1003,7 @@ describe('Deadlock Reporting and Logging', () => {
     });
 
     // GAP: getDeadlockStats() should exist
-    const stats = (lockManager as any).getDeadlockStats?.();
+    const stats = (lockManager as unknown as ExtendedLockManager).getDeadlockStats?.();
     expect(stats).toBeDefined();
     expect(stats.totalDeadlocks).toBe(0);
 
@@ -954,7 +1022,7 @@ describe('Deadlock Reporting and Logging', () => {
       // Expected
     }
 
-    const updatedStats = (lockManager as any).getDeadlockStats?.();
+    const updatedStats = (lockManager as unknown as ExtendedLockManager).getDeadlockStats?.();
     expect(updatedStats.totalDeadlocks).toBe(1);
     expect(updatedStats.avgCycleLength).toBeGreaterThan(0);
 
@@ -1059,7 +1127,7 @@ describe('Deadlock Reporting and Logging', () => {
     }
 
     // GAP: getDeadlockHistory() should exist
-    const history = (lockManager as any).getDeadlockHistory?.();
+    const history = (lockManager as unknown as ExtendedLockManager).getDeadlockHistory?.();
     expect(history).toBeDefined();
     expect(history).toHaveLength(3);
 
@@ -1090,7 +1158,7 @@ describe('Transaction Manager Deadlock Integration', () => {
         baseBackoffMs: 10,
         maxBackoffMs: 100,
       },
-    } as any);
+    } as ExtendedLockManagerConfig);
 
     let attempts = 0;
 

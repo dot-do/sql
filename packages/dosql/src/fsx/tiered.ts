@@ -11,9 +11,7 @@
  */
 
 import {
-  type FSXBackend,
   type FSXBackendWithMeta,
-  type FSXMetadata,
   type ByteRange,
   type TieredStorageConfig,
   type TieredMetadata,
@@ -25,63 +23,16 @@ import {
 } from './types.js';
 import { type DOStorageBackend } from './do-backend.js';
 import { type R2StorageBackend } from './r2-backend.js';
-
-// =============================================================================
-// Internal Types
-// =============================================================================
-
-/**
- * Index entry for tracking file locations across tiers
- */
-interface TierIndexEntry {
-  /** Original file path */
-  path: string;
-  /** File size in bytes */
-  size: number;
-  /** Which tier(s) contain the file */
-  tier: StorageTier;
-  /** Creation timestamp */
-  createdAt: number;
-  /** Last access timestamp */
-  lastAccessed: number;
-  /** When migrated to cold storage (if applicable) */
-  migratedAt?: number;
-  /** ETag from R2 (for cache validation) */
-  r2Etag?: string;
-  /** Access count for prioritizing which files to migrate */
-  accessCount: number;
-  /** Whether file is pinned to hot tier */
-  pinned?: boolean;
-}
-
-/**
- * Extended DO backend interface with index access
- */
-interface DOBackendWithIndex extends FSXBackendWithMeta {
-  getStats(): Promise<{ fileCount: number; totalSize: number; chunkedFileCount: number }>;
-}
-
-/**
- * Extended R2 backend interface with batch operations
- */
-interface R2BackendWithBatch extends FSXBackendWithMeta {
-  deleteMany(paths: string[]): Promise<void>;
-  getStats(prefix?: string): Promise<{ objectCount: number; totalSize: number }>;
-}
-
-// =============================================================================
-// Tiered Storage Implementation
-// =============================================================================
-
-/**
- * Migration history entry
- */
-interface MigrationHistoryEntry {
-  timestamp: number;
-  fileCount: number;
-  bytesTransferred: number;
-  direction: 'hot-to-cold' | 'cold-to-hot';
-}
+import {
+  type TierIndexEntry,
+  type HotBackendWithIndex,
+  type ColdBackendWithBatch,
+  type MigrateToR2Options,
+  TierMigrator,
+  MigrationProgressTracker,
+  createProgressTracker,
+  createTierMigrator,
+} from './tier-migration.js';
 
 /**
  * Extended statistics interface
@@ -103,8 +54,8 @@ export interface TieredStorageStats {
  * Tiered storage backend that combines DO (hot) and R2 (cold) storage
  */
 export class TieredStorageBackend implements FSXBackendWithMeta {
-  private readonly hotBackend: DOBackendWithIndex;
-  private readonly coldBackend: R2BackendWithBatch;
+  private readonly hotBackend: HotBackendWithIndex;
+  private readonly coldBackend: ColdBackendWithBatch;
   private readonly config: TieredStorageConfig;
 
   /** In-memory index of file locations (for fast tier lookup) */
@@ -113,23 +64,35 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
   /** Index key prefix in hot storage */
   private readonly indexPrefix = '_tier_index/';
 
-  /** Migration history for statistics */
-  private migrationHistory: MigrationHistoryEntry[] = [];
+  /** Migration progress tracker */
+  private readonly progressTracker: MigrationProgressTracker;
 
-  /** Total bytes migrated (cumulative) */
-  private totalBytesMigrated = 0;
-
-  /** Total migration count */
-  private migrationCount = 0;
+  /** Tier migrator for handling migration operations */
+  private readonly migrator: TierMigrator;
 
   constructor(
     hotBackend: DOStorageBackend,
     coldBackend: R2StorageBackend,
     config: Partial<TieredStorageConfig> = {}
   ) {
-    this.hotBackend = hotBackend as DOBackendWithIndex;
-    this.coldBackend = coldBackend as R2BackendWithBatch;
+    this.hotBackend = hotBackend as HotBackendWithIndex;
+    this.coldBackend = coldBackend as ColdBackendWithBatch;
     this.config = { ...DEFAULT_TIERED_CONFIG, ...config };
+
+    // Initialize migration components
+    this.progressTracker = createProgressTracker();
+    this.migrator = createTierMigrator(
+      this.hotBackend,
+      this.coldBackend,
+      {
+        hotDataMaxAge: this.config.hotDataMaxAge,
+        hotStorageMaxSize: this.config.hotStorageMaxSize,
+        maxHotFileSize: this.config.maxHotFileSize,
+        autoMigrate: this.config.autoMigrate,
+      },
+      this.progressTracker,
+      this.indexPrefix
+    );
   }
 
   // ===========================================================================
@@ -445,216 +408,28 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
 
   /**
    * Migrate cold data from hot storage to R2
+   * Delegates to the TierMigrator for actual migration logic
    */
-  async migrateToR2(options: {
-    /** Only migrate files older than this (ms) */
-    olderThan?: number;
-    /** Maximum number of files to migrate */
-    limit?: number;
-    /** Only migrate files matching this prefix */
-    prefix?: string;
-    /** Delete from hot storage after successful migration */
-    deleteFromHot?: boolean;
-    /** Target size to free up in bytes */
-    targetSize?: number;
-    /** Path to exclude from migration (e.g., file just written) */
-    excludePath?: string;
-  } = {}): Promise<MigrationResult> {
-    const {
-      olderThan = this.config.hotDataMaxAge,
-      limit = 100,
-      prefix = '',
-      deleteFromHot = true,
-      targetSize,
-      excludePath,
-    } = options;
-
-    const result: MigrationResult = {
-      migrated: [],
-      failed: [],
-      bytesTransferred: 0,
-    };
-
-    const now = Date.now();
-    // Handle olderThan = Infinity (used for size-based migration)
-    const cutoff = olderThan === Infinity ? Infinity : now - olderThan;
-
-    // Find candidates for migration
-    const candidates: TierIndexEntry[] = [];
-
-    for (const entry of this.tierIndex.values()) {
-      if (entry.tier !== StorageTier.HOT) continue;
-      // Skip pinned files
-      if (entry.pinned) continue;
-      // Skip excluded path (usually the file that triggered migration)
-      if (excludePath && entry.path === excludePath) continue;
-      // For age-based migration, only consider files older than cutoff
-      // For size-based migration (cutoff = Infinity), consider all files
-      if (cutoff !== Infinity && entry.lastAccessed > cutoff) continue;
-      if (prefix && !entry.path.startsWith(prefix)) continue;
-
-      candidates.push(entry);
-    }
-
-    // Also check hot storage for files without index entries
-    const hotFiles = await this.hotBackend.list(prefix);
-    for (const path of hotFiles) {
-      if (path.startsWith(this.indexPrefix)) continue;
-      // Skip excluded path
-      if (excludePath && path === excludePath) continue;
-
-      if (!this.tierIndex.has(path)) {
-        const meta = await this.hotBackend.metadata(path);
-        if (meta) {
-          const fileTime = meta.lastModified.getTime();
-          if (cutoff === Infinity || fileTime <= cutoff) {
-            candidates.push({
-              path,
-              size: meta.size,
-              tier: StorageTier.HOT,
-              createdAt: fileTime,
-              lastAccessed: fileTime,
-              accessCount: 0,
-            });
-          }
-        }
-      }
-    }
-
-    // Sort candidates by priority:
-    // 1. Lower access count = higher priority for migration
-    // 2. Older lastAccessed = higher priority for migration
-    candidates.sort((a, b) => {
-      const accessDiff = (a.accessCount || 0) - (b.accessCount || 0);
-      if (accessDiff !== 0) return accessDiff;
-      return a.lastAccessed - b.lastAccessed;
-    });
-
-    // Limit candidates
-    const limitedCandidates = candidates.slice(0, limit);
-
-    // Track bytes freed for targetSize
-    let bytesFreed = 0;
-
-    // Migrate each candidate
-    for (const entry of limitedCandidates) {
-      // Stop if we've freed enough space
-      if (targetSize && bytesFreed >= targetSize) break;
-
-      try {
-        // Read from hot
-        const data = await this.hotBackend.read(entry.path);
-        if (!data) {
-          result.failed.push({ path: entry.path, error: 'File not found in hot storage' });
-          continue;
-        }
-
-        // Write to cold
-        await this.coldBackend.write(entry.path, data);
-
-        // Update index
-        const coldMeta = await this.coldBackend.metadata(entry.path);
-        entry.tier = deleteFromHot ? StorageTier.COLD : StorageTier.BOTH;
-        entry.migratedAt = now;
-        entry.r2Etag = coldMeta?.etag;
-        await this.setTierEntry(entry);
-
-        // Optionally delete from hot
-        if (deleteFromHot) {
-          await this.hotBackend.delete(entry.path);
-          bytesFreed += data.length;
-        }
-
-        result.migrated.push(entry.path);
-        result.bytesTransferred += data.length;
-      } catch (error) {
-        result.failed.push({
-          path: entry.path,
-          error: (error as Error).message,
-        });
-      }
-    }
-
-    // Track migration in history
-    if (result.migrated.length > 0) {
-      this.migrationHistory.push({
-        timestamp: Date.now(),
-        fileCount: result.migrated.length,
-        bytesTransferred: result.bytesTransferred,
-        direction: 'hot-to-cold',
-      });
-      this.totalBytesMigrated += result.bytesTransferred;
-      this.migrationCount++;
-    }
-
-    return result;
+  async migrateToR2(options: MigrateToR2Options = {}): Promise<MigrationResult> {
+    return this.migrator.migrateToR2(
+      this.tierIndex,
+      (entry) => this.setTierEntry(entry),
+      options
+    );
   }
 
   /**
    * Promote cold data back to hot storage
+   * Delegates to the TierMigrator for actual promotion logic
    */
   async promoteToHot(paths: string[]): Promise<MigrationResult> {
-    const result: MigrationResult = {
-      migrated: [],
-      failed: [],
-      bytesTransferred: 0,
-    };
-
-    for (const path of paths) {
-      try {
-        let entry = await this.getTierEntry(path);
-
-        if (entry?.tier === StorageTier.HOT || entry?.tier === StorageTier.BOTH) {
-          // Already in hot
-          result.migrated.push(path);
-          continue;
-        }
-
-        // Read from cold
-        const data = await this.coldBackend.read(path);
-        if (!data) {
-          result.failed.push({ path, error: 'File not found in cold storage' });
-          continue;
-        }
-
-        // Check size limit
-        if (data.length > this.config.maxHotFileSize) {
-          result.failed.push({ path, error: 'File too large for hot storage' });
-          continue;
-        }
-
-        // Write to hot
-        await this.hotBackend.write(path, data);
-
-        // Update index
-        const now = Date.now();
-        if (entry) {
-          entry.tier = StorageTier.BOTH;
-          entry.lastAccessed = now;
-          entry.accessCount = (entry.accessCount || 0) + 1;
-          await this.updateTierEntry(entry);
-        } else {
-          await this.setTierEntry({
-            path,
-            size: data.length,
-            tier: StorageTier.BOTH,
-            createdAt: now,
-            lastAccessed: now,
-            accessCount: 1,
-          });
-        }
-
-        result.migrated.push(path);
-        result.bytesTransferred += data.length;
-      } catch (error) {
-        result.failed.push({
-          path,
-          error: (error as Error).message,
-        });
-      }
-    }
-
-    return result;
+    return this.migrator.promoteToHot(
+      paths,
+      this.tierIndex,
+      (path) => this.getTierEntry(path),
+      (entry) => this.setTierEntry(entry),
+      (entry) => this.updateTierEntry(entry)
+    );
   }
 
   /**
@@ -694,37 +469,12 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
   }
 
   private async maybeRunMigration(excludePath?: string): Promise<void> {
-    // Always run age-based migration first
-    await this.migrateToR2({
-      olderThan: this.config.hotDataMaxAge,
-      limit: 50,
-      deleteFromHot: true,
-      excludePath,
-    });
-
-    // Calculate actual data size (excluding index entries)
-    let actualDataSize = 0;
-    for (const entry of this.tierIndex.values()) {
-      if (entry.tier === StorageTier.HOT || entry.tier === StorageTier.BOTH) {
-        actualDataSize += entry.size;
-      }
-    }
-
-    if (actualDataSize > this.config.hotStorageMaxSize) {
-      // Calculate how much space we need to free
-      const excessSize = actualDataSize - this.config.hotStorageMaxSize;
-
-      // Run migration to free up space - prioritize by access pattern
-      // We use olderThan = Infinity to consider all files, but only migrate
-      // enough to get under the size limit
-      await this.migrateToR2({
-        olderThan: Infinity, // Consider all files when over size limit
-        limit: 100,
-        deleteFromHot: true,
-        targetSize: excessSize + (this.config.hotStorageMaxSize * 0.1), // Free 10% buffer
-        excludePath,
-      });
-    }
+    // Delegate to the TierMigrator
+    await this.migrator.maybeRunMigration(
+      this.tierIndex,
+      (entry) => this.setTierEntry(entry),
+      excludePath
+    );
   }
 
   // ===========================================================================
@@ -785,16 +535,11 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
     let hotDataSize = 0;
     let hotFileCount = 0;
     let coldFileCount = 0;
-    let migrationPending = 0;
 
     for (const entry of this.tierIndex.values()) {
       if (entry.tier === StorageTier.HOT) {
         hotDataSize += entry.size;
         hotFileCount++;
-        // Check if file is old enough to be migration candidate
-        if (Date.now() - entry.lastAccessed > this.config.hotDataMaxAge) {
-          migrationPending++;
-        }
       } else if (entry.tier === StorageTier.COLD) {
         coldFileCount++;
       } else if (entry.tier === StorageTier.BOTH) {
@@ -804,6 +549,9 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
       }
     }
 
+    // Get migration pending count from migrator
+    const migrationPending = this.migrator.calculatePendingMigrations(this.tierIndex);
+
     const totalFiles = new Set([...this.tierIndex.keys()]).size;
     const totalSize = hotDataSize + coldStats.totalSize;
     const hotToTotalRatio = totalSize > 0 ? hotDataSize / totalSize : 0;
@@ -812,10 +560,8 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
     const hotStorageWarning = this.config.hotStorageMaxSize > 0 &&
       hotDataSize / this.config.hotStorageMaxSize > 0.7;
 
-    // Get last migration timestamp
-    const lastMigration = this.migrationHistory.length > 0
-      ? new Date(this.migrationHistory[this.migrationHistory.length - 1].timestamp)
-      : undefined;
+    // Get migration stats from progress tracker
+    const migrationStats = this.progressTracker.getStats();
 
     return {
       hot: {
@@ -830,9 +576,9 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
       hotToTotalRatio,
       migrationPending,
       hotStorageWarning,
-      lastMigration,
-      migrationCount: this.migrationCount,
-      totalBytesMigrated: this.totalBytesMigrated,
+      lastMigration: migrationStats.lastMigration,
+      migrationCount: migrationStats.migrationCount,
+      totalBytesMigrated: migrationStats.totalBytesMigrated,
     };
   }
 

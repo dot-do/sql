@@ -32,6 +32,77 @@ import {
 } from '../factory.js';
 
 // =============================================================================
+// TEST UTILITIES - Mock R2 Types
+// =============================================================================
+
+/**
+ * Minimal mock R2Object for testing
+ */
+interface MockR2Object {
+  key: string;
+  version: string;
+  size: number;
+  etag: string;
+  httpEtag: string;
+  checksums: Record<string, unknown>;
+  uploaded: Date;
+  httpMetadata?: Record<string, string>;
+  customMetadata?: Record<string, string>;
+  body?: ReadableStream;
+  bodyUsed: boolean;
+  arrayBuffer: () => Promise<ArrayBuffer>;
+  text: () => Promise<string>;
+  json: <T>() => Promise<T>;
+  blob: () => Promise<Blob>;
+  writeHttpMetadata: (headers: Headers) => void;
+}
+
+/**
+ * Create a minimal mock R2Object
+ */
+function createMockR2Object(): MockR2Object {
+  return {
+    key: 'test-key',
+    version: '1',
+    size: 0,
+    etag: 'test-etag',
+    httpEtag: '"test-etag"',
+    checksums: {},
+    uploaded: new Date(),
+    bodyUsed: false,
+    arrayBuffer: async () => new ArrayBuffer(0),
+    text: async () => '',
+    json: async <T>() => ({} as T),
+    blob: async () => new Blob(),
+    writeHttpMetadata: () => {},
+  };
+}
+
+/**
+ * Minimal mock storage bucket for testing
+ */
+interface MockStorageBucket {
+  get: (key: string) => Promise<null>;
+  head: (key: string) => Promise<null>;
+  put: (key: string, value: unknown) => Promise<MockR2Object>;
+  delete: (keys: string | string[]) => Promise<void>;
+  list: () => Promise<{ objects: unknown[]; truncated: boolean }>;
+}
+
+/**
+ * Create a minimal mock storage bucket
+ */
+function createMockStorageBucket(): MockStorageBucket {
+  return {
+    get: async () => null,
+    head: async () => null,
+    put: async () => createMockR2Object(),
+    delete: async () => {},
+    list: async () => ({ objects: [], truncated: false }),
+  };
+}
+
+// =============================================================================
 // MODE DETECTION TESTS
 // =============================================================================
 
@@ -265,13 +336,7 @@ describe('WorkerQueryEngine', () => {
   describe('mode enforcement', () => {
     it('should report read-only mode', () => {
       // Create a minimal mock R2Bucket
-      const mockBucket = {
-        get: async () => null,
-        head: async () => null,
-        put: async () => ({} as any),
-        delete: async () => {},
-        list: async () => ({ objects: [], truncated: false }),
-      };
+      const mockBucket = createMockStorageBucket();
 
       const engine = new WorkerQueryEngine({
         storage: mockBucket,
@@ -282,13 +347,7 @@ describe('WorkerQueryEngine', () => {
     });
 
     it('should reject write operations', async () => {
-      const mockBucket = {
-        get: async () => null,
-        head: async () => null,
-        put: async () => ({} as any),
-        delete: async () => {},
-        list: async () => ({ objects: [], truncated: false }),
-      };
+      const mockBucket = createMockStorageBucket();
 
       const engine = new WorkerQueryEngine({
         storage: mockBucket,
@@ -305,13 +364,7 @@ describe('WorkerQueryEngine', () => {
     });
 
     it('should allow read operations', async () => {
-      const mockBucket = {
-        get: async () => null,
-        head: async () => null,
-        put: async () => ({} as any),
-        delete: async () => {},
-        list: async () => ({ objects: [], truncated: false }),
-      };
+      const mockBucket = createMockStorageBucket();
 
       const engine = new WorkerQueryEngine({
         storage: mockBucket,
@@ -325,13 +378,7 @@ describe('WorkerQueryEngine', () => {
 
   describe('write routing', () => {
     it('should fail without DO stub', async () => {
-      const mockBucket = {
-        get: async () => null,
-        head: async () => null,
-        put: async () => ({} as any),
-        delete: async () => {},
-        list: async () => ({ objects: [], truncated: false }),
-      };
+      const mockBucket = createMockStorageBucket();
 
       const engine = new WorkerQueryEngine({
         storage: mockBucket,
@@ -342,13 +389,7 @@ describe('WorkerQueryEngine', () => {
     });
 
     it('should fail if write() called with non-write operation', async () => {
-      const mockBucket = {
-        get: async () => null,
-        head: async () => null,
-        put: async () => ({} as any),
-        delete: async () => {},
-        list: async () => ({ objects: [], truncated: false }),
-      };
+      const mockBucket = createMockStorageBucket();
 
       // Create a mock DO stub
       const mockDoStub = {
@@ -366,13 +407,7 @@ describe('WorkerQueryEngine', () => {
     });
 
     it('should route writes to DO stub', async () => {
-      const mockBucket = {
-        get: async () => null,
-        head: async () => null,
-        put: async () => ({} as any),
-        delete: async () => {},
-        list: async () => ({ objects: [], truncated: false }),
-      };
+      const mockBucket = createMockStorageBucket();
 
       let receivedRequest: Request | null = null;
 
@@ -398,13 +433,7 @@ describe('WorkerQueryEngine', () => {
     });
 
     it('should handle DO stub errors', async () => {
-      const mockBucket = {
-        get: async () => null,
-        head: async () => null,
-        put: async () => ({} as any),
-        delete: async () => {},
-        list: async () => ({ objects: [], truncated: false }),
-      };
+      const mockBucket = createMockStorageBucket();
 
       const mockDoStub = {
         id: { toString: () => 'test-id' },
@@ -482,13 +511,7 @@ describe('WorkerQueryEngine', () => {
     });
 
     it('should provide cache stats', () => {
-      const mockBucket = {
-        get: async () => null,
-        head: async () => null,
-        put: async () => ({} as any),
-        delete: async () => {},
-        list: async () => ({ objects: [], truncated: false }),
-      };
+      const mockBucket = createMockStorageBucket();
 
       const engine = new WorkerQueryEngine({
         storage: mockBucket,
@@ -503,13 +526,7 @@ describe('WorkerQueryEngine', () => {
 
   describe('factory function', () => {
     it('createWorkerEngine should create WorkerQueryEngine', () => {
-      const mockBucket = {
-        get: async () => null,
-        head: async () => null,
-        put: async () => ({} as any),
-        delete: async () => {},
-        list: async () => ({ objects: [], truncated: false }),
-      };
+      const mockBucket = createMockStorageBucket();
 
       const engine = createWorkerEngine({ storage: mockBucket });
       expect(engine).toBeInstanceOf(WorkerQueryEngine);
@@ -735,13 +752,7 @@ describe('DOQueryEngine', () => {
 describe('createQueryEngine', () => {
   describe('read-only mode', () => {
     it('should create WorkerQueryEngine', () => {
-      const mockBucket = {
-        get: async () => null,
-        head: async () => null,
-        put: async () => ({} as any),
-        delete: async () => {},
-        list: async () => ({ objects: [], truncated: false }),
-      };
+      const mockBucket = createMockStorageBucket();
 
       const engine = createQueryEngine({
         mode: 'read-only',
@@ -782,13 +793,7 @@ describe('createQueryEngine', () => {
 
 describe('createReadOnlyEngine', () => {
   it('should create WorkerQueryEngine', () => {
-    const mockBucket = {
-      get: async () => null,
-      head: async () => null,
-      put: async () => ({} as any),
-      delete: async () => {},
-      list: async () => ({ objects: [], truncated: false }),
-    };
+    const mockBucket = createMockStorageBucket();
 
     const engine = createReadOnlyEngine(mockBucket);
 
@@ -796,19 +801,38 @@ describe('createReadOnlyEngine', () => {
   });
 });
 
+/**
+ * Minimal mock DO storage for testing
+ */
+interface MockDOStorage {
+  get: (key: string) => Promise<unknown>;
+  put: (key: string, value: unknown) => Promise<void>;
+  delete: (keys: string | string[]) => Promise<boolean>;
+  list: () => Promise<Map<string, unknown>>;
+  transaction: <T>(fn: (txn: MockDOStorage) => Promise<T>) => Promise<T>;
+  deleteAll: () => Promise<void>;
+  getAlarm: () => Promise<number | null>;
+  setAlarm: (time: number) => Promise<void>;
+  deleteAlarm: () => Promise<void>;
+}
+
+function createMockDOStorage(): MockDOStorage {
+  return {
+    get: async () => undefined,
+    put: async () => {},
+    delete: async () => false,
+    list: async () => new Map(),
+    transaction: async <T>(fn: (txn: MockDOStorage) => Promise<T>) => fn({} as MockDOStorage),
+    deleteAll: async () => {},
+    getAlarm: async () => null,
+    setAlarm: async () => {},
+    deleteAlarm: async () => {},
+  };
+}
+
 describe('createReadWriteEngine', () => {
   it('should create DOQueryEngine', () => {
-    const mockStorage = {
-      get: async () => undefined,
-      put: async () => {},
-      delete: async () => false,
-      list: async () => new Map(),
-      transaction: async <T>(fn: any) => fn({}),
-      deleteAll: async () => {},
-      getAlarm: async () => null,
-      setAlarm: async () => {},
-      deleteAlarm: async () => {},
-    };
+    const mockStorage = createMockDOStorage();
 
     const engine = createReadWriteEngine(mockStorage);
 
@@ -818,32 +842,16 @@ describe('createReadWriteEngine', () => {
 
 describe('type guards for options', () => {
   it('isReadOnlyOptions should identify read-only options', () => {
-    const mockBucket = {
-      get: async () => null,
-      head: async () => null,
-      put: async () => ({} as any),
-      delete: async () => {},
-      list: async () => ({ objects: [], truncated: false }),
-    };
+    const mockBucket = createMockStorageBucket();
 
     expect(isReadOnlyOptions({ mode: 'read-only', storage: mockBucket })).toBe(true);
-    expect(isReadOnlyOptions({ mode: 'read-write', storage: {} as any })).toBe(false);
+    expect(isReadOnlyOptions({ mode: 'read-write', storage: createMockDOStorage() })).toBe(false);
   });
 
   it('isReadWriteOptions should identify read-write options', () => {
-    const mockStorage = {
-      get: async () => undefined,
-      put: async () => {},
-      delete: async () => false,
-      list: async () => new Map(),
-      transaction: async <T>(fn: any) => fn({}),
-      deleteAll: async () => {},
-      getAlarm: async () => null,
-      setAlarm: async () => {},
-      deleteAlarm: async () => {},
-    };
+    const mockStorage = createMockDOStorage();
 
     expect(isReadWriteOptions({ mode: 'read-write', storage: mockStorage })).toBe(true);
-    expect(isReadWriteOptions({ mode: 'read-only', storage: {} as any })).toBe(false);
+    expect(isReadWriteOptions({ mode: 'read-only', storage: createMockStorageBucket() })).toBe(false);
   });
 });

@@ -29,7 +29,83 @@ import {
   isDropIndexStatement,
   isCreateViewStatement,
   isDropViewStatement,
+  type ColumnConstraint,
+  type TableConstraint,
+  type PrimaryKeyColumnConstraint,
+  type DefaultColumnConstraint,
+  type CheckColumnConstraint,
+  type CollateColumnConstraint,
+  type ReferencesColumnConstraint,
+  type GeneratedColumnConstraint,
+  type PrimaryKeyTableConstraint,
+  type UniqueTableConstraint,
+  type ForeignKeyTableConstraint,
+  type CheckTableConstraint,
+  type AddColumnOperation,
+  type DropColumnOperation,
+  type RenameTableOperation,
+  type RenameColumnOperation,
 } from './ddl.js';
+
+// =============================================================================
+// TYPE GUARDS FOR CONSTRAINTS
+// =============================================================================
+
+function isPrimaryKeyConstraint(c: ColumnConstraint): c is PrimaryKeyColumnConstraint {
+  return c.type === 'PRIMARY KEY';
+}
+
+function isDefaultConstraint(c: ColumnConstraint): c is DefaultColumnConstraint {
+  return c.type === 'DEFAULT';
+}
+
+function isCheckConstraint(c: ColumnConstraint): c is CheckColumnConstraint {
+  return c.type === 'CHECK';
+}
+
+function isCollateConstraint(c: ColumnConstraint): c is CollateColumnConstraint {
+  return c.type === 'COLLATE';
+}
+
+function isReferencesConstraint(c: ColumnConstraint): c is ReferencesColumnConstraint {
+  return c.type === 'REFERENCES';
+}
+
+function isGeneratedConstraint(c: ColumnConstraint): c is GeneratedColumnConstraint {
+  return c.type === 'GENERATED';
+}
+
+function isUniqueTableConstraint(c: TableConstraint): c is UniqueTableConstraint {
+  return c.type === 'UNIQUE';
+}
+
+function isPrimaryKeyTableConstraint(c: TableConstraint): c is PrimaryKeyTableConstraint {
+  return c.type === 'PRIMARY KEY';
+}
+
+function isForeignKeyTableConstraint(c: TableConstraint): c is ForeignKeyTableConstraint {
+  return c.type === 'FOREIGN KEY';
+}
+
+function isCheckTableConstraint(c: TableConstraint): c is CheckTableConstraint {
+  return c.type === 'CHECK';
+}
+
+function isAddColumnOp(op: { operation: string }): op is AddColumnOperation {
+  return op.operation === 'ADD COLUMN';
+}
+
+function isDropColumnOp(op: { operation: string }): op is DropColumnOperation {
+  return op.operation === 'DROP COLUMN';
+}
+
+function isRenameTableOp(op: { operation: string }): op is RenameTableOperation {
+  return op.operation === 'RENAME TO';
+}
+
+function isRenameColumnOp(op: { operation: string }): op is RenameColumnOperation {
+  return op.operation === 'RENAME COLUMN';
+}
 
 // =============================================================================
 // CREATE TABLE TESTS
@@ -293,11 +369,9 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const pkConstraint = result.statement.columns[0].constraints.find(
-        (c) => c.type === 'PRIMARY KEY'
-      ) as any;
+      const pkConstraint = result.statement.columns[0].constraints.find(isPrimaryKeyConstraint);
       expect(pkConstraint).toBeDefined();
-      expect(pkConstraint.autoincrement).toBe(true);
+      expect(pkConstraint?.autoincrement).toBe(true);
     });
 
     it('should parse PRIMARY KEY with sort order', () => {
@@ -307,9 +381,7 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const pkConstraint = result.statement.columns[0].constraints.find(
-        (c) => c.type === 'PRIMARY KEY'
-      ) as any;
+      const pkConstraint = result.statement.columns[0].constraints.find(isPrimaryKeyConstraint);
       expect(pkConstraint?.order).toBe('DESC');
     });
 
@@ -346,11 +418,9 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const defConstraint = result.statement.columns[0].constraints.find(
-        (c) => c.type === 'DEFAULT'
-      ) as any;
+      const defConstraint = result.statement.columns[0].constraints.find(isDefaultConstraint);
       expect(defConstraint).toBeDefined();
-      expect(defConstraint.value).toBe('active');
+      expect(defConstraint?.value).toBe('active');
     });
 
     it('should parse DEFAULT constraint with numeric value', () => {
@@ -360,11 +430,9 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const defConstraint = result.statement.columns[0].constraints.find(
-        (c) => c.type === 'DEFAULT'
-      ) as any;
+      const defConstraint = result.statement.columns[0].constraints.find(isDefaultConstraint);
       expect(defConstraint).toBeDefined();
-      expect(defConstraint.value).toBe(0);
+      expect(defConstraint?.value).toBe(0);
     });
 
     it('should parse DEFAULT constraint with NULL', () => {
@@ -374,11 +442,9 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const defConstraint = result.statement.columns[0].constraints.find(
-        (c) => c.type === 'DEFAULT'
-      ) as any;
+      const defConstraint = result.statement.columns[0].constraints.find(isDefaultConstraint);
       expect(defConstraint).toBeDefined();
-      expect(defConstraint.value).toBeNull();
+      expect(defConstraint?.value).toBeNull();
     });
 
     it('should parse DEFAULT constraint with CURRENT_TIMESTAMP', () => {
@@ -388,12 +454,10 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const defConstraint = result.statement.columns[0].constraints.find(
-        (c) => c.type === 'DEFAULT'
-      ) as any;
+      const defConstraint = result.statement.columns[0].constraints.find(isDefaultConstraint);
       expect(defConstraint).toBeDefined();
-      expect(defConstraint.value).toBe('CURRENT_TIMESTAMP');
-      expect(defConstraint.isExpression).toBe(true);
+      expect(defConstraint?.value).toBe('CURRENT_TIMESTAMP');
+      expect(defConstraint?.isExpression).toBe(true);
     });
 
     it('should parse CHECK constraint', () => {
@@ -403,11 +467,9 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const checkConstraint = result.statement.columns[0].constraints.find(
-        (c) => c.type === 'CHECK'
-      ) as any;
+      const checkConstraint = result.statement.columns[0].constraints.find(isCheckConstraint);
       expect(checkConstraint).toBeDefined();
-      expect(checkConstraint.expression).toBe('age >= 0');
+      expect(checkConstraint?.expression).toBe('age >= 0');
     });
 
     it('should parse COLLATE constraint', () => {
@@ -417,11 +479,9 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const collateConstraint = result.statement.columns[0].constraints.find(
-        (c) => c.type === 'COLLATE'
-      ) as any;
+      const collateConstraint = result.statement.columns[0].constraints.find(isCollateConstraint);
       expect(collateConstraint).toBeDefined();
-      expect(collateConstraint.collation).toBe('NOCASE');
+      expect(collateConstraint?.collation).toBe('NOCASE');
     });
 
     it('should parse column-level REFERENCES constraint', () => {
@@ -431,12 +491,10 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const refConstraint = result.statement.columns[0].constraints.find(
-        (c) => c.type === 'REFERENCES'
-      ) as any;
+      const refConstraint = result.statement.columns[0].constraints.find(isReferencesConstraint);
       expect(refConstraint).toBeDefined();
-      expect(refConstraint.table).toBe('users');
-      expect(refConstraint.columns).toEqual(['id']);
+      expect(refConstraint?.table).toBe('users');
+      expect(refConstraint?.columns).toEqual(['id']);
     });
 
     it('should parse REFERENCES with ON DELETE CASCADE', () => {
@@ -446,9 +504,7 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const refConstraint = result.statement.columns[0].constraints.find(
-        (c) => c.type === 'REFERENCES'
-      ) as any;
+      const refConstraint = result.statement.columns[0].constraints.find(isReferencesConstraint);
       expect(refConstraint?.onDelete).toBe('CASCADE');
     });
 
@@ -459,9 +515,7 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const refConstraint = result.statement.columns[0].constraints.find(
-        (c) => c.type === 'REFERENCES'
-      ) as any;
+      const refConstraint = result.statement.columns[0].constraints.find(isReferencesConstraint);
       expect(refConstraint?.onUpdate).toBe('SET NULL');
     });
 
@@ -473,11 +527,9 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const genConstraint = result.statement.columns[2].constraints.find(
-        (c) => c.type === 'GENERATED'
-      ) as any;
+      const genConstraint = result.statement.columns[2].constraints.find(isGeneratedConstraint);
       expect(genConstraint).toBeDefined();
-      expect(genConstraint.storage).toBe('STORED');
+      expect(genConstraint?.storage).toBe('STORED');
     });
 
     it('should parse named constraint', () => {
@@ -489,7 +541,7 @@ describe('CREATE TABLE', () => {
 
       const uqConstraint = result.statement.columns[0].constraints.find(
         (c) => c.type === 'UNIQUE'
-      ) as any;
+      );
       expect(uqConstraint?.name).toBe('email_unique');
     });
 
@@ -515,11 +567,11 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const pkConstraint = result.statement.constraints.find(
-        (c) => c.type === 'PRIMARY KEY'
-      );
+      const pkConstraint = result.statement.constraints.find(isPrimaryKeyTableConstraint);
       expect(pkConstraint).toBeDefined();
-      expect((pkConstraint as any).columns).toEqual([{ name: 'id' }]);
+      if (pkConstraint) {
+        expect(pkConstraint.columns).toEqual([{ name: 'id' }]);
+      }
     });
 
     it('should parse composite PRIMARY KEY', () => {
@@ -529,12 +581,13 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const pkConstraint = result.statement.constraints.find(
-        (c) => c.type === 'PRIMARY KEY'
-      ) as any;
-      expect(pkConstraint?.columns).toHaveLength(2);
-      expect(pkConstraint?.columns[0].name).toBe('order_id');
-      expect(pkConstraint?.columns[1].name).toBe('item_id');
+      const pkConstraint = result.statement.constraints.find(isPrimaryKeyTableConstraint);
+      expect(pkConstraint).toBeDefined();
+      if (pkConstraint) {
+        expect(pkConstraint.columns).toHaveLength(2);
+        expect(pkConstraint.columns[0].name).toBe('order_id');
+        expect(pkConstraint.columns[1].name).toBe('item_id');
+      }
     });
 
     it('should parse table-level UNIQUE', () => {
@@ -544,10 +597,11 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const uqConstraint = result.statement.constraints.find(
-        (c) => c.type === 'UNIQUE'
-      ) as any;
-      expect(uqConstraint?.columns).toHaveLength(2);
+      const uqConstraint = result.statement.constraints.find(isUniqueTableConstraint);
+      expect(uqConstraint).toBeDefined();
+      if (uqConstraint) {
+        expect(uqConstraint.columns).toHaveLength(2);
+      }
     });
 
     it('should parse table-level FOREIGN KEY', () => {
@@ -561,13 +615,13 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const fkConstraint = result.statement.constraints.find(
-        (c) => c.type === 'FOREIGN KEY'
-      ) as any;
+      const fkConstraint = result.statement.constraints.find(isForeignKeyTableConstraint);
       expect(fkConstraint).toBeDefined();
-      expect(fkConstraint.columns).toEqual(['user_id']);
-      expect(fkConstraint.references.table).toBe('users');
-      expect(fkConstraint.references.columns).toEqual(['id']);
+      if (fkConstraint) {
+        expect(fkConstraint.columns).toEqual(['user_id']);
+        expect(fkConstraint.references.table).toBe('users');
+        expect(fkConstraint.references.columns).toEqual(['id']);
+      }
     });
 
     it('should parse FOREIGN KEY with ON DELETE and ON UPDATE', () => {
@@ -581,11 +635,12 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const fkConstraint = result.statement.constraints.find(
-        (c) => c.type === 'FOREIGN KEY'
-      ) as any;
-      expect(fkConstraint?.onDelete).toBe('CASCADE');
-      expect(fkConstraint?.onUpdate).toBe('RESTRICT');
+      const fkConstraint = result.statement.constraints.find(isForeignKeyTableConstraint);
+      expect(fkConstraint).toBeDefined();
+      if (fkConstraint) {
+        expect(fkConstraint.onDelete).toBe('CASCADE');
+        expect(fkConstraint.onUpdate).toBe('RESTRICT');
+      }
     });
 
     it('should parse table-level CHECK', () => {
@@ -595,11 +650,11 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const checkConstraint = result.statement.constraints.find(
-        (c) => c.type === 'CHECK'
-      ) as any;
+      const checkConstraint = result.statement.constraints.find(isCheckTableConstraint);
       expect(checkConstraint).toBeDefined();
-      expect(checkConstraint.expression).toBe('discount <= price');
+      if (checkConstraint) {
+        expect(checkConstraint.expression).toBe('discount <= price');
+      }
     });
 
     it('should parse named table constraint', () => {
@@ -609,10 +664,11 @@ describe('CREATE TABLE', () => {
       expect(isParseSuccess(result)).toBe(true);
       if (!isParseSuccess(result)) return;
 
-      const pkConstraint = result.statement.constraints.find(
-        (c) => c.type === 'PRIMARY KEY'
-      ) as any;
-      expect(pkConstraint?.name).toBe('pk_users');
+      const pkConstraint = result.statement.constraints.find(isPrimaryKeyTableConstraint);
+      expect(pkConstraint).toBeDefined();
+      if (pkConstraint) {
+        expect(pkConstraint.name).toBe('pk_users');
+      }
     });
   });
 
@@ -751,8 +807,11 @@ describe('ALTER TABLE', () => {
     expect(result.statement.name).toBe('users');
     expect(result.statement.operations).toHaveLength(1);
     expect(result.statement.operations[0].operation).toBe('ADD COLUMN');
-    expect((result.statement.operations[0] as any).column.name).toBe('email');
-    expect((result.statement.operations[0] as any).column.dataType.name).toBe('TEXT');
+    const op = result.statement.operations[0];
+    if (isAddColumnOp(op)) {
+      expect(op.column.name).toBe('email');
+      expect(op.column.dataType.name).toBe('TEXT');
+    }
   });
 
   it('should parse ALTER TABLE ADD (without COLUMN keyword)', () => {
@@ -763,7 +822,10 @@ describe('ALTER TABLE', () => {
     if (!isParseSuccess(result)) return;
 
     expect(result.statement.operations[0].operation).toBe('ADD COLUMN');
-    expect((result.statement.operations[0] as any).column.name).toBe('email');
+    const op = result.statement.operations[0];
+    if (isAddColumnOp(op)) {
+      expect(op.column.name).toBe('email');
+    }
   });
 
   it('should parse ALTER TABLE ADD COLUMN with constraints', () => {
@@ -773,9 +835,12 @@ describe('ALTER TABLE', () => {
     expect(isParseSuccess(result)).toBe(true);
     if (!isParseSuccess(result)) return;
 
-    const column = (result.statement.operations[0] as any).column;
-    expect(column.constraints.find((c: any) => c.type === 'NOT NULL')).toBeDefined();
-    expect(column.constraints.find((c: any) => c.type === 'DEFAULT')).toBeDefined();
+    const op = result.statement.operations[0];
+    if (isAddColumnOp(op)) {
+      const column = op.column;
+      expect(column.constraints.find((c) => c.type === 'NOT NULL')).toBeDefined();
+      expect(column.constraints.find((c) => c.type === 'DEFAULT')).toBeDefined();
+    }
   });
 
   it('should parse ALTER TABLE DROP COLUMN', () => {
@@ -786,7 +851,10 @@ describe('ALTER TABLE', () => {
     if (!isParseSuccess(result)) return;
 
     expect(result.statement.operations[0].operation).toBe('DROP COLUMN');
-    expect((result.statement.operations[0] as any).column).toBe('email');
+    const op = result.statement.operations[0];
+    if (isDropColumnOp(op)) {
+      expect(op.column).toBe('email');
+    }
   });
 
   it('should parse ALTER TABLE RENAME TO', () => {
@@ -797,7 +865,10 @@ describe('ALTER TABLE', () => {
     if (!isParseSuccess(result)) return;
 
     expect(result.statement.operations[0].operation).toBe('RENAME TO');
-    expect((result.statement.operations[0] as any).newName).toBe('customers');
+    const op = result.statement.operations[0];
+    if (isRenameTableOp(op)) {
+      expect(op.newName).toBe('customers');
+    }
   });
 
   it('should parse ALTER TABLE RENAME COLUMN', () => {
@@ -808,8 +879,11 @@ describe('ALTER TABLE', () => {
     if (!isParseSuccess(result)) return;
 
     expect(result.statement.operations[0].operation).toBe('RENAME COLUMN');
-    expect((result.statement.operations[0] as any).oldName).toBe('email');
-    expect((result.statement.operations[0] as any).newName).toBe('email_address');
+    const op = result.statement.operations[0];
+    if (isRenameColumnOp(op)) {
+      expect(op.oldName).toBe('email');
+      expect(op.newName).toBe('email_address');
+    }
   });
 
   it('should parse schema-qualified ALTER TABLE', () => {
@@ -1090,8 +1164,11 @@ describe('Complex examples', () => {
 
     // Check PRIMARY KEY with AUTOINCREMENT
     const idCol = result.statement.columns[0];
-    const pkConstraint = idCol.constraints.find((c) => c.type === 'PRIMARY KEY') as any;
-    expect(pkConstraint?.autoincrement).toBe(true);
+    const pkConstraint = idCol.constraints.find(isPrimaryKeyConstraint);
+    expect(pkConstraint).toBeDefined();
+    if (pkConstraint) {
+      expect(pkConstraint.autoincrement).toBe(true);
+    }
 
     // Check DECIMAL precision
     const priceCol = result.statement.columns.find((c) => c.name === 'price');
@@ -1099,14 +1176,17 @@ describe('Complex examples', () => {
     expect(priceCol?.dataType.scale).toBe(2);
 
     // Check CHECK constraint
-    const checkConstraint = priceCol?.constraints.find((c) => c.type === 'CHECK');
+    const checkConstraint = priceCol?.constraints.find(isCheckConstraint);
     expect(checkConstraint).toBeDefined();
 
     // Check REFERENCES
     const categoryCol = result.statement.columns.find((c) => c.name === 'category_id');
-    const refConstraint = categoryCol?.constraints.find((c) => c.type === 'REFERENCES') as any;
-    expect(refConstraint?.table).toBe('categories');
-    expect(refConstraint?.onDelete).toBe('SET NULL');
+    const refConstraint = categoryCol?.constraints.find(isReferencesConstraint);
+    expect(refConstraint).toBeDefined();
+    if (refConstraint) {
+      expect(refConstraint.table).toBe('categories');
+      expect(refConstraint.onDelete).toBe('SET NULL');
+    }
   });
 
   it('should parse a table with quoted identifiers', () => {

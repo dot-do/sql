@@ -99,7 +99,7 @@ export {
   type AutoCheckpointOptions,
 } from './checkpoint.js';
 
-// Retention
+// Retention - Core exports
 export {
   createWALRetentionManager,
   DEFAULT_RETENTION_POLICY,
@@ -142,4 +142,25 @@ export {
   type ForceCleanupResult,
   type CleanupLatencyHistogram,
   type GrowthStats,
+  // Extended manager type
+  type ExtendedWALRetentionManager,
+  // Checkpoint integration
+  type CheckpointManagerForRetention,
+  // Policy utilities
+  parseSizeString,
+  formatSizeString,
+  validatePolicy,
+  resolvePolicy,
+  isInTimeWindow,
+  getNextCronTime,
+  // Scheduler utilities
+  createRetentionScheduler,
+  type RetentionScheduler,
+  // Metrics utilities
+  createMetricsCollector,
+  createConsoleMetricsReporter,
+  createNoopMetricsReporter,
+  createBufferedMetricsReporter,
+  performHealthCheck,
+  type MetricsCollector,
 } from './retention.js';

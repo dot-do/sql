@@ -12,6 +12,13 @@
 
 import type { WALEntry, WALWriter, WALReader } from '../wal/types.js';
 import type { LSN, TransactionId } from '../engine/types.js';
+import {
+  DoSQLError,
+  ErrorCategory,
+  registerErrorClass,
+  type ErrorContext,
+  type SerializedError,
+} from '../errors/base.js';
 
 // Re-export branded types for convenience
 export type { LSN, TransactionId } from '../engine/types.js';
@@ -554,19 +561,184 @@ export enum TransactionErrorCode {
 }
 
 /**
- * Custom error class for transaction operations
+ * Error class for transaction operations
+ *
+ * Extends DoSQLError to provide consistent error handling with:
+ * - Machine-readable error codes
+ * - Error categories for API layer handling
+ * - Recovery hints for developers
+ * - Serialization support for RPC
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await tx.commit();
+ * } catch (error) {
+ *   if (error instanceof TransactionError) {
+ *     if (error.isRetryable()) {
+ *       // Retry the transaction
+ *     }
+ *     console.log(error.code);        // 'TXN_ABORTED'
+ *     console.log(error.txnId);       // Transaction ID
+ *     console.log(error.recoveryHint); // How to fix
+ *   }
+ * }
+ * ```
  */
-export class TransactionError extends Error {
+export class TransactionError extends DoSQLError {
+  readonly code: TransactionErrorCode;
+  readonly category: ErrorCategory;
+  readonly txnId?: TransactionId;
+
   constructor(
-    public readonly code: TransactionErrorCode,
+    code: TransactionErrorCode,
     message: string,
-    public readonly txnId?: TransactionId,
-    public readonly cause?: Error
+    options?: {
+      cause?: Error;
+      context?: ErrorContext;
+      txnId?: TransactionId;
+    }
   ) {
-    super(message);
+    super(message, { cause: options?.cause, context: options?.context });
     this.name = 'TransactionError';
+    this.code = code;
+    this.txnId = options?.txnId;
+
+    // Set category based on error code
+    this.category = this.determineCategory();
+
+    // Include transaction ID in context
+    if (this.txnId) {
+      this.context = { ...this.context, transactionId: this.txnId };
+    }
+
+    // Set recovery hints based on error code
+    this.setRecoveryHint();
+  }
+
+  private determineCategory(): ErrorCategory {
+    switch (this.code) {
+      case TransactionErrorCode.DEADLOCK:
+      case TransactionErrorCode.SERIALIZATION_FAILURE:
+      case TransactionErrorCode.ABORTED:
+        return ErrorCategory.CONFLICT;
+      case TransactionErrorCode.TIMEOUT:
+      case TransactionErrorCode.LOCK_TIMEOUT:
+        return ErrorCategory.TIMEOUT;
+      case TransactionErrorCode.NO_ACTIVE_TRANSACTION:
+      case TransactionErrorCode.TRANSACTION_ALREADY_ACTIVE:
+      case TransactionErrorCode.SAVEPOINT_NOT_FOUND:
+      case TransactionErrorCode.READ_ONLY_VIOLATION:
+        return ErrorCategory.VALIDATION;
+      case TransactionErrorCode.WAL_FAILURE:
+      case TransactionErrorCode.ROLLBACK_FAILED:
+        return ErrorCategory.INTERNAL;
+      default:
+        return ErrorCategory.EXECUTION;
+    }
+  }
+
+  private setRecoveryHint(): void {
+    switch (this.code) {
+      case TransactionErrorCode.NO_ACTIVE_TRANSACTION:
+        this.recoveryHint = 'Call beginTransaction() before performing transaction operations';
+        break;
+      case TransactionErrorCode.TRANSACTION_ALREADY_ACTIVE:
+        this.recoveryHint = 'Commit or rollback the existing transaction before starting a new one, or use savepoints';
+        break;
+      case TransactionErrorCode.ABORTED:
+        this.recoveryHint = 'Retry the entire transaction with exponential backoff';
+        break;
+      case TransactionErrorCode.DEADLOCK:
+        this.recoveryHint = 'Acquire locks in a consistent order across all transactions to prevent deadlocks';
+        break;
+      case TransactionErrorCode.SERIALIZATION_FAILURE:
+        this.recoveryHint = 'Retry the transaction - this is expected under SERIALIZABLE isolation';
+        break;
+      case TransactionErrorCode.LOCK_TIMEOUT:
+        this.recoveryHint = 'Increase lock timeout or reduce transaction duration';
+        break;
+      case TransactionErrorCode.TIMEOUT:
+        this.recoveryHint = 'Increase transaction timeout or break into smaller transactions';
+        break;
+      case TransactionErrorCode.SAVEPOINT_NOT_FOUND:
+        this.recoveryHint = 'Verify savepoint name and ensure it was created in the current transaction';
+        break;
+      case TransactionErrorCode.READ_ONLY_VIOLATION:
+        this.recoveryHint = 'Use a read-write transaction for write operations';
+        break;
+      case TransactionErrorCode.WAL_FAILURE:
+        this.recoveryHint = 'Check disk space and I/O availability';
+        break;
+      case TransactionErrorCode.ROLLBACK_FAILED:
+        this.recoveryHint = 'Critical error - investigate immediately and consider database recovery';
+        break;
+    }
+  }
+
+  /**
+   * Check if this error is retryable
+   */
+  isRetryable(): boolean {
+    return [
+      TransactionErrorCode.ABORTED,
+      TransactionErrorCode.DEADLOCK,
+      TransactionErrorCode.SERIALIZATION_FAILURE,
+      TransactionErrorCode.LOCK_TIMEOUT,
+      TransactionErrorCode.TIMEOUT,
+      TransactionErrorCode.WAL_FAILURE,
+    ].includes(this.code);
+  }
+
+  /**
+   * Get a user-friendly error message
+   */
+  toUserMessage(): string {
+    switch (this.code) {
+      case TransactionErrorCode.NO_ACTIVE_TRANSACTION:
+        return 'No active transaction. Please start a transaction first.';
+      case TransactionErrorCode.TRANSACTION_ALREADY_ACTIVE:
+        return 'A transaction is already in progress. Complete it before starting a new one.';
+      case TransactionErrorCode.ABORTED:
+        return 'The transaction was aborted due to a conflict. Please retry.';
+      case TransactionErrorCode.DEADLOCK:
+        return 'A deadlock was detected. Please retry the transaction.';
+      case TransactionErrorCode.SERIALIZATION_FAILURE:
+        return 'The transaction failed due to concurrent modifications. Please retry.';
+      case TransactionErrorCode.LOCK_TIMEOUT:
+        return 'Failed to acquire a lock within the timeout period. Please retry.';
+      case TransactionErrorCode.TIMEOUT:
+        return 'The transaction timed out. Please retry with a shorter transaction or increased timeout.';
+      case TransactionErrorCode.SAVEPOINT_NOT_FOUND:
+        return 'The specified savepoint does not exist.';
+      case TransactionErrorCode.READ_ONLY_VIOLATION:
+        return 'Cannot perform write operations in a read-only transaction.';
+      case TransactionErrorCode.WAL_FAILURE:
+        return 'A write-ahead log error occurred. Please retry.';
+      case TransactionErrorCode.ROLLBACK_FAILED:
+        return 'Failed to rollback the transaction. Database integrity may be affected.';
+      default:
+        return this.message;
+    }
+  }
+
+  /**
+   * Deserialize from JSON
+   */
+  static fromJSON(json: SerializedError): TransactionError {
+    return new TransactionError(
+      json.code as TransactionErrorCode,
+      json.message,
+      {
+        context: json.context,
+        txnId: json.context?.transactionId as TransactionId | undefined,
+      }
+    );
   }
 }
+
+// Register for deserialization
+registerErrorClass('TransactionError', TransactionError);
 
 // =============================================================================
 // Transaction Manager Interface

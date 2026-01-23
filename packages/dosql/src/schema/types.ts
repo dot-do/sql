@@ -81,7 +81,7 @@ export interface FieldModifiers {
   /** Is this an array type? ([] modifier) */
   isArray: boolean;
   /** Default value if specified */
-  defaultValue?: string;
+  defaultValue?: string | undefined;
 }
 
 /**
@@ -115,7 +115,7 @@ export interface ParsedField {
   /** Field modifiers */
   modifiers: FieldModifiers;
   /** Relation info (if this is a relation field) */
-  relation?: RelationInfo;
+  relation?: RelationInfo | undefined;
 }
 
 // =============================================================================

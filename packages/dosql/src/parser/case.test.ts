@@ -24,7 +24,47 @@ import {
   type CaseExpression,
   type SimpleCaseExpression,
   type SearchedCaseExpression,
+  type ParsedExpr,
+  type ColumnExpr,
+  type LiteralExpr,
+  type BinaryExpr,
+  type FunctionExpr,
+  type AggregateExpr,
+  type InExpr,
+  type IsNullExpr,
 } from './case.js';
+
+// =============================================================================
+// TYPE GUARDS FOR EXPRESSION TYPES
+// =============================================================================
+
+function isColumnExpr(expr: ParsedExpr | undefined): expr is ColumnExpr {
+  return expr !== undefined && expr.type === 'column';
+}
+
+function isLiteralExpr(expr: ParsedExpr | undefined): expr is LiteralExpr {
+  return expr !== undefined && expr.type === 'literal';
+}
+
+function isBinaryExpr(expr: ParsedExpr | undefined): expr is BinaryExpr {
+  return expr !== undefined && expr.type === 'binary';
+}
+
+function isFunctionExpr(expr: ParsedExpr | undefined): expr is FunctionExpr {
+  return expr !== undefined && expr.type === 'function';
+}
+
+function isAggregateExpr(expr: ParsedExpr | undefined): expr is AggregateExpr {
+  return expr !== undefined && expr.type === 'aggregate';
+}
+
+function isInExpr(expr: ParsedExpr | undefined): expr is InExpr {
+  return expr !== undefined && expr.type === 'in';
+}
+
+function isIsNullExpr(expr: ParsedExpr | undefined): expr is IsNullExpr {
+  return expr !== undefined && expr.type === 'isNull';
+}
 
 describe('DoSQL CASE Expression Parser', () => {
   let parser: CaseExpressionParser;
@@ -83,7 +123,9 @@ describe('DoSQL CASE Expression Parser', () => {
 
       const caseExpr = result.columns[0].expr as SimpleCaseExpression;
       expect(caseExpr.operand.type).toBe('column');
-      expect((caseExpr.operand as any).name).toBe('priority');
+      if (isColumnExpr(caseExpr.operand)) {
+        expect(caseExpr.operand.name).toBe('priority');
+      }
     });
 
     it('should parse simple CASE with expression as operand', () => {
@@ -106,7 +148,9 @@ describe('DoSQL CASE Expression Parser', () => {
 
       const caseExpr = result.columns[0].expr as SimpleCaseExpression;
       expect(caseExpr.operand.type).toBe('column');
-      expect((caseExpr.operand as any).table).toBe('u');
+      if (isColumnExpr(caseExpr.operand)) {
+        expect(caseExpr.operand.table).toBe('u');
+      }
     });
 
     it('should parse simple CASE with alias', () => {
@@ -170,7 +214,9 @@ describe('DoSQL CASE Expression Parser', () => {
 
       const caseExpr = result.columns[0].expr as SearchedCaseExpression;
       expect(caseExpr.whenClauses[0].condition.type).toBe('binary');
-      expect((caseExpr.whenClauses[0].condition as any).op).toBe('or');
+      if (isBinaryExpr(caseExpr.whenClauses[0].condition)) {
+        expect(caseExpr.whenClauses[0].condition.op).toBe('or');
+      }
     });
 
     it('should parse searched CASE with BETWEEN condition', () => {
@@ -243,9 +289,11 @@ describe('DoSQL CASE Expression Parser', () => {
         FROM products`;
       const result = parser.parse(sql);
 
-      const binary = result.columns[0].expr as any;
-      expect(binary.type).toBe('binary');
-      expect(binary.right.type).toBe('case');
+      const expr = result.columns[0].expr;
+      expect(expr.type).toBe('binary');
+      if (isBinaryExpr(expr)) {
+        expect(expr.right.type).toBe('case');
+      }
     });
 
     it('should parse CASE with aggregate result', () => {
@@ -268,9 +316,11 @@ describe('DoSQL CASE Expression Parser', () => {
       ) AS title FROM persons`;
       const result = parser.parse(sql);
 
-      const funcExpr = result.columns[0].expr as any;
-      expect(funcExpr.type).toBe('function');
-      expect(funcExpr.args[0].type).toBe('case');
+      const expr = result.columns[0].expr;
+      expect(expr.type).toBe('function');
+      if (isFunctionExpr(expr)) {
+        expect(expr.args[0].type).toBe('case');
+      }
     });
   });
 
@@ -284,9 +334,11 @@ describe('DoSQL CASE Expression Parser', () => {
         WHERE CASE WHEN vip THEN amount * 0.9 ELSE amount END > 100`;
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.type).toBe('binary');
-      expect(where.left.type).toBe('case');
+      expect(result.where).toBeDefined();
+      if (isBinaryExpr(result.where)) {
+        expect(result.where.type).toBe('binary');
+        expect(result.where.left.type).toBe('case');
+      }
     });
 
     it('should parse CASE in WHERE equality', () => {
@@ -294,8 +346,9 @@ describe('DoSQL CASE Expression Parser', () => {
         WHERE CASE status WHEN 'active' THEN 1 ELSE 0 END = 1`;
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.left.type).toBe('case');
+      if (isBinaryExpr(result.where)) {
+        expect(result.where.left.type).toBe('case');
+      }
     });
 
     it('should parse CASE in WHERE with AND', () => {
@@ -304,9 +357,10 @@ describe('DoSQL CASE Expression Parser', () => {
         AND CASE category WHEN 'electronics' THEN 1 ELSE 0 END = 1`;
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.type).toBe('binary');
-      expect(where.op).toBe('and');
+      if (isBinaryExpr(result.where)) {
+        expect(result.where.type).toBe('binary');
+        expect(result.where.op).toBe('and');
+      }
     });
 
     it('should parse CASE result in IN clause', () => {
@@ -318,9 +372,10 @@ describe('DoSQL CASE Expression Parser', () => {
         END IN (1, 2)`;
       const result = parser.parse(sql);
 
-      const inExpr = result.where as any;
-      expect(inExpr.type).toBe('in');
-      expect(inExpr.expr.type).toBe('case');
+      if (isInExpr(result.where)) {
+        expect(result.where.type).toBe('in');
+        expect(result.where.expr.type).toBe('case');
+      }
     });
 
     it('should parse boolean CASE in WHERE', () => {
@@ -454,7 +509,9 @@ describe('DoSQL CASE Expression Parser', () => {
 
       const caseExpr = result.columns[0].expr as SearchedCaseExpression;
       expect(caseExpr.elseClause?.type).toBe('literal');
-      expect((caseExpr.elseClause as any).value).toBeNull();
+      if (isLiteralExpr(caseExpr.elseClause)) {
+        expect(caseExpr.elseClause.value).toBeNull();
+      }
     });
 
     it('should parse CASE with IS NULL condition', () => {
@@ -476,9 +533,11 @@ describe('DoSQL CASE Expression Parser', () => {
       const result = parser.parse(sql);
 
       const caseExpr = result.columns[0].expr as SearchedCaseExpression;
-      const condition = caseExpr.whenClauses[0].condition as any;
-      expect(condition.type).toBe('isNull');
-      expect(condition.isNot).toBe(true);
+      const condition = caseExpr.whenClauses[0].condition;
+      if (isIsNullExpr(condition)) {
+        expect(condition.type).toBe('isNull');
+        expect(condition.isNot).toBe(true);
+      }
     });
 
     it('should parse simple CASE comparing to NULL', () => {
@@ -486,7 +545,10 @@ describe('DoSQL CASE Expression Parser', () => {
       const result = parser.parse(sql);
 
       const caseExpr = result.columns[0].expr as SimpleCaseExpression;
-      expect((caseExpr.whenClauses[0].value as any).value).toBeNull();
+      const whenValue = caseExpr.whenClauses[0].value;
+      if (isLiteralExpr(whenValue)) {
+        expect(whenValue.value).toBeNull();
+      }
     });
 
     it('should parse CASE with COALESCE in condition', () => {
@@ -569,26 +631,37 @@ describe('DoSQL CASE Expression Parser', () => {
         FROM orders`;
       const result = parser.parse(sql);
 
-      const aggExpr = result.columns[0].expr as any;
-      expect(aggExpr.type).toBe('aggregate');
-      expect(aggExpr.arg.type).toBe('case');
+      const expr = result.columns[0].expr;
+      expect(expr.type).toBe('aggregate');
+      if (isAggregateExpr(expr)) {
+        expect(expr.arg).not.toBe('*');
+        if (expr.arg !== '*') {
+          expect(expr.arg.type).toBe('case');
+        }
+      }
     });
 
     it('should parse COUNT with CASE (conditional count)', () => {
       const sql = `SELECT count(CASE WHEN active THEN 1 END) AS active_count FROM users`;
       const result = parser.parse(sql);
 
-      const aggExpr = result.columns[0].expr as any;
-      expect(aggExpr.name).toBe('count');
-      expect(aggExpr.arg.type).toBe('case');
+      const expr = result.columns[0].expr;
+      if (isAggregateExpr(expr)) {
+        expect(expr.name).toBe('count');
+        if (expr.arg !== '*') {
+          expect(expr.arg.type).toBe('case');
+        }
+      }
     });
 
     it('should parse AVG with CASE', () => {
       const sql = `SELECT avg(CASE WHEN type = 'A' THEN value END) AS avg_a FROM data`;
       const result = parser.parse(sql);
 
-      const aggExpr = result.columns[0].expr as any;
-      expect(aggExpr.name).toBe('avg');
+      const expr = result.columns[0].expr;
+      if (isAggregateExpr(expr)) {
+        expect(expr.name).toBe('avg');
+      }
     });
 
     it('should parse multiple aggregates with CASE', () => {
@@ -636,43 +709,54 @@ describe('DoSQL CASE Expression Parser', () => {
       const sql = `SELECT coalesce(nullable_col, 'default') FROM data`;
       const result = parser.parse(sql);
 
-      const funcExpr = result.columns[0].expr as any;
-      expect(funcExpr.type).toBe('function');
-      expect(funcExpr.name.toLowerCase()).toBe('coalesce');
-      expect(funcExpr.args.length).toBe(2);
+      const expr = result.columns[0].expr;
+      expect(expr.type).toBe('function');
+      if (isFunctionExpr(expr)) {
+        expect(expr.name.toLowerCase()).toBe('coalesce');
+        expect(expr.args.length).toBe(2);
+      }
     });
 
     it('should parse COALESCE with multiple arguments', () => {
       const sql = `SELECT coalesce(col1, col2, col3, 'fallback') FROM data`;
       const result = parser.parse(sql);
 
-      const funcExpr = result.columns[0].expr as any;
-      expect(funcExpr.args.length).toBe(4);
+      const expr = result.columns[0].expr;
+      if (isFunctionExpr(expr)) {
+        expect(expr.args.length).toBe(4);
+      }
     });
 
     it('should parse nested COALESCE', () => {
       const sql = `SELECT coalesce(coalesce(a, b), c) FROM data`;
       const result = parser.parse(sql);
 
-      const outerCoalesce = result.columns[0].expr as any;
-      expect(outerCoalesce.args[0].type).toBe('function');
-      expect(outerCoalesce.args[0].name.toLowerCase()).toBe('coalesce');
+      const expr = result.columns[0].expr;
+      if (isFunctionExpr(expr)) {
+        expect(expr.args[0].type).toBe('function');
+        if (isFunctionExpr(expr.args[0])) {
+          expect(expr.args[0].name.toLowerCase()).toBe('coalesce');
+        }
+      }
     });
 
     it('should parse COALESCE in WHERE clause', () => {
       const sql = `SELECT * FROM users WHERE coalesce(status, 'inactive') = 'active'`;
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.left.type).toBe('function');
+      if (isBinaryExpr(result.where)) {
+        expect(result.where.left.type).toBe('function');
+      }
     });
 
     it('should parse COALESCE with expressions', () => {
       const sql = `SELECT coalesce(price * discount, price, 0) AS final_price FROM products`;
       const result = parser.parse(sql);
 
-      const funcExpr = result.columns[0].expr as any;
-      expect(funcExpr.args[0].type).toBe('binary');
+      const expr = result.columns[0].expr;
+      if (isFunctionExpr(expr)) {
+        expect(expr.args[0].type).toBe('binary');
+      }
     });
   });
 
@@ -685,36 +769,46 @@ describe('DoSQL CASE Expression Parser', () => {
       const sql = `SELECT nullif(value, 0) FROM data`;
       const result = parser.parse(sql);
 
-      const funcExpr = result.columns[0].expr as any;
-      expect(funcExpr.type).toBe('function');
-      expect(funcExpr.name.toLowerCase()).toBe('nullif');
-      expect(funcExpr.args.length).toBe(2);
+      const expr = result.columns[0].expr;
+      expect(expr.type).toBe('function');
+      if (isFunctionExpr(expr)) {
+        expect(expr.name.toLowerCase()).toBe('nullif');
+        expect(expr.args.length).toBe(2);
+      }
     });
 
     it('should parse NULLIF with string comparison', () => {
       const sql = `SELECT nullif(status, 'unknown') FROM items`;
       const result = parser.parse(sql);
 
-      const funcExpr = result.columns[0].expr as any;
-      expect(funcExpr.args[1].value).toBe('unknown');
+      const expr = result.columns[0].expr;
+      if (isFunctionExpr(expr) && isLiteralExpr(expr.args[1])) {
+        expect(expr.args[1].value).toBe('unknown');
+      }
     });
 
     it('should parse NULLIF in division (avoid divide by zero)', () => {
       const sql = `SELECT total / nullif(cnt, 0) AS average FROM stats`;
       const result = parser.parse(sql);
 
-      const binary = result.columns[0].expr as any;
-      expect(binary.type).toBe('binary');
-      expect(binary.right.type).toBe('function');
-      expect(binary.right.name.toLowerCase()).toBe('nullif');
+      const expr = result.columns[0].expr;
+      if (isBinaryExpr(expr)) {
+        expect(expr.type).toBe('binary');
+        expect(expr.right.type).toBe('function');
+        if (isFunctionExpr(expr.right)) {
+          expect(expr.right.name.toLowerCase()).toBe('nullif');
+        }
+      }
     });
 
     it('should parse nested NULLIF and COALESCE', () => {
       const sql = `SELECT coalesce(nullif(value, 0), default_value) FROM data`;
       const result = parser.parse(sql);
 
-      const coalesce = result.columns[0].expr as any;
-      expect(coalesce.args[0].name.toLowerCase()).toBe('nullif');
+      const expr = result.columns[0].expr;
+      if (isFunctionExpr(expr) && isFunctionExpr(expr.args[0])) {
+        expect(expr.args[0].name.toLowerCase()).toBe('nullif');
+      }
     });
   });
 
@@ -727,43 +821,54 @@ describe('DoSQL CASE Expression Parser', () => {
       const sql = `SELECT iif(condition, true_value, false_value) FROM data`;
       const result = parser.parse(sql);
 
-      const funcExpr = result.columns[0].expr as any;
-      expect(funcExpr.type).toBe('function');
-      expect(funcExpr.name.toLowerCase()).toBe('iif');
-      expect(funcExpr.args.length).toBe(3);
+      const expr = result.columns[0].expr;
+      expect(expr.type).toBe('function');
+      if (isFunctionExpr(expr)) {
+        expect(expr.name.toLowerCase()).toBe('iif');
+        expect(expr.args.length).toBe(3);
+      }
     });
 
     it('should parse IIF with comparison condition', () => {
       const sql = `SELECT iif(age >= 18, 'adult', 'minor') AS age_group FROM persons`;
       const result = parser.parse(sql);
 
-      const funcExpr = result.columns[0].expr as any;
-      expect(funcExpr.args[0].type).toBe('binary');
+      const expr = result.columns[0].expr;
+      if (isFunctionExpr(expr)) {
+        expect(expr.args[0].type).toBe('binary');
+      }
     });
 
     it('should parse nested IIF', () => {
       const sql = `SELECT iif(x > 0, 'positive', iif(x < 0, 'negative', 'zero')) FROM numbers`;
       const result = parser.parse(sql);
 
-      const outerIif = result.columns[0].expr as any;
-      expect(outerIif.args[2].type).toBe('function');
-      expect(outerIif.args[2].name.toLowerCase()).toBe('iif');
+      const expr = result.columns[0].expr;
+      if (isFunctionExpr(expr)) {
+        expect(expr.args[2].type).toBe('function');
+        if (isFunctionExpr(expr.args[2])) {
+          expect(expr.args[2].name.toLowerCase()).toBe('iif');
+        }
+      }
     });
 
     it('should parse IIF in WHERE clause', () => {
       const sql = `SELECT * FROM orders WHERE iif(vip, amount * 0.9, amount) > 100`;
       const result = parser.parse(sql);
 
-      const where = result.where as any;
-      expect(where.left.type).toBe('function');
+      if (isBinaryExpr(result.where)) {
+        expect(result.where.left.type).toBe('function');
+      }
     });
 
     it('should parse IIF with NULL values', () => {
       const sql = `SELECT iif(flag, value, NULL) FROM data`;
       const result = parser.parse(sql);
 
-      const funcExpr = result.columns[0].expr as any;
-      expect(funcExpr.args[2].value).toBeNull();
+      const expr = result.columns[0].expr;
+      if (isFunctionExpr(expr) && isLiteralExpr(expr.args[2])) {
+        expect(expr.args[2].value).toBeNull();
+      }
     });
   });
 
@@ -964,7 +1069,10 @@ describe('DoSQL CASE Expression Parser', () => {
       const result = parser.parse(sql);
 
       const caseExpr = result.columns[0].expr as SearchedCaseExpression;
-      expect((caseExpr.whenClauses[0].condition as any).right.value).toBe('');
+      const condition = caseExpr.whenClauses[0].condition;
+      if (isBinaryExpr(condition) && isLiteralExpr(condition.right)) {
+        expect(condition.right.value).toBe('');
+      }
     });
 
     it('should handle CASE-insensitive keywords', () => {

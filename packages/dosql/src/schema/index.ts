@@ -62,6 +62,9 @@
  * - **Binary**: `blob`, `binary`
  */
 
+// Import types for local use in function signatures
+import type { SchemaDefinition, TableDefinition } from './types.js';
+
 // =============================================================================
 // RE-EXPORTS: TYPES
 // =============================================================================
@@ -155,6 +158,42 @@ export type {
   IsArrayType as TypeIsArrayType,
   ExtractBaseType as TypeExtractBaseType,
 } from './parser.js';
+
+// =============================================================================
+// RE-EXPORTS: AST PARSER
+// =============================================================================
+
+/**
+ * AST-based schema parsing utilities using TypeScript Compiler API.
+ * @public
+ * @stability stable
+ */
+export {
+  // AST-based parsing functions
+  parseSchemaSource,
+  parseFieldDefinition,
+  parseObjectTableDefinition,
+
+  // AST utilities
+  getPosition,
+  unwrapExpression,
+  getJsDocComment,
+  evaluateExpression,
+  getPropertyName,
+} from './ast-parser.js';
+
+/**
+ * AST parser types.
+ * @public
+ * @stability stable
+ */
+export type {
+  SourcePosition,
+  ParseError,
+  ParseResult,
+  ParsedSchemaSource,
+  AstParseOptions,
+} from './ast-parser.js';
 
 // =============================================================================
 // RE-EXPORTS: VALIDATOR

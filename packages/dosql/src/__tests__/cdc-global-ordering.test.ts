@@ -102,6 +102,57 @@ interface HLCTimestamp {
 }
 
 /**
+ * Extended WAL entry with HLC (for TDD - doesn't exist yet)
+ */
+interface WALEntryWithHLC {
+  lsn: bigint;
+  timestamp: number;
+  txnId: string;
+  op: string;
+  table: string;
+  before?: Uint8Array;
+  after?: Uint8Array;
+  hlc?: HLCTimestamp;
+}
+
+/**
+ * Extended WAL Writer with HLC support (for TDD - doesn't exist yet)
+ */
+interface WALWriterWithHLC extends WALWriter {
+  receiveHLC?(hlc: HLCTimestamp, options?: { maxDriftMs?: number; warningThreshold?: number }): Promise<void>;
+  on?(event: string, callback: (...args: unknown[]) => void): void;
+  getDriftMetrics?(): { maxDrift: number; avgDrift: number; driftCount: number };
+}
+
+/**
+ * Extended CDC Subscription with HLC ordering (for TDD - doesn't exist yet)
+ */
+interface CDCSubscriptionWithHLC extends CDCSubscription {
+  subscribeByHLC(fromLsn: bigint, options?: { tables?: string[] }): AsyncIterable<HLCCDCEvent>;
+}
+
+/**
+ * Helper to cast to extended WAL entry
+ */
+function asHLCEntry(entry: unknown): WALEntryWithHLC {
+  return entry as WALEntryWithHLC;
+}
+
+/**
+ * Helper to cast to extended WAL writer
+ */
+function asHLCWriter(writer: WALWriter): WALWriterWithHLC {
+  return writer as WALWriterWithHLC;
+}
+
+/**
+ * Helper to cast to extended subscription
+ */
+function asHLCSubscription(sub: CDCSubscription): CDCSubscriptionWithHLC {
+  return sub as CDCSubscriptionWithHLC;
+}
+
+/**
  * CDC Event with HLC ordering (expected enhanced interface)
  */
 interface HLCCDCEvent<T = unknown> extends ChangeEvent<T> {
@@ -180,10 +231,10 @@ describe('CDC Global Ordering - HLC Timestamp Generation', () => {
 
     expect(insertEntry).toBeDefined();
     // Expected: WAL entry has hlc field with HLC timestamp
-    expect((insertEntry as any).hlc).toBeDefined();
-    expect((insertEntry as any).hlc.physicalTime).toBeGreaterThan(0);
-    expect((insertEntry as any).hlc.logicalCounter).toBeGreaterThanOrEqual(0);
-    expect((insertEntry as any).hlc.nodeId).toBeDefined();
+    expect(asHLCEntry(insertEntry).hlc).toBeDefined();
+    expect(asHLCEntry(insertEntry).hlc.physicalTime).toBeGreaterThan(0);
+    expect(asHLCEntry(insertEntry).hlc.logicalCounter).toBeGreaterThanOrEqual(0);
+    expect(asHLCEntry(insertEntry).hlc.nodeId).toBeDefined();
   });
 
   it.fails('should generate HLC timestamp for UPDATE mutation', async () => {
@@ -205,9 +256,9 @@ describe('CDC Global Ordering - HLC Timestamp Generation', () => {
     const updateEntry = entries.find((e) => e.op === 'UPDATE' && e.table === 'users');
 
     expect(updateEntry).toBeDefined();
-    expect((updateEntry as any).hlc).toBeDefined();
-    expect((updateEntry as any).hlc.physicalTime).toBeGreaterThan(0);
-    expect((updateEntry as any).hlc.logicalCounter).toBeGreaterThanOrEqual(0);
+    expect(asHLCEntry(updateEntry).hlc).toBeDefined();
+    expect(asHLCEntry(updateEntry).hlc.physicalTime).toBeGreaterThan(0);
+    expect(asHLCEntry(updateEntry).hlc.logicalCounter).toBeGreaterThanOrEqual(0);
   });
 
   it.fails('should generate HLC timestamp for DELETE mutation', async () => {
@@ -228,8 +279,8 @@ describe('CDC Global Ordering - HLC Timestamp Generation', () => {
     const deleteEntry = entries.find((e) => e.op === 'DELETE' && e.table === 'users');
 
     expect(deleteEntry).toBeDefined();
-    expect((deleteEntry as any).hlc).toBeDefined();
-    expect((deleteEntry as any).hlc.physicalTime).toBeGreaterThan(0);
+    expect(asHLCEntry(deleteEntry).hlc).toBeDefined();
+    expect(asHLCEntry(deleteEntry).hlc.physicalTime).toBeGreaterThan(0);
   });
 });
 
@@ -270,7 +321,7 @@ describe('CDC Global Ordering - HLC Structure', () => {
 
     const entries = await reader.readEntries({ operations: ['INSERT'] });
     const entry = entries.find((e) => e.table === 'events');
-    const hlc = (entry as any).hlc as HLCTimestamp;
+    const hlc = asHLCEntry(entry).hlc as HLCTimestamp;
 
     // Physical time should be between before and after time of the operation
     expect(hlc.physicalTime).toBeGreaterThanOrEqual(beforeTime);
@@ -300,7 +351,7 @@ describe('CDC Global Ordering - HLC Structure', () => {
     const eventEntries = entries.filter((e) => e.table === 'events');
 
     // Each entry should have distinct logical counter if physical time is same
-    const counters = eventEntries.map((e) => (e as any).hlc.logicalCounter);
+    const counters = eventEntries.map((e) => asHLCEntry(e).hlc?.logicalCounter);
     const uniqueCounters = new Set(counters);
 
     // All counters should be unique
@@ -323,7 +374,7 @@ describe('CDC Global Ordering - HLC Structure', () => {
 
     const entries = await reader.readEntries({ operations: ['INSERT'] });
     const entry = entries.find((e) => e.table === 'events');
-    const hlc = (entry as any).hlc as HLCTimestamp;
+    const hlc = asHLCEntry(entry).hlc as HLCTimestamp;
 
     // Node ID should be non-empty string identifying the shard/DO
     expect(typeof hlc.nodeId).toBe('string');
@@ -353,8 +404,8 @@ describe('CDC Global Ordering - HLC Structure', () => {
 
     // HLC physical time should be monotonically non-decreasing
     for (let i = 1; i < eventEntries.length; i++) {
-      const prev = (eventEntries[i - 1] as any).hlc as HLCTimestamp;
-      const curr = (eventEntries[i] as any).hlc as HLCTimestamp;
+      const prev = asHLCEntry(eventEntries[i - 1]).hlc as HLCTimestamp;
+      const curr = asHLCEntry(eventEntries[i]).hlc as HLCTimestamp;
       expect(curr.physicalTime).toBeGreaterThanOrEqual(prev.physicalTime);
     }
   });
@@ -394,7 +445,7 @@ describe('CDC Global Ordering - Cross-Shard Causal Ordering', () => {
     // Read HLC from Shard A event
     const entriesA = await shardAReader.readEntries({ operations: ['INSERT'] });
     const eventA = entriesA.find((e) => e.table === 'orders');
-    const hlcA = (eventA as any).hlc as HLCTimestamp;
+    const hlcA = asHLCEntry(eventA).hlc as HLCTimestamp;
 
     // Shard B receives the HLC and writes causally dependent event
     // The HLC clock on Shard B should be updated to ensure causal ordering
@@ -402,7 +453,7 @@ describe('CDC Global Ordering - Cross-Shard Causal Ordering', () => {
     const timestampB = Date.now();
 
     // Expected: Writer accepts remote HLC to update its clock
-    await (shardBWriter as any).receiveHLC?.(hlcA);
+    await asHLCWriter(shardBWriter).receiveHLC?.(hlcA);
 
     await shardBWriter.append({ timestamp: timestampB, txnId: txnB, op: 'BEGIN', table: '' });
     await shardBWriter.append({
@@ -417,7 +468,7 @@ describe('CDC Global Ordering - Cross-Shard Causal Ordering', () => {
     // Read HLC from Shard B event
     const entriesB = await shardBReader.readEntries({ operations: ['INSERT'] });
     const eventB = entriesB.find((e) => e.table === 'shipments');
-    const hlcB = (eventB as any).hlc as HLCTimestamp;
+    const hlcB = asHLCEntry(eventB).hlc as HLCTimestamp;
 
     // Causal ordering: Event B must be > Event A in HLC ordering
     const comparison = compareHLC(hlcA, hlcB);
@@ -537,7 +588,7 @@ describe('CDC Global Ordering - HLC vs Wall Clock Ordering', () => {
     const entries = await reader.readEntries({ operations: ['INSERT'] });
     const events = entries
       .filter((e) => e.table === 'events')
-      .map((e) => ({ entry: e, hlc: (e as any).hlc as HLCTimestamp }))
+      .map((e) => ({ entry: e, hlc: asHLCEntry(e).hlc as HLCTimestamp }))
       .sort((a, b) => compareHLC(a.hlc, b.hlc));
 
     // First event by HLC should be the one written first (id: 1)
@@ -552,7 +603,7 @@ describe('CDC Global Ordering - HLC vs Wall Clock Ordering', () => {
     // Expected: subscribeChanges returns events ordered by HLC
     const orderedEvents: HLCCDCEvent[] = [];
 
-    for await (const event of (subscription as any).subscribeByHLC(0n)) {
+    for await (const event of asHLCSubscription(subscription).subscribeByHLC(0n)) {
       if ((event as HLCCDCEvent).hlc) {
         orderedEvents.push(event as HLCCDCEvent);
       }
@@ -609,7 +660,7 @@ describe('CDC Global Ordering - Concurrent Event Distinction', () => {
     const eventEntries = entries.filter((e) => e.table === 'concurrent_events');
 
     // All events should have distinct HLCs
-    const hlcs = eventEntries.map((e) => (e as any).hlc as HLCTimestamp);
+    const hlcs = eventEntries.map((e) => asHLCEntry(e).hlc as HLCTimestamp);
     const hlcStrings = hlcs.map((hlc) => `${hlc.physicalTime}-${hlc.logicalCounter}-${hlc.nodeId}`);
     const uniqueHLCs = new Set(hlcStrings);
 
@@ -640,7 +691,7 @@ describe('CDC Global Ordering - Concurrent Event Distinction', () => {
       .sort((a, b) => Number(a.lsn - b.lsn));
 
     // Logical counters should be incrementing
-    const counters = eventEntries.map((e) => (e as any).hlc.logicalCounter);
+    const counters = eventEntries.map((e) => asHLCEntry(e).hlc?.logicalCounter);
     for (let i = 1; i < counters.length; i++) {
       expect(counters[i]).toBeGreaterThan(counters[i - 1]);
     }
@@ -681,8 +732,8 @@ describe('CDC Global Ordering - Concurrent Event Distinction', () => {
       .filter((e) => e.table === 'reset_test')
       .sort((a, b) => Number(a.lsn - b.lsn));
 
-    const hlc1 = (eventEntries[0] as any).hlc as HLCTimestamp;
-    const hlc2 = (eventEntries[1] as any).hlc as HLCTimestamp;
+    const hlc1 = asHLCEntry(eventEntries[0]).hlc as HLCTimestamp;
+    const hlc2 = asHLCEntry(eventEntries[1]).hlc as HLCTimestamp;
 
     // Physical time should have advanced
     expect(hlc2.physicalTime).toBeGreaterThan(hlc1.physicalTime);
@@ -712,7 +763,7 @@ describe('CDC Global Ordering - HLC Receive Semantics', () => {
     };
 
     // Expected: Writer has receiveHLC method to update its clock
-    await (writer as any).receiveHLC?.(remoteHLC);
+    await asHLCWriter(writer).receiveHLC?.(remoteHLC);
 
     // Write new event
     const txnId = generateTxnId();
@@ -728,7 +779,7 @@ describe('CDC Global Ordering - HLC Receive Semantics', () => {
 
     const entries = await reader.readEntries({ operations: ['INSERT'] });
     const entry = entries.find((e) => e.table === 'receive_test');
-    const localHLC = (entry as any).hlc as HLCTimestamp;
+    const localHLC = asHLCEntry(entry).hlc as HLCTimestamp;
 
     // Local HLC should be greater than received remote HLC
     expect(compareHLC(remoteHLC, localHLC)).toBeLessThan(0);
@@ -750,7 +801,7 @@ describe('CDC Global Ordering - HLC Receive Semantics', () => {
       nodeId: 'remote',
     };
 
-    await (writer as any).receiveHLC?.(remoteHLC);
+    await asHLCWriter(writer).receiveHLC?.(remoteHLC);
 
     const txnId = generateTxnId();
     await writer.append({ timestamp: localTime, txnId, op: 'BEGIN', table: '' });
@@ -765,7 +816,7 @@ describe('CDC Global Ordering - HLC Receive Semantics', () => {
 
     const entries = await reader.readEntries({ operations: ['INSERT'] });
     const entry = entries.find((e) => e.table === 'max_test');
-    const localHLC = (entry as any).hlc as HLCTimestamp;
+    const localHLC = asHLCEntry(entry).hlc as HLCTimestamp;
 
     // Physical time should be at least as high as the remote's
     expect(localHLC.physicalTime).toBeGreaterThanOrEqual(futureTime);
@@ -786,7 +837,7 @@ describe('CDC Global Ordering - HLC Receive Semantics', () => {
       nodeId: 'remote',
     };
 
-    await (writer as any).receiveHLC?.(remoteHLC);
+    await asHLCWriter(writer).receiveHLC?.(remoteHLC);
 
     const txnId = generateTxnId();
     await writer.append({ timestamp: currentTime, txnId, op: 'BEGIN', table: '' });
@@ -801,7 +852,7 @@ describe('CDC Global Ordering - HLC Receive Semantics', () => {
 
     const entries = await reader.readEntries({ operations: ['INSERT'] });
     const entry = entries.find((e) => e.table === 'counter_advance_test');
-    const localHLC = (entry as any).hlc as HLCTimestamp;
+    const localHLC = asHLCEntry(entry).hlc as HLCTimestamp;
 
     // If physical time equals remote, logical counter should be > remote's counter
     if (localHLC.physicalTime === remoteHLC.physicalTime) {
@@ -841,7 +892,7 @@ describe('CDC Global Ordering - Subscriber Causal Delivery', () => {
     // Expected: subscribeByHLC delivers events in causal (HLC) order
     const receivedEvents: HLCCDCEvent[] = [];
 
-    for await (const event of (subscription as any).subscribeByHLC(0n, {
+    for await (const event of asHLCSubscription(subscription).subscribeByHLC(0n, {
       tables: ['ordered_events'],
     })) {
       if ((event as HLCCDCEvent).hlc) {
@@ -888,8 +939,8 @@ describe('CDC Global Ordering - Subscriber Causal Delivery', () => {
     }
 
     const events: HLCCDCEvent[] = [];
-    for await (const event of (subscription as any).subscribeByHLC(0n)) {
-      if ((event as any).table === 'buffered_events') {
+    for await (const event of asHLCSubscription(subscription).subscribeByHLC(0n)) {
+      if ((event as HLCCDCEvent).table === 'buffered_events') {
         events.push(event as HLCCDCEvent);
       }
       if (events.length >= 5) break;
@@ -991,7 +1042,7 @@ describe('CDC Global Ordering - HLC Drift Detection', () => {
 
     // Expected: receiveHLC should throw or return error on excessive drift
     await expect(
-      (writer as any).receiveHLC?.(remoteHLC, { maxDriftMs })
+      asHLCWriter(writer).receiveHLC?.(remoteHLC, { maxDriftMs })
     ).rejects.toThrow(/drift|clock|skew/i);
 
     await writer.close();
@@ -1033,8 +1084,8 @@ describe('CDC Global Ordering - HLC Drift Detection', () => {
       .filter((e) => e.table === 'drift_test')
       .sort((a, b) => Number(a.lsn - b.lsn));
 
-    const hlc1 = (events[0] as any).hlc as HLCTimestamp;
-    const hlc2 = (events[1] as any).hlc as HLCTimestamp;
+    const hlc1 = asHLCEntry(events[0]).hlc as HLCTimestamp;
+    const hlc2 = asHLCEntry(events[1]).hlc as HLCTimestamp;
 
     // HLC should still be monotonically increasing despite wall clock going back
     expect(compareHLC(hlc1, hlc2)).toBeLessThan(0);
@@ -1052,7 +1103,7 @@ describe('CDC Global Ordering - HLC Drift Detection', () => {
     const warnings: Array<{ drift: number; timestamp: number }> = [];
 
     // Expected: Writer emits drift warnings
-    (writer as any).on?.('drift-warning', (warning: { drift: number; timestamp: number }) => {
+    asHLCWriter(writer).on?.('drift-warning', (warning: { drift: number; timestamp: number }) => {
       warnings.push(warning);
     });
 
@@ -1063,7 +1114,7 @@ describe('CDC Global Ordering - HLC Drift Detection', () => {
       nodeId: 'remote',
     };
 
-    await (writer as any).receiveHLC?.(remoteHLC, { maxDriftMs, warningThreshold });
+    await asHLCWriter(writer).receiveHLC?.(remoteHLC, { maxDriftMs, warningThreshold });
 
     expect(warnings.length).toBeGreaterThan(0);
     expect(warnings[0].drift).toBeGreaterThanOrEqual(maxDriftMs * warningThreshold);
@@ -1082,7 +1133,7 @@ describe('CDC Global Ordering - HLC Drift Detection', () => {
       //   driftStrategy: 'wait-for-sync',
       //   syncTimeoutMs: 5000,
       // },
-    } as any);
+    } as Record<string, unknown>);
 
     // When drift exceeds threshold with 'wait-for-sync' strategy
     const remoteHLC: HLCTimestamp = {
@@ -1093,7 +1144,7 @@ describe('CDC Global Ordering - HLC Drift Detection', () => {
 
     // Should wait for local clock to catch up (with timeout)
     const startTime = Date.now();
-    await (writer as any).receiveHLC?.(remoteHLC);
+    await asHLCWriter(writer).receiveHLC?.(remoteHLC);
     const elapsed = Date.now() - startTime;
 
     // Should have waited for clock sync
@@ -1115,11 +1166,11 @@ describe('CDC Global Ordering - HLC Drift Detection', () => {
         logicalCounter: 0,
         nodeId: 'remote',
       };
-      await (writer as any).receiveHLC?.(remoteHLC);
+      await asHLCWriter(writer).receiveHLC?.(remoteHLC);
     }
 
     // Expected: Writer provides drift metrics
-    const metrics = (writer as any).getDriftMetrics?.();
+    const metrics = asHLCWriter(writer).getDriftMetrics?.();
 
     expect(metrics).toBeDefined();
     expect(metrics.maxDrift).toBeGreaterThanOrEqual(Math.max(...drifts));

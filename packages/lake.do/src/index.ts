@@ -383,3 +383,104 @@ export {
 export {
   DEFAULT_CLIENT_CAPABILITIES,
 } from './types.js';
+
+// =============================================================================
+// Advanced Module Exports
+// =============================================================================
+
+/**
+ * Connection management module - for advanced usage.
+ *
+ * @see {@link WebSocketConnectionManager} - Manages WebSocket connections
+ * @see {@link ConnectionEventEmitter} - Event emitter for connection events
+ *
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export {
+  WebSocketConnectionManager,
+  ConnectionEventEmitter,
+} from './connection/index.js';
+
+export type {
+  ConnectionEventType,
+  ConnectionConfig,
+} from './connection/index.js';
+
+/**
+ * CDC Stream management module - for advanced usage.
+ *
+ * @see {@link CDCStreamController} - Manages CDC stream iteration
+ * @see {@link BoundedQueue} - Queue with backpressure support
+ * @see {@link MetricsTracker} - Metrics collection for queues
+ *
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export {
+  CDCStreamController,
+  BoundedQueue,
+  MetricsTracker,
+} from './cdc-stream/index.js';
+
+export type {
+  CDCStreamControllerOptions,
+  CDCStreamMetrics,
+  BackpressureStrategy,
+  WaterMarkEvent,
+  BoundedQueueOptions,
+  PushResult,
+  MetricsTrackerOptions,
+  QueueMetrics,
+} from './cdc-stream/index.js';
+
+/**
+ * Query execution module - for advanced usage.
+ *
+ * @see {@link QueryExecutor} - Handles RPC calls and response transformation
+ *
+ * @public
+ * @stability experimental
+ * @since 0.1.0
+ */
+export {
+  QueryExecutor,
+} from './query/index.js';
+
+export type {
+  QueryExecutorConfig,
+} from './query/index.js';
+
+/**
+ * Error classes - stable.
+ *
+ * @see {@link TimeoutError} - Error for request timeouts
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
+export {
+  TimeoutError,
+} from './errors.js';
+
+/**
+ * Constants - stable.
+ *
+ * @see {@link ErrorCode} - Named error codes
+ * @see {@link DEFAULT_TIMEOUT_MS} - Default timeout value
+ * @see {@link DEFAULT_MAX_QUEUE_SIZE} - Default CDC queue size
+ *
+ * @public
+ * @stability stable
+ * @since 0.1.0
+ */
+export {
+  ErrorCode,
+  DEFAULT_TIMEOUT_MS,
+  DEFAULT_MAX_QUEUE_SIZE,
+  MIN_QUEUE_SIZE,
+  WebSocketState,
+} from './constants.js';

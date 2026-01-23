@@ -30,6 +30,9 @@ import {
   type ShardRPC,
   type ExecutorConfig,
   type ExecuteOptions,
+  type CircuitBreakerConfig,
+  type CircuitBreakerState,
+  type CircuitStateChangeEvent,
 } from '../executor.js';
 
 import {
@@ -42,9 +45,11 @@ import {
   hashVindex,
   shardedTable,
   shard,
+  createShardId,
   type ShardConfig,
   type ExecutionPlan,
   type ShardResult,
+  type ShardId,
 } from '../types.js';
 
 import { createRouter, type QueryRouter } from '../router.js';
@@ -52,6 +57,26 @@ import { createRouter, type QueryRouter } from '../router.js';
 // =============================================================================
 // TEST HELPERS
 // =============================================================================
+
+/**
+ * Extended executor interface for testing internal state.
+ * The DistributedExecutor class exposes these methods publicly,
+ * but TypeScript sometimes needs explicit typing for test assertions.
+ */
+interface TestableExecutor extends DistributedExecutor {
+  getCircuitState(shardId: string): CircuitBreakerState;
+  getCircuitStates(): Map<string, CircuitBreakerState>;
+  initializeCircuitStates(shardIds: string[]): void;
+  forceCircuitOpen(shardId: string): void;
+  forceCircuitClose(shardId: string): void;
+}
+
+/**
+ * Interface for accessing internal config (for test assertions only)
+ */
+interface ExecutorInternals {
+  config: Required<Omit<ExecutorConfig, 'circuitBreaker'>> & { circuitBreaker?: CircuitBreakerConfig };
+}
 
 /**
  * Mock RPC that can be configured to fail for specific shards
@@ -90,7 +115,7 @@ class FailingMockShardRPC implements ShardRPC {
 
     const data = this.shardData.get(shardId) ?? { columns: [], rows: [] };
     return {
-      shardId: shardId as any,
+      shardId: createShardId(shardId),
       columns: data.columns,
       rows: data.rows,
       rowCount: data.rows.length,
@@ -114,9 +139,9 @@ class FailingMockShardRPC implements ShardRPC {
  */
 function createTestSetup() {
   const shards: ShardConfig[] = [
-    shard('shard-1' as any, 'do-ns-1'),
-    shard('shard-2' as any, 'do-ns-2'),
-    shard('shard-3' as any, 'do-ns-3'),
+    shard(createShardId('shard-1'), 'do-ns-1'),
+    shard(createShardId('shard-2'), 'do-ns-2'),
+    shard(createShardId('shard-3'), 'do-ns-3'),
   ];
 
   const vschema = createVSchema({
@@ -132,38 +157,6 @@ function createTestSetup() {
   const router = createRouter(vschema);
 
   return { shards, vschema, rpc, selector, router };
-}
-
-// =============================================================================
-// CIRCUIT BREAKER TYPES (expected interface)
-// =============================================================================
-
-/**
- * Expected circuit state enum
- * This documents what we expect to exist after implementation
- */
-type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
-
-/**
- * Expected circuit breaker configuration
- */
-interface CircuitBreakerConfig {
-  /** Number of consecutive failures before opening the circuit */
-  failureThreshold: number;
-  /** Time in ms before transitioning from OPEN to HALF_OPEN */
-  resetTimeoutMs: number;
-  /** Number of successful requests to close the circuit from HALF_OPEN */
-  successThreshold?: number;
-}
-
-/**
- * Expected interface for circuit breaker state introspection
- */
-interface CircuitBreakerState {
-  state: CircuitState;
-  failureCount: number;
-  lastFailureTime?: number;
-  lastSuccessTime?: number;
 }
 
 // =============================================================================
@@ -189,13 +182,14 @@ describe('Circuit Breaker for DistributedExecutor', () => {
         },
       };
 
-      const executor = createExecutor(rpc, selector, config);
+      const executor = createExecutor(rpc, selector, config) as TestableExecutor;
 
       // Executor should store and use the circuit breaker config
       // Access the internal config to verify it was stored
-      expect((executor as any).config.circuitBreaker).toBeDefined();
-      expect((executor as any).config.circuitBreaker.failureThreshold).toBe(5);
-      expect((executor as any).config.circuitBreaker.resetTimeoutMs).toBe(30000);
+      const internals = executor as unknown as ExecutorInternals;
+      expect(internals.config.circuitBreaker).toBeDefined();
+      expect(internals.config.circuitBreaker?.failureThreshold).toBe(5);
+      expect(internals.config.circuitBreaker?.resetTimeoutMs).toBe(30000);
     });
 
     it('should have getCircuitState method for shard introspection', () => {
@@ -206,10 +200,10 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 5,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Expected: executor should have getCircuitState method
-      const state = (executor as any).getCircuitState('shard-1');
+      const state = executor.getCircuitState('shard-1');
       expect(state).toBeDefined();
       expect(state.state).toBe('CLOSED');
     });
@@ -222,11 +216,11 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 5,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Each shard should have its own circuit breaker initialized
       for (const shardConfig of shards) {
-        const state = (executor as any).getCircuitState(shardConfig.id);
+        const state = executor.getCircuitState(shardConfig.id);
         expect(state.state).toBe('CLOSED');
         expect(state.failureCount).toBe(0);
       }
@@ -248,7 +242,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Configure shard-1 to fail
       rpc.setShardToFail('shard-1');
@@ -257,7 +251,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
       for (let i = 0; i < failureThreshold; i++) {
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
         // Force the plan to target shard-1
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
 
         try {
           await executor.execute(plan);
@@ -267,7 +261,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
       }
 
       // Circuit should now be OPEN
-      const state = (executor as any).getCircuitState('shard-1');
+      const state = executor.getCircuitState('shard-1');
       expect(state.state).toBe('OPEN');
       expect(state.failureCount).toBe(failureThreshold);
     });
@@ -282,13 +276,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 2,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Open the circuit for shard-1
       rpc.setShardToFail('shard-1');
       for (let i = 0; i < 2; i++) {
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         try {
           await executor.execute(plan);
         } catch {
@@ -301,7 +295,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
 
       // Next request should be rejected immediately without calling RPC
       const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-      plan.shardPlans[0].shardId = 'shard-1' as any;
+      plan.shardPlans[0].shardId = createShardId('shard-1');
 
       await expect(executor.execute(plan)).rejects.toThrow(/circuit.*open/i);
 
@@ -319,13 +313,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 3,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Fail shard-1 twice
       rpc.setShardToFail('shard-1');
       for (let i = 0; i < 2; i++) {
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         try {
           await executor.execute(plan);
         } catch {
@@ -336,7 +330,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
       // Fail shard-2 once
       rpc.setShardToFail('shard-2');
       const plan2 = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 2');
-      plan2.shardPlans[0].shardId = 'shard-2' as any;
+      plan2.shardPlans[0].shardId = createShardId('shard-2');
       try {
         await executor.execute(plan2);
       } catch {
@@ -344,10 +338,10 @@ describe('Circuit Breaker for DistributedExecutor', () => {
       }
 
       // Both circuits should still be CLOSED (under threshold)
-      expect((executor as any).getCircuitState('shard-1').state).toBe('CLOSED');
-      expect((executor as any).getCircuitState('shard-1').failureCount).toBe(2);
-      expect((executor as any).getCircuitState('shard-2').state).toBe('CLOSED');
-      expect((executor as any).getCircuitState('shard-2').failureCount).toBe(1);
+      expect(executor.getCircuitState('shard-1').state).toBe('CLOSED');
+      expect(executor.getCircuitState('shard-1').failureCount).toBe(2);
+      expect(executor.getCircuitState('shard-2').state).toBe('CLOSED');
+      expect(executor.getCircuitState('shard-2').failureCount).toBe(1);
     });
 
     it('should reset failure count on successful request', async () => {
@@ -360,13 +354,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 5,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Fail shard-1 twice
       rpc.setShardToFail('shard-1');
       for (let i = 0; i < 2; i++) {
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         try {
           await executor.execute(plan);
         } catch {
@@ -374,17 +368,17 @@ describe('Circuit Breaker for DistributedExecutor', () => {
         }
       }
 
-      expect((executor as any).getCircuitState('shard-1').failureCount).toBe(2);
+      expect(executor.getCircuitState('shard-1').failureCount).toBe(2);
 
       // Now succeed
       rpc.clearShardFailure('shard-1');
       const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-      plan.shardPlans[0].shardId = 'shard-1' as any;
+      plan.shardPlans[0].shardId = createShardId('shard-1');
       await executor.execute(plan);
 
       // Failure count should be reset
-      expect((executor as any).getCircuitState('shard-1').failureCount).toBe(0);
-      expect((executor as any).getCircuitState('shard-1').state).toBe('CLOSED');
+      expect(executor.getCircuitState('shard-1').failureCount).toBe(0);
+      expect(executor.getCircuitState('shard-1').state).toBe('CLOSED');
     });
   });
 
@@ -409,13 +403,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
             failureThreshold: 2,
             resetTimeoutMs,
           },
-        } as any);
+        }) as TestableExecutor;
 
         // Open the circuit
         rpc.setShardToFail('shard-1');
         for (let i = 0; i < 2; i++) {
           const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-          plan.shardPlans[0].shardId = 'shard-1' as any;
+          plan.shardPlans[0].shardId = createShardId('shard-1');
           try {
             await executor.execute(plan);
           } catch {
@@ -423,13 +417,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           }
         }
 
-        expect((executor as any).getCircuitState('shard-1').state).toBe('OPEN');
+        expect(executor.getCircuitState('shard-1').state).toBe('OPEN');
 
         // Advance time past reset timeout
         currentTime += resetTimeoutMs + 100;
 
         // Circuit should be HALF_OPEN (or ready to transition on next request)
-        const state = (executor as any).getCircuitState('shard-1');
+        const state = executor.getCircuitState('shard-1');
         expect(state.state).toBe('HALF_OPEN');
       } finally {
         Date.now = originalDateNow;
@@ -453,13 +447,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
             failureThreshold: 2,
             resetTimeoutMs,
           },
-        } as any);
+        }) as TestableExecutor;
 
         // Open the circuit
         rpc.setShardToFail('shard-1');
         for (let i = 0; i < 2; i++) {
           const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-          plan.shardPlans[0].shardId = 'shard-1' as any;
+          plan.shardPlans[0].shardId = createShardId('shard-1');
           try {
             await executor.execute(plan);
           } catch {
@@ -476,7 +470,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
 
         // Make a request - it should be allowed through
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         await executor.execute(plan);
 
         // Verify the RPC was called
@@ -508,13 +502,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
             failureThreshold: 2,
             resetTimeoutMs,
           },
-        } as any);
+        }) as TestableExecutor;
 
         // Open the circuit
         rpc.setShardToFail('shard-1');
         for (let i = 0; i < 2; i++) {
           const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-          plan.shardPlans[0].shardId = 'shard-1' as any;
+          plan.shardPlans[0].shardId = createShardId('shard-1');
           try {
             await executor.execute(plan);
           } catch {
@@ -530,11 +524,11 @@ describe('Circuit Breaker for DistributedExecutor', () => {
 
         // Make a successful request
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         await executor.execute(plan);
 
         // Circuit should be CLOSED
-        const state = (executor as any).getCircuitState('shard-1');
+        const state = executor.getCircuitState('shard-1');
         expect(state.state).toBe('CLOSED');
         expect(state.failureCount).toBe(0);
       } finally {
@@ -559,13 +553,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
             failureThreshold: 2,
             resetTimeoutMs,
           },
-        } as any);
+        }) as TestableExecutor;
 
         // Open the circuit
         rpc.setShardToFail('shard-1');
         for (let i = 0; i < 2; i++) {
           const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-          plan.shardPlans[0].shardId = 'shard-1' as any;
+          plan.shardPlans[0].shardId = createShardId('shard-1');
           try {
             await executor.execute(plan);
           } catch {
@@ -579,7 +573,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
         // Service still failing - don't clear the failure
         // Make a request that will fail
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         try {
           await executor.execute(plan);
         } catch {
@@ -587,7 +581,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
         }
 
         // Circuit should be OPEN again
-        const state = (executor as any).getCircuitState('shard-1');
+        const state = executor.getCircuitState('shard-1');
         expect(state.state).toBe('OPEN');
       } finally {
         Date.now = originalDateNow;
@@ -613,13 +607,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
             resetTimeoutMs,
             successThreshold,
           },
-        } as any);
+        }) as TestableExecutor;
 
         // Open the circuit
         rpc.setShardToFail('shard-1');
         for (let i = 0; i < 2; i++) {
           const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-          plan.shardPlans[0].shardId = 'shard-1' as any;
+          plan.shardPlans[0].shardId = createShardId('shard-1');
           try {
             await executor.execute(plan);
           } catch {
@@ -636,20 +630,20 @@ describe('Circuit Breaker for DistributedExecutor', () => {
         // Make successThreshold - 1 successful requests
         for (let i = 0; i < successThreshold - 1; i++) {
           const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-          plan.shardPlans[0].shardId = 'shard-1' as any;
+          plan.shardPlans[0].shardId = createShardId('shard-1');
           await executor.execute(plan);
         }
 
         // Still in HALF_OPEN
-        expect((executor as any).getCircuitState('shard-1').state).toBe('HALF_OPEN');
+        expect(executor.getCircuitState('shard-1').state).toBe('HALF_OPEN');
 
         // One more success
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         await executor.execute(plan);
 
         // Now CLOSED
-        expect((executor as any).getCircuitState('shard-1').state).toBe('CLOSED');
+        expect(executor.getCircuitState('shard-1').state).toBe('CLOSED');
       } finally {
         Date.now = originalDateNow;
       }
@@ -670,13 +664,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 2,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Open circuit for shard-1
       rpc.setShardToFail('shard-1');
       for (let i = 0; i < 2; i++) {
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         try {
           await executor.execute(plan);
         } catch {
@@ -684,7 +678,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
         }
       }
 
-      expect((executor as any).getCircuitState('shard-1').state).toBe('OPEN');
+      expect(executor.getCircuitState('shard-1').state).toBe('OPEN');
 
       // Scatter query across all shards should still return results from healthy shards
       const plan = router.createExecutionPlan('SELECT * FROM users');
@@ -709,13 +703,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 2,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Open circuit for shard-1
       rpc.setShardToFail('shard-1');
       for (let i = 0; i < 2; i++) {
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         try {
           await executor.execute(plan);
         } catch {
@@ -742,7 +736,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 10,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Make shard-1 fail
       rpc.setShardToFail('shard-1');
@@ -754,11 +748,11 @@ describe('Circuit Breaker for DistributedExecutor', () => {
       }
 
       // shard-1 should have accumulated failures
-      expect((executor as any).getCircuitState('shard-1').failureCount).toBe(5);
+      expect(executor.getCircuitState('shard-1').failureCount).toBe(5);
 
       // shard-2 and shard-3 should have no failures
-      expect((executor as any).getCircuitState('shard-2').failureCount).toBe(0);
-      expect((executor as any).getCircuitState('shard-3').failureCount).toBe(0);
+      expect(executor.getCircuitState('shard-2').failureCount).toBe(0);
+      expect(executor.getCircuitState('shard-3').failureCount).toBe(0);
     });
   });
 
@@ -776,13 +770,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 2,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Open circuit for shard-1
       rpc.setShardToFail('shard-1');
       for (let i = 0; i < 2; i++) {
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         try {
           await executor.execute(plan);
         } catch {
@@ -791,9 +785,9 @@ describe('Circuit Breaker for DistributedExecutor', () => {
       }
 
       // Verify states
-      expect((executor as any).getCircuitState('shard-1').state).toBe('OPEN');
-      expect((executor as any).getCircuitState('shard-2').state).toBe('CLOSED');
-      expect((executor as any).getCircuitState('shard-3').state).toBe('CLOSED');
+      expect(executor.getCircuitState('shard-1').state).toBe('OPEN');
+      expect(executor.getCircuitState('shard-2').state).toBe('CLOSED');
+      expect(executor.getCircuitState('shard-3').state).toBe('CLOSED');
     });
 
     it('should allow queries to shard-2 when shard-1 circuit is OPEN', async () => {
@@ -806,13 +800,13 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 2,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Open circuit for shard-1
       rpc.setShardToFail('shard-1');
       for (let i = 0; i < 2; i++) {
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         try {
           await executor.execute(plan);
         } catch {
@@ -822,7 +816,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
 
       // Queries to shard-2 should work
       const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 2');
-      plan.shardPlans[0].shardId = 'shard-2' as any;
+      plan.shardPlans[0].shardId = createShardId('shard-2');
       const result = await executor.execute(plan);
 
       expect(result.rows.length).toBeGreaterThan(0);
@@ -837,20 +831,20 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 5,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Initialize circuit states for all shards
-      (executor as any).initializeCircuitStates(shards.map(s => s.id));
+      executor.initializeCircuitStates(shards.map(s => s.id));
 
       // Expected: executor should have getCircuitStates method returning all states
-      const states = (executor as any).getCircuitStates();
+      const states = executor.getCircuitStates();
 
       expect(states).toBeInstanceOf(Map);
       expect(states.size).toBe(shards.length);
 
       for (const shardConfig of shards) {
         expect(states.has(shardConfig.id)).toBe(true);
-        expect(states.get(shardConfig.id).state).toBe('CLOSED');
+        expect(states.get(shardConfig.id)?.state).toBe('CLOSED');
       }
     });
 
@@ -862,14 +856,14 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 5,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
       // Expected: executor should have forceCircuitOpen and forceCircuitClose methods
-      (executor as any).forceCircuitOpen('shard-1');
-      expect((executor as any).getCircuitState('shard-1').state).toBe('OPEN');
+      executor.forceCircuitOpen('shard-1');
+      expect(executor.getCircuitState('shard-1').state).toBe('OPEN');
 
-      (executor as any).forceCircuitClose('shard-1');
-      expect((executor as any).getCircuitState('shard-1').state).toBe('CLOSED');
+      executor.forceCircuitClose('shard-1');
+      expect(executor.getCircuitState('shard-1').state).toBe('CLOSED');
     });
 
     it('should emit circuit state change events', async () => {
@@ -882,12 +876,12 @@ describe('Circuit Breaker for DistributedExecutor', () => {
           failureThreshold: 2,
           resetTimeoutMs: 30000,
         },
-      } as any);
+      }) as TestableExecutor;
 
-      const events: Array<{ shardId: string; oldState: CircuitState; newState: CircuitState }> = [];
+      const events: CircuitStateChangeEvent[] = [];
 
       // Expected: executor should emit 'circuitStateChange' events
-      (executor as any).on('circuitStateChange', (event: any) => {
+      executor.on('circuitStateChange', (event: CircuitStateChangeEvent) => {
         events.push(event);
       });
 
@@ -895,7 +889,7 @@ describe('Circuit Breaker for DistributedExecutor', () => {
       rpc.setShardToFail('shard-1');
       for (let i = 0; i < 2; i++) {
         const plan = router.createExecutionPlan('SELECT * FROM users WHERE tenant_id = 1');
-        plan.shardPlans[0].shardId = 'shard-1' as any;
+        plan.shardPlans[0].shardId = createShardId('shard-1');
         try {
           await executor.execute(plan);
         } catch {

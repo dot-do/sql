@@ -2,6 +2,8 @@
  * DoSQL Schema DSL Parser
  *
  * Parses field definitions in the IceType-inspired DSL format.
+ * Uses a state machine-based approach instead of regex for more accurate parsing
+ * and better error messages.
  *
  * Field type notation:
  * - `!` = required/unique (primary key)
@@ -25,24 +27,8 @@ import type {
 } from './types.js';
 
 // =============================================================================
-// REGEX PATTERNS
+// VALID BASE TYPES
 // =============================================================================
-
-/** Pattern to match relation prefixes */
-const FORWARD_RELATION_PATTERN = /^->\s*/;
-const BACKWARD_RELATION_PATTERN = /^<-\s*/;
-
-/** Pattern to match array suffix */
-const ARRAY_PATTERN = /\[\]$/;
-
-/** Pattern to match modifiers at the end of type (!, #, ?) */
-const MODIFIERS_PATTERN = /([!#?]+)$/;
-
-/** Pattern to match default value */
-const DEFAULT_PATTERN = /\s*=\s*(?:"([^"]*)"|([\w()]+))\s*$/;
-
-/** Pattern to match decimal with precision: decimal(10,2) */
-const DECIMAL_PRECISION_PATTERN = /^decimal\(\d+(?:,\s*\d+)?\)/i;
 
 /** Valid SQL base types */
 const VALID_BASE_TYPES: Set<string> = new Set([
@@ -69,7 +55,7 @@ const VALID_BASE_TYPES: Set<string> = new Set([
 ]);
 
 // =============================================================================
-// FIELD PARSER
+// FIELD PARSER (State Machine Based)
 // =============================================================================
 
 /**
@@ -87,112 +73,191 @@ function createDefaultModifiers(): FieldModifiers {
 }
 
 /**
- * Parse a field type definition string
+ * Parse a field type definition string using a state machine approach
+ * This provides more accurate parsing than regex and better error messages.
  *
  * @param fieldDef - The field definition string (e.g., 'uuid!#', '-> Order[]')
  * @returns ParsedField object with all extracted information
  */
 export function parseField(fieldDef: FieldType): ParsedField {
-  let remaining = fieldDef.trim();
-  const modifiers = createDefaultModifiers();
+  const modifiers: FieldModifiers = {
+    required: true,
+    primaryKey: false,
+    indexed: false,
+    nullable: false,
+    isArray: false,
+  };
   let relation: RelationInfo | undefined;
+  let baseType = '';
 
-  // 1. Extract default value first (if present)
-  const defaultMatch = remaining.match(DEFAULT_PATTERN);
-  if (defaultMatch) {
-    modifiers.defaultValue = defaultMatch[1] ?? defaultMatch[2];
-    remaining = remaining.replace(DEFAULT_PATTERN, '').trim();
-  }
+  const input = fieldDef.trim();
+  let index = 0;
 
-  // 2. Check for forward relation (->)
-  if (FORWARD_RELATION_PATTERN.test(remaining)) {
-    remaining = remaining.replace(FORWARD_RELATION_PATTERN, '').trim();
+  // Helper functions for parsing
+  const skipWhitespace = () => {
+    while (index < input.length && /\s/.test(input[index]!)) {
+      index++;
+    }
+  };
 
-    // Check for array (many relation)
-    const isMany = ARRAY_PATTERN.test(remaining);
-    if (isMany) {
-      remaining = remaining.replace(ARRAY_PATTERN, '').trim();
+  const peek = (offset = 0): string | undefined => input[index + offset];
+  const consume = (): string => input[index++]!;
+  const atEnd = () => index >= input.length;
+
+  const isIdentifierChar = (ch: string | undefined): boolean =>
+    ch !== undefined && /[a-zA-Z0-9_]/.test(ch);
+
+  skipWhitespace();
+
+  // Check for forward relation (->)
+  if (peek() === '-' && peek(1) === '>') {
+    index += 2;
+    skipWhitespace();
+
+    // Parse target table name
+    let target = '';
+    while (!atEnd() && isIdentifierChar(peek())) {
+      target += consume();
+    }
+    skipWhitespace();
+
+    // Check for array notation
+    let isMany = false;
+    if (peek() === '[' && peek(1) === ']') {
+      index += 2;
+      isMany = true;
       modifiers.isArray = true;
     }
 
-    relation = {
-      type: 'forward',
-      target: remaining,
-      isMany,
-    };
-
     return {
       raw: fieldDef,
-      baseType: remaining, // The target table name is the "type"
+      baseType: target,
       modifiers,
-      relation,
+      relation: {
+        type: 'forward',
+        target,
+        isMany,
+      },
     };
   }
 
-  // 3. Check for backward relation (<-)
-  if (BACKWARD_RELATION_PATTERN.test(remaining)) {
-    remaining = remaining.replace(BACKWARD_RELATION_PATTERN, '').trim();
+  // Check for backward relation (<-)
+  if (peek() === '<' && peek(1) === '-') {
+    index += 2;
+    skipWhitespace();
 
-    // Check for array (many relation - unusual but supported)
-    const isMany = ARRAY_PATTERN.test(remaining);
-    if (isMany) {
-      remaining = remaining.replace(ARRAY_PATTERN, '').trim();
+    // Parse target table name
+    let target = '';
+    while (!atEnd() && isIdentifierChar(peek())) {
+      target += consume();
+    }
+    skipWhitespace();
+
+    // Check for array notation
+    let isMany = false;
+    if (peek() === '[' && peek(1) === ']') {
+      index += 2;
+      isMany = true;
       modifiers.isArray = true;
     }
 
-    relation = {
-      type: 'backward',
-      target: remaining,
-      isMany,
-    };
-
     return {
       raw: fieldDef,
-      baseType: remaining, // The target table name is the "type"
+      baseType: target,
       modifiers,
-      relation,
+      relation: {
+        type: 'backward',
+        target,
+        isMany,
+      },
     };
   }
 
-  // 4. Check for array type (before modifiers)
-  if (ARRAY_PATTERN.test(remaining)) {
-    remaining = remaining.replace(ARRAY_PATTERN, '').trim();
-    modifiers.isArray = true;
+  // Handle decimal with precision: decimal(10,2)
+  if (input.slice(index).toLowerCase().startsWith('decimal(')) {
+    let depth = 0;
+    while (!atEnd()) {
+      const ch = consume();
+      baseType += ch;
+      if (ch === '(') depth++;
+      if (ch === ')') {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+  } else {
+    // Regular type name
+    while (!atEnd() && isIdentifierChar(peek())) {
+      baseType += consume();
+    }
   }
 
-  // 5. Extract modifiers (!, #, ?)
-  const modifiersMatch = remaining.match(MODIFIERS_PATTERN);
-  if (modifiersMatch) {
-    const modifierChars = modifiersMatch[1];
-    remaining = remaining.slice(0, -modifierChars.length).trim();
+  // Parse modifiers, array notation, and default values
+  while (!atEnd()) {
+    skipWhitespace();
+    const ch = peek();
 
-    // Parse each modifier
-    if (modifierChars.includes('!')) {
+    if (ch === '!') {
+      consume();
       modifiers.primaryKey = true;
       modifiers.required = true;
       modifiers.nullable = false;
-    }
-    if (modifierChars.includes('#')) {
+    } else if (ch === '#') {
+      consume();
       modifiers.indexed = true;
-    }
-    if (modifierChars.includes('?')) {
+    } else if (ch === '?') {
+      consume();
       modifiers.nullable = true;
       modifiers.required = false;
+    } else if (ch === '[' && peek(1) === ']') {
+      index += 2;
+      modifiers.isArray = true;
+    } else if (ch === '=') {
+      // Default value
+      consume();
+      skipWhitespace();
+
+      let defaultValue = '';
+      if (peek() === '"') {
+        // Quoted string default
+        consume(); // Opening quote
+        while (!atEnd() && peek() !== '"') {
+          if (peek() === '\\' && peek(1) === '"') {
+            consume(); // Skip escape character
+            defaultValue += consume();
+          } else {
+            defaultValue += consume();
+          }
+        }
+        if (peek() === '"') consume(); // Closing quote
+      } else if (peek() === "'") {
+        // Single-quoted string default
+        consume(); // Opening quote
+        while (!atEnd() && peek() !== "'") {
+          if (peek() === '\\' && peek(1) === "'") {
+            consume(); // Skip escape character
+            defaultValue += consume();
+          } else {
+            defaultValue += consume();
+          }
+        }
+        if (peek() === "'") consume(); // Closing quote
+      } else {
+        // Unquoted value (function call like now(), or identifier, or number)
+        while (!atEnd() && peek() !== undefined && /[a-zA-Z0-9_().]/.test(peek()!)) {
+          defaultValue += consume();
+        }
+      }
+      modifiers.defaultValue = defaultValue;
+    } else {
+      // Unknown character, stop parsing
+      break;
     }
-  }
-
-  // 6. The remaining string is the base type
-  let baseType = remaining.toLowerCase();
-
-  // Handle decimal with precision (keep original case for precision)
-  const decimalMatch = remaining.match(DECIMAL_PRECISION_PATTERN);
-  if (decimalMatch) {
-    baseType = decimalMatch[0].toLowerCase();
   }
 
   return {
     raw: fieldDef,
-    baseType,
+    baseType: baseType.toLowerCase(),
     modifiers,
     relation,
   };
@@ -265,25 +330,24 @@ export function isValidBaseType(type: string): type is SqlBaseType {
  * Check if a field definition represents a relation
  */
 export function isRelation(fieldDef: FieldType): boolean {
-  const trimmed = fieldDef.trim();
-  return (
-    FORWARD_RELATION_PATTERN.test(trimmed) ||
-    BACKWARD_RELATION_PATTERN.test(trimmed)
-  );
+  const parsed = parseField(fieldDef);
+  return parsed.relation !== undefined;
 }
 
 /**
  * Check if a field definition is a forward relation (->)
  */
 export function isForwardRelation(fieldDef: FieldType): boolean {
-  return FORWARD_RELATION_PATTERN.test(fieldDef.trim());
+  const parsed = parseField(fieldDef);
+  return parsed.relation?.type === 'forward';
 }
 
 /**
  * Check if a field definition is a backward relation (<-)
  */
 export function isBackwardRelation(fieldDef: FieldType): boolean {
-  return BACKWARD_RELATION_PATTERN.test(fieldDef.trim());
+  const parsed = parseField(fieldDef);
+  return parsed.relation?.type === 'backward';
 }
 
 /**

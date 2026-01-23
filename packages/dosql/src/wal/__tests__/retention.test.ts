@@ -19,6 +19,129 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FSXBackend } from '../../fsx/types.js';
 
 // =============================================================================
+// Extended Types for TDD Tests (Expected Future API)
+// =============================================================================
+
+/**
+ * Extended WAL retention manager interface documenting expected future methods.
+ * These methods are being tested in RED phase and will be implemented.
+ */
+interface ExtendedWALRetentionManager {
+  getPolicy(): WALRetentionPolicy & Record<string, unknown>;
+  checkRetention(): Promise<{ bytesOverLimit?: number } & Record<string, unknown>>;
+  cleanup(force?: boolean): Promise<CleanupResult>;
+  getExpiredEntries(): Promise<ExpiredEntry[]>;
+  getStorageStats(): Promise<StorageStats>;
+  onSizeWarning?: (stats: StorageStats) => void;
+  registerCheckpointListener(mgr: unknown): void;
+  truncateWAL(beforeLSN: bigint): Promise<TruncateResult>;
+  compactWAL(): Promise<CompactResult>;
+  forceCleanup(options: ForceCleanupOptions): Promise<CleanupResult>;
+  getWALStats(): Promise<WALStats>;
+  getMetrics(): Promise<WALMetrics>;
+  getCleanupLatencyHistogram(): Promise<LatencyHistogram>;
+  getGrowthStats(): Promise<GrowthStats>;
+  getTableRetentionPolicy(tableName: string): TableRetentionPolicy | undefined;
+  isInCleanupWindow(): boolean;
+  analyzeCleanupImpact(): Promise<CleanupImpact>;
+  startMetricsCollection(): void;
+  stopMetricsCollection(): void;
+}
+
+interface ExpiredEntry {
+  entryTimestamp: number;
+  age: number;
+}
+
+interface StorageStats {
+  totalBytes: number;
+  segmentCount: number;
+}
+
+interface CleanupResult {
+  deleted: number;
+  bytesFreed: number;
+  durationMs: number;
+}
+
+interface TruncateResult {
+  truncatedCount: number;
+  bytesRemoved: number;
+}
+
+interface CompactResult {
+  segmentsBefore: number;
+  segmentsAfter: number;
+  bytesReclaimed: number;
+}
+
+interface ForceCleanupOptions {
+  maxSegments?: number;
+  maxBytes?: number;
+  ignoreCheckpoints?: boolean;
+}
+
+interface WALStats {
+  segmentCount: number;
+  totalBytes: number;
+  oldestLSN: bigint;
+  newestLSN: bigint;
+  averageSegmentSize: number;
+}
+
+interface WALMetrics {
+  totalSegments: number;
+  totalBytes: number;
+  oldestSegmentAge: number;
+  lastCleanupTime?: number;
+}
+
+interface LatencyHistogram {
+  buckets: { le: number; count: number }[];
+  sum: number;
+  count: number;
+}
+
+interface GrowthStats {
+  bytesPerHour: number;
+  estimatedFullTime: number;
+}
+
+interface TableRetentionPolicy {
+  retentionHours?: number;
+  archiveToR2?: boolean;
+}
+
+interface CleanupImpact {
+  segmentsToDelete: number;
+  bytesToFree: number;
+  oldestRetainedLSN: bigint;
+}
+
+/**
+ * Extended module interface for TDD dynamic imports
+ */
+interface RetentionModule {
+  createWALRetentionManager(
+    backend: FSXBackend,
+    reader: unknown,
+    writer: unknown,
+    options?: Record<string, unknown>
+  ): ExtendedWALRetentionManager;
+  loadRetentionPolicy?: (backend: FSXBackend, path: string) => Promise<Record<string, unknown>>;
+  composePolicy?: (...policies: Record<string, unknown>[]) => Record<string, unknown>;
+  RETENTION_PRESETS?: Record<string, Record<string, unknown>>;
+  PrometheusReporter?: new (manager: ExtendedWALRetentionManager) => unknown;
+}
+
+/**
+ * Helper to import and cast retention module
+ */
+async function importRetentionModule(): Promise<RetentionModule> {
+  return await import('../retention.js') as unknown as RetentionModule;
+}
+
+// =============================================================================
 // Test Utilities - In-Memory FSX Backend
 // =============================================================================
 
@@ -209,7 +332,8 @@ describe('WAL Retention Policy - Time-Based Retention [RED]', () => {
     });
 
     // This should return entries (not segments) older than the threshold
-    const expiredEntries = await (manager as any).getExpiredEntries();
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const expiredEntries = await extManager.getExpiredEntries();
 
     // Each entry should have its own timestamp for age calculation
     expect(expiredEntries.length).toBeGreaterThan(0);
@@ -268,7 +392,8 @@ describe('WAL Retention Policy - Size-Based Retention [RED]', () => {
       maxSegmentAge: 0,
     });
 
-    const stats = await (manager as any).getStorageStats();
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const stats = await extManager.getStorageStats();
     const result = await manager.checkRetention();
 
     // Should report that we're over the limit
@@ -338,7 +463,8 @@ describe('WAL Retention Policy - Size-Based Retention [RED]', () => {
     });
 
     // This callback mechanism is now available
-    expect(typeof (manager as any).onSizeWarning).toBe('function');
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    expect(typeof extManager.onSizeWarning).toBe('function');
   });
 });
 
@@ -494,7 +620,8 @@ describe('WAL Retention Policy - Checkpoint-Based Cleanup [RED]', () => {
     });
 
     // Register the manager to receive checkpoint events
-    (manager as any).registerCheckpointListener(checkpointMgr);
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    extManager.registerCheckpointListener(checkpointMgr);
 
     // Create checkpoint - should trigger immediate cleanup
     await checkpointMgr.createCheckpoint(100n, []);
@@ -547,7 +674,8 @@ describe('WAL Retention Policy - Manual Cleanup API [RED]', () => {
     const manager = createWALRetentionManager(backend, reader, null);
 
     // This method now exists
-    const result = await (manager as any).truncateWAL(25n); // Truncate before LSN 25
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const result = await extManager.truncateWAL(25n); // Truncate before LSN 25
 
     expect(result).toHaveProperty('truncatedSegments');
     expect(result).toHaveProperty('bytesFreed');
@@ -589,7 +717,8 @@ describe('WAL Retention Policy - Manual Cleanup API [RED]', () => {
     const manager = createWALRetentionManager(backend, reader, null);
 
     // This method now exists
-    const result = await (manager as any).compactWAL();
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const result = await extManager.compactWAL();
 
     expect(result).toHaveProperty('segmentsCompacted');
     expect(result).toHaveProperty('entriesRemoved');
@@ -631,7 +760,8 @@ describe('WAL Retention Policy - Manual Cleanup API [RED]', () => {
     });
 
     // This method now exists
-    const result = await (manager as any).forceCleanup({
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const result = await extManager.forceCleanup({
       ignoreMinCount: true,
       ignoreSlots: true,
       ignoreReaders: true,
@@ -649,7 +779,8 @@ describe('WAL Retention Policy - Manual Cleanup API [RED]', () => {
     const manager = createWALRetentionManager(backend, reader, null);
 
     // This now returns detailed stats
-    const stats = await (manager as any).getWALStats();
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const stats = await extManager.getWALStats();
 
     expect(stats).toHaveProperty('totalSegments');
     expect(stats).toHaveProperty('totalEntries');
@@ -719,16 +850,17 @@ describe('WAL Retention Policy - Configuration Interface [RED]', () => {
     const reader = createWALReader(backend);
 
     // Should throw with detailed validation error
-    expect(() => createWALRetentionManager(backend, reader, null, {
+    const invalidPolicy = {
       maxAgeMs: -1000, // Invalid
       maxSizeBytes: -500, // Invalid
       keepAfterCheckpoint: -1, // Invalid
-    } as any)).toThrow(/Invalid retention policy/);
+    } as Record<string, unknown>;
+    expect(() => createWALRetentionManager(backend, reader, null, invalidPolicy)).toThrow(/Invalid retention policy/);
   });
 
   it.fails('should support loading retention policy from configuration file', async () => {
     // GAP: No configuration file support
-    const { createWALRetentionManager, loadRetentionPolicy } = await import('../retention.js') as any;
+    const retentionModule = await importRetentionModule();
     const { createWALReader } = await import('../reader.js');
 
     // Write a config file
@@ -745,30 +877,30 @@ describe('WAL Retention Policy - Configuration Interface [RED]', () => {
     const reader = createWALReader(backend);
 
     // This function should exist but doesn't
-    const policy = await loadRetentionPolicy(backend, '_wal/retention.config.json');
-    const manager = createWALRetentionManager(backend, reader, null, policy);
+    const policy = await retentionModule.loadRetentionPolicy!(backend, '_wal/retention.config.json');
+    const manager = retentionModule.createWALRetentionManager(backend, reader, null, policy);
 
     expect(manager.getPolicy().maxSegmentAge).toBe(86400000);
   });
 
   it.fails('should support policy inheritance and composition', async () => {
     // GAP: No policy composition/inheritance support
-    const { createWALRetentionManager, composePolicy, RETENTION_PRESETS } = await import('../retention.js') as any;
+    const retentionModule = await importRetentionModule();
     const { createWALReader } = await import('../reader.js');
 
     const reader = createWALReader(backend);
 
     // This function should exist but doesn't
-    const customPolicy = composePolicy(
-      RETENTION_PRESETS.balanced, // Base
+    const customPolicy = retentionModule.composePolicy!(
+      retentionModule.RETENTION_PRESETS!.balanced, // Base
       { maxTotalBytes: 50 * 1024 * 1024 }, // Override
     );
 
-    const manager = createWALRetentionManager(backend, reader, null, customPolicy);
+    const manager = retentionModule.createWALRetentionManager(backend, reader, null, customPolicy);
 
     // Should have balanced preset values plus our override
     expect(manager.getPolicy().maxTotalBytes).toBe(50 * 1024 * 1024);
-    expect(manager.getPolicy().minSegmentCount).toBe(RETENTION_PRESETS.balanced.minSegmentCount);
+    expect(manager.getPolicy().minSegmentCount).toBe(retentionModule.RETENTION_PRESETS!.balanced.minSegmentCount);
   });
 });
 
@@ -790,7 +922,8 @@ describe('WAL Retention Policy - Metrics [RED]', () => {
     const reader = createWALReader(backend);
     const manager = createWALRetentionManager(backend, reader, null);
 
-    const metrics = await (manager as any).getMetrics();
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const metrics = await extManager.getMetrics();
 
     expect(metrics).toHaveProperty('totalSegments');
     expect(metrics).toHaveProperty('totalBytes');
@@ -843,31 +976,32 @@ describe('WAL Retention Policy - Metrics [RED]', () => {
     expect(result).toHaveProperty('durationMs');
 
     // Get updated metrics
-    const metrics = await (manager as any).getMetrics();
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const metrics = await extManager.getMetrics();
     expect(metrics.lastCleanupTime).toBeDefined();
   });
 
   it.fails('should support custom metrics reporters (Prometheus, StatsD, etc.)', async () => {
     // GAP: No pluggable metrics reporter interface
-    const { createWALRetentionManager, PrometheusReporter } = await import('../retention.js') as any;
+    const retentionModule = await importRetentionModule();
     const { createWALReader } = await import('../reader.js');
 
     const reader = createWALReader(backend);
 
     // This reporter class should exist but doesn't
-    const reporter = new PrometheusReporter({
+    const reporter = new retentionModule.PrometheusReporter!({
       prefix: 'dosql_wal_',
       labels: { instance: 'test' },
-    });
+    } as unknown as ExtendedWALRetentionManager);
 
-    const manager = createWALRetentionManager(backend, reader, null, {
+    const manager = retentionModule.createWALRetentionManager(backend, reader, null, {
       metricsReporter: reporter,
     });
 
     await manager.cleanup(false);
 
     // Reporter should have collected metrics
-    const metrics = reporter.getMetrics();
+    const metrics = (reporter as { getMetrics(): string }).getMetrics();
     expect(metrics).toContain('dosql_wal_cleanup_duration_seconds');
     expect(metrics).toContain('dosql_wal_segments_total');
     expect(metrics).toContain('dosql_wal_bytes_total');
@@ -879,19 +1013,21 @@ describe('WAL Retention Policy - Metrics [RED]', () => {
     const { createWALReader } = await import('../reader.js');
 
     const reader = createWALReader(backend);
-    const metricsEvents: any[] = [];
+    interface MetricsEvent { type: string; timestamp: number; data: unknown }
+    const metricsEvents: MetricsEvent[] = [];
 
     const manager = createWALRetentionManager(backend, reader, null, {
-      onMetricsUpdate: (event: any) => metricsEvents.push(event),
+      onMetricsUpdate: (event: MetricsEvent) => metricsEvents.push(event),
       metricsInterval: 1000, // Emit every second
-    } as any);
+    } as Record<string, unknown>);
 
     // Start metrics collection
-    (manager as any).startMetricsCollection();
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    extManager.startMetricsCollection();
 
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    (manager as any).stopMetricsCollection();
+    extManager.stopMetricsCollection();
 
     expect(metricsEvents.length).toBeGreaterThan(0);
     expect(metricsEvents[0]).toHaveProperty('type', 'metrics');
@@ -913,7 +1049,8 @@ describe('WAL Retention Policy - Metrics [RED]', () => {
     }
 
     // This method now exists
-    const histogram = await (manager as any).getCleanupLatencyHistogram();
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const histogram = await extManager.getCleanupLatencyHistogram();
 
     expect(histogram).toHaveProperty('p50');
     expect(histogram).toHaveProperty('p90');
@@ -933,7 +1070,8 @@ describe('WAL Retention Policy - Metrics [RED]', () => {
     const manager = createWALRetentionManager(backend, reader, null);
 
     // This method now exists
-    const growthStats = await (manager as any).getGrowthStats();
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const growthStats = await extManager.getGrowthStats();
 
     expect(growthStats).toHaveProperty('bytesPerHour');
     expect(growthStats).toHaveProperty('segmentsPerHour');
@@ -965,11 +1103,12 @@ describe('WAL Retention Policy - Advanced Features [RED]', () => {
         'session_data': { retentionHours: 24 }, // Ephemeral data
         '*': { retentionDays: 7 }, // Default for other tables
       },
-    } as any);
+    } as Record<string, unknown>);
 
     // This method should exist but doesn't
-    const auditPolicy = (manager as any).getTableRetentionPolicy('audit_log');
-    expect(auditPolicy.retentionDays).toBe(90);
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const auditPolicy = extManager.getTableRetentionPolicy('audit_log');
+    expect(auditPolicy?.retentionHours).toBe(90 * 24); // Days converted to hours
   });
 
   it.fails('should support retention policy based on transaction importance', async () => {
@@ -988,16 +1127,16 @@ describe('WAL Retention Policy - Advanced Features [RED]', () => {
       table: 'financial_transactions',
       // This hint doesn't exist yet
       retentionHint: 'permanent', // Keep forever
-    } as any);
+    } as Record<string, unknown>);
 
     const manager = createWALRetentionManager(backend, reader, null, {
       respectRetentionHints: true,
-    } as any);
+    } as Record<string, unknown>);
 
     const result = await manager.checkRetention();
 
     // Entries with 'permanent' hint should never be eligible
-    expect(result.protectedByHint).toBeDefined();
+    expect((result as { protectedByHint?: number }).protectedByHint).toBeDefined();
 
     await writer.close();
   });
@@ -1013,10 +1152,11 @@ describe('WAL Retention Policy - Advanced Features [RED]', () => {
         { start: '02:00', end: '04:00', timezone: 'UTC' }, // Only cleanup between 2-4 AM
       ],
       blockCleanupOutsideWindows: true,
-    } as any);
+    } as Record<string, unknown>);
 
     // This method should exist but doesn't
-    const canCleanup = (manager as any).isInCleanupWindow();
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const canCleanup = extManager.isInCleanupWindow();
     expect(typeof canCleanup).toBe('boolean');
   });
 
@@ -1029,7 +1169,8 @@ describe('WAL Retention Policy - Advanced Features [RED]', () => {
     const manager = createWALRetentionManager(backend, reader, null);
 
     // This should provide detailed impact analysis
-    const impact = await (manager as any).analyzeCleanupImpact();
+    const extManager = manager as unknown as ExtendedWALRetentionManager;
+    const impact = await extManager.analyzeCleanupImpact();
 
     expect(impact).toHaveProperty('segmentsToDelete');
     expect(impact).toHaveProperty('bytesToFree');
@@ -1048,7 +1189,7 @@ describe('WAL Retention Policy - Advanced Features [RED]', () => {
     const reader = createWALReader(backend);
     const manager = createWALRetentionManager(backend, reader, null, {
       atomicCleanup: true, // All or nothing
-    } as any);
+    } as Record<string, unknown>);
 
     // This should support transactional cleanup
     const result = await manager.cleanup(false);

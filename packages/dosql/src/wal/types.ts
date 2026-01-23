@@ -8,6 +8,13 @@
 import type { FSXBackend } from '../fsx/types.js';
 import type { LSN, TransactionId } from '../engine/types.js';
 import type { HLCTimestamp } from '../hlc.js';
+import {
+  DoSQLError,
+  ErrorCategory,
+  registerErrorClass,
+  type ErrorContext,
+  type SerializedError,
+} from '../errors/base.js';
 
 // Re-export branded types for convenience
 export type { LSN, TransactionId } from '../engine/types.js';
@@ -402,17 +409,176 @@ export enum WALErrorCode {
 }
 
 /**
- * Custom error class for WAL operations
+ * Error class for WAL (Write-Ahead Log) operations
+ *
+ * Extends DoSQLError to provide consistent error handling with:
+ * - Machine-readable error codes
+ * - Error categories for API layer handling
+ * - Recovery hints for developers
+ * - LSN and segment context for debugging
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await walWriter.append(entry);
+ * } catch (error) {
+ *   if (error instanceof WALError) {
+ *     console.log(error.code);      // 'WAL_FLUSH_FAILED'
+ *     console.log(error.lsn);       // LSN at failure
+ *     console.log(error.segmentId); // Affected segment
+ *     if (error.isRetryable()) {
+ *       // Retry the operation
+ *     }
+ *   }
+ * }
+ * ```
  */
-export class WALError extends Error {
+export class WALError extends DoSQLError {
+  readonly code: WALErrorCode;
+  readonly category: ErrorCategory;
+  readonly lsn?: LSN;
+  readonly segmentId?: string;
+
   constructor(
-    public readonly code: WALErrorCode,
+    code: WALErrorCode,
     message: string,
-    public readonly lsn?: LSN,
-    public readonly segmentId?: string,
-    public readonly cause?: Error
+    options?: {
+      cause?: Error;
+      context?: ErrorContext;
+      lsn?: LSN;
+      segmentId?: string;
+    }
   ) {
-    super(message);
+    super(message, { cause: options?.cause, context: options?.context });
     this.name = 'WALError';
+    this.code = code;
+    this.lsn = options?.lsn;
+    this.segmentId = options?.segmentId;
+
+    // Set category based on error code
+    this.category = this.determineCategory();
+
+    // Include LSN and segment in context
+    if (this.lsn !== undefined || this.segmentId) {
+      this.context = {
+        ...this.context,
+        metadata: {
+          ...this.context?.metadata,
+          ...(this.lsn !== undefined && { lsn: String(this.lsn) }),
+          ...(this.segmentId && { segmentId: this.segmentId }),
+        },
+      };
+    }
+
+    // Set recovery hints
+    this.setRecoveryHint();
+  }
+
+  private determineCategory(): ErrorCategory {
+    switch (this.code) {
+      case WALErrorCode.SEGMENT_NOT_FOUND:
+      case WALErrorCode.ENTRY_NOT_FOUND:
+        return ErrorCategory.RESOURCE;
+      case WALErrorCode.CHECKSUM_MISMATCH:
+      case WALErrorCode.SEGMENT_CORRUPTED:
+      case WALErrorCode.SERIALIZATION_ERROR:
+        return ErrorCategory.INTERNAL;
+      case WALErrorCode.INVALID_LSN:
+        return ErrorCategory.VALIDATION;
+      case WALErrorCode.FLUSH_FAILED:
+      case WALErrorCode.CHECKPOINT_FAILED:
+      case WALErrorCode.RECOVERY_FAILED:
+        return ErrorCategory.EXECUTION;
+      default:
+        return ErrorCategory.EXECUTION;
+    }
+  }
+
+  private setRecoveryHint(): void {
+    switch (this.code) {
+      case WALErrorCode.CHECKSUM_MISMATCH:
+        this.recoveryHint = 'Data integrity error - segment may be corrupted. Consider recovery from backup.';
+        break;
+      case WALErrorCode.SEGMENT_NOT_FOUND:
+        this.recoveryHint = 'WAL segment was deleted or compacted. Start from a more recent checkpoint.';
+        break;
+      case WALErrorCode.ENTRY_NOT_FOUND:
+        this.recoveryHint = 'LSN may be too old. Check WAL retention settings.';
+        break;
+      case WALErrorCode.INVALID_LSN:
+        this.recoveryHint = 'Ensure LSN values are monotonically increasing and properly ordered.';
+        break;
+      case WALErrorCode.SEGMENT_CORRUPTED:
+        this.recoveryHint = 'Segment is corrupted. Recovery from backup may be required.';
+        break;
+      case WALErrorCode.RECOVERY_FAILED:
+        this.recoveryHint = 'WAL recovery failed. Check disk space, permissions, and segment integrity.';
+        break;
+      case WALErrorCode.CHECKPOINT_FAILED:
+        this.recoveryHint = 'Checkpoint failed. Verify disk space and storage availability.';
+        break;
+      case WALErrorCode.FLUSH_FAILED:
+        this.recoveryHint = 'Flush failed. Check disk I/O and storage health. Retry the operation.';
+        break;
+      case WALErrorCode.SERIALIZATION_ERROR:
+        this.recoveryHint = 'Serialization error. Check WAL entry format and data types.';
+        break;
+    }
+  }
+
+  /**
+   * Check if this error is retryable
+   */
+  isRetryable(): boolean {
+    return [
+      WALErrorCode.FLUSH_FAILED,
+      WALErrorCode.CHECKPOINT_FAILED,
+    ].includes(this.code);
+  }
+
+  /**
+   * Get a user-friendly error message
+   */
+  toUserMessage(): string {
+    switch (this.code) {
+      case WALErrorCode.CHECKSUM_MISMATCH:
+        return 'Data integrity check failed. The write-ahead log may be corrupted.';
+      case WALErrorCode.SEGMENT_NOT_FOUND:
+        return 'The requested log segment is no longer available.';
+      case WALErrorCode.ENTRY_NOT_FOUND:
+        return 'The requested log entry could not be found.';
+      case WALErrorCode.INVALID_LSN:
+        return 'Invalid log sequence number provided.';
+      case WALErrorCode.SEGMENT_CORRUPTED:
+        return 'Log segment is corrupted and cannot be read.';
+      case WALErrorCode.RECOVERY_FAILED:
+        return 'Failed to recover from the write-ahead log.';
+      case WALErrorCode.CHECKPOINT_FAILED:
+        return 'Failed to create a checkpoint. Please try again.';
+      case WALErrorCode.FLUSH_FAILED:
+        return 'Failed to flush log entries. Please try again.';
+      case WALErrorCode.SERIALIZATION_ERROR:
+        return 'Failed to serialize log entry data.';
+      default:
+        return this.message;
+    }
+  }
+
+  /**
+   * Deserialize from JSON
+   */
+  static fromJSON(json: SerializedError): WALError {
+    return new WALError(
+      json.code as WALErrorCode,
+      json.message,
+      {
+        context: json.context,
+        lsn: json.context?.metadata?.lsn as LSN | undefined,
+        segmentId: json.context?.metadata?.segmentId as string | undefined,
+      }
+    );
   }
 }
+
+// Register for deserialization
+registerErrorClass('WALError', WALError);

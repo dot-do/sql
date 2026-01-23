@@ -38,6 +38,7 @@ import {
   TransactionErrorCode,
   type TransactionTimeoutConfig,
   type LongRunningTransactionLog,
+  createTransactionId,
 } from '../types.js';
 
 // =============================================================================
@@ -46,6 +47,34 @@ import {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Mock Durable Object storage for testing
+ * Partial implementation for transaction timeout tests
+ */
+interface MockDOStorage {
+  setAlarm: ReturnType<typeof vi.fn>;
+  deleteAlarm: ReturnType<typeof vi.fn>;
+  getAlarm: ReturnType<typeof vi.fn>;
+}
+
+interface MockDOState {
+  storage: MockDOStorage;
+}
+
+/**
+ * Create a mock DO state for testing
+ */
+function createMockDOState(overrides?: Partial<MockDOStorage>): MockDOState {
+  return {
+    storage: {
+      setAlarm: vi.fn().mockResolvedValue(undefined),
+      deleteAlarm: vi.fn().mockResolvedValue(undefined),
+      getAlarm: vi.fn().mockResolvedValue(null),
+      ...overrides,
+    },
+  };
 }
 
 // Mock WAL Writer for transaction manager
@@ -201,7 +230,7 @@ describe('Durable Object Alarm Integration', () => {
     };
 
     const manager = createTransactionManager({
-      doState: mockDOState as any,
+      doState: mockDOState,
     });
 
     expect(manager).toBeDefined();
@@ -223,7 +252,7 @@ describe('Durable Object Alarm Integration', () => {
 
     const manager = createTransactionManager({
       walWriter: createMockWALWriter(),
-      doState: mockDOState as any,
+      doState: mockDOState,
     });
 
     const timeoutMs = 30000;
@@ -253,7 +282,7 @@ describe('Durable Object Alarm Integration', () => {
 
     const manager = createTransactionManager({
       walWriter: createMockWALWriter(),
-      doState: mockDOState as any,
+      doState: mockDOState,
     });
 
     await manager.begin({ timeoutMs: 30000 });
@@ -278,7 +307,7 @@ describe('Durable Object Alarm Integration', () => {
 
     const manager = createTransactionManager({
       walWriter: createMockWALWriter(),
-      doState: mockDOState as any,
+      doState: mockDOState,
     });
 
     await manager.begin({ timeoutMs: 30000 });
@@ -724,9 +753,9 @@ describe('Timeout During Blocking Operations', () => {
   });
 
   afterEach(() => {
-    lockManager.releaseAll('txn1' as any);
-    lockManager.releaseAll('txn2' as any);
-    lockManager.releaseAll('blocker' as any);
+    lockManager.releaseAll(createTransactionId('txn1'));
+    lockManager.releaseAll(createTransactionId('txn2'));
+    lockManager.releaseAll(createTransactionId('blocker'));
   });
 
   /**
@@ -746,7 +775,7 @@ describe('Timeout During Blocking Operations', () => {
 
     // Blocker holds lock
     await lockManager.acquire({
-      txnId: 'blocker' as any,
+      txnId: createTransactionId('blocker'),
       resource: 'users',
       lockType: LockType.EXCLUSIVE,
       timestamp: Date.now(),
@@ -760,7 +789,7 @@ describe('Timeout During Blocking Operations', () => {
     // Transaction should be timed out and cleaned up
     expect(manager.isActive()).toBe(false);
 
-    lockManager.releaseAll('blocker' as any);
+    lockManager.releaseAll(createTransactionId('blocker'));
   });
 
   /**
@@ -820,7 +849,7 @@ describe('Timeout During Blocking Operations', () => {
 
     // Blocker holds lock
     await lockManager.acquire({
-      txnId: 'blocker' as any,
+      txnId: createTransactionId('blocker'),
       resource: 'users',
       lockType: LockType.EXCLUSIVE,
       timestamp: Date.now(),
@@ -844,7 +873,7 @@ describe('Timeout During Blocking Operations', () => {
     // Any locks held by this transaction should be released
     expect(lockManager.getHeldLocks(ctx.txnId)).toHaveLength(0);
 
-    lockManager.releaseAll('blocker' as any);
+    lockManager.releaseAll(createTransactionId('blocker'));
   });
 
   /**
@@ -901,7 +930,7 @@ describe('Timeout Enforcement Integration', () => {
 
     const manager = createTransactionManager({
       walWriter: createMockWALWriter(),
-      doState: mockDOState as any,
+      doState: mockDOState,
       timeoutConfig: {
         defaultTimeoutMs: 500,
         maxTimeoutMs: 60000,
