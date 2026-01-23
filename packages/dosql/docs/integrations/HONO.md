@@ -4,6 +4,7 @@ A comprehensive guide for integrating DoSQL with Hono, the ultrafast web framewo
 
 ## Table of Contents
 
+- [Quick Start](#quick-start)
 - [Overview](#overview)
 - [Setup](#setup)
 - [Basic Usage](#basic-usage)
@@ -13,8 +14,104 @@ A comprehensive guide for integrating DoSQL with Hono, the ultrafast web framewo
 - [Advanced Patterns](#advanced-patterns)
 - [Real-time Features](#real-time-features)
 - [Error Handling](#error-handling)
+- [Hono RPC (Type-Safe API Client)](#hono-rpc-type-safe-api-client)
 - [Testing](#testing)
 - [Deployment](#deployment)
+
+---
+
+## Quick Start
+
+Get a Hono + DoSQL API running in under 5 minutes:
+
+```bash
+# Create project
+npm create hono@latest my-api -- --template cloudflare-workers
+cd my-api
+npm install @dotdo/dosql
+```
+
+Create your Durable Object and routes in `src/index.ts`:
+
+```typescript
+import { Hono } from 'hono';
+import { DB, type Database } from '@dotdo/dosql';
+
+interface Env {
+  DOSQL_DB: DurableObjectNamespace;
+}
+
+// Durable Object for your database
+export class DoSQLDatabase implements DurableObject {
+  private db: Database | null = null;
+
+  constructor(private state: DurableObjectState) {}
+
+  async fetch(request: Request): Promise<Response> {
+    if (!this.db) {
+      this.db = await DB('app', { storage: { hot: this.state.storage } });
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS todos (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          done INTEGER DEFAULT 0
+        )
+      `);
+    }
+
+    const { sql, params } = await request.json() as { sql: string; params?: unknown[] };
+    const rows = this.db.prepare(sql).all(...(params || []));
+    return Response.json(rows);
+  }
+}
+
+// Hono app
+const app = new Hono<{ Bindings: Env }>();
+
+const query = async (env: Env, sql: string, params?: unknown[]) => {
+  const stub = env.DOSQL_DB.get(env.DOSQL_DB.idFromName('default'));
+  const res = await stub.fetch('http://do/query', {
+    method: 'POST',
+    body: JSON.stringify({ sql, params }),
+  });
+  return res.json();
+};
+
+app.get('/todos', async (c) => {
+  const todos = await query(c.env, 'SELECT * FROM todos ORDER BY id DESC');
+  return c.json(todos);
+});
+
+app.post('/todos', async (c) => {
+  const { title } = await c.req.json();
+  await query(c.env, 'INSERT INTO todos (title) VALUES (?)', [title]);
+  return c.json({ success: true }, 201);
+});
+
+export default app;
+```
+
+Add to `wrangler.toml`:
+
+```toml
+[[durable_objects.bindings]]
+name = "DOSQL_DB"
+class_name = "DoSQLDatabase"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["DoSQLDatabase"]
+```
+
+Run it:
+
+```bash
+npm run dev
+curl -X POST http://localhost:8787/todos -H "Content-Type: application/json" -d '{"title":"Learn DoSQL"}'
+curl http://localhost:8787/todos
+```
+
+For production patterns, continue reading below.
 
 ---
 
@@ -142,7 +239,7 @@ my-hono-app/
 # wrangler.toml
 name = "my-hono-app"
 main = "src/index.ts"
-compatibility_date = "2024-01-01"
+compatibility_date = "2025-01-01"
 
 # DoSQL Durable Object binding
 [[durable_objects.bindings]]
@@ -608,6 +705,69 @@ export const rateLimit = (config: RateLimitConfig) => {
 ---
 
 ## Route Handlers
+
+### Validation Options
+
+Hono supports multiple validation approaches. Choose based on your needs:
+
+**Option 1: Zod Validator (recommended for complex schemas)**
+
+```typescript
+import { zValidator } from '@hono/zod-validator';
+import { z } from 'zod';
+
+const schema = z.object({
+  name: z.string().min(1).max(100),
+  email: z.string().email(),
+});
+
+app.post('/users', zValidator('json', schema), async (c) => {
+  const { name, email } = c.req.valid('json');
+  // name and email are typed and validated
+});
+```
+
+**Option 2: Hono's Built-in Validator (zero dependencies)**
+
+```typescript
+import { validator } from 'hono/validator';
+
+app.post(
+  '/users',
+  validator('json', (value, c) => {
+    const { name, email } = value as { name?: string; email?: string };
+
+    if (!name || name.length < 1 || name.length > 100) {
+      return c.json({ error: 'Name must be 1-100 characters' }, 400);
+    }
+    if (!email || !email.includes('@')) {
+      return c.json({ error: 'Valid email required' }, 400);
+    }
+
+    return { name, email };
+  }),
+  async (c) => {
+    const { name, email } = c.req.valid('json');
+    // Validated data
+  }
+);
+```
+
+**Option 3: Valibot (smaller bundle size)**
+
+```typescript
+import { vValidator } from '@hono/valibot-validator';
+import * as v from 'valibot';
+
+const schema = v.object({
+  name: v.pipe(v.string(), v.minLength(1), v.maxLength(100)),
+  email: v.pipe(v.string(), v.email()),
+});
+
+app.post('/users', vValidator('json', schema), async (c) => {
+  const { name, email } = c.req.valid('json');
+});
+```
 
 ### User Routes
 
@@ -1655,6 +1815,243 @@ export default app;
 
 ---
 
+## Hono RPC (Type-Safe API Client)
+
+Hono RPC provides end-to-end type safety between your API and client. When combined with DoSQL, you get type-safe queries on the server and type-safe API calls on the client.
+
+### Define Type-Safe Routes
+
+```typescript
+// src/routes/users.ts
+import { Hono } from 'hono';
+import { zValidator } from '@hono/zod-validator';
+import { z } from 'zod';
+import type { DBClient } from '../db/client';
+
+// Define schemas
+const createUserSchema = z.object({
+  name: z.string().min(1).max(100),
+  email: z.string().email(),
+});
+
+const updateUserSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  email: z.string().email().optional(),
+});
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  created_at: string;
+}
+
+// Create typed router
+const usersApi = new Hono<{ Variables: { db: DBClient } }>()
+  // GET /users
+  .get('/', async (c) => {
+    const db = c.get('db');
+    const users = await db.query<User>('SELECT * FROM users ORDER BY id DESC');
+    return c.json({ users });
+  })
+
+  // GET /users/:id
+  .get('/:id', async (c) => {
+    const db = c.get('db');
+    const id = parseInt(c.req.param('id'), 10);
+    const user = await db.queryOne<User>('SELECT * FROM users WHERE id = ?', [id]);
+
+    if (!user) {
+      return c.json({ error: 'User not found' }, 404);
+    }
+    return c.json({ user });
+  })
+
+  // POST /users
+  .post('/', zValidator('json', createUserSchema), async (c) => {
+    const db = c.get('db');
+    const { name, email } = c.req.valid('json');
+
+    const result = await db.run(
+      'INSERT INTO users (name, email) VALUES (?, ?)',
+      [name, email]
+    );
+
+    const user = await db.queryOne<User>(
+      'SELECT * FROM users WHERE id = ?',
+      [result.lastInsertRowid]
+    );
+
+    return c.json({ user }, 201);
+  })
+
+  // PATCH /users/:id
+  .patch('/:id', zValidator('json', updateUserSchema), async (c) => {
+    const db = c.get('db');
+    const id = parseInt(c.req.param('id'), 10);
+    const updates = c.req.valid('json');
+
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.name) {
+      fields.push('name = ?');
+      values.push(updates.name);
+    }
+    if (updates.email) {
+      fields.push('email = ?');
+      values.push(updates.email);
+    }
+
+    if (fields.length === 0) {
+      return c.json({ error: 'No fields to update' }, 400);
+    }
+
+    values.push(id);
+    await db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
+
+    const user = await db.queryOne<User>('SELECT * FROM users WHERE id = ?', [id]);
+    return c.json({ user });
+  })
+
+  // DELETE /users/:id
+  .delete('/:id', async (c) => {
+    const db = c.get('db');
+    const id = parseInt(c.req.param('id'), 10);
+    await db.run('DELETE FROM users WHERE id = ?', [id]);
+    return c.json({ success: true });
+  });
+
+export { usersApi };
+export type UsersApi = typeof usersApi;
+```
+
+### Create the Main App with Type Export
+
+```typescript
+// src/index.ts
+import { Hono } from 'hono';
+import { dbMiddleware } from './middleware/db';
+import { usersApi } from './routes/users';
+import { DoSQLDatabase } from './durable-objects/database';
+import type { Env } from './types';
+
+export { DoSQLDatabase };
+
+const app = new Hono<{ Bindings: Env }>()
+  .use('*', dbMiddleware)
+  .route('/api/users', usersApi);
+
+export default app;
+
+// Export the app type for RPC client
+export type AppType = typeof app;
+```
+
+### Use Hono RPC Client
+
+```typescript
+// client/api.ts
+import { hc } from 'hono/client';
+import type { AppType } from '../src/index';
+
+// Create type-safe client
+const client = hc<AppType>('https://my-api.workers.dev');
+
+// All methods are fully typed!
+async function examples() {
+  // GET /api/users - returns { users: User[] }
+  const listRes = await client.api.users.$get();
+  const { users } = await listRes.json();
+  console.log(users[0].name); // TypeScript knows this is a string
+
+  // POST /api/users - body is validated by types
+  const createRes = await client.api.users.$post({
+    json: {
+      name: 'Alice',
+      email: 'alice@example.com',
+    },
+  });
+  const { user } = await createRes.json();
+  console.log(user.id); // TypeScript knows this is a number
+
+  // GET /api/users/:id
+  const getRes = await client.api.users[':id'].$get({
+    param: { id: '1' },
+  });
+
+  // PATCH /api/users/:id
+  const updateRes = await client.api.users[':id'].$patch({
+    param: { id: '1' },
+    json: { name: 'Alice Updated' },
+  });
+
+  // DELETE /api/users/:id
+  const deleteRes = await client.api.users[':id'].$delete({
+    param: { id: '1' },
+  });
+}
+```
+
+### React Example with Hono RPC
+
+```typescript
+// client/hooks/useUsers.ts
+import { hc } from 'hono/client';
+import { useState, useEffect } from 'react';
+import type { AppType } from '../../src/index';
+
+const client = hc<AppType>(import.meta.env.VITE_API_URL);
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+export function useUsers() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    client.api.users.$get()
+      .then((res) => res.json())
+      .then((data) => {
+        setUsers(data.users);
+        setLoading(false);
+      });
+  }, []);
+
+  const createUser = async (name: string, email: string) => {
+    const res = await client.api.users.$post({
+      json: { name, email },
+    });
+    const { user } = await res.json();
+    setUsers((prev) => [user, ...prev]);
+    return user;
+  };
+
+  const deleteUser = async (id: number) => {
+    await client.api.users[':id'].$delete({
+      param: { id: String(id) },
+    });
+    setUsers((prev) => prev.filter((u) => u.id !== id));
+  };
+
+  return { users, loading, createUser, deleteUser };
+}
+```
+
+### Benefits of Hono RPC + DoSQL
+
+1. **End-to-end type safety** - Types flow from DoSQL query results through API responses to client code
+2. **No code generation** - Types are inferred at build time
+3. **Autocomplete** - Full IDE support for routes, parameters, and responses
+4. **Refactoring safety** - Rename a field and TypeScript catches all usages
+5. **Zero runtime overhead** - RPC client is just typed fetch calls
+
+---
+
 ## Testing
 
 ### Test Setup
@@ -1883,7 +2280,7 @@ describe('Integration Tests', () => {
 # wrangler.toml
 name = "my-hono-app"
 main = "src/index.ts"
-compatibility_date = "2024-01-01"
+compatibility_date = "2025-01-01"
 
 # Durable Objects
 [[durable_objects.bindings]]

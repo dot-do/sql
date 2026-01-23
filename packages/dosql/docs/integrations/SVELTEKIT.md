@@ -10,8 +10,12 @@ A comprehensive guide for using DoSQL with SvelteKit applications, covering serv
 - [Form Actions](#form-actions)
 - [API Routes](#api-routes)
 - [Real-Time Updates](#real-time-updates)
+- [Multi-Tenancy](#multi-tenancy)
+- [Authentication](#authentication)
 - [Type Safety](#type-safety)
+- [Testing](#testing)
 - [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -78,17 +82,26 @@ SvelteKit and DoSQL are an excellent combination for building full-stack applica
 ### Installation
 
 ```bash
-# Create a new SvelteKit project with Cloudflare adapter
+# Create a new SvelteKit project
 npx sv create my-sveltekit-app
 cd my-sveltekit-app
 
-# Select: Cloudflare adapter when prompted
+# When prompted, select:
+# - SvelteKit minimal
+# - TypeScript
+# - Cloudflare adapter (or add it manually)
 
 # Install DoSQL
 npm install @dotdo/dosql
 
 # Install dev dependencies
 npm install -D @cloudflare/workers-types wrangler
+```
+
+If you didn't select the Cloudflare adapter during setup:
+
+```bash
+npm install @sveltejs/adapter-cloudflare
 ```
 
 ### Project Structure
@@ -102,10 +115,12 @@ my-sveltekit-app/
 ├── src/
 │   ├── lib/
 │   │   ├── server/
-│   │   │   └── db.ts           # Database utilities (server only)
+│   │   │   ├── db.ts           # Database utilities (server only)
+│   │   │   └── auth.ts         # Auth utilities (server only)
 │   │   └── types.ts            # Shared type definitions
 │   ├── routes/
 │   │   ├── +layout.server.ts   # Root layout server load
+│   │   ├── +layout.svelte
 │   │   ├── +page.svelte
 │   │   ├── +page.server.ts
 │   │   ├── users/
@@ -121,6 +136,7 @@ my-sveltekit-app/
 │   └── hooks.server.ts         # Server hooks
 ├── wrangler.toml
 ├── svelte.config.js
+├── vite.config.ts
 └── package.json
 ```
 
@@ -130,6 +146,8 @@ Update `src/app.d.ts` with your environment bindings:
 
 ```typescript
 // src/app.d.ts
+import type { DatabaseClient } from '$lib/server/db';
+
 declare global {
   namespace App {
     interface Platform {
@@ -142,7 +160,18 @@ declare global {
     }
 
     interface Locals {
-      db: import('$lib/server/db').DatabaseClient;
+      db: DatabaseClient;
+      user?: {
+        id: number;
+        name: string;
+        email: string;
+      };
+    }
+
+    // Add error types if needed
+    interface Error {
+      message: string;
+      code?: string;
     }
   }
 }
@@ -158,10 +187,6 @@ Configure `wrangler.toml`:
 name = "my-sveltekit-app"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
-
-# Assets for SvelteKit
-[site]
-bucket = "./.svelte-kit/cloudflare"
 
 # DoSQL Durable Object
 [[durable_objects.bindings]]
@@ -214,6 +239,12 @@ function createDBClient(stub: DurableObjectStub): DatabaseClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql, params }),
       });
+
+      if (!response.ok) {
+        const error = await response.json() as { error: string };
+        throw new Error(error.error);
+      }
+
       const data = await response.json() as { rows: T[] };
       return data.rows;
     },
@@ -229,11 +260,16 @@ function createDBClient(stub: DurableObjectStub): DatabaseClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql, params }),
       });
+
+      if (!response.ok) {
+        const error = await response.json() as { error: string };
+        throw new Error(error.error);
+      }
+
       return response.json() as Promise<{ rowsAffected: number; lastInsertRowId: number }>;
     },
 
     async transaction<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T> {
-      // Collect operations and send as batch
       const operations: Array<{ type: 'query' | 'run'; sql: string; params?: unknown[] }> = [];
       const txClient: TransactionClient = {
         async query<R>(sql: string, params?: unknown[]): Promise<R[]> {
@@ -257,12 +293,18 @@ function createDBClient(stub: DurableObjectStub): DatabaseClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ operations }),
       });
+
+      if (!response.ok) {
+        const error = await response.json() as { error: string };
+        throw new Error(error.error);
+      }
+
       return response.json() as Promise<T>;
     },
   };
 }
 
-// Export the Durable Object class
+// Export the Durable Object class for wrangler
 export class DoSQLDatabase implements DurableObject {
   private db: Database | null = null;
 
@@ -368,6 +410,10 @@ const config = {
         include: ['/*'],
         exclude: ['<all>'],
       },
+      platformProxy: {
+        configPath: 'wrangler.toml',
+        persist: { path: '.wrangler/state/v3' },
+      },
     }),
   },
 };
@@ -411,7 +457,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 <script lang="ts">
   import type { PageData } from './$types';
 
-  export let data: PageData;
+  let { data }: { data: PageData } = $props();
 </script>
 
 <h1>Users</h1>
@@ -450,7 +496,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   const userId = parseInt(params.id, 10);
 
   if (isNaN(userId)) {
-    throw error(400, 'Invalid user ID');
+    error(400, 'Invalid user ID');
   }
 
   const user = await locals.db.queryOne<User>(
@@ -459,7 +505,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   );
 
   if (!user) {
-    throw error(404, 'User not found');
+    error(404, 'User not found');
   }
 
   const posts = await locals.db.query<Post>(
@@ -480,7 +526,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 <script lang="ts">
   import type { PageData } from './$types';
 
-  export let data: PageData;
+  let { data }: { data: PageData } = $props();
 </script>
 
 <article>
@@ -620,7 +666,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 <script lang="ts">
   import type { PageData } from './$types';
 
-  export let data: PageData;
+  let { data }: { data: PageData } = $props();
 </script>
 
 <h1>Posts</h1>
@@ -732,7 +778,7 @@ export const actions: Actions = {
         [name, email]
       );
 
-      throw redirect(303, `/users/${result.lastInsertRowId}`);
+      redirect(303, `/users/${result.lastInsertRowId}`);
     } catch (error) {
       if ((error as Error).message.includes('UNIQUE constraint')) {
         return fail(400, {
@@ -753,7 +799,7 @@ export const actions: Actions = {
   import { enhance } from '$app/forms';
   import type { ActionData } from './$types';
 
-  export let form: ActionData;
+  let { form }: { form: ActionData } = $props();
 </script>
 
 <h1>Create User</h1>
@@ -825,7 +871,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   );
 
   if (!post) {
-    throw redirect(303, '/posts');
+    redirect(303, '/posts');
   }
 
   return { post };
@@ -859,7 +905,7 @@ export const actions: Actions = {
       await tx.run('DELETE FROM posts WHERE id = ?', [params.id]);
     });
 
-    throw redirect(303, '/posts');
+    redirect(303, '/posts');
   },
 
   publish: async ({ params, locals }) => {
@@ -888,10 +934,8 @@ export const actions: Actions = {
   import { enhance } from '$app/forms';
   import type { PageData, ActionData } from './$types';
 
-  export let data: PageData;
-  export let form: ActionData;
-
-  let isDeleting = false;
+  let { data, form }: { data: PageData; form: ActionData } = $props();
+  let isDeleting = $state(false);
 </script>
 
 <article>
@@ -1048,7 +1092,7 @@ export const actions: Actions = {
         return orderId;
       });
 
-      throw redirect(303, `/orders/${orderId}/confirmation`);
+      redirect(303, `/orders/${orderId}/confirmation`);
     } catch (error) {
       if (error instanceof Response) throw error; // Re-throw redirects
       return fail(400, { error: (error as Error).message });
@@ -1065,10 +1109,8 @@ export const actions: Actions = {
   import { enhance } from '$app/forms';
   import type { PageData, ActionData } from './$types';
 
-  export let data: PageData;
-  export let form: ActionData;
-
-  let isSubmitting = false;
+  let { data, form }: { data: PageData; form: ActionData } = $props();
+  let isSubmitting = $state(false);
 </script>
 
 <section>
@@ -1092,8 +1134,8 @@ export const actions: Actions = {
         isSubmitting = false;
         if (result.type === 'success') {
           // Clear the form on success
-          const form = document.querySelector('form');
-          form?.reset();
+          const formElement = document.querySelector('form') as HTMLFormElement;
+          formElement?.reset();
         }
       };
     }}
@@ -1179,7 +1221,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
   const body = await request.json() as { name: string; email: string };
 
   if (!body.name || !body.email) {
-    throw error(400, 'Name and email are required');
+    error(400, 'Name and email are required');
   }
 
   try {
@@ -1194,7 +1236,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     );
   } catch (err) {
     if ((err as Error).message.includes('UNIQUE constraint')) {
-      throw error(409, 'Email already exists');
+      error(409, 'Email already exists');
     }
     throw err;
   }
@@ -1224,7 +1266,7 @@ export const GET: RequestHandler = async ({ params, locals }) => {
   );
 
   if (!user) {
-    throw error(404, 'User not found');
+    error(404, 'User not found');
   }
 
   return json(user);
@@ -1251,7 +1293,7 @@ export const PATCH: RequestHandler = async ({ params, request, locals }) => {
   }
 
   if (updates.length === 0) {
-    throw error(400, 'No fields to update');
+    error(400, 'No fields to update');
   }
 
   values.push(params.id);
@@ -1262,7 +1304,7 @@ export const PATCH: RequestHandler = async ({ params, request, locals }) => {
   );
 
   if (result.rowsAffected === 0) {
-    throw error(404, 'User not found');
+    error(404, 'User not found');
   }
 
   return json({ success: true });
@@ -1276,7 +1318,7 @@ export const DELETE: RequestHandler = async ({ params, locals }) => {
   );
 
   if (result.rowsAffected === 0) {
-    throw error(404, 'User not found');
+    error(404, 'User not found');
   }
 
   return json({ success: true });
@@ -1336,7 +1378,6 @@ function escapeCSV(str: string): string {
 ```typescript
 // src/routes/api/events/users/+server.ts
 import type { RequestHandler } from './$types';
-import { createCDCStream } from '@dotdo/dosql';
 
 export const GET: RequestHandler = async ({ platform, request }) => {
   if (!platform) {
@@ -1392,11 +1433,10 @@ export const GET: RequestHandler = async ({ platform, request }) => {
 };
 ```
 
-### Client-Side SSE Hook
+### Client-Side SSE Store
 
 ```typescript
-// src/lib/hooks/useRealtimeUsers.ts
-import { writable, type Readable } from 'svelte/store';
+// src/lib/stores/realtimeUsers.svelte.ts
 import { browser } from '$app/environment';
 
 interface User {
@@ -1410,61 +1450,70 @@ interface CDCEvent {
   data: User;
 }
 
-export function useRealtimeUsers(initialUsers: User[]): Readable<User[]> {
-  const users = writable(initialUsers);
+export function createRealtimeUsers(initialUsers: User[]) {
+  let users = $state<User[]>(initialUsers);
+  let eventSource: EventSource | null = null;
 
-  if (browser) {
-    const eventSource = new EventSource('/api/events/users');
+  function connect() {
+    if (!browser) return;
+
+    eventSource = new EventSource('/api/events/users');
 
     eventSource.onmessage = (event) => {
       const change: CDCEvent = JSON.parse(event.data);
 
-      users.update((current) => {
-        switch (change.type) {
-          case 'insert':
-            return [change.data, ...current];
-          case 'update':
-            return current.map((u) =>
-              u.id === change.data.id ? change.data : u
-            );
-          case 'delete':
-            return current.filter((u) => u.id !== change.data.id);
-          default:
-            return current;
-        }
-      });
+      switch (change.type) {
+        case 'insert':
+          users = [change.data, ...users];
+          break;
+        case 'update':
+          users = users.map((u) =>
+            u.id === change.data.id ? change.data : u
+          );
+          break;
+        case 'delete':
+          users = users.filter((u) => u.id !== change.data.id);
+          break;
+      }
     };
 
     eventSource.onerror = () => {
       console.error('SSE connection error');
     };
-
-    // Cleanup on component unmount
-    return {
-      subscribe: users.subscribe,
-      destroy: () => eventSource.close(),
-    } as Readable<User[]> & { destroy: () => void };
   }
 
-  return users;
+  function disconnect() {
+    eventSource?.close();
+    eventSource = null;
+  }
+
+  return {
+    get users() {
+      return users;
+    },
+    connect,
+    disconnect,
+  };
 }
 ```
 
 ```svelte
 <!-- src/routes/users/live/+page.svelte -->
 <script lang="ts">
-  import { onDestroy } from 'svelte';
-  import { useRealtimeUsers } from '$lib/hooks/useRealtimeUsers';
+  import { onMount, onDestroy } from 'svelte';
+  import { createRealtimeUsers } from '$lib/stores/realtimeUsers.svelte';
   import type { PageData } from './$types';
 
-  export let data: PageData;
+  let { data }: { data: PageData } = $props();
 
-  const users = useRealtimeUsers(data.users);
+  const store = createRealtimeUsers(data.users);
+
+  onMount(() => {
+    store.connect();
+  });
 
   onDestroy(() => {
-    if ('destroy' in users) {
-      (users as any).destroy();
-    }
+    store.disconnect();
   });
 </script>
 
@@ -1472,10 +1521,196 @@ export function useRealtimeUsers(initialUsers: User[]): Readable<User[]> {
 <p class="status">Updates in real-time</p>
 
 <ul>
-  {#each $users as user (user.id)}
+  {#each store.users as user (user.id)}
     <li>{user.name} - {user.email}</li>
   {/each}
 </ul>
+```
+
+---
+
+## Multi-Tenancy
+
+### Tenant-Based Routing
+
+```typescript
+// src/hooks.server.ts
+import { getDB } from '$lib/server/db';
+import type { Handle } from '@sveltejs/kit';
+
+export const handle: Handle = async ({ event, resolve }) => {
+  if (!event.platform) {
+    return resolve(event);
+  }
+
+  // Extract tenant from subdomain, header, or path
+  const tenantId = getTenantId(event);
+
+  // Each tenant gets their own isolated database
+  event.locals.db = getDB(event.platform, tenantId);
+
+  return resolve(event);
+};
+
+function getTenantId(event: Parameters<Handle>[0]['event']): string {
+  // Option 1: From subdomain (tenant.example.com)
+  const host = event.request.headers.get('host') || '';
+  const subdomain = host.split('.')[0];
+  if (subdomain && subdomain !== 'www' && subdomain !== 'app') {
+    return subdomain;
+  }
+
+  // Option 2: From header (X-Tenant-ID)
+  const headerTenant = event.request.headers.get('x-tenant-id');
+  if (headerTenant) {
+    return headerTenant;
+  }
+
+  // Option 3: From path (/tenant/[slug]/...)
+  const pathMatch = event.url.pathname.match(/^\/tenant\/([^/]+)/);
+  if (pathMatch) {
+    return pathMatch[1];
+  }
+
+  // Default tenant
+  return 'default';
+}
+```
+
+### Tenant-Scoped Routes
+
+```typescript
+// src/routes/tenant/[tenant]/+layout.server.ts
+import { error } from '@sveltejs/kit';
+import type { LayoutServerLoad } from './$types';
+
+interface Tenant {
+  id: string;
+  name: string;
+  plan: string;
+}
+
+export const load: LayoutServerLoad = async ({ params, locals }) => {
+  // Verify tenant exists
+  const tenant = await locals.db.queryOne<Tenant>(
+    'SELECT id, name, plan FROM tenants WHERE id = ?',
+    [params.tenant]
+  );
+
+  if (!tenant) {
+    error(404, 'Tenant not found');
+  }
+
+  return { tenant };
+};
+```
+
+---
+
+## Authentication
+
+### Auth Hook Integration
+
+```typescript
+// src/hooks.server.ts
+import { getDB } from '$lib/server/db';
+import { verifySession } from '$lib/server/auth';
+import type { Handle } from '@sveltejs/kit';
+
+export const handle: Handle = async ({ event, resolve }) => {
+  if (!event.platform) {
+    return resolve(event);
+  }
+
+  // Initialize database
+  event.locals.db = getDB(event.platform);
+
+  // Verify session from cookie
+  const sessionToken = event.cookies.get('session');
+  if (sessionToken) {
+    const user = await verifySession(event.locals.db, sessionToken);
+    if (user) {
+      event.locals.user = user;
+    }
+  }
+
+  return resolve(event);
+};
+```
+
+```typescript
+// src/lib/server/auth.ts
+import type { DatabaseClient } from './db';
+import { randomBytes, createHash } from 'crypto';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+export async function verifySession(
+  db: DatabaseClient,
+  token: string
+): Promise<User | null> {
+  const session = await db.queryOne<{ user_id: number; expires_at: string }>(
+    'SELECT user_id, expires_at FROM sessions WHERE token = ?',
+    [token]
+  );
+
+  if (!session || new Date(session.expires_at) < new Date()) {
+    return null;
+  }
+
+  const user = await db.queryOne<User>(
+    'SELECT id, name, email FROM users WHERE id = ?',
+    [session.user_id]
+  );
+
+  return user;
+}
+
+export async function createSession(
+  db: DatabaseClient,
+  userId: number
+): Promise<string> {
+  const token = randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+  await db.run(
+    `INSERT INTO sessions (token, user_id, expires_at, created_at)
+     VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+    [token, userId, expiresAt.toISOString()]
+  );
+
+  return token;
+}
+
+export function hashPassword(password: string): string {
+  return createHash('sha256').update(password).digest('hex');
+}
+```
+
+### Protected Routes
+
+```typescript
+// src/routes/dashboard/+page.server.ts
+import { redirect } from '@sveltejs/kit';
+import type { PageServerLoad } from './$types';
+
+export const load: PageServerLoad = async ({ locals }) => {
+  if (!locals.user) {
+    redirect(303, '/login');
+  }
+
+  // User is authenticated
+  const data = await locals.db.query(
+    'SELECT * FROM user_data WHERE user_id = ?',
+    [locals.user.id]
+  );
+
+  return { user: locals.user, data };
+};
 ```
 
 ---
@@ -1590,7 +1825,7 @@ export const actions: Actions = {
         [result.data.name, result.data.email, result.data.bio ?? null]
       );
 
-      throw redirect(303, `/users/${insertResult.lastInsertRowId}`);
+      redirect(303, `/users/${insertResult.lastInsertRowId}`);
     } catch (error) {
       if (error instanceof Response) throw error;
       if ((error as Error).message.includes('UNIQUE constraint')) {
@@ -1603,6 +1838,127 @@ export const actions: Actions = {
     }
   },
 };
+```
+
+---
+
+## Testing
+
+### Unit Testing with Vitest
+
+```typescript
+// src/lib/server/db.test.ts
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { getDB, type DatabaseClient } from './db';
+
+describe('DatabaseClient', () => {
+  let mockStub: any;
+  let db: DatabaseClient;
+
+  beforeEach(() => {
+    mockStub = {
+      fetch: vi.fn(),
+    };
+
+    const mockPlatform = {
+      env: {
+        DOSQL_DB: {
+          idFromName: vi.fn().mockReturnValue('test-id'),
+          get: vi.fn().mockReturnValue(mockStub),
+        },
+      },
+    } as unknown as App.Platform;
+
+    db = getDB(mockPlatform, 'test-tenant');
+  });
+
+  it('should query data', async () => {
+    mockStub.fetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ rows: [{ id: 1, name: 'Test' }] }),
+    });
+
+    const result = await db.query('SELECT * FROM users');
+
+    expect(result).toEqual([{ id: 1, name: 'Test' }]);
+    expect(mockStub.fetch).toHaveBeenCalledWith(
+      'http://internal/query',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ sql: 'SELECT * FROM users', params: undefined }),
+      })
+    );
+  });
+
+  it('should handle errors', async () => {
+    mockStub.fetch.mockResolvedValue({
+      ok: false,
+      json: () => Promise.resolve({ error: 'Database error' }),
+    });
+
+    await expect(db.query('SELECT * FROM users')).rejects.toThrow('Database error');
+  });
+});
+```
+
+### Integration Testing with Playwright
+
+```typescript
+// tests/users.test.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Users', () => {
+  test('should list users', async ({ page }) => {
+    await page.goto('/users');
+
+    await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
+    await expect(page.getByRole('list')).toBeVisible();
+  });
+
+  test('should create a new user', async ({ page }) => {
+    await page.goto('/users/new');
+
+    await page.fill('#name', 'Test User');
+    await page.fill('#email', 'test@example.com');
+    await page.click('button[type="submit"]');
+
+    // Should redirect to user page
+    await expect(page).toHaveURL(/\/users\/\d+/);
+    await expect(page.getByText('Test User')).toBeVisible();
+  });
+
+  test('should show validation errors', async ({ page }) => {
+    await page.goto('/users/new');
+
+    await page.fill('#name', 'A');
+    await page.fill('#email', 'invalid-email');
+    await page.click('button[type="submit"]');
+
+    await expect(page.getByText('Name must be at least 2 characters')).toBeVisible();
+    await expect(page.getByText('Valid email is required')).toBeVisible();
+  });
+});
+```
+
+### Mocking the Database in Tests
+
+```typescript
+// tests/helpers/mockDb.ts
+import type { DatabaseClient } from '$lib/server/db';
+
+export function createMockDb(overrides: Partial<DatabaseClient> = {}): DatabaseClient {
+  return {
+    query: vi.fn().mockResolvedValue([]),
+    queryOne: vi.fn().mockResolvedValue(null),
+    run: vi.fn().mockResolvedValue({ rowsAffected: 0, lastInsertRowId: 0 }),
+    transaction: vi.fn().mockImplementation((fn) => fn({
+      query: vi.fn().mockResolvedValue([]),
+      queryOne: vi.fn().mockResolvedValue(null),
+      run: vi.fn().mockResolvedValue({ rowsAffected: 0, lastInsertRowId: 0 }),
+    })),
+    ...overrides,
+  };
+}
 ```
 
 ---
@@ -1621,7 +1977,9 @@ export const actions: Actions = {
     "deploy": "npm run build && wrangler pages deploy .svelte-kit/cloudflare",
     "deploy:staging": "npm run build && wrangler pages deploy .svelte-kit/cloudflare --env staging",
     "deploy:production": "npm run build && wrangler pages deploy .svelte-kit/cloudflare --env production",
-    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   }
 }
 ```
@@ -1671,8 +2029,7 @@ bucket_name = "sveltekit-data-staging"
 // vite.config.ts
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
-import { copyFileSync, mkdirSync } from 'fs';
-import { glob } from 'glob';
+import { copyFileSync, mkdirSync, readdirSync } from 'fs';
 
 export default defineConfig({
   plugins: [
@@ -1681,12 +2038,18 @@ export default defineConfig({
       name: 'copy-migrations',
       buildEnd() {
         // Copy SQL migrations to build output
-        mkdirSync('.svelte-kit/cloudflare/.do/migrations', { recursive: true });
-        const files = glob.sync('.do/migrations/*.sql');
-        files.forEach((file) => {
-          const dest = file.replace('.do', '.svelte-kit/cloudflare/.do');
-          copyFileSync(file, dest);
-        });
+        const migrationsDir = '.do/migrations';
+        const outputDir = '.svelte-kit/cloudflare/.do/migrations';
+
+        try {
+          mkdirSync(outputDir, { recursive: true });
+          const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql'));
+          files.forEach((file) => {
+            copyFileSync(`${migrationsDir}/${file}`, `${outputDir}/${file}`);
+          });
+        } catch (error) {
+          console.warn('No migrations to copy:', error);
+        }
       },
     },
   ],
@@ -1701,6 +2064,98 @@ export default defineConfig({
 4. **Rate limiting** - Consider adding rate limits for form actions and API routes
 5. **Monitoring** - Set up Cloudflare analytics and logging
 6. **CORS** - Configure CORS headers for API endpoints if needed
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### "Platform not available in hooks"
+
+The platform object is only available when running on Cloudflare Workers. During development, use the Cloudflare adapter's platform proxy:
+
+```javascript
+// svelte.config.js
+adapter: adapter({
+  platformProxy: {
+    configPath: 'wrangler.toml',
+    persist: { path: '.wrangler/state/v3' },
+  },
+}),
+```
+
+#### "Durable Objects require a Workers Paid plan"
+
+Upgrade to the Workers Paid plan ($5/month) at [dash.cloudflare.com](https://dash.cloudflare.com).
+
+#### "class_name 'DoSQLDatabase' not found in exports"
+
+Ensure you export the Durable Object class from your worker entry point:
+
+```typescript
+// src/lib/server/db.ts
+export class DoSQLDatabase implements DurableObject {
+  // ...
+}
+```
+
+And configure wrangler.toml to use it:
+
+```toml
+[[durable_objects.bindings]]
+name = "DOSQL_DB"
+class_name = "DoSQLDatabase"
+```
+
+#### "Migration folder not found"
+
+Create the migrations directory and ensure it's copied to the build output:
+
+```bash
+mkdir -p .do/migrations
+```
+
+#### "form?.errors is undefined in template"
+
+When using Svelte 5 runes, make sure you're using the correct props syntax:
+
+```svelte
+<script lang="ts">
+  import type { ActionData } from './$types';
+
+  let { form }: { form: ActionData } = $props();
+</script>
+
+<!-- Use optional chaining -->
+{#if form?.errors?.email}
+  <span>{form.errors.email}</span>
+{/if}
+```
+
+#### Local Development Database Persistence
+
+Data persists between restarts when using the platform proxy with persist option:
+
+```javascript
+platformProxy: {
+  persist: { path: '.wrangler/state/v3' },
+},
+```
+
+To reset the database during development:
+
+```bash
+rm -rf .wrangler/state
+```
+
+### Performance Tips
+
+1. **Use parallel queries** - Fetch independent data with `Promise.all()`
+2. **Limit result sets** - Always use `LIMIT` in queries
+3. **Create indexes** - Add indexes for frequently queried columns
+4. **Use pagination** - Don't load all data at once
+5. **Cache where appropriate** - Use SvelteKit's caching for static content
 
 ---
 

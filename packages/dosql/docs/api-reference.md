@@ -27,20 +27,43 @@ Complete API documentation for DoSQL - a type-safe SQL database for Cloudflare W
   - [Error Hierarchy](#error-hierarchy)
   - [Error Codes](#error-codes)
   - [Error Handling Patterns](#error-handling-patterns)
+- [RPC API](#rpc-api)
+  - [Client Creation](#client-creation)
+  - [Query Operations](#query-operations)
+  - [Streaming Queries](#streaming-queries)
+  - [Transaction Operations](#transaction-operations)
+  - [Schema Operations](#schema-operations)
+  - [Connection Management](#connection-management)
+  - [Server Implementation](#server-implementation)
 - [WAL (Write-Ahead Log)](#wal-write-ahead-log)
   - [WAL Writer](#wal-writer)
   - [WAL Reader](#wal-reader)
   - [Checkpoint Management](#checkpoint-management)
+  - [WAL Retention](#wal-retention)
 - [CDC (Change Data Capture)](#cdc-change-data-capture)
   - [Subscriptions](#subscriptions)
+  - [Change Events](#change-events)
   - [Replication Slots](#replication-slots)
+  - [Lakehouse Streaming](#lakehouse-streaming)
+- [Branching](#branching)
+  - [Branch Manager](#branch-manager)
+  - [Branch Operations](#branch-operations)
+  - [Merge Operations](#merge-operations)
+- [Migrations](#migrations)
+  - [Migration Runner](#migration-runner)
+  - [Schema Tracker](#schema-tracker)
+  - [Drizzle Compatibility](#drizzle-compatibility)
 - [Virtual Tables](#virtual-tables)
   - [URL Table Sources](#url-table-sources)
   - [R2 Sources](#r2-sources)
+- [FSX (File System Abstraction)](#fsx-file-system-abstraction)
+  - [Storage Backends](#storage-backends)
+  - [Tiered Storage](#tiered-storage)
+  - [Copy-on-Write Backend](#copy-on-write-backend)
 - [Advanced Features](#advanced-features)
-  - [FSX Tiered Storage](#fsx-tiered-storage)
   - [Sharding](#sharding)
   - [Stored Procedures](#stored-procedures)
+  - [Observability](#observability)
 - [Columnar Storage](#columnar-storage)
   - [Encoding Types](#encoding-types)
   - [Automatic Encoding Selection](#automatic-encoding-selection)
@@ -62,16 +85,22 @@ DoSQL provides multiple subpath exports for importing specific functionality:
 import { Database, createDatabase, DatabaseError } from '@dotdo/dosql';
 
 // RPC client/server for remote database access
-import { createRPCClient, createRPCServer } from '@dotdo/dosql/rpc';
+import { createWebSocketClient, createHttpClient, DoSQLTarget } from '@dotdo/dosql/rpc';
 
 // Write-Ahead Log for durability
-import { createWALWriter, createWALReader } from '@dotdo/dosql/wal';
+import { createWALWriter, createWALReader, createCheckpointManager } from '@dotdo/dosql/wal';
 
 // Change Data Capture for real-time streaming
-import { createCDC, createCDCSubscription } from '@dotdo/dosql/cdc';
+import { createCDC, createCDCSubscription, createReplicationSlotManager } from '@dotdo/dosql/cdc';
 
 // Transaction utilities
-import { TransactionManager } from '@dotdo/dosql/transaction';
+import { createTransactionManager, executeInTransaction, IsolationLevel } from '@dotdo/dosql/transaction';
+
+// Branching for git-like database versioning
+import { createBranchManager, DOBranchManager } from '@dotdo/dosql/branch';
+
+// Migrations
+import { createMigrationRunner, createSchemaTracker, initializeWithMigrations } from '@dotdo/dosql/migrations';
 
 // FSX - File System Abstraction for tiered storage
 import {
@@ -81,6 +110,9 @@ import {
   createCOWBackend,
   MemoryFSXBackend,
 } from '@dotdo/dosql/fsx';
+
+// Observability - tracing and metrics
+import { createObservability, createDoSQLMetrics, instrumentQuery } from '@dotdo/dosql/observability';
 
 // ORM adapters
 import { createPrismaAdapter } from '@dotdo/dosql/orm/prisma';
@@ -96,7 +128,10 @@ import { createDrizzleAdapter } from '@dotdo/dosql/orm/drizzle';
 | `@dotdo/dosql/wal` | Write-Ahead Log for durability and recovery |
 | `@dotdo/dosql/cdc` | Change Data Capture for real-time change streaming |
 | `@dotdo/dosql/transaction` | Transaction management utilities |
+| `@dotdo/dosql/branch` | Git-like branching for database versioning |
+| `@dotdo/dosql/migrations` | Schema migrations with Drizzle compatibility |
 | `@dotdo/dosql/fsx` | File System Abstraction with tiered storage backends |
+| `@dotdo/dosql/observability` | OpenTelemetry tracing and Prometheus metrics |
 | `@dotdo/dosql/orm/prisma` | Prisma ORM adapter |
 | `@dotdo/dosql/orm/kysely` | Kysely query builder adapter |
 | `@dotdo/dosql/orm/knex` | Knex.js query builder adapter |
@@ -1915,6 +1950,371 @@ async function executeWithRetry<T>(
 
 ---
 
+## RPC API
+
+The RPC module provides client/server communication for remote database access using CapnWeb.
+
+### Client Creation
+
+#### createWebSocketClient()
+
+Create a DoSQL client using WebSocket transport (recommended for streaming and CDC).
+
+```typescript
+import { createWebSocketClient, type ConnectionOptions } from '@dotdo/dosql/rpc';
+
+interface ConnectionOptions {
+  /** WebSocket URL for the RPC endpoint */
+  url: string;
+  /** Default branch for all queries */
+  defaultBranch?: string;
+  /** Connection timeout in milliseconds (default: 30000) */
+  connectTimeoutMs?: number;
+  /** Query timeout in milliseconds (default: 30000) */
+  queryTimeoutMs?: number;
+  /** Auto-reconnect on disconnect (default: true) */
+  autoReconnect?: boolean;
+  /** Max reconnect attempts (default: 5) */
+  maxReconnectAttempts?: number;
+  /** Delay between reconnect attempts in ms (default: 1000) */
+  reconnectDelayMs?: number;
+}
+
+const client = createWebSocketClient({
+  url: 'wss://dosql.example.com/rpc',
+  defaultBranch: 'main',
+  autoReconnect: true,
+});
+
+// Execute queries
+const result = await client.query({
+  sql: 'SELECT * FROM users WHERE id = $1',
+  params: [123],
+});
+
+// Subscribe to CDC
+for await (const event of client.subscribeCDC({ fromLSN: 0n, tables: ['users'] })) {
+  console.log('Change:', event);
+}
+
+// Close connection
+client.close();
+```
+
+#### createHttpClient()
+
+Create a DoSQL client using HTTP batch transport (for stateless requests).
+
+```typescript
+import { createHttpClient } from '@dotdo/dosql/rpc';
+
+const client = createHttpClient({
+  url: 'https://dosql.example.com/rpc',
+  defaultBranch: 'main',
+});
+
+// Execute queries (streaming and CDC not supported)
+const result = await client.query({
+  sql: 'SELECT * FROM users LIMIT 10',
+});
+
+client.close();
+```
+
+### Query Operations
+
+```typescript
+interface QueryRequest {
+  /** SQL query string */
+  sql: string;
+  /** Positional parameters */
+  params?: unknown[];
+  /** Named parameters */
+  namedParams?: Record<string, unknown>;
+  /** Branch for query isolation */
+  branch?: string;
+  /** Time travel LSN */
+  asOf?: bigint;
+  /** Query timeout in ms */
+  timeoutMs?: number;
+  /** Max rows to return */
+  limit?: number;
+  /** Offset for pagination */
+  offset?: number;
+}
+
+interface QueryResponse {
+  /** Column names */
+  columns: string[];
+  /** Column types */
+  columnTypes: ColumnType[];
+  /** Result rows */
+  rows: unknown[][];
+  /** Number of rows */
+  rowCount: number;
+  /** Current LSN */
+  lsn: bigint;
+  /** Execution time in ms */
+  executionTimeMs: number;
+  /** Whether more rows exist */
+  hasMore: boolean;
+}
+
+// Execute a query
+const result = await client.query({
+  sql: 'SELECT id, name, email FROM users WHERE active = $1',
+  params: [true],
+  limit: 100,
+});
+
+console.log('Columns:', result.columns);
+console.log('Row count:', result.rowCount);
+console.log('Execution time:', result.executionTimeMs, 'ms');
+```
+
+### Streaming Queries
+
+For large result sets, use streaming to avoid memory issues:
+
+```typescript
+interface StreamRequest {
+  /** SQL query string */
+  sql: string;
+  /** Query parameters */
+  params?: unknown[];
+  /** Chunk size (rows per chunk) */
+  chunkSize?: number;
+  /** Maximum total rows */
+  maxRows?: number;
+  /** Branch for query isolation */
+  branch?: string;
+}
+
+interface StreamChunk {
+  /** Chunk sequence number (0-indexed) */
+  chunkIndex: number;
+  /** Rows in this chunk */
+  rows: unknown[][];
+  /** Row count in this chunk */
+  rowCount: number;
+  /** Whether this is the final chunk */
+  isLast: boolean;
+  /** Total rows streamed so far */
+  totalRowsSoFar: number;
+}
+
+// Stream large results
+for await (const chunk of client.queryStream({
+  sql: 'SELECT * FROM events WHERE timestamp > $1',
+  params: ['2024-01-01'],
+  chunkSize: 1000,
+  maxRows: 100000,
+})) {
+  console.log(`Received chunk ${chunk.chunkIndex} with ${chunk.rowCount} rows`);
+  processRows(chunk.rows);
+
+  if (chunk.isLast) {
+    console.log(`Stream complete: ${chunk.totalRowsSoFar} total rows`);
+  }
+}
+```
+
+### Transaction Operations
+
+```typescript
+import { withTransaction, type TransactionContext } from '@dotdo/dosql/rpc';
+
+interface BeginTransactionRequest {
+  /** Isolation level */
+  isolation?: 'READ_COMMITTED' | 'REPEATABLE_READ' | 'SERIALIZABLE';
+  /** Transaction timeout in ms */
+  timeoutMs?: number;
+  /** Branch for the transaction */
+  branch?: string;
+  /** Read-only transaction */
+  readOnly?: boolean;
+}
+
+interface TransactionHandle {
+  /** Transaction ID */
+  txId: string;
+  /** LSN at transaction start */
+  startLSN: bigint;
+  /** Expiration timestamp */
+  expiresAt: number;
+}
+
+// Manual transaction management
+const handle = await client.beginTransaction({ isolation: 'SERIALIZABLE' });
+try {
+  await client.query({ sql: 'INSERT INTO users (name) VALUES ($1)', params: ['Alice'] });
+  await client.query({ sql: 'INSERT INTO logs (action) VALUES ($1)', params: ['user_created'] });
+  await client.commit({ txId: handle.txId });
+} catch (error) {
+  await client.rollback({ txId: handle.txId });
+  throw error;
+}
+
+// Using the convenience wrapper
+const result = await withTransaction(client, async (tx) => {
+  await tx.query({ sql: 'INSERT INTO users (name) VALUES ($1)', params: ['Alice'] });
+  await tx.query({ sql: 'INSERT INTO logs (action) VALUES ($1)', params: ['user_created'] });
+  return { success: true };
+});
+```
+
+### Schema Operations
+
+```typescript
+interface SchemaRequest {
+  /** Tables to get schema for (empty = all) */
+  tables?: string[];
+  /** Branch to query */
+  branch?: string;
+  /** Include indexes */
+  includeIndexes?: boolean;
+  /** Include foreign keys */
+  includeForeignKeys?: boolean;
+}
+
+interface SchemaResponse {
+  /** Table schemas */
+  tables: TableSchema[];
+  /** Current schema version */
+  version: number;
+  /** Last modification LSN */
+  lastModifiedLSN: bigint;
+}
+
+interface TableSchema {
+  name: string;
+  columns: ColumnSchema[];
+  primaryKey: string[];
+  indexes?: IndexSchema[];
+  foreignKeys?: ForeignKeySchema[];
+}
+
+// Get schema information
+const schema = await client.getSchema({
+  tables: ['users', 'posts'],
+  includeIndexes: true,
+  includeForeignKeys: true,
+});
+
+for (const table of schema.tables) {
+  console.log(`Table: ${table.name}`);
+  for (const col of table.columns) {
+    console.log(`  ${col.name}: ${col.type} ${col.nullable ? 'NULL' : 'NOT NULL'}`);
+  }
+}
+```
+
+### Connection Management
+
+```typescript
+interface ConnectionStats {
+  /** Whether connected */
+  connected: boolean;
+  /** Connection ID */
+  connectionId?: string;
+  /** Current branch */
+  branch?: string;
+  /** Current LSN */
+  currentLSN?: bigint;
+  /** Latency in ms */
+  latencyMs?: number;
+  /** Messages sent */
+  messagesSent: number;
+  /** Messages received */
+  messagesReceived: number;
+  /** Reconnect count */
+  reconnectCount: number;
+}
+
+// Ping the server
+const pong = await client.ping();
+console.log('LSN:', pong.lsn);
+console.log('Timestamp:', new Date(pong.timestamp));
+
+// Get connection stats
+const stats = client.getConnectionStats();
+console.log('Connected:', stats.connected);
+console.log('Latency:', stats.latencyMs, 'ms');
+
+// Check connection
+if (!client.isConnected()) {
+  await client.reconnect();
+}
+
+// Close when done
+client.close();
+```
+
+### Server Implementation
+
+Implement the RPC server in your Durable Object:
+
+```typescript
+import { DoSQLTarget, handleDoSQLRequest, type QueryExecutor } from '@dotdo/dosql/rpc';
+
+export class DoSQLDurableObject implements DurableObject {
+  private target: DoSQLTarget;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    const executor = new MyQueryExecutor(ctx);
+    this.target = new DoSQLTarget(executor, undefined, {
+      streamTTLMs: 30 * 60 * 1000, // 30 minutes
+      maxConcurrentStreams: 100,
+      onScheduleAlarm: (delayMs) => ctx.storage.setAlarm(Date.now() + delayMs),
+    });
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (url.pathname === '/rpc') {
+      return handleDoSQLRequest(request, this.target);
+    }
+
+    return new Response('Not Found', { status: 404 });
+  }
+
+  async alarm(): Promise<void> {
+    // Clean up expired streams
+    this.target.cleanupExpiredStreams();
+  }
+}
+
+// Implement the QueryExecutor interface
+class MyQueryExecutor implements QueryExecutor {
+  async execute(sql: string, params?: unknown[], options?: ExecuteOptions): Promise<ExecuteResult> {
+    // Execute SQL and return results
+  }
+
+  getCurrentLSN(): bigint {
+    // Return current LSN
+  }
+
+  async getSchema(tables?: string[]): Promise<TableSchema[]> {
+    // Return schema information
+  }
+
+  async beginTransaction(options?: TransactionOptions): Promise<string> {
+    // Begin transaction and return ID
+  }
+
+  async commit(txId: string): Promise<void> {
+    // Commit transaction
+  }
+
+  async rollback(txId: string, savepoint?: string): Promise<void> {
+    // Rollback transaction
+  }
+}
+```
+
+---
+
 ## WAL (Write-Ahead Log)
 
 The WAL module provides durability through a write-ahead log.
@@ -1932,10 +2332,41 @@ import {
   type WALConfig,
   type AppendOptions,
   type AppendResult,
-} from '@dotdo/dosql';
+} from '@dotdo/dosql/wal';
+
+interface WALConfig {
+  /** Maximum segment size in bytes (default: 2MB) */
+  maxSegmentSize?: number;
+  /** Flush interval in ms (default: 100) */
+  flushIntervalMs?: number;
+  /** Enable CRC32 checksums (default: true) */
+  enableChecksums?: boolean;
+}
+
+interface WALEntry {
+  /** Timestamp when entry was created */
+  timestamp: number;
+  /** Transaction ID */
+  txnId: string;
+  /** Operation type */
+  op: 'INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE' | 'DDL';
+  /** Table name */
+  table: string;
+  /** Value before change (for UPDATE/DELETE) */
+  before?: Uint8Array;
+  /** Value after change (for INSERT/UPDATE) */
+  after?: Uint8Array;
+  /** Primary key value */
+  pk?: Uint8Array;
+  /** Branch name */
+  branch?: string;
+}
 
 // Create a WAL writer
-const writer = createWALWriter(backend, config);
+const writer = createWALWriter(backend, {
+  maxSegmentSize: 2 * 1024 * 1024, // 2MB
+  enableChecksums: true,
+});
 
 // Write an entry
 const result = await writer.append({
@@ -1946,11 +2377,20 @@ const result = await writer.append({
   after: new TextEncoder().encode(JSON.stringify({ id: 1, name: 'Alice' })),
 });
 
+console.log('LSN:', result.lsn);
+
 // Flush to storage
 await writer.flush();
 
 // Get current LSN
 const lsn = writer.getCurrentLSN();
+
+// Using transactions
+const tx = createTransaction();
+tx.addInsert('users', { id: 1, name: 'Alice' });
+tx.addUpdate('users', { id: 1, name: 'Alice Updated' }, { id: 1, name: 'Alice' });
+await writer.appendTransaction(tx);
+await writer.flush();
 ```
 
 ### WAL Reader
@@ -1963,7 +2403,7 @@ import {
   reconstructTransactions,
   type WALReader,
   type ReadOptions,
-} from '@dotdo/dosql';
+} from '@dotdo/dosql/wal';
 
 // Create a reader
 const reader = createWALReader(backend);
@@ -1980,9 +2420,19 @@ for await (const batch of batches) {
 }
 
 // Tail the WAL (follow new entries)
-const tail = tailWAL(reader, { fromLSN: lastLSN, pollInterval: 100 });
+const tail = tailWAL(reader, {
+  fromLSN: lastLSN,
+  pollInterval: 100,
+  maxWait: 5000,
+});
 for await (const entry of tail) {
   handleNewEntry(entry);
+}
+
+// Reconstruct transactions
+const transactions = reconstructTransactions(reader, { fromLSN: 0n });
+for await (const tx of transactions) {
+  console.log('Transaction:', tx.txnId, 'Entries:', tx.entries.length);
 }
 ```
 
@@ -1997,29 +2447,84 @@ import {
   type CheckpointManager,
   type Checkpoint,
   type RecoveryState,
-} from '@dotdo/dosql';
+} from '@dotdo/dosql/wal';
 
 // Create checkpoint manager
 const checkpointManager = createCheckpointManager(storage, writer);
 
 // Create a checkpoint
-await checkpointManager.createCheckpoint();
+const checkpoint = await checkpointManager.createCheckpoint();
+console.log('Checkpoint at LSN:', checkpoint.lsn);
 
 // Get latest checkpoint
-const checkpoint = await checkpointManager.getLatestCheckpoint();
+const latest = await checkpointManager.getLatestCheckpoint();
 
 // Check if recovery is needed
 if (await needsRecovery(storage)) {
   const state = await performRecovery(storage, writer, reader);
   console.log(`Recovered ${state.entriesReplayed} entries`);
+  console.log('Recovery LSN:', state.recoveredLSN);
 }
 
 // Auto-checkpoint
 const autoCheckpointer = createAutoCheckpointer(checkpointManager, {
-  intervalMs: 60000,
-  maxEntries: 10000,
+  intervalMs: 60000,      // Every minute
+  maxEntries: 10000,      // Or every 10k entries
+  maxSizeBytes: 50 * 1024 * 1024, // Or every 50MB
 });
 autoCheckpointer.start();
+
+// Stop auto-checkpointing
+autoCheckpointer.stop();
+```
+
+### WAL Retention
+
+```typescript
+import {
+  createWALRetentionManager,
+  DEFAULT_RETENTION_POLICY,
+  RETENTION_PRESETS,
+  type WALRetentionManager,
+  type RetentionPolicy,
+} from '@dotdo/dosql/wal';
+
+interface RetentionPolicy {
+  /** Maximum age of entries in ms */
+  maxAgeMs?: number;
+  /** Maximum number of entries */
+  maxEntries?: number;
+  /** Maximum size in bytes */
+  maxSizeBytes?: number;
+  /** Minimum entries to keep */
+  minEntriesToKeep?: number;
+  /** Cleanup schedule (cron) */
+  cleanupSchedule?: string;
+}
+
+// Create retention manager
+const retention = createWALRetentionManager(backend, writer, {
+  policy: {
+    maxAgeMs: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxSizeBytes: 1024 * 1024 * 1024,   // 1GB
+    minEntriesToKeep: 1000,
+  },
+});
+
+// Check what can be cleaned up
+const check = await retention.checkRetention();
+console.log('Expired entries:', check.expiredCount);
+console.log('Can reclaim:', check.reclaimableBytes, 'bytes');
+
+// Perform cleanup
+const result = await retention.cleanup();
+console.log('Cleaned:', result.entriesRemoved, 'entries');
+console.log('Reclaimed:', result.bytesReclaimed, 'bytes');
+
+// Use presets
+const retention = createWALRetentionManager(backend, writer, {
+  policy: RETENTION_PRESETS.production, // or 'development', 'testing'
+});
 ```
 
 ---
@@ -2037,21 +2542,29 @@ import {
   subscribeTable,
   subscribeBatched,
   type CDCSubscription,
-  type ChangeEvent,
   type CDCFilter,
-} from '@dotdo/dosql';
+} from '@dotdo/dosql/cdc';
+
+interface CDCFilter {
+  /** Tables to subscribe to (empty = all) */
+  tables?: string[];
+  /** Operations to filter */
+  operations?: ('INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE')[];
+  /** Custom predicate function */
+  predicate?: (entry: WALEntry) => boolean;
+}
 
 // Create CDC instance
 const cdc = createCDC(backend);
 
 // Subscribe to all changes
-const subscription = cdc.subscribe({ fromLSN: 0n });
+const subscription = createCDCSubscription(backend);
 
 for await (const entry of subscription.subscribe(0n)) {
   console.log('Change:', entry.op, entry.table);
 }
 
-// Subscribe with typed events
+// Subscribe with filters
 for await (const event of subscription.subscribeChanges(0n, {
   tables: ['users'],
   operations: ['INSERT', 'UPDATE']
@@ -2069,7 +2582,7 @@ for await (const change of userChanges) {
   handleUserChange(change);
 }
 
-// Batched subscription
+// Batched subscription for throughput
 const batched = subscribeBatched(cdc, {
   batchSize: 100,
   maxWaitMs: 1000,
@@ -2079,37 +2592,472 @@ for await (const batch of batched) {
 }
 ```
 
+### Change Events
+
+```typescript
+interface ChangeEvent<T = unknown> {
+  /** Event type */
+  type: 'insert' | 'update' | 'delete' | 'truncate';
+  /** Table name */
+  table: string;
+  /** LSN of the change */
+  lsn: bigint;
+  /** Timestamp */
+  timestamp: number;
+  /** Transaction ID */
+  txnId: string;
+  /** Data after change (INSERT/UPDATE) */
+  data?: T;
+  /** Data before change (UPDATE/DELETE) */
+  oldData?: T;
+  /** Primary key */
+  pk?: unknown;
+  /** Branch name */
+  branch?: string;
+}
+
+// Handle typed events
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+for await (const event of subscription.subscribeChanges<User>(0n, {
+  tables: ['users'],
+})) {
+  switch (event.type) {
+    case 'insert':
+      console.log('Created user:', event.data?.id);
+      break;
+    case 'update':
+      console.log('Updated user:', event.data?.id, 'name changed from', event.oldData?.name);
+      break;
+    case 'delete':
+      console.log('Deleted user:', event.oldData?.id);
+      break;
+  }
+}
+```
+
 ### Replication Slots
+
+Replication slots provide persistent position tracking for CDC consumers:
 
 ```typescript
 import {
   createReplicationSlotManager,
   type ReplicationSlotManager,
   type ReplicationSlot,
-} from '@dotdo/dosql';
+} from '@dotdo/dosql/cdc';
+
+interface ReplicationSlot {
+  /** Slot name */
+  name: string;
+  /** Last confirmed LSN */
+  confirmedLSN: bigint;
+  /** Creation timestamp */
+  createdAt: number;
+  /** Last activity timestamp */
+  lastActiveAt: number;
+  /** Metadata */
+  metadata?: Record<string, unknown>;
+}
 
 // Create slot manager
 const slots = createReplicationSlotManager(storage);
 
 // Create a slot
-await slots.createSlot('my-consumer', 0n);
+await slots.createSlot('my-consumer', 0n, {
+  metadata: { version: '1.0', consumer: 'analytics' },
+});
 
 // Get slot
 const slot = await slots.getSlot('my-consumer');
 console.log('Last confirmed LSN:', slot?.confirmedLSN);
 
-// Subscribe from slot
+// Subscribe from slot (resumes from last position)
 const subscription = await slots.subscribeFromSlot('my-consumer');
 for await (const entry of subscription) {
   await processEntry(entry);
+
+  // Confirm processing
   await slots.updateSlot('my-consumer', entry.lsn);
 }
 
 // List all slots
 const allSlots = await slots.listSlots();
+for (const slot of allSlots) {
+  console.log(`${slot.name}: LSN ${slot.confirmedLSN}`);
+}
 
 // Delete a slot
 await slots.deleteSlot('my-consumer');
+```
+
+### Lakehouse Streaming
+
+Stream CDC events to a lakehouse (Iceberg/Delta Lake):
+
+```typescript
+import {
+  createLakehouseStreamer,
+  DEFAULT_LAKEHOUSE_CONFIG,
+  type LakehouseStreamer,
+  type LakehouseStreamConfig,
+} from '@dotdo/dosql/cdc';
+
+interface LakehouseStreamConfig {
+  /** Target lakehouse URL */
+  targetUrl: string;
+  /** Batch size for commits */
+  batchSize: number;
+  /** Flush interval in ms */
+  flushIntervalMs: number;
+  /** Retry configuration */
+  retry: RetryConfig;
+  /** Checkpoint interval */
+  checkpointIntervalMs: number;
+}
+
+// Create streamer
+const streamer = createLakehouseStreamer(cdc, {
+  targetUrl: 'iceberg://my-catalog/database/table',
+  batchSize: 1000,
+  flushIntervalMs: 5000,
+  retry: {
+    maxAttempts: 5,
+    baseDelayMs: 1000,
+    maxDelayMs: 30000,
+  },
+});
+
+// Start streaming
+await streamer.start({ fromLSN: 0n });
+
+// Check status
+const status = streamer.getStatus();
+console.log('Current LSN:', status.currentLSN);
+console.log('Events streamed:', status.eventsStreamed);
+console.log('Last checkpoint:', status.lastCheckpoint);
+
+// Stop streaming
+await streamer.stop();
+```
+
+---
+
+## Branching
+
+DoSQL provides git-like branching for database versioning.
+
+### Branch Manager
+
+```typescript
+import {
+  createBranchManager,
+  DOBranchManager,
+  type BranchManager,
+  type BranchMetadata,
+  type BranchManagerConfig,
+} from '@dotdo/dosql/branch';
+
+interface BranchMetadata {
+  /** Branch name */
+  name: string;
+  /** Parent branch name */
+  parent?: string;
+  /** Creation LSN */
+  createdAtLSN: bigint;
+  /** Creation timestamp */
+  createdAt: number;
+  /** Last commit LSN */
+  headLSN: bigint;
+  /** Author information */
+  author?: AuthorInfo;
+  /** Branch description */
+  description?: string;
+}
+
+interface BranchManagerConfig {
+  /** Default branch name (default: 'main') */
+  defaultBranch?: string;
+  /** Protected branches that cannot be deleted */
+  protectedBranches?: string[];
+  /** Maximum branch name length */
+  maxBranchNameLength?: number;
+}
+
+// Create branch manager
+const branchManager = createBranchManager(storage, {
+  defaultBranch: 'main',
+  protectedBranches: ['main', 'production'],
+});
+
+// Or use the DO implementation directly
+const branchManager = new DOBranchManager(storage);
+```
+
+### Branch Operations
+
+```typescript
+// Create a new branch
+const branch = await branchManager.createBranch({
+  name: 'feature/new-users',
+  fromBranch: 'main',
+  author: { name: 'Alice', email: 'alice@example.com' },
+  description: 'Add new user features',
+});
+
+// List branches
+const branches = await branchManager.listBranches();
+for (const b of branches) {
+  console.log(`${b.name} (from ${b.parent}): LSN ${b.headLSN}`);
+}
+
+// Get branch info
+const info = await branchManager.getBranch('feature/new-users');
+console.log('Created at:', new Date(info.createdAt));
+
+// Checkout a branch (set current branch)
+await branchManager.checkout('feature/new-users');
+const current = branchManager.getCurrentBranch();
+console.log('Current branch:', current);
+
+// Get branch log
+const log = await branchManager.getLog('feature/new-users', { limit: 10 });
+for (const entry of log) {
+  console.log(`${entry.commitId}: ${entry.message}`);
+}
+
+// Compare branches
+const diff = await branchManager.compare('main', 'feature/new-users');
+console.log('Commits ahead:', diff.commitsAhead);
+console.log('Commits behind:', diff.commitsBehind);
+console.log('Files changed:', diff.filesChanged.length);
+
+// Delete a branch
+await branchManager.deleteBranch('feature/new-users', { force: false });
+```
+
+### Merge Operations
+
+```typescript
+import {
+  diff,
+  threeWayMerge,
+  resolveConflicts,
+  type MergeStrategy,
+  type MergeResult,
+  type MergeConflict,
+} from '@dotdo/dosql/branch';
+
+type MergeStrategy = 'fast-forward' | 'merge' | 'squash' | 'rebase';
+
+interface MergeResult {
+  /** Whether merge succeeded */
+  success: boolean;
+  /** Resulting commit ID */
+  commitId?: string;
+  /** Conflicts if any */
+  conflicts?: MergeConflict[];
+  /** Merge strategy used */
+  strategy: MergeStrategy;
+}
+
+interface MergeConflict {
+  /** Path of conflicting file */
+  path: string;
+  /** Our version */
+  ours: string;
+  /** Their version */
+  theirs: string;
+  /** Base version */
+  base?: string;
+}
+
+// Merge a branch
+const result = await branchManager.merge({
+  source: 'feature/new-users',
+  target: 'main',
+  strategy: 'merge',
+  message: 'Merge feature/new-users into main',
+  author: { name: 'Alice', email: 'alice@example.com' },
+});
+
+if (result.success) {
+  console.log('Merged successfully:', result.commitId);
+} else {
+  console.log('Conflicts detected:');
+  for (const conflict of result.conflicts!) {
+    console.log(`  ${conflict.path}`);
+  }
+
+  // Resolve conflicts
+  const resolved = resolveConflicts(result.conflicts!, {
+    strategy: 'ours', // or 'theirs', 'manual'
+  });
+}
+
+// Three-way merge for custom resolution
+const mergeResult = threeWayMerge(base, ours, theirs);
+if (mergeResult.hasConflicts) {
+  // Handle conflicts manually
+  for (const region of mergeResult.conflicts) {
+    console.log('Conflict at lines:', region.start, '-', region.end);
+  }
+}
+```
+
+---
+
+## Migrations
+
+### Migration Runner
+
+```typescript
+import {
+  createMigrationRunner,
+  createMigration,
+  createMigrations,
+  sortMigrations,
+  type MigrationRunner,
+  type Migration,
+  type MigrationResult,
+} from '@dotdo/dosql/migrations';
+
+interface Migration {
+  /** Unique migration ID (timestamp-based recommended) */
+  id: string;
+  /** SQL to apply the migration */
+  sql: string;
+  /** SQL to reverse the migration (optional) */
+  down?: string;
+  /** Migration description */
+  description?: string;
+  /** Checksum for integrity verification */
+  checksum?: string;
+}
+
+// Create migrations
+const migrations = createMigrations([
+  {
+    id: '20240101000000_init',
+    sql: `
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL
+      )
+    `,
+    down: 'DROP TABLE users',
+    description: 'Create users table',
+  },
+  {
+    id: '20240101000001_add_status',
+    sql: 'ALTER TABLE users ADD COLUMN status TEXT DEFAULT "active"',
+    description: 'Add status column to users',
+  },
+]);
+
+// Create runner
+const runner = createMigrationRunner(db, storage, {
+  table: '_migrations', // Track applied migrations
+  dryRun: false,
+  logger: console,
+});
+
+// Run pending migrations
+const results = await runner.up();
+for (const result of results) {
+  if (result.success) {
+    console.log(`Applied: ${result.migrationId}`);
+  } else {
+    console.error(`Failed: ${result.migrationId}`, result.error);
+  }
+}
+
+// Rollback last migration
+await runner.down(1);
+
+// Get migration status
+const status = await runner.status();
+console.log('Applied:', status.applied.map(m => m.id));
+console.log('Pending:', status.pending.map(m => m.id));
+```
+
+### Schema Tracker
+
+```typescript
+import {
+  createSchemaTracker,
+  initializeWithMigrations,
+  prepareClone,
+  isCloneReady,
+  type SchemaTracker,
+  type MigrationStatus,
+} from '@dotdo/dosql/migrations';
+
+// Create schema tracker
+const tracker = createSchemaTracker(storage, {
+  snapshotInterval: 10, // Snapshot every 10 migrations
+});
+
+// Initialize database with migrations
+const status = await initializeWithMigrations({
+  migrations,
+  storage: ctx.storage,
+  db: database,
+  autoMigrate: true,
+});
+
+console.log('Schema version:', status.version);
+console.log('Applied migrations:', status.appliedCount);
+
+// Prepare a clone for new tenant
+const clone = await prepareClone(tracker, 'tenant-123');
+if (await isCloneReady(clone)) {
+  // Clone is ready to use
+  console.log('Clone initialized at version:', clone.version);
+}
+
+// Get current schema version
+const version = await tracker.getCurrentVersion();
+console.log('Current version:', version);
+
+// Create snapshot
+await tracker.createSnapshot();
+```
+
+### Drizzle Compatibility
+
+Load migrations from Drizzle Kit:
+
+```typescript
+import {
+  loadDrizzleMigrations,
+  parseDrizzleConfig,
+  toDoSqlMigration,
+  type DrizzleMigrationFolder,
+} from '@dotdo/dosql/migrations';
+
+// Load from Drizzle migrations folder
+const migrations = await loadDrizzleMigrations('./drizzle', {
+  validateChecksums: true,
+  includeDown: false,
+});
+
+// Parse Drizzle config
+const config = await parseDrizzleConfig('./drizzle.config.ts');
+console.log('Migrations folder:', config.out);
+
+// Convert individual migration
+const drizzleMigration = {
+  idx: 0,
+  tag: '0000_init',
+  sql: 'CREATE TABLE users (...)',
+};
+const doSqlMigration = toDoSqlMigration(drizzleMigration);
 ```
 
 ---
@@ -2185,13 +3133,51 @@ const { bucket, key } = parseR2Uri('r2://mybucket/path/to/file.parquet');
 
 ---
 
-## Advanced Features
+## FSX (File System Abstraction)
 
-### FSX Tiered Storage
+### Storage Backends
 
-The FSX (File System Abstraction) module provides a tiered storage backend that combines Durable Object storage (hot tier) with R2 storage (cold tier) for optimal performance and cost.
+```typescript
+import {
+  createDOBackend,
+  createR2Backend,
+  createMemoryBackend,
+  type FSXBackend,
+  type FSXMetadata,
+} from '@dotdo/dosql/fsx';
 
-#### Storage Tiers
+interface FSXBackend {
+  /** Read file contents */
+  read(path: string, range?: [number, number]): Promise<Uint8Array | null>;
+  /** Write file contents */
+  write(path: string, data: Uint8Array): Promise<void>;
+  /** Delete a file */
+  delete(path: string): Promise<void>;
+  /** List files by prefix */
+  list(prefix: string): Promise<string[]>;
+  /** Check if file exists */
+  exists(path: string): Promise<boolean>;
+}
+
+// Durable Object storage backend
+const doBackend = createDOBackend(ctx.storage);
+
+// R2 storage backend
+const r2Backend = createR2Backend(env.MY_BUCKET, {
+  keyPrefix: 'data/',
+});
+
+// In-memory backend (for testing)
+const memoryBackend = createMemoryBackend();
+
+// Basic operations
+await doBackend.write('data/file.bin', data);
+const content = await doBackend.read('data/file.bin');
+const files = await doBackend.list('data/');
+await doBackend.delete('data/file.bin');
+```
+
+### Tiered Storage
 
 ```typescript
 import {
@@ -2200,297 +3186,117 @@ import {
   type TieredStorageConfig,
   type TieredStorageBackend,
   type MigrationResult,
-} from '@dotdo/dosql';
+} from '@dotdo/dosql/fsx';
 
-/**
- * Storage tier enum indicating where data resides
- */
 enum StorageTier {
-  /** Data is in Durable Object storage (hot) */
-  HOT = 'hot',
-  /** Data is in R2 storage (cold) */
-  COLD = 'cold',
-  /** Data exists in both tiers */
-  BOTH = 'both',
+  HOT = 'hot',   // Durable Object storage
+  COLD = 'cold', // R2 storage
+  BOTH = 'both', // Exists in both tiers
 }
-```
 
-#### TieredStorageConfig
-
-Configuration options for tiered storage behavior.
-
-```typescript
 interface TieredStorageConfig {
-  /**
-   * Maximum age in milliseconds before data is considered cold
-   * Files not accessed within this window are eligible for migration to R2
-   * @default 3600000 (1 hour)
-   */
+  /** Max age before data is cold (default: 1 hour) */
   hotDataMaxAge: number;
-
-  /**
-   * Maximum total size in bytes for hot storage before triggering migration
-   * When exceeded, oldest/least-accessed files migrate to R2
-   * @default 104857600 (100MB)
-   */
+  /** Max hot storage size (default: 100MB) */
   hotStorageMaxSize: number;
-
-  /**
-   * Whether to automatically migrate cold data to R2
-   * When true, migration runs during write operations
-   * @default true
-   */
+  /** Auto-migrate cold data (default: true) */
   autoMigrate: boolean;
-
-  /**
-   * Whether to read from hot storage first
-   * When true, reads check DO storage before R2
-   * @default true
-   */
+  /** Read from hot first (default: true) */
   readHotFirst: boolean;
-
-  /**
-   * Whether to cache R2 reads in hot storage
-   * When true, data read from R2 is copied to DO for faster subsequent reads
-   * @default false
-   */
+  /** Cache R2 reads in hot (default: false) */
   cacheR2Reads: boolean;
-
-  /**
-   * Maximum size of individual files to keep in hot storage
-   * Files larger than this go directly to R2 on write
-   * @default 10485760 (10MB)
-   */
+  /** Max file size for hot tier (default: 10MB) */
   maxHotFileSize: number;
 }
 
-// Default configuration values
-const DEFAULT_TIERED_CONFIG: TieredStorageConfig = {
-  hotDataMaxAge: 60 * 60 * 1000,      // 1 hour
-  hotStorageMaxSize: 100 * 1024 * 1024, // 100MB
-  autoMigrate: true,
-  readHotFirst: true,
-  cacheR2Reads: false,
-  maxHotFileSize: 10 * 1024 * 1024,   // 10MB
-};
-```
-
-#### Creating a Tiered Backend
-
-```typescript
-import {
-  createTieredBackend,
-  createDOBackend,
-  createR2Backend,
-} from '@dotdo/dosql';
-
-// Create individual backends
-const hotBackend = createDOBackend(ctx.storage);
-const coldBackend = createR2Backend(env.MY_BUCKET, {
-  keyPrefix: 'data/',
-});
-
-// Create tiered backend with custom configuration
-const tieredBackend = createTieredBackend(hotBackend, coldBackend, {
+// Create tiered backend
+const hot = createDOBackend(ctx.storage);
+const cold = createR2Backend(env.MY_BUCKET);
+const tiered = createTieredBackend(hot, cold, {
   hotDataMaxAge: 30 * 60 * 1000,      // 30 minutes
   hotStorageMaxSize: 50 * 1024 * 1024, // 50MB
   autoMigrate: true,
   cacheR2Reads: true,
-  maxHotFileSize: 5 * 1024 * 1024,    // 5MB
-});
-```
-
-#### Migration Behavior
-
-##### Automatic Migration
-
-When `autoMigrate` is enabled, migration is triggered during write operations:
-
-1. **Age-based migration**: Files not accessed within `hotDataMaxAge` are migrated to R2
-2. **Size-based migration**: When hot storage exceeds `hotStorageMaxSize`, oldest/least-accessed files migrate
-
-```typescript
-// Files are automatically migrated based on access patterns
-await tieredBackend.write('data.bin', myData);
-// ^ This may trigger migration of older files
-
-// Migration priority is determined by:
-// 1. Access count (lower = higher migration priority)
-// 2. Last access time (older = higher migration priority)
-```
-
-##### Manual Migration
-
-You can explicitly trigger migration with `migrateToR2()`:
-
-```typescript
-interface MigrationOptions {
-  /** Only migrate files older than this (ms). Default: hotDataMaxAge */
-  olderThan?: number;
-  /** Maximum number of files to migrate. Default: 100 */
-  limit?: number;
-  /** Only migrate files matching this prefix */
-  prefix?: string;
-  /** Delete from hot storage after migration. Default: true */
-  deleteFromHot?: boolean;
-  /** Target size to free up in bytes */
-  targetSize?: number;
-}
-
-interface MigrationResult {
-  /** Paths that were successfully migrated */
-  migrated: string[];
-  /** Paths that failed with error messages */
-  failed: Array<{ path: string; error: string }>;
-  /** Total bytes transferred */
-  bytesTransferred: number;
-}
-
-// Migrate all files older than 1 hour
-const result = await tieredBackend.migrateToR2({
-  olderThan: 60 * 60 * 1000,
 });
 
-// Migrate specific prefix to free up space
-const result = await tieredBackend.migrateToR2({
-  prefix: 'logs/',
+// Read/write (transparent across tiers)
+await tiered.write('data.bin', myData);
+const data = await tiered.read('data.bin');
+
+// Manual migration
+const result = await tiered.migrateToR2({
+  olderThan: 60 * 60 * 1000, // 1 hour
+  limit: 100,
   deleteFromHot: true,
-  targetSize: 10 * 1024 * 1024, // Free 10MB
 });
-```
+console.log('Migrated:', result.migrated.length);
 
-##### Promoting Data to Hot Tier
+// Promote to hot tier
+await tiered.promoteToHot(['important-data.bin']);
 
-Promote cold data back to hot storage for performance:
+// Pin files to hot tier (prevent migration)
+await tiered.pinToHot('critical-config.bin');
+await tiered.unpinFromHot('critical-config.bin');
 
-```typescript
-// Promote specific files
-const result = await tieredBackend.promoteToHot([
-  'frequently-accessed.bin',
-  'important-data.bin',
-]);
-
-// Files will be in StorageTier.BOTH after promotion
-// (exists in both tiers until next migration)
-```
-
-##### Pinning Files to Hot Tier
-
-Prevent automatic migration of specific files:
-
-```typescript
-// Pin a file to hot storage
-await tieredBackend.pinToHot('critical-config.bin');
-// This file will NOT be migrated automatically
-
-// Unpin to allow migration
-await tieredBackend.unpinFromHot('critical-config.bin');
-```
-
-##### Writing with Tier Hint
-
-Specify initial tier placement for writes:
-
-```typescript
-// Write directly to cold storage (skips hot tier)
-await tieredBackend.writeWithTier('archive.bin', data, {
-  tier: StorageTier.COLD,
-});
-
-// Explicitly request hot tier (throws if file exceeds maxHotFileSize)
-await tieredBackend.writeWithTier('hot-data.bin', data, {
-  tier: StorageTier.HOT,
-});
-```
-
-#### Reading Behavior
-
-Reads are transparent across tiers:
-
-```typescript
-// Read checks hot tier first (if readHotFirst: true)
-const data = await tieredBackend.read('myfile.bin');
-
-// Range reads work across tiers
-const partial = await tieredBackend.read('largefile.bin', [0, 1023]);
-
-// If cacheR2Reads is enabled, data read from R2 is cached in DO
-// for faster subsequent reads (respects maxHotFileSize)
-```
-
-#### Metadata and Statistics
-
-```typescript
-interface TieredMetadata {
-  size: number;
-  lastModified: Date;
-  tier: StorageTier;
-  lastAccessed?: Date;
-  migratedAt?: Date;
-  etag?: string;
-}
-
-// Get file metadata including tier information
-const meta = await tieredBackend.metadata('myfile.bin');
-console.log('Tier:', meta?.tier);        // 'hot', 'cold', or 'both'
-console.log('Migrated:', meta?.migratedAt);
+// Get metadata with tier info
+const meta = await tiered.metadata('myfile.bin');
+console.log('Tier:', meta?.tier);
 
 // Get storage statistics
-interface TieredStorageStats {
-  hot: { fileCount: number; totalSize: number };
-  cold: { objectCount: number; totalSize: number };
-  index: { entryCount: number };
-  totalFiles: number;
-  hotToTotalRatio: number;
-  migrationPending: number;
-  hotStorageWarning?: boolean;  // True when >70% of hotStorageMaxSize used
-  lastMigration?: Date;
-  migrationCount: number;
-  totalBytesMigrated: number;
-}
-
-const stats = await tieredBackend.getStats();
+const stats = await tiered.getStats();
 console.log('Hot files:', stats.hot.fileCount);
 console.log('Cold files:', stats.cold.objectCount);
-console.log('Migration pending:', stats.migrationPending);
 ```
 
-#### Index Management
-
-The tiered backend maintains an index in DO storage to track file locations:
+### Copy-on-Write Backend
 
 ```typescript
-// Rebuild index from actual storage contents
-// Useful after recovery or inconsistent state
-const { indexed, errors } = await tieredBackend.rebuildIndex();
+import {
+  createCOWBackend,
+  type COWBackend,
+  type Snapshot,
+  type MergeResult,
+} from '@dotdo/dosql/fsx';
 
-// Load index into memory from storage
-const loadedCount = await tieredBackend.loadIndex();
+// Create COW backend
+const cow = createCOWBackend(underlying, {
+  enableSnapshots: true,
+  gcIntervalMs: 60000,
+});
+
+// Create snapshots
+const snapshot1 = await cow.createSnapshot('v1.0');
+
+// Make changes (copy-on-write)
+await cow.write('data.bin', newData);
+
+// Create another snapshot
+const snapshot2 = await cow.createSnapshot('v1.1');
+
+// Restore from snapshot
+await cow.restore(snapshot1);
+
+// List snapshots
+const snapshots = await cow.listSnapshots();
+
+// Branch from snapshot
+await cow.createBranch('feature', { fromSnapshot: snapshot1 });
+await cow.checkout('feature');
+
+// Merge branches
+const result = await cow.merge({
+  source: 'feature',
+  target: 'main',
+});
+
+// Garbage collection
+const gcResult = await cow.gc({ dryRun: false });
+console.log('Reclaimed:', gcResult.bytesReclaimed);
 ```
 
-#### Migration Best Practices
-
-1. **Configure thresholds based on workload**:
-   - Set `hotDataMaxAge` based on your access patterns
-   - Set `hotStorageMaxSize` below DO storage limits (typically 1-10GB)
-
-2. **Use pinning for critical data**:
-   - Pin configuration files or frequently accessed data
-   - Avoid pinning large files that could exhaust hot storage
-
-3. **Monitor with statistics**:
-   - Watch `hotStorageWarning` for capacity issues
-   - Track `migrationPending` to tune thresholds
-
-4. **Consider cacheR2Reads for read-heavy workloads**:
-   - Enable when same cold data is read repeatedly
-   - Disable to minimize hot storage usage
-
-5. **Use tier hints for predictable data**:
-   - Write archives directly to cold with `tier: StorageTier.COLD`
-   - Prevents unnecessary hot storage churn
-
 ---
+
+## Advanced Features
 
 ### Sharding
 
@@ -2560,6 +3366,75 @@ const executor = createProcedureExecutor(registry, { db });
 const result = await executor.execute('createUser', {
   name: 'Alice',
   email: 'alice@example.com',
+});
+```
+
+### Observability
+
+```typescript
+import {
+  createObservability,
+  createDoSQLMetrics,
+  instrumentQuery,
+  instrumentTransaction,
+  type Observability,
+  type TracingConfig,
+  type MetricsConfig,
+} from '@dotdo/dosql/observability';
+
+// Create observability instance
+const { tracer, metrics, sanitizer } = createObservability({
+  tracing: {
+    enabled: true,
+    serviceName: 'my-service',
+  },
+  metrics: {
+    enabled: true,
+    prefix: 'dosql',
+  },
+});
+
+// Create standard metrics
+const doSQLMetrics = createDoSQLMetrics(metrics);
+
+// Instrument query execution
+const result = await instrumentQuery(
+  { tracer, metrics, sanitizer, config },
+  doSQLMetrics,
+  'SELECT * FROM users WHERE id = $1',
+  [123],
+  async () => {
+    return db.query('SELECT * FROM users WHERE id = $1', [123]);
+  }
+);
+
+// Instrument transactions
+await instrumentTransaction(
+  { tracer, metrics, sanitizer, config },
+  doSQLMetrics,
+  async () => {
+    // Transaction operations
+  }
+);
+
+// Create custom span
+const span = tracer.startSpan('custom-operation', {
+  kind: 'INTERNAL',
+  attributes: { 'custom.key': 'value' },
+});
+try {
+  // Do work
+  span.setStatus('OK');
+} catch (error) {
+  span.setStatus('ERROR', error.message);
+  throw error;
+} finally {
+  span.end();
+}
+
+// Export metrics for /metrics endpoint
+return new Response(metrics.getMetrics(), {
+  headers: { 'Content-Type': 'text/plain' },
 });
 ```
 

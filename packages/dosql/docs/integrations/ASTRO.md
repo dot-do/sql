@@ -12,8 +12,12 @@ This guide covers how to integrate DoSQL with Astro applications, including SSR/
 - [Client-Side Integration](#client-side-integration)
 - [Content Collections with DoSQL](#content-collections-with-dosql)
 - [Type Safety](#type-safety)
+- [View Transitions](#view-transitions)
+- [Error Handling](#error-handling)
+- [Local Development](#local-development)
 - [Advanced Patterns](#advanced-patterns)
 - [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -1722,6 +1726,471 @@ const comments = await getPostComments(db, post.id);
 
 ---
 
+## View Transitions
+
+Astro's View Transitions API provides smooth page transitions while preserving database-fetched content state.
+
+### Basic View Transitions Setup
+
+```astro
+---
+// src/layouts/Layout.astro
+import { ViewTransitions } from 'astro:transitions';
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{title}</title>
+    <ViewTransitions />
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>
+```
+
+### Persisting Data Across Transitions
+
+```astro
+---
+// src/pages/posts/[slug].astro
+import Layout from '../../layouts/Layout.astro';
+import { getDB } from '../../lib/db';
+
+const { slug } = Astro.params;
+const { env } = Astro.locals.runtime;
+const db = await getDB(env);
+
+const post = await db.queryOne(
+  'SELECT * FROM posts WHERE slug = ? AND published = ?',
+  [slug, true]
+);
+
+if (!post) return Astro.redirect('/404');
+---
+
+<Layout title={post.title}>
+  <article transition:name={`post-${post.id}`}>
+    <h1 transition:name={`title-${post.id}`}>{post.title}</h1>
+    <div class="content" set:html={post.content} />
+  </article>
+</Layout>
+```
+
+### Loading States with View Transitions
+
+```astro
+---
+// src/components/PostCard.astro
+interface Props {
+  post: {
+    id: number;
+    title: string;
+    slug: string;
+    excerpt: string;
+  };
+}
+
+const { post } = Astro.props;
+---
+
+<a href={`/posts/${post.slug}`} class="post-card" transition:name={`post-${post.id}`}>
+  <h2 transition:name={`title-${post.id}`}>{post.title}</h2>
+  <p>{post.excerpt}</p>
+</a>
+
+<style>
+  .post-card {
+    display: block;
+    padding: 1.5rem;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+    transition: box-shadow 0.2s;
+  }
+
+  .post-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Style during transition */
+  :global([data-astro-transition-fallback="old"]) .post-card {
+    opacity: 0.5;
+  }
+</style>
+```
+
+---
+
+## Error Handling
+
+### Global Error Handling Pattern
+
+```typescript
+// src/lib/errors.ts
+export class DatabaseError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+    public readonly statusCode: number = 500
+  ) {
+    super(message);
+    this.name = 'DatabaseError';
+  }
+
+  static notFound(resource: string): DatabaseError {
+    return new DatabaseError(`${resource} not found`, 'NOT_FOUND', 404);
+  }
+
+  static conflict(message: string): DatabaseError {
+    return new DatabaseError(message, 'CONFLICT', 409);
+  }
+
+  static validation(message: string): DatabaseError {
+    return new DatabaseError(message, 'VALIDATION_ERROR', 400);
+  }
+}
+
+export function handleDatabaseError(error: unknown): Response {
+  console.error('Database error:', error);
+
+  if (error instanceof DatabaseError) {
+    return new Response(JSON.stringify({
+      error: error.message,
+      code: error.code,
+    }), {
+      status: error.statusCode,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const message = error instanceof Error ? error.message : 'Unknown error';
+
+  // Handle SQLite-specific errors
+  if (message.includes('UNIQUE constraint')) {
+    return new Response(JSON.stringify({
+      error: 'A record with this value already exists',
+      code: 'UNIQUE_VIOLATION',
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (message.includes('FOREIGN KEY constraint')) {
+    return new Response(JSON.stringify({
+      error: 'Referenced record does not exist',
+      code: 'FOREIGN_KEY_VIOLATION',
+    }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  return new Response(JSON.stringify({
+    error: 'Internal server error',
+    code: 'INTERNAL_ERROR',
+  }), {
+    status: 500,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+```
+
+### Using Error Handling in API Routes
+
+```typescript
+// src/pages/api/posts.ts
+import type { APIRoute } from 'astro';
+import { getDB } from '../../lib/db';
+import { DatabaseError, handleDatabaseError } from '../../lib/errors';
+
+export const POST: APIRoute = async ({ locals, request }) => {
+  try {
+    const { env } = locals.runtime;
+    const db = await getDB(env);
+
+    const body = await request.json() as {
+      title?: string;
+      slug?: string;
+      content?: string;
+    };
+
+    // Validation
+    if (!body.title?.trim()) {
+      throw DatabaseError.validation('Title is required');
+    }
+    if (!body.slug?.trim()) {
+      throw DatabaseError.validation('Slug is required');
+    }
+    if (!body.content?.trim()) {
+      throw DatabaseError.validation('Content is required');
+    }
+
+    // Check for existing slug
+    const existing = await db.queryOne(
+      'SELECT id FROM posts WHERE slug = ?',
+      [body.slug]
+    );
+    if (existing) {
+      throw DatabaseError.conflict('A post with this slug already exists');
+    }
+
+    const result = await db.run(
+      `INSERT INTO posts (title, slug, content) VALUES (?, ?, ?)`,
+      [body.title, body.slug, body.content]
+    );
+
+    return new Response(JSON.stringify({
+      id: result.lastInsertRowId,
+      message: 'Post created successfully',
+    }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (error) {
+    return handleDatabaseError(error);
+  }
+};
+```
+
+### Error Pages with Database Context
+
+```astro
+---
+// src/pages/404.astro
+import Layout from '../layouts/Layout.astro';
+import { getDB } from '../lib/db';
+
+// Optionally fetch suggested content
+let suggestions: { title: string; slug: string }[] = [];
+
+try {
+  const { env } = Astro.locals.runtime;
+  const db = await getDB(env);
+  suggestions = await db.query(
+    `SELECT title, slug FROM posts
+     WHERE published = ?
+     ORDER BY created_at DESC
+     LIMIT 5`,
+    [true]
+  );
+} catch {
+  // Silently fail - suggestions are optional
+}
+---
+
+<Layout title="Page Not Found">
+  <main class="error-page">
+    <h1>404 - Page Not Found</h1>
+    <p>The page you're looking for doesn't exist.</p>
+
+    {suggestions.length > 0 && (
+      <section class="suggestions">
+        <h2>You might be interested in:</h2>
+        <ul>
+          {suggestions.map((post) => (
+            <li>
+              <a href={`/posts/${post.slug}`}>{post.title}</a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+
+    <a href="/" class="home-link">Go to homepage</a>
+  </main>
+</Layout>
+```
+
+---
+
+## Local Development
+
+### Development Workflow
+
+```bash
+# Start local development with Wrangler bindings
+npm run dev
+
+# Or use Astro's dev server with Wrangler proxy
+wrangler pages dev -- npm run dev
+```
+
+### Local Database Setup
+
+For local development, you can use Wrangler's local Durable Object emulation:
+
+```javascript
+// astro.config.mjs
+import { defineConfig } from 'astro/config';
+import cloudflare from '@astrojs/cloudflare';
+
+export default defineConfig({
+  output: 'server',
+  adapter: cloudflare({
+    mode: 'directory',
+    runtime: {
+      mode: 'local',
+      type: 'pages',
+      persistTo: '.wrangler/state', // Persist local data
+      bindings: {
+        DOSQL_DB: {
+          type: 'durable-object-namespace',
+          className: 'DoSQLDatabase',
+        },
+      },
+    },
+  }),
+});
+```
+
+### Seeding Development Data
+
+```typescript
+// scripts/seed.ts
+import { DB } from '@dotdo/dosql';
+
+async function seed() {
+  const db = await DB('dev-blog', {
+    migrations: { folder: '.do/migrations' },
+  });
+
+  // Clear existing data
+  await db.run('DELETE FROM comments');
+  await db.run('DELETE FROM posts');
+
+  // Insert sample posts
+  const posts = [
+    {
+      title: 'Getting Started with DoSQL',
+      slug: 'getting-started-dosql',
+      content: '<p>Welcome to DoSQL...</p>',
+      excerpt: 'Learn how to build edge-native applications with DoSQL.',
+      published: true,
+    },
+    {
+      title: 'Astro + DoSQL: A Perfect Match',
+      slug: 'astro-dosql-integration',
+      content: '<p>Astro and DoSQL work great together...</p>',
+      excerpt: 'Discover why Astro and DoSQL are perfect for content sites.',
+      published: true,
+    },
+    {
+      title: 'Draft Post',
+      slug: 'draft-post',
+      content: '<p>This is a draft...</p>',
+      excerpt: 'A draft post for testing.',
+      published: false,
+    },
+  ];
+
+  for (const post of posts) {
+    const result = await db.run(
+      `INSERT INTO posts (title, slug, content, excerpt, published)
+       VALUES (?, ?, ?, ?, ?)`,
+      [post.title, post.slug, post.content, post.excerpt, post.published]
+    );
+
+    // Add sample comments to published posts
+    if (post.published) {
+      await db.run(
+        `INSERT INTO comments (post_id, author_name, content, approved)
+         VALUES (?, ?, ?, ?)`,
+        [result.lastInsertRowId, 'Test User', 'Great article!', true]
+      );
+    }
+  }
+
+  console.log('Seed completed: 3 posts, 2 comments');
+}
+
+seed().catch(console.error);
+```
+
+Add the seed script to package.json:
+
+```json
+{
+  "scripts": {
+    "seed": "npx tsx scripts/seed.ts",
+    "dev": "astro dev",
+    "dev:fresh": "npm run seed && npm run dev"
+  }
+}
+```
+
+### Environment-Specific Configuration
+
+```typescript
+// src/lib/config.ts
+export const config = {
+  isDev: import.meta.env.DEV,
+  isProd: import.meta.env.PROD,
+
+  // Database settings
+  db: {
+    defaultTenant: import.meta.env.DEV ? 'dev' : 'prod',
+    enableLogging: import.meta.env.DEV,
+  },
+
+  // Feature flags
+  features: {
+    enableComments: true,
+    enableSearch: true,
+    enableCDC: import.meta.env.PROD, // Only in production
+  },
+};
+```
+
+```typescript
+// src/lib/db.ts (updated with logging)
+import { DB, type Database } from '@dotdo/dosql';
+import { config } from './config';
+
+export async function getDB(env: Env, tenantId?: string): Promise<DBClient> {
+  const id = env.DOSQL_DB.idFromName(tenantId || config.db.defaultTenant);
+  const stub = env.DOSQL_DB.get(id);
+
+  const client = createDBClient(stub);
+
+  // Wrap with logging in development
+  if (config.db.enableLogging) {
+    return wrapWithLogging(client);
+  }
+
+  return client;
+}
+
+function wrapWithLogging(client: DBClient): DBClient {
+  return {
+    async query<T>(sql: string, params?: unknown[]): Promise<T[]> {
+      console.log('[DB Query]', sql, params);
+      const start = performance.now();
+      const result = await client.query<T>(sql, params);
+      console.log(`[DB Query] completed in ${(performance.now() - start).toFixed(2)}ms`);
+      return result;
+    },
+    // ... wrap other methods similarly
+    queryOne: client.queryOne,
+    run: client.run,
+    transaction: client.transaction,
+  };
+}
+```
+
+---
+
 ## Advanced Patterns
 
 ### Middleware for Database Access
@@ -2070,11 +2539,271 @@ jobs:
 
 ---
 
+## Troubleshooting
+
+### Common Issues
+
+#### "Cannot find runtime" Error
+
+**Problem**: `Astro.locals.runtime` is undefined.
+
+**Solution**: Ensure you're using the Cloudflare adapter with runtime bindings:
+
+```javascript
+// astro.config.mjs
+export default defineConfig({
+  output: 'server', // Must be 'server' or 'hybrid'
+  adapter: cloudflare({
+    mode: 'directory',
+    runtime: {
+      mode: 'local',
+      type: 'pages',
+    },
+  }),
+});
+```
+
+Also verify `src/env.d.ts` has the correct type declarations:
+
+```typescript
+/// <reference types="astro/client" />
+
+type Runtime = import('@astrojs/cloudflare').Runtime<Env>;
+
+declare namespace App {
+  interface Locals extends Runtime {}
+}
+```
+
+#### "Durable Object not found" Error
+
+**Problem**: The Durable Object binding is not available.
+
+**Solution**: Check your `wrangler.toml` configuration:
+
+```toml
+[[durable_objects.bindings]]
+name = "DOSQL_DB"
+class_name = "DoSQLDatabase"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["DoSQLDatabase"]
+```
+
+For Cloudflare Pages with external Durable Objects:
+
+```toml
+[[durable_objects.bindings]]
+name = "DOSQL_DB"
+class_name = "DoSQLDatabase"
+script_name = "your-do-worker"  # Reference the worker that exports the DO
+```
+
+#### Static Pages Trying to Access Database
+
+**Problem**: Static pages (prerendered) cannot access runtime bindings.
+
+**Solution**: Mark pages that need database access as server-rendered:
+
+```astro
+---
+// src/pages/posts/index.astro
+export const prerender = false; // Force SSR for this page
+
+import { getDB } from '../../lib/db';
+// ... rest of page
+---
+```
+
+Or use hybrid mode and only mark static pages explicitly:
+
+```javascript
+// astro.config.mjs
+export default defineConfig({
+  output: 'hybrid', // Default to static, opt-in to SSR
+});
+```
+
+```astro
+---
+// src/pages/about.astro
+export const prerender = true; // This page is static
+---
+```
+
+#### TypeScript Errors with Cloudflare Types
+
+**Problem**: TypeScript cannot find Cloudflare types.
+
+**Solution**: Install and configure worker types:
+
+```bash
+npm install -D @cloudflare/workers-types
+```
+
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types"]
+  }
+}
+```
+
+#### API Routes Not Working Locally
+
+**Problem**: API endpoints return 404 in local development.
+
+**Solution**: Use Wrangler to serve the built output:
+
+```bash
+# Build first
+npm run build
+
+# Then preview with Wrangler (enables bindings)
+wrangler pages dev dist
+```
+
+Or configure Astro's dev server with Wrangler proxy:
+
+```bash
+wrangler pages dev --local -- npm run dev
+```
+
+#### Database Migrations Not Running
+
+**Problem**: Tables don't exist or schema is outdated.
+
+**Solution**: Verify migration folder path and ensure migrations are applied:
+
+```typescript
+// In your Durable Object
+const db = await DB('my-app', {
+  migrations: {
+    folder: '.do/migrations', // Relative to project root
+  },
+});
+```
+
+Check migration files are named correctly:
+- `001_init.sql`
+- `002_add_comments.sql`
+- Numbers must be sequential with no gaps
+
+#### Memory Issues with Large Queries
+
+**Problem**: Large result sets cause out-of-memory errors.
+
+**Solution**: Use pagination and streaming:
+
+```typescript
+// Pagination
+const pageSize = 100;
+const page = 1;
+
+const posts = await db.query(
+  'SELECT * FROM posts ORDER BY created_at DESC LIMIT ? OFFSET ?',
+  [pageSize, (page - 1) * pageSize]
+);
+
+// For very large exports, stream results
+export const GET: APIRoute = async ({ locals }) => {
+  const { env } = locals.runtime;
+  const db = await getDB(env);
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      let offset = 0;
+      const batchSize = 100;
+
+      controller.enqueue(encoder.encode('[\n'));
+
+      while (true) {
+        const batch = await db.query(
+          'SELECT * FROM posts LIMIT ? OFFSET ?',
+          [batchSize, offset]
+        );
+
+        if (batch.length === 0) break;
+
+        for (let i = 0; i < batch.length; i++) {
+          const prefix = offset > 0 || i > 0 ? ',\n' : '';
+          controller.enqueue(encoder.encode(prefix + JSON.stringify(batch[i])));
+        }
+
+        offset += batchSize;
+      }
+
+      controller.enqueue(encoder.encode('\n]'));
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+```
+
+### Performance Tips
+
+1. **Use parallel queries** when fetching independent data:
+
+```astro
+---
+const [posts, categories, tags] = await Promise.all([
+  db.query('SELECT * FROM posts WHERE published = ?', [true]),
+  db.query('SELECT * FROM categories'),
+  db.query('SELECT * FROM tags'),
+]);
+---
+```
+
+2. **Add database indexes** for frequently queried columns:
+
+```sql
+-- .do/migrations/002_add_indexes.sql
+CREATE INDEX IF NOT EXISTS idx_posts_published ON posts(published, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_slug ON posts(slug);
+CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, approved);
+```
+
+3. **Use `queryOne` for single results** to avoid unnecessary array operations:
+
+```typescript
+// Good
+const post = await db.queryOne('SELECT * FROM posts WHERE id = ?', [id]);
+
+// Avoid
+const [post] = await db.query('SELECT * FROM posts WHERE id = ?', [id]);
+```
+
+4. **Cache expensive queries** at the edge:
+
+```typescript
+export const GET: APIRoute = async ({ locals }) => {
+  const posts = await db.query('SELECT * FROM posts WHERE published = ?', [true]);
+
+  return new Response(JSON.stringify(posts), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
+    },
+  });
+};
+```
+
+---
+
 ## Next Steps
 
 - [Getting Started](../getting-started.md) - DoSQL basics
 - [API Reference](../api-reference.md) - Complete API documentation
 - [Advanced Features](../advanced.md) - CDC, time travel, branching
 - [Architecture](../architecture.md) - Understanding DoSQL internals
+- [Troubleshooting](../TROUBLESHOOTING.md) - General troubleshooting guide
 - [Next.js Integration](./NEXTJS.md) - Next.js specific patterns
 - [Remix Integration](./REMIX.md) - Remix specific patterns
+- [SvelteKit Integration](./SVELTEKIT.md) - SvelteKit specific patterns
