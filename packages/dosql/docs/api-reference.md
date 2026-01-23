@@ -2742,16 +2742,19 @@ await streamer.stop();
 
 DoSQL provides git-like branching for database versioning.
 
+> **Note:** The branching module is available internally but not currently exported via the main package subpaths. Contact the team for access to this feature.
+
 ### Branch Manager
 
 ```typescript
+// Internal module - types shown for reference
 import {
   createBranchManager,
   DOBranchManager,
   type BranchManager,
   type BranchMetadata,
   type BranchManagerConfig,
-} from 'dosql';
+} from 'dosql/branch'; // Not currently in exports
 
 interface BranchMetadata {
   /** Branch name */
@@ -2834,6 +2837,7 @@ await branchManager.deleteBranch('feature/new-users', { force: false });
 ### Merge Operations
 
 ```typescript
+// Internal module - types shown for reference
 import {
   diff,
   threeWayMerge,
@@ -2841,7 +2845,7 @@ import {
   type MergeStrategy,
   type MergeResult,
   type MergeConflict,
-} from 'dosql';
+} from 'dosql/branch'; // Not currently in exports
 
 type MergeStrategy = 'fast-forward' | 'merge' | 'squash' | 'rebase';
 
@@ -2904,9 +2908,12 @@ if (mergeResult.hasConflicts) {
 
 ## Migrations
 
+> **Note:** The migrations module is available internally but not currently exported via the main package subpaths. Contact the team for access to this feature.
+
 ### Migration Runner
 
 ```typescript
+// Internal module - types shown for reference
 import {
   createMigrationRunner,
   createMigration,
@@ -2915,7 +2922,7 @@ import {
   type MigrationRunner,
   type Migration,
   type MigrationResult,
-} from 'dosql';
+} from 'dosql/migrations'; // Not currently in exports
 
 interface Migration {
   /** Unique migration ID (timestamp-based recommended) */
@@ -2980,6 +2987,7 @@ console.log('Pending:', status.pending.map(m => m.id));
 ### Schema Tracker
 
 ```typescript
+// Internal module - types shown for reference
 import {
   createSchemaTracker,
   initializeWithMigrations,
@@ -2987,7 +2995,7 @@ import {
   isCloneReady,
   type SchemaTracker,
   type MigrationStatus,
-} from 'dosql';
+} from 'dosql/migrations'; // Not currently in exports
 
 // Create schema tracker
 const tracker = createSchemaTracker(storage, {
@@ -3025,12 +3033,13 @@ await tracker.createSnapshot();
 Load migrations from Drizzle Kit:
 
 ```typescript
+// Internal module - types shown for reference
 import {
   loadDrizzleMigrations,
   parseDrizzleConfig,
   toDoSqlMigration,
   type DrizzleMigrationFolder,
-} from 'dosql';
+} from 'dosql/migrations'; // Not currently in exports
 
 // Load from Drizzle migrations folder
 const migrations = await loadDrizzleMigrations('./drizzle', {
@@ -3291,32 +3300,65 @@ console.log('Reclaimed:', gcResult.bytesReclaimed);
 
 ### Sharding
 
+DoSQL provides a Vitess-inspired native sharding implementation with real SQL parsing, cost-based query routing, and type-safe shard keys.
+
 ```typescript
 import {
-  createShardRouter,
-  createConsistentHashRouter,
-  createRangeShardRouter,
-  type ShardRouter,
+  createShardingClient,
+  createVSchema,
+  shardedTable,
+  referenceTable,
+  hashVindex,
+  consistentHashVindex,
+  rangeVindex,
+  shard,
+  replica,
+  createShardId,
+  type ShardingClient,
+  type VSchema,
   type ShardConfig,
 } from 'dosql';
 
-// Consistent hash sharding
-const router = createConsistentHashRouter({
-  shards: ['shard1', 'shard2', 'shard3', 'shard4'],
-  virtualNodes: 150,
+// Define your VSchema (Virtual Schema)
+const vschema = createVSchema({
+  // Sharded by tenant_id using hash distribution
+  users: shardedTable('tenant_id', hashVindex()),
+
+  // Sharded using consistent hash (better for rebalancing)
+  orders: shardedTable('order_id', consistentHashVindex(150)),
+
+  // Reference table replicated to all shards
+  countries: referenceTable(),
+}, [
+  shard(createShardId('shard-1'), 'user-do', {
+    replicas: [
+      replica('replica-1a', 'user-do-replica', 'replica', { region: 'us-west' }),
+    ],
+  }),
+  shard(createShardId('shard-2'), 'user-do'),
+]);
+
+// Create a sharding client
+const client = createShardingClient({
+  vschema,
+  rpc: myShardRPC, // Your ShardRPC implementation
+  currentRegion: request.cf?.colo,
+  executor: {
+    maxParallelShards: 16,
+    defaultTimeoutMs: 5000,
+  },
 });
 
-// Route a key
-const shard = router.route('user:12345');
-console.log('Route to:', shard);
+// Execute queries - automatically routed to correct shard
+const result = await client.query(
+  'SELECT * FROM users WHERE tenant_id = $1',
+  [123]
+);
 
-// Range-based sharding
-const rangeRouter = createRangeShardRouter({
-  ranges: [
-    { start: 0, end: 1000000, shard: 'shard1' },
-    { start: 1000000, end: 2000000, shard: 'shard2' },
-  ],
-});
+// Stream large results
+for await (const row of client.queryStream('SELECT * FROM users')) {
+  processRow(row);
+}
 ```
 
 ### Stored Procedures
