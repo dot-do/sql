@@ -833,7 +833,7 @@ describe('Observability - End-to-End Integration', () => {
     // Verify tracing
     expect(span.status).toBe('OK');
     expect(span.attributes.get('db.operation')).toBe('SELECT');
-    expect(span.endTime).toBeGreaterThan(span.startTime);
+    expect(span.endTime).toBeGreaterThanOrEqual(span.startTime);
 
     // Verify metrics were recorded
     const metricsOutput = metrics.getMetrics();

@@ -64,7 +64,7 @@ DoLake is a high-performance Lakehouse Durable Object that receives CDC (Change 
 |  |  (CDC)  |  |  (CDC)  |  |  (CDC)  |  |  (CDC)  |  |         |        |
 |  +----+----+  +----+----+  +----+----+  +----+----+  +----+----+        |
 |       |            |            |            |            |             |
-|       |   WebSocket Hibernation (95% cost discount)      |             |
+|       |   WebSocket Hibernation (95% cost discount)       |             |
 |       v            v            v            v            v             |
 |  +------------------------------------------------------------------+   |
 |  |                    DoLake (Aggregator DO)                        |   |
