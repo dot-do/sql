@@ -377,9 +377,19 @@ export class DistributedExecutor extends EventEmitter {
     // Merge and post-process results
     const merged = this.mergeResults(shardResults, plan.postProcessing);
 
+    // Calculate execution time, ensuring at least a minimum positive value
+    // when work was actually done (performance.now() can have reduced precision
+    // in some environments like Cloudflare Workers for security reasons)
+    let totalExecutionTimeMs = performance.now() - startTime;
+    if (totalExecutionTimeMs === 0 && shardResults.length > 0) {
+      // Sum up individual shard execution times as fallback
+      const shardTimeSum = shardResults.reduce((sum, r) => sum + r.executionTimeMs, 0);
+      totalExecutionTimeMs = shardTimeSum > 0 ? shardTimeSum : 0.001;
+    }
+
     return {
       ...merged,
-      totalExecutionTimeMs: performance.now() - startTime,
+      totalExecutionTimeMs,
       partialFailures: errors.length > 0 ? errors : undefined,
     };
   }

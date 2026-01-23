@@ -387,12 +387,24 @@ export class COWBackend implements FSXWithCOW {
       throw new COWError(COWErrorCode.BRANCH_NOT_FOUND, `Branch not found: ${branchName}`);
     }
 
-    // Build manifest from current refs
-    const paths = await this.listFrom('', branchName);
+    // Increment version to ensure each snapshot gets a unique version
+    // This is necessary because data may be written directly to underlying storage
+    // (e.g., via B-trees) without going through cowBackend.writeTo()
+    await this.updateBranchVersion(branchName);
+
+    // Re-fetch branch to get updated version
+    const updatedBranch = await this.getBranch(branchName);
+    if (!updatedBranch) {
+      throw new COWError(COWErrorCode.BRANCH_NOT_FOUND, `Branch not found: ${branchName}`);
+    }
+
+    // Build manifest from current refs (data written through COW backend)
+    const cowPaths = await this.listFrom('', branchName);
     const entries: ManifestEntry[] = [];
     let totalSize = 0;
+    const seenPaths = new Set<string>();
 
-    for (const path of paths) {
+    for (const path of cowPaths) {
       const ref = await this.getRefInternal(path, branchName);
       if (ref) {
         entries.push({
@@ -402,6 +414,30 @@ export class COWBackend implements FSXWithCOW {
           hash: ref.hash,
         });
         totalSize += ref.size;
+        seenPaths.add(path);
+      }
+    }
+
+    // Also include paths written directly to underlying storage (e.g., B-trees)
+    // that don't have corresponding COW refs
+    const allPaths = await this.storage.list('');
+    for (const path of allPaths) {
+      // Skip COW internal paths
+      if (path.startsWith('_cow/')) continue;
+      // Skip paths already tracked via refs
+      if (seenPaths.has(path)) continue;
+
+      const data = await this.storage.read(path);
+      if (data) {
+        const hash = await this.computeHash(data);
+        entries.push({
+          path,
+          version: updatedBranch.headVersion,
+          size: data.length,
+          hash,
+        });
+        totalSize += data.length;
+        seenPaths.add(path);
       }
     }
 
@@ -411,7 +447,7 @@ export class COWBackend implements FSXWithCOW {
       count: entries.length,
     };
 
-    return this.snapshotManager.createSnapshot(branchName, branch.headVersion, manifest, message);
+    return this.snapshotManager.createSnapshot(branchName, updatedBranch.headVersion, manifest, message);
   }
 
   async readAt(path: string, snapshotId: SnapshotId, range?: ByteRange): Promise<Uint8Array | null> {

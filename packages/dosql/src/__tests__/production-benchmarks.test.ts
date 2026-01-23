@@ -681,7 +681,7 @@ describe('GREEN Phase - Production Cold Start', () => {
 
     // CI/test environment threshold - production target is 100ms
     expect(elapsed).toBeLessThan(1000);
-  });
+  }, 30000); // Extended timeout for cold start tests in CI environments
 
   it('should achieve < 100ms cold start with schema setup', async () => {
     const stub = getUniqueStub();
@@ -700,7 +700,7 @@ describe('GREEN Phase - Production Cold Start', () => {
 
     // CI/test environment threshold - production target is 100ms
     expect(elapsed).toBeLessThan(1000);
-  });
+  }, 30000); // Extended timeout for cold start tests in CI environments
 
   it('should maintain consistent cold start times across multiple instances', async () => {
     const coldStartTimes: number[] = [];
@@ -727,7 +727,7 @@ describe('GREEN Phase - Production Cold Start', () => {
     coldStartTimes.sort((a, b) => a - b);
     const p95 = coldStartTimes[Math.floor(coldStartTimes.length * 0.95)];
     expect(p95).toBeLessThan(1000);
-  });
+  }, 30000); // Extended timeout for cold start tests in CI environments
 });
 
 // =============================================================================

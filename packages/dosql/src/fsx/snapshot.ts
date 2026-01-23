@@ -139,8 +139,8 @@ export class SnapshotManager {
       }
     }
 
-    // Sort by version descending (newest first)
-    return snapshots.sort((a, b) => b.version - a.version);
+    // Sort by version ascending (chronological order - oldest first)
+    return snapshots.sort((a, b) => a.version - b.version);
   }
 
   /**
