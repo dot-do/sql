@@ -17,18 +17,6 @@
     "./experimental": {
       "types": "./dist/experimental.d.ts",
       "import": "./dist/experimental.js"
-    },
-    "./auth": {
-      "types": "./dist/auth.d.ts",
-      "import": "./dist/auth.js"
-    },
-    "./cli": {
-      "types": "./dist/cli-helpers.d.ts",
-      "import": "./dist/cli-helpers.js"
-    },
-    "./rpc": {
-      "types": "./dist/rpc-transport.d.ts",
-      "import": "./dist/rpc-transport.js"
     }
   },
   "files": [
@@ -61,16 +49,6 @@
   },
   "dependencies": {
     "sql.do": "workspace:*"
-  },
-  "peerDependencies": {
-    "rpc.do": "^0.2.0",
-    "oauth.do": "^0.2.0",
-    "@dotdo/cli": "^0.2.0"
-  },
-  "peerDependenciesMeta": {
-    "rpc.do": { "optional": true },
-    "oauth.do": { "optional": true },
-    "@dotdo/cli": { "optional": true }
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.0.0",

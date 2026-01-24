@@ -53,6 +53,10 @@
     "./e2e": {
       "types": "./e2e/index.d.ts",
       "import": "./e2e/index.js"
+    },
+    "./middleware": {
+      "types": "./dist/middleware/index.d.ts",
+      "import": "./dist/middleware/index.js"
     }
   },
   "files": [
@@ -115,10 +119,22 @@
     "wrangler": "^4.59.3"
   },
   "peerDependencies": {
-    "@cloudflare/workers-types": "^4.0.0"
+    "@cloudflare/workers-types": "^4.0.0",
+    "hono": "^4.0.0",
+    "rpc.do": "^0.2.0",
+    "oauth.do": "^0.2.0"
   },
   "peerDependenciesMeta": {
     "@cloudflare/workers-types": {
+      "optional": true
+    },
+    "hono": {
+      "optional": true
+    },
+    "rpc.do": {
+      "optional": true
+    },
+    "oauth.do": {
       "optional": true
     }
   }
