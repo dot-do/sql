@@ -166,7 +166,8 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
       tier = StorageTier.HOT;
     }
 
-    // Update tier index
+    // Update tier index with incremented write version
+    const existingEntry = this.tierIndex.get(path);
     const entry: TierIndexEntry = {
       path,
       size,
@@ -174,6 +175,7 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
       createdAt: now,
       lastAccessed: now,
       accessCount: 0,
+      writeVersion: (existingEntry?.writeVersion ?? 0) + 1,
     };
 
     await this.setTierEntry(entry);
@@ -365,16 +367,13 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
         accessCount: 1,
       };
 
-      // Cache in hot if enabled and file is small enough
+      await this.setTierEntry(entry);
+
+      // Cache in hot if enabled (uses cacheInHot for eviction support)
       if (this.config.cacheR2Reads && !range) {
-        const fullData = coldData;
-        if (fullData.length <= this.config.maxHotFileSize) {
-          await this.hotBackend.write(path, fullData);
-          entry.tier = StorageTier.BOTH;
-        }
+        await this.cacheInHot(path, coldData, entry);
       }
 
-      await this.setTierEntry(entry);
       return coldData;
     }
 
@@ -392,6 +391,11 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
     }
 
     try {
+      // Check if caching would exceed hot storage max size; evict cached entries if needed
+      if (this.config.hotStorageMaxSize > 0) {
+        await this.evictCachedIfNeeded(data.length);
+      }
+
       await this.hotBackend.write(path, data);
 
       // Update entry to show both tiers
@@ -399,6 +403,50 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
       await this.updateTierEntry(entry);
     } catch {
       // Ignore caching errors
+    }
+  }
+
+  /**
+   * Evict cached (BOTH-tier) entries from hot storage to make room for new cached data.
+   * Only evicts entries that are cached copies of cold data (tier === BOTH),
+   * not native hot data.
+   */
+  private async evictCachedIfNeeded(incomingSize: number): Promise<void> {
+    // Calculate current hot data size
+    let hotDataSize = 0;
+    for (const entry of this.tierIndex.values()) {
+      if (entry.tier === StorageTier.HOT || entry.tier === StorageTier.BOTH) {
+        hotDataSize += entry.size;
+      }
+    }
+
+    // If adding new data wouldn't exceed limit, no eviction needed
+    if (hotDataSize + incomingSize <= this.config.hotStorageMaxSize) {
+      return;
+    }
+
+    // Find cached entries (BOTH tier) sorted by lastAccessed (oldest first)
+    const cachedEntries: TierIndexEntry[] = [];
+    for (const entry of this.tierIndex.values()) {
+      if (entry.tier === StorageTier.BOTH && !entry.pinned) {
+        cachedEntries.push(entry);
+      }
+    }
+    cachedEntries.sort((a, b) => a.lastAccessed - b.lastAccessed);
+
+    // Evict oldest cached entries until we have enough space
+    let spaceNeeded = (hotDataSize + incomingSize) - this.config.hotStorageMaxSize;
+    for (const entry of cachedEntries) {
+      if (spaceNeeded <= 0) break;
+
+      try {
+        await this.hotBackend.delete(entry.path);
+        entry.tier = StorageTier.COLD;
+        await this.updateTierEntry(entry);
+        spaceNeeded -= entry.size;
+      } catch {
+        // Ignore eviction errors for individual files
+      }
     }
   }
 

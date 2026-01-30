@@ -589,20 +589,36 @@ export class TransactionError extends DoSQLError {
   readonly code: TransactionErrorCode;
   readonly category: ErrorCategory;
   readonly txnId?: TransactionId;
+  /** Number of operations logged in the transaction when the error occurred */
+  readonly operationCount?: number;
+  /** Isolation level of the transaction when the error occurred */
+  readonly isolationLevel?: IsolationLevel;
 
   constructor(
     code: TransactionErrorCode,
     message: string,
-    options?: {
+    txnIdOrOptions?: TransactionId | {
       cause?: Error;
       context?: ErrorContext;
       txnId?: TransactionId;
-    }
+      operationCount?: number;
+      isolationLevel?: IsolationLevel;
+    },
+    cause?: Error,
   ) {
-    super(message, { cause: options?.cause, context: options?.context });
+    // Support both old signature (code, msg, txnId, cause) and new options object
+    const options = typeof txnIdOrOptions === 'object' && txnIdOrOptions !== null && !Array.isArray(txnIdOrOptions) && !(txnIdOrOptions instanceof Error)
+      ? (txnIdOrOptions as { cause?: Error; context?: ErrorContext; txnId?: TransactionId; operationCount?: number; isolationLevel?: IsolationLevel })
+      : undefined;
+    const txnId = options ? options.txnId : (txnIdOrOptions as TransactionId | undefined);
+    const effectiveCause = options ? options.cause : cause;
+
+    super(message, { cause: effectiveCause, context: options?.context });
     this.name = 'TransactionError';
     this.code = code;
-    this.txnId = options?.txnId;
+    this.txnId = txnId;
+    this.operationCount = options?.operationCount;
+    this.isolationLevel = options?.isolationLevel;
 
     // Set category based on error code
     this.category = this.determineCategory();

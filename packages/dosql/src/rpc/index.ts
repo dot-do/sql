@@ -111,6 +111,14 @@ export {
   type CDCManager,
   type CDCSubscribeOptions,
   type CDCSubscription,
+
+  // Stream management
+  type StreamInfo,
+  type StreamStats,
+  type StreamManager,
+  type CleanupStats,
+  type MemoryUsage,
+  type MemoryMetrics,
 } from './server.js';
 
 // =============================================================================

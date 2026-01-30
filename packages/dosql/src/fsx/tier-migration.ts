@@ -45,6 +45,8 @@ export interface TierIndexEntry {
   accessCount: number;
   /** Whether file is pinned to hot tier */
   pinned?: boolean;
+  /** Write version counter for detecting concurrent writes during migration */
+  writeVersion?: number;
 }
 
 /**
@@ -274,6 +276,9 @@ export class TierMigrator {
       // Stop if we've freed enough space
       if (targetSize && bytesFreed >= targetSize) break;
 
+      // Capture the entry's writeVersion before migration to detect concurrent writes
+      const preWriteVersion = entry.writeVersion ?? 0;
+
       try {
         // Read from hot
         const data = await this.hotBackend.read(entry.path);
@@ -284,6 +289,15 @@ export class TierMigrator {
 
         // Write to cold
         await this.coldBackend.write(entry.path, data);
+
+        // Check if the file was concurrently written (writeVersion changed in tierIndex)
+        const currentEntry = tierIndex.get(entry.path);
+        if (currentEntry && (currentEntry.writeVersion ?? 0) !== preWriteVersion) {
+          // File was rewritten during migration - the new data is in hot storage.
+          // Keep the cold copy (it's stale but harmless), but don't delete from hot
+          // and don't update the index to COLD (it should stay HOT for the new data).
+          continue;
+        }
 
         // Update index
         const coldMeta = await this.coldBackend.metadata(entry.path);

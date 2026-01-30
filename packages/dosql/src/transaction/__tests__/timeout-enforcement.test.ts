@@ -879,9 +879,66 @@ describe('Timeout During Blocking Operations', () => {
   /**
    * Timeout should release waiting transactions
    */
-  it.skip('should notify waiting transactions when holder times out', async () => {
-    // This test requires complex coordination between two managers
-    // Skipping for now as it requires more infrastructure
+  it('should notify waiting transactions when holder times out', async () => {
+    // Verify that when a transaction holding a lock times out,
+    // the lock is released so other transactions can proceed
+    const walWriter = createMockWALWriter();
+    const manager = createTransactionManager({
+      walWriter,
+      lockManager,
+      timeoutConfig: {
+        defaultTimeoutMs: 150,
+        maxTimeoutMs: 60000,
+        gracePeriodMs: 30,
+        warningThresholdMs: 120,
+      },
+    });
+
+    // Transaction 1 acquires an exclusive lock
+    const ctx1 = await manager.begin({ timeoutMs: 150 });
+    await lockManager.acquire({
+      txnId: ctx1.txnId,
+      resource: 'users',
+      lockType: LockType.EXCLUSIVE,
+      timestamp: Date.now(),
+    });
+
+    // Wait for transaction 1 to time out (auto-rollback releases locks)
+    await delay(200);
+
+    // After timeout, the transaction should be rolled back
+    expect(manager.isActive()).toBe(false);
+
+    // The lock should be released, allowing another transaction to acquire it
+    // Verify by checking that no locks are held by the timed-out transaction
+    expect(lockManager.getHeldLocks(ctx1.txnId)).toHaveLength(0);
+
+    // A new transaction should be able to acquire the same lock
+    const manager2 = createTransactionManager({
+      walWriter: createMockWALWriter(),
+      lockManager,
+      timeoutConfig: {
+        defaultTimeoutMs: 5000,
+        maxTimeoutMs: 60000,
+        gracePeriodMs: 1000,
+        warningThresholdMs: 4000,
+      },
+    });
+
+    const ctx2 = await manager2.begin({});
+    const acquired = await lockManager.acquire({
+      txnId: ctx2.txnId,
+      resource: 'users',
+      lockType: LockType.EXCLUSIVE,
+      timestamp: Date.now(),
+    });
+
+    // The lock should be successfully acquired
+    expect(acquired).toBeDefined();
+    expect(lockManager.getHeldLocks(ctx2.txnId).length).toBeGreaterThan(0);
+
+    lockManager.releaseAll(ctx2.txnId);
+    await manager2.rollback();
   });
 
   /**

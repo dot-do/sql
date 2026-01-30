@@ -11,29 +11,16 @@ import { FSXError, FSXErrorCode } from './types.js';
 // R2-Specific Error Codes
 // =============================================================================
 
-/**
- * Extended error codes for R2 operations
- */
 export enum R2ErrorCode {
-  /** Network timeout during operation */
   TIMEOUT = 'R2_TIMEOUT',
-  /** Rate limit (429) exceeded */
   RATE_LIMITED = 'R2_RATE_LIMITED',
-  /** Checksum mismatch on read */
   CHECKSUM_MISMATCH = 'R2_CHECKSUM_MISMATCH',
-  /** Permission denied (403) */
   PERMISSION_DENIED = 'R2_PERMISSION_DENIED',
-  /** Bucket not bound in environment */
   BUCKET_NOT_BOUND = 'R2_BUCKET_NOT_BOUND',
-  /** Object size exceeds limit */
   SIZE_EXCEEDED = 'R2_SIZE_EXCEEDED',
-  /** Concurrent write conflict */
   CONFLICT = 'R2_CONFLICT',
-  /** Object not found (404) */
   NOT_FOUND = 'R2_NOT_FOUND',
-  /** Read operation during ongoing write */
   READ_DURING_WRITE = 'R2_READ_DURING_WRITE',
-  /** General network error */
   NETWORK_ERROR = 'R2_NETWORK_ERROR',
 }
 
@@ -41,23 +28,13 @@ export enum R2ErrorCode {
 // R2 Error Class
 // =============================================================================
 
-/**
- * R2-specific error with detailed context
- */
 export class R2Error extends FSXError {
-  /** R2-specific error code */
   readonly r2Code: R2ErrorCode;
-  /** HTTP status code if applicable */
   readonly httpStatus?: number;
-  /** Retry-After header value if rate limited */
   readonly retryAfter?: number;
-  /** Number of retries attempted */
   readonly retryCount?: number;
-  /** Expected checksum (for checksum errors) */
   readonly expectedChecksum?: string;
-  /** Actual checksum (for checksum errors) */
   readonly actualChecksum?: string;
-  /** Request ID for debugging */
   readonly requestId?: string;
 
   constructor(
@@ -72,10 +49,10 @@ export class R2Error extends FSXError {
       expectedChecksum?: string;
       actualChecksum?: string;
       requestId?: string;
+      fsxCode?: FSXErrorCode;
     }
   ) {
-    // Map R2 error code to FSX error code
-    const fsxCode = mapR2ToFSXErrorCode(r2Code);
+    const fsxCode = options?.fsxCode ?? mapR2ToFSXErrorCode(r2Code);
     super(fsxCode, message, path, options?.cause);
 
     this.name = 'R2Error';
@@ -88,9 +65,6 @@ export class R2Error extends FSXError {
     this.requestId = options?.requestId;
   }
 
-  /**
-   * Check if this error is retryable
-   */
   isRetryable(): boolean {
     return [
       R2ErrorCode.TIMEOUT,
@@ -100,9 +74,6 @@ export class R2Error extends FSXError {
     ].includes(this.r2Code);
   }
 
-  /**
-   * Get a user-friendly error message
-   */
   toUserMessage(): string {
     switch (this.r2Code) {
       case R2ErrorCode.TIMEOUT:
@@ -129,14 +100,11 @@ export class R2Error extends FSXError {
 // Error Detection Utilities
 // =============================================================================
 
-/**
- * Map R2 error code to FSX error code
- */
 function mapR2ToFSXErrorCode(r2Code: R2ErrorCode): FSXErrorCode {
   switch (r2Code) {
     case R2ErrorCode.TIMEOUT:
-    case R2ErrorCode.RATE_LIMITED:
     case R2ErrorCode.NETWORK_ERROR:
+    case R2ErrorCode.RATE_LIMITED:
       return FSXErrorCode.READ_FAILED;
     case R2ErrorCode.CHECKSUM_MISMATCH:
       return FSXErrorCode.CHUNK_CORRUPTED;
@@ -155,9 +123,31 @@ function mapR2ToFSXErrorCode(r2Code: R2ErrorCode): FSXErrorCode {
   }
 }
 
-/**
- * Detect R2 error type from an unknown error
- */
+export function mapR2ToFSXErrorCodeForOp(r2Code: R2ErrorCode, operation: string): FSXErrorCode {
+  const isWrite = operation === 'write' || operation === 'writeWithMetadata' || operation === 'delete' || operation === 'deleteMany';
+
+  switch (r2Code) {
+    case R2ErrorCode.TIMEOUT:
+    case R2ErrorCode.NETWORK_ERROR:
+    case R2ErrorCode.RATE_LIMITED:
+      return isWrite ? FSXErrorCode.WRITE_FAILED : FSXErrorCode.READ_FAILED;
+    case R2ErrorCode.CHECKSUM_MISMATCH:
+      return FSXErrorCode.CHUNK_CORRUPTED;
+    case R2ErrorCode.PERMISSION_DENIED:
+    case R2ErrorCode.BUCKET_NOT_BOUND:
+      return isWrite ? FSXErrorCode.WRITE_FAILED : FSXErrorCode.READ_FAILED;
+    case R2ErrorCode.SIZE_EXCEEDED:
+      return FSXErrorCode.SIZE_EXCEEDED;
+    case R2ErrorCode.CONFLICT:
+    case R2ErrorCode.READ_DURING_WRITE:
+      return FSXErrorCode.WRITE_FAILED;
+    case R2ErrorCode.NOT_FOUND:
+      return FSXErrorCode.NOT_FOUND;
+    default:
+      return isWrite ? FSXErrorCode.WRITE_FAILED : FSXErrorCode.READ_FAILED;
+  }
+}
+
 export function detectR2ErrorType(error: unknown): R2ErrorCode {
   if (!(error instanceof Error)) {
     return R2ErrorCode.NETWORK_ERROR;
@@ -166,42 +156,39 @@ export function detectR2ErrorType(error: unknown): R2ErrorCode {
   const message = error.message.toLowerCase();
   const name = error.name.toLowerCase();
 
-  // Timeout detection
   if (message.includes('timeout') || message.includes('timed out') || message.includes('etimedout') || name.includes('timeout')) {
     return R2ErrorCode.TIMEOUT;
   }
 
-  // Rate limit detection
   if (message.includes('429') || message.includes('rate limit') || message.includes('too many')) {
     return R2ErrorCode.RATE_LIMITED;
   }
 
-  // Permission detection
-  if (message.includes('403') || message.includes('forbidden') || message.includes('permission') || message.includes('access denied')) {
+  if (message.includes('checksum') || name.includes('checksum') || message.includes('md5') || message.includes('integrity')) {
+    return R2ErrorCode.CHECKSUM_MISMATCH;
+  }
+
+  if (message.includes('permission') || message.includes('access denied') || name.includes('permission') || message.includes('forbidden')) {
     return R2ErrorCode.PERMISSION_DENIED;
   }
 
-  // Not found detection
+  // Bucket not bound - check BEFORE "not found"
+  if (message.includes('bucket') || message.includes('binding') || message.includes('not bound')) {
+    return R2ErrorCode.BUCKET_NOT_BOUND;
+  }
+
   if (message.includes('404') || message.includes('not found')) {
     return R2ErrorCode.NOT_FOUND;
   }
 
-  // Bucket not bound detection
-  if (message.includes('binding') || message.includes('not bound') || message.includes('undefined')) {
-    return R2ErrorCode.BUCKET_NOT_BOUND;
+  if (message.includes('being written') || message.includes('write in progress')) {
+    return R2ErrorCode.READ_DURING_WRITE;
   }
 
-  // Checksum detection
-  if (message.includes('checksum') || message.includes('md5') || message.includes('integrity')) {
-    return R2ErrorCode.CHECKSUM_MISMATCH;
-  }
-
-  // Conflict detection
   if (message.includes('conflict') || message.includes('concurrent') || message.includes('etag')) {
     return R2ErrorCode.CONFLICT;
   }
 
-  // Size detection
   if (message.includes('size') || message.includes('too large') || message.includes('exceed')) {
     return R2ErrorCode.SIZE_EXCEEDED;
   }
@@ -209,32 +196,140 @@ export function detectR2ErrorType(error: unknown): R2ErrorCode {
   return R2ErrorCode.NETWORK_ERROR;
 }
 
+function buildR2ErrorMessage(
+  errorType: R2ErrorCode,
+  originalError: Error,
+  path?: string,
+  operation?: string,
+): string {
+  const pathStr = path ? ` for path "${path}"` : '';
+
+  switch (errorType) {
+    case R2ErrorCode.TIMEOUT:
+      return `R2 timeout during ${operation}${pathStr}: ${originalError.message}`;
+
+    case R2ErrorCode.RATE_LIMITED:
+      return `R2 rate limit (429) exceeded during ${operation}${pathStr}: retry after 1s - ${originalError.message}`;
+
+    case R2ErrorCode.PERMISSION_DENIED:
+      return `R2 permission denied (403) during ${operation}${pathStr}: ${originalError.message}`;
+
+    case R2ErrorCode.BUCKET_NOT_BOUND:
+      return `R2 bucket not bound during ${operation}${pathStr}: check wrangler.toml binding configuration - ${originalError.message}`;
+
+    case R2ErrorCode.CHECKSUM_MISMATCH: {
+      const ce = originalError as { expected?: string; actual?: string };
+      let msg = `R2 checksum mismatch during ${operation}${pathStr}`;
+      if (ce.expected && ce.actual) {
+        msg += `: expected ${ce.expected}, got ${ce.actual}`;
+      } else {
+        msg += `: ${originalError.message}`;
+      }
+      return msg;
+    }
+
+    case R2ErrorCode.SIZE_EXCEEDED:
+      return `R2 object size exceeded (max 5GB) during ${operation}${pathStr}: consider using multipart upload - ${originalError.message}`;
+
+    case R2ErrorCode.CONFLICT:
+      return `R2 concurrent write conflict during ${operation}${pathStr}: retry the operation - ${originalError.message}`;
+
+    case R2ErrorCode.READ_DURING_WRITE:
+      return `R2 write in progress during ${operation}${pathStr}: retry after write completes - ${originalError.message}`;
+
+    default:
+      return `R2 operation failed during ${operation}${pathStr}: ${originalError.message}`;
+  }
+}
+
 /**
- * Create an R2Error from a generic error
+ * Create a detailed R2Error from a generic error
  */
 export function createR2Error(error: unknown, path?: string, context?: string): R2Error {
   const errorType = detectR2ErrorType(error);
   const originalError = error instanceof Error ? error : new Error(String(error));
+  const operation = context ?? 'unknown';
 
-  let message = `R2 operation failed`;
-  if (context) {
-    message += ` during ${context}`;
-  }
-  if (path) {
-    message += ` for path "${path}"`;
-  }
-  message += `: ${originalError.message}`;
+  const fsxCode = mapR2ToFSXErrorCodeForOp(errorType, operation);
+  const message = buildR2ErrorMessage(errorType, originalError, path, operation);
 
-  return new R2Error(errorType, message, path, { cause: originalError });
+  const options: {
+    cause?: Error;
+    httpStatus?: number;
+    retryAfter?: number;
+    expectedChecksum?: string;
+    actualChecksum?: string;
+    fsxCode: FSXErrorCode;
+  } = { cause: originalError, fsxCode };
+
+  if (errorType === R2ErrorCode.RATE_LIMITED) {
+    options.httpStatus = 429;
+    options.retryAfter = 1;
+  } else if (errorType === R2ErrorCode.PERMISSION_DENIED) {
+    options.httpStatus = 403;
+  }
+
+  if (errorType === R2ErrorCode.CHECKSUM_MISMATCH && originalError) {
+    const checksumError = originalError as { expected?: string; actual?: string };
+    if (checksumError.expected) options.expectedChecksum = checksumError.expected;
+    if (checksumError.actual) options.actualChecksum = checksumError.actual;
+  }
+
+  return new R2Error(errorType, message, path, options);
+}
+
+/**
+ * Create an R2Error for retries-exhausted scenario
+ */
+export function createRetriesExhaustedError(
+  lastError: unknown,
+  path: string | undefined,
+  operation: string,
+  retryCount: number,
+): R2Error {
+  const originalError = lastError instanceof Error ? lastError : new Error(String(lastError));
+  const errorType = detectR2ErrorType(lastError);
+  const fsxCode = mapR2ToFSXErrorCodeForOp(errorType, operation);
+  const baseMessage = buildR2ErrorMessage(errorType, originalError, path, operation);
+
+  const message = `${baseMessage} (retries exhausted after ${retryCount} attempts)`;
+
+  return new R2Error(errorType, message, path, {
+    cause: originalError,
+    retryCount,
+    fsxCode,
+  });
+}
+
+/**
+ * Create an R2Error for circuit breaker open state
+ */
+export function createCircuitOpenError(
+  path: string | undefined,
+  operation: string,
+  failureCount: number,
+): R2Error {
+  const pathStr = path ? ` for path "${path}"` : '';
+  const message = `R2 circuit open${pathStr}: ${operation} rejected - failure count: ${failureCount}`;
+
+  return new R2Error(R2ErrorCode.NETWORK_ERROR, message, path);
+}
+
+/**
+ * Create an R2Error for partial write failure
+ */
+export function createPartialWriteError(path: string, cause: Error): R2Error {
+  const message = `R2 write failed for path "${path}": partial write detected - checksum mismatch after write`;
+  return new R2Error(R2ErrorCode.NETWORK_ERROR, message, path, {
+    cause,
+    fsxCode: FSXErrorCode.WRITE_FAILED,
+  });
 }
 
 // =============================================================================
 // Error Message Formatting
 // =============================================================================
 
-/**
- * Format R2 error for logging
- */
 export function formatR2ErrorForLog(error: R2Error): string {
   const parts: string[] = [
     `[${error.r2Code}]`,

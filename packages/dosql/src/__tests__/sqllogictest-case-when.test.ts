@@ -737,7 +737,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
      * KNOWN FAILURE: CASE in ORDER BY
      * Requires ORDER BY expression support (not implemented in InMemoryEngine)
      */
-    it.fails('should handle CASE in ORDER BY clause', () => {
+    it('should handle CASE in ORDER BY clause', () => {
       const result = db.prepare(`
         SELECT id, customer, amount, status
         FROM orders
@@ -756,7 +756,7 @@ describe('SQLLogicTest CASE WHEN Compatibility', () => {
      * KNOWN FAILURE: CASE in WHERE clause
      * Requires WHERE expression support (not implemented in InMemoryEngine)
      */
-    it.fails('should handle CASE in WHERE clause', () => {
+    it('should handle CASE in WHERE clause', () => {
       const result = db.prepare(`
         SELECT id, customer, amount
         FROM orders

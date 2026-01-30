@@ -216,7 +216,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
   // ===========================================================================
 
   describe('INSERT without column list - DEFAULT values', () => {
-    it.fails('should accept INSERT with DEFAULT keyword', () => {
+    it('should accept INSERT with DEFAULT keyword', () => {
       db.exec('CREATE TABLE t1 (a INTEGER DEFAULT 0, b TEXT DEFAULT \'none\')');
 
       // Using DEFAULT keyword should use column default
@@ -227,7 +227,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 0, b: 'none' });
     });
 
-    it.fails('should accept INSERT mixing DEFAULT and literal values', () => {
+    it('should accept INSERT mixing DEFAULT and literal values', () => {
       db.exec("CREATE TABLE t1 (a INTEGER DEFAULT 99, b TEXT DEFAULT 'default')");
 
       db.exec("INSERT INTO t1 VALUES(DEFAULT, 'explicit')");
@@ -243,7 +243,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
   // ===========================================================================
 
   describe('INSERT without column list - AUTOINCREMENT', () => {
-    it.fails('should accept INSERT without column list with PRIMARY KEY', () => {
+    it('should accept INSERT without column list with PRIMARY KEY', () => {
       db.exec('CREATE TABLE t1 (id INTEGER PRIMARY KEY, name TEXT)');
 
       // When inserting into a table with INTEGER PRIMARY KEY, NULL auto-generates ID
@@ -266,7 +266,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ id: 100, name: 'explicit id' });
     });
 
-    it.fails('should accept INSERT without column list with AUTOINCREMENT', () => {
+    it('should accept INSERT without column list with AUTOINCREMENT', () => {
       db.exec('CREATE TABLE t1 (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
 
       db.exec("INSERT INTO t1 VALUES(NULL, 'auto')");
@@ -283,7 +283,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
   // ===========================================================================
 
   describe('INSERT without column list - Expressions in VALUES', () => {
-    it.fails('should accept INSERT with arithmetic expressions', () => {
+    it('should accept INSERT with arithmetic expressions', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b INTEGER)');
 
       db.exec('INSERT INTO t1 VALUES(1 + 2, 3 * 4)');
@@ -293,7 +293,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 3, b: 12 });
     });
 
-    it.fails('should accept INSERT with string concatenation', () => {
+    it('should accept INSERT with string concatenation', () => {
       db.exec('CREATE TABLE t1 (a TEXT)');
 
       db.exec("INSERT INTO t1 VALUES('hello' || ' ' || 'world')");
@@ -303,7 +303,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[0]).toEqual({ a: 'hello world' });
     });
 
-    it.fails('should accept INSERT with function calls', () => {
+    it('should accept INSERT with function calls', () => {
       db.exec('CREATE TABLE t1 (a TEXT, b INTEGER)');
 
       db.exec("INSERT INTO t1 VALUES(UPPER('test'), ABS(-42))");
@@ -319,7 +319,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
   // ===========================================================================
 
   describe('INSERT without column list - Multi-row INSERT', () => {
-    it.fails('should accept INSERT with multiple VALUES tuples', () => {
+    it('should accept INSERT with multiple VALUES tuples', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       // SQL standard multi-row insert
@@ -332,7 +332,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       expect(result[2]).toEqual({ a: 3, b: 'three' });
     });
 
-    it.fails('should accept INSERT with multiple VALUES and NULL', () => {
+    it('should accept INSERT with multiple VALUES and NULL', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       db.exec("INSERT INTO t1 VALUES(1, 'one'), (NULL, 'null-a'), (3, NULL)");
@@ -342,7 +342,7 @@ describe('SQLLogicTest INSERT Compatibility', () => {
       // Note: NULL sorts differently, this tests the actual insert worked
     });
 
-    it.fails('should accept INSERT with multiple VALUES using params', () => {
+    it('should accept INSERT with multiple VALUES using params', () => {
       db.exec('CREATE TABLE t1 (a INTEGER, b TEXT)');
 
       const stmt = db.prepare('INSERT INTO t1 VALUES(?, ?), (?, ?)');

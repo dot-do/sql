@@ -72,12 +72,12 @@ import type {
   CDCEvent as DoLakeCDCEvent,
   CDCOperation as DoLakeCDCOperation,
   ClientCapabilities as DoLakeClientCapabilities,
-} from 'dolake';
+} from '@dotdo/dolake';
 
 import {
   CDCOperationCode as DoLakeCDCOperationCode,
   DEFAULT_CLIENT_CAPABILITIES as DoLakeDefaultCapabilities,
-} from 'dolake';
+} from '@dotdo/dolake';
 
 // Lake.do types (lake.do client) - now re-exports from sql.do
 import type {

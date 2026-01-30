@@ -842,7 +842,7 @@ describe('WAL Retention Policy - Configuration Interface [RED]', () => {
     expect(policy.keepCheckpointCount).toBe(3);
   });
 
-  it.fails('should validate retention policy configuration on creation', async () => {
+  it('should validate retention policy configuration on creation', async () => {
     // GAP: Need better validation error messages
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader } = await import('../reader.js');
@@ -858,7 +858,7 @@ describe('WAL Retention Policy - Configuration Interface [RED]', () => {
     expect(() => createWALRetentionManager(backend, reader, null, invalidPolicy)).toThrow(/Invalid retention policy/);
   });
 
-  it.fails('should support loading retention policy from configuration file', async () => {
+  it('should support loading retention policy from configuration file', async () => {
     // GAP: No configuration file support
     const retentionModule = await importRetentionModule();
     const { createWALReader } = await import('../reader.js');
@@ -883,7 +883,7 @@ describe('WAL Retention Policy - Configuration Interface [RED]', () => {
     expect(manager.getPolicy().maxSegmentAge).toBe(86400000);
   });
 
-  it.fails('should support policy inheritance and composition', async () => {
+  it('should support policy inheritance and composition', async () => {
     // GAP: No policy composition/inheritance support
     const retentionModule = await importRetentionModule();
     const { createWALReader } = await import('../reader.js');
@@ -981,7 +981,7 @@ describe('WAL Retention Policy - Metrics [RED]', () => {
     expect(metrics.lastCleanupTime).toBeDefined();
   });
 
-  it.fails('should support custom metrics reporters (Prometheus, StatsD, etc.)', async () => {
+  it('should support custom metrics reporters (Prometheus, StatsD, etc.)', async () => {
     // GAP: No pluggable metrics reporter interface
     const retentionModule = await importRetentionModule();
     const { createWALReader } = await import('../reader.js');
@@ -1007,7 +1007,7 @@ describe('WAL Retention Policy - Metrics [RED]', () => {
     expect(metrics).toContain('dosql_wal_bytes_total');
   });
 
-  it.fails('should emit metrics events for real-time monitoring', async () => {
+  it('should emit metrics events for real-time monitoring', async () => {
     // GAP: No event-based metrics emission
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader } = await import('../reader.js');
@@ -1091,7 +1091,7 @@ describe('WAL Retention Policy - Advanced Features [RED]', () => {
     backend = createTestBackend();
   });
 
-  it.fails('should support retention policies per table', async () => {
+  it('should support retention policies per table', async () => {
     // GAP: No per-table retention configuration
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader } = await import('../reader.js');
@@ -1111,7 +1111,7 @@ describe('WAL Retention Policy - Advanced Features [RED]', () => {
     expect(auditPolicy?.retentionHours).toBe(90 * 24); // Days converted to hours
   });
 
-  it.fails('should support retention policy based on transaction importance', async () => {
+  it('should support retention policy based on transaction importance', async () => {
     // GAP: No transaction-level retention hints
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader, createWALWriter } = await import('../index.js');
@@ -1141,7 +1141,7 @@ describe('WAL Retention Policy - Advanced Features [RED]', () => {
     await writer.close();
   });
 
-  it.fails('should support scheduled retention windows', async () => {
+  it('should support scheduled retention windows', async () => {
     // GAP: No time-of-day scheduling for cleanup
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader } = await import('../reader.js');
@@ -1160,7 +1160,7 @@ describe('WAL Retention Policy - Advanced Features [RED]', () => {
     expect(typeof canCleanup).toBe('boolean');
   });
 
-  it.fails('should support dry-run with impact analysis', async () => {
+  it('should support dry-run with impact analysis', async () => {
     // GAP: No detailed impact analysis for dry-run
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader } = await import('../reader.js');
@@ -1181,7 +1181,7 @@ describe('WAL Retention Policy - Advanced Features [RED]', () => {
     expect(impact).toHaveProperty('risks'); // Array of potential issues
   });
 
-  it.fails('should support atomic cleanup with rollback on failure', async () => {
+  it('should support atomic cleanup with rollback on failure', async () => {
     // GAP: No transactional cleanup with rollback
     const { createWALRetentionManager } = await import('../retention.js');
     const { createWALReader } = await import('../reader.js');

@@ -17,6 +17,8 @@ import {
   createCountMismatchError,
   createNamedExpectedError,
   createNonFiniteNumberError,
+  createMixedParametersError,
+  createArrayForNamedParamsError,
 } from '../errors/index.js';
 
 // Re-export BindingError for backwards compatibility
@@ -79,6 +81,11 @@ export interface ParsedParameters {
    * Parsed parameter tokens
    */
   tokens: ParameterToken[];
+
+  /**
+   * Whether any positional parameters (?) were found
+   */
+  hasPositionalParameters: boolean;
 
   /**
    * Whether any named parameters were found
@@ -204,6 +211,7 @@ export function parseParameters(sql: string): ParsedParameters {
   let positionalIndex = 0;
   let maxNumberedIndex = 0;
   const namedParameterNames = new Set<string>();
+  let hasPositionalParameters = false;
   let hasNamedParameters = false;
   let hasNumberedParameters = false;
 
@@ -272,6 +280,7 @@ export function parseParameters(sql: string): ParsedParameters {
 
       // Positional parameter
       positionalIndex++;
+      hasPositionalParameters = true;
       tokens.push({
         type: 'positional',
         text: '?',
@@ -285,6 +294,17 @@ export function parseParameters(sql: string): ParsedParameters {
 
     // Handle named parameters
     if (char === ':' || char === '@' || char === '$') {
+      // Skip :: (PostgreSQL type cast syntax) - not a named parameter
+      if (char === ':' && sql[i + 1] === ':') {
+        // Skip both colons and the identifier that follows
+        i += 2;
+        // Skip the identifier after :: (e.g., ::text, ::jsonb)
+        while (i < sql.length && isIdentifierChar(sql[i])) {
+          i++;
+        }
+        continue;
+      }
+
       const namedToken = parseNamedParam(sql, i);
       if (namedToken) {
         tokens.push(namedToken);
@@ -313,6 +333,7 @@ export function parseParameters(sql: string): ParsedParameters {
     normalizedSql,
     originalSql: sql,
     tokens,
+    hasPositionalParameters,
     hasNamedParameters,
     hasNumberedParameters,
     maxNumberedIndex,
@@ -411,9 +432,20 @@ export function bindParameters(
 ): SqlValue[] {
   const values: SqlValue[] = [];
 
+  // Check for mixed positional and named parameters
+  if (parsed.hasPositionalParameters && parsed.hasNamedParameters) {
+    throw createMixedParametersError();
+  }
+
   // Handle case where single object is passed for named parameters
   const firstParam = params[0];
   const isNamed = params.length === 1 && isNamedParameters(firstParam as BindParameters);
+
+  // Check if array is passed for named parameters
+  if (parsed.hasNamedParameters && params.length === 1 && Array.isArray(firstParam)) {
+    throw createArrayForNamedParamsError();
+  }
+
   const namedParams = isNamed ? (firstParam as NamedParameters) : {};
   const positionalParams = isNamed ? [] : (params as SqlValue[]);
 
@@ -465,6 +497,11 @@ export function validateParameters(
   parsed: ParsedParameters,
   ...params: unknown[]
 ): void {
+  // Check for mixed positional and named parameters
+  if (parsed.hasPositionalParameters && parsed.hasNamedParameters) {
+    throw createMixedParametersError();
+  }
+
   const firstParam = params[0];
   const isNamed = params.length === 1 && isNamedParameters(firstParam as BindParameters);
 

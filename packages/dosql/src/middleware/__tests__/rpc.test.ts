@@ -793,7 +793,9 @@ describe('exposeDoSQL Middleware', () => {
 
   it('should handle WebSocket upgrade request', async () => {
     const stub = createMockDOStub();
-    stub.fetch.mockResolvedValue(new Response(null, { status: 101 }));
+    // Note: Response constructor doesn't accept status 101, so we use 200
+    // and verify the stub was called with the correct upgrade request
+    stub.fetch.mockResolvedValue(new Response(null, { status: 200 }));
     const namespace = createMockNamespace(stub);
     const middleware = exposeDoSQL({ doBinding: 'SQL_DO' });
 
@@ -805,7 +807,10 @@ describe('exposeDoSQL Middleware', () => {
 
     await middleware(ctx as unknown as Parameters<typeof middleware>[0], next);
 
+    // Verify the WebSocket upgrade was forwarded to the DO stub
     expect(stub.fetch).toHaveBeenCalled();
+    const calledRequest = stub.fetch.mock.calls[0][0] as Request;
+    expect(calledRequest.headers.get('upgrade')).toBe('websocket');
   });
 });
 

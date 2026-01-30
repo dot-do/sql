@@ -64,6 +64,8 @@ export {
   createCountMismatchError,
   createNamedExpectedError,
   createNonFiniteNumberError,
+  createMixedParametersError,
+  createArrayForNamedParamsError,
 } from './binding-errors.js';
 
 // Typed errors (Planner, Executor, Parser, Storage)

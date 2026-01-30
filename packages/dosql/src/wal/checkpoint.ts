@@ -75,6 +75,7 @@ export function createCheckpointManager(
   async function findSegmentForLSN(lsn: bigint): Promise<string | null> {
     const segments = await reader.listSegments(false);
 
+    // First pass: exact match (LSN is within segment range)
     for (const segmentId of segments) {
       const segment = await reader.readSegment(segmentId);
       if (segment && segment.startLSN <= lsn && segment.endLSN >= lsn) {
@@ -82,7 +83,20 @@ export function createCheckpointManager(
       }
     }
 
-    return null;
+    // Second pass: find the closest segment whose endLSN is <= lsn
+    // This handles the common case where getCurrentLSN() returns the NEXT LSN
+    // (one past the last written entry), which won't be inside any segment.
+    let bestSegmentId: string | null = null;
+    let bestEndLSN: bigint = -1n;
+    for (const segmentId of segments) {
+      const segment = await reader.readSegment(segmentId);
+      if (segment && segment.endLSN <= lsn && segment.endLSN > bestEndLSN) {
+        bestEndLSN = segment.endLSN;
+        bestSegmentId = segmentId;
+      }
+    }
+
+    return bestSegmentId;
   }
 
   /**
@@ -463,7 +477,7 @@ export function createAutoCheckpointer(
   const timeInterval = options.timeInterval ?? 60000;
   const { getActiveTransactions, onCheckpoint } = options;
 
-  let lastCheckpointLSN = 0n;
+  let lastCheckpointLSN = -1n;
   let lastCheckpointTime = Date.now();
   let entriesSinceCheckpoint = 0;
   let timer: ReturnType<typeof setInterval> | null = null;

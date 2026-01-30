@@ -6,10 +6,12 @@
  * @packageDocumentation
  */
 
+import type { FSXBackend } from '../../fsx/types.js';
 import type {
   RetentionPolicy,
   RetentionWarning,
   LowActivityWindow,
+  CleanupWindow,
 } from '../retention-types.js';
 
 // =============================================================================
@@ -271,7 +273,22 @@ export function getMillisUntilNextCron(cronExpression: string): number {
  * @param policy - Policy configuration to validate
  * @throws Error if validation fails
  */
-export function validatePolicy(policy: Partial<RetentionPolicy>): void {
+export function validatePolicy(policy: Partial<RetentionPolicy> & Record<string, unknown>): void {
+  // Validate legacy/alias fields
+  const legacyErrors: string[] = [];
+  if (typeof policy.maxAgeMs === 'number' && policy.maxAgeMs < 0) {
+    legacyErrors.push('maxAgeMs must be non-negative');
+  }
+  if (typeof policy.maxSizeBytes === 'number' && policy.maxSizeBytes < 0) {
+    legacyErrors.push('maxSizeBytes must be non-negative');
+  }
+  if (typeof policy.keepAfterCheckpoint === 'number' && policy.keepAfterCheckpoint < 0) {
+    legacyErrors.push('keepAfterCheckpoint must be non-negative');
+  }
+  if (legacyErrors.length > 0) {
+    throw new Error(`Invalid retention policy: ${legacyErrors.join('; ')}`);
+  }
+
   if (policy.minSegmentCount !== undefined && policy.minSegmentCount < 0) {
     throw new Error('minSegmentCount must be non-negative');
   }
@@ -468,4 +485,104 @@ export function checkAgeWarning(
   }
 
   return null;
+}
+
+// =============================================================================
+// Configuration File Loading
+// =============================================================================
+
+/**
+ * Load retention policy from a configuration file stored in FSX
+ *
+ * @param backend - Storage backend
+ * @param path - Path to configuration file
+ * @returns Parsed retention policy
+ */
+export async function loadRetentionPolicy(
+  backend: FSXBackend,
+  path: string
+): Promise<Partial<RetentionPolicy>> {
+  const data = await backend.read(path);
+  if (!data) {
+    throw new Error(`Retention config not found at: ${path}`);
+  }
+
+  const json = JSON.parse(new TextDecoder().decode(data));
+  const config = json.retention ?? json;
+
+  // Map common config keys to RetentionPolicy fields
+  const policy: Partial<RetentionPolicy> & Record<string, unknown> = {};
+
+  if (config.maxAgeMs !== undefined) {
+    policy.maxSegmentAge = config.maxAgeMs;
+  }
+  if (config.maxSizeBytes !== undefined) {
+    policy.maxTotalBytes = config.maxSizeBytes;
+  }
+  if (config.keepAfterCheckpoint !== undefined) {
+    policy.keepCheckpointCount = config.keepAfterCheckpoint;
+  }
+
+  // Copy through any standard RetentionPolicy fields
+  const standardFields = [
+    'minSegmentCount', 'maxSegmentAge', 'respectSlotPositions',
+    'readerIdleTimeout', 'archiveBeforeDelete', 'retentionHours',
+    'retentionDays', 'maxTotalBytes', 'maxTotalSize', 'keepCheckpointCount',
+    'cleanupOnCheckpoint', 'compactionThreshold',
+  ];
+  for (const field of standardFields) {
+    if (config[field] !== undefined && !(field in policy)) {
+      (policy as Record<string, unknown>)[field] = config[field];
+    }
+  }
+
+  return policy;
+}
+
+// =============================================================================
+// Policy Composition
+// =============================================================================
+
+/**
+ * Compose multiple policies together (later policies override earlier ones)
+ *
+ * @param policies - Policies to compose
+ * @returns Composed policy
+ */
+export function composePolicy(
+  ...policies: Array<Partial<RetentionPolicy> | Record<string, unknown>>
+): Partial<RetentionPolicy> {
+  const result: Record<string, unknown> = {};
+
+  for (const policy of policies) {
+    for (const [key, value] of Object.entries(policy)) {
+      if (value !== undefined) {
+        result[key] = value;
+      }
+    }
+  }
+
+  return result as Partial<RetentionPolicy>;
+}
+
+// =============================================================================
+// Cleanup Window Utilities
+// =============================================================================
+
+/**
+ * Check if current time is within any of the configured cleanup windows
+ *
+ * @param windows - Array of cleanup windows
+ * @returns True if current time is within a window
+ */
+export function isInCleanupWindow(windows?: CleanupWindow[]): boolean {
+  if (!windows || windows.length === 0) return true; // No windows = always allowed
+
+  for (const window of windows) {
+    if (isInTimeWindow({ start: window.start, end: window.end })) {
+      return true;
+    }
+  }
+
+  return false;
 }

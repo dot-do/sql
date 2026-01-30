@@ -1250,11 +1250,10 @@ describe('Cross-DO Communication: Replica Promotion Scenarios', () => {
     });
 
     /**
-     * TDD RED PHASE: Document expected behavior when no healthy candidates
-     * GAP: initiateFailover does not filter out offline replicas when selecting candidates
-     * Expected: Should reject failover when all candidates are offline
+     * GREEN PHASE: Correctly rejects failover when no healthy candidates
+     * The initiateFailover implementation filters out offline replicas when selecting candidates.
      */
-    it.fails('rejects failover when no healthy candidates', async () => {
+    it('rejects failover when no healthy candidates', async () => {
       const primary = createPrimary({ backend: primaryBackend, walWriter: primaryWalWriter, walReader: primaryWalReader });
 
       // Register offline replicas

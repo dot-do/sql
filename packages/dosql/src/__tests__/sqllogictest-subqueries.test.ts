@@ -256,7 +256,7 @@ describe('SQLLogicTest Subqueries', () => {
      * KNOWN FAILURE: Subquery from different table in WHERE with compound conditions
      * TODO: Compound AND conditions with multiple subqueries not supported
      */
-    it.fails('should support subquery from different table in WHERE', () => {
+    it('should support subquery from different table in WHERE', () => {
       db.exec('CREATE TABLE thresholds (min_val INTEGER, max_val INTEGER)');
       db.exec('INSERT INTO thresholds (min_val, max_val) VALUES (20, 40)');
 
@@ -526,7 +526,7 @@ describe('SQLLogicTest Subqueries', () => {
      * KNOWN FAILURE: EXISTS with aggregate correlated condition
      * TODO: EXISTS with GROUP BY/HAVING in subquery not supported
      */
-    it.fails('should support EXISTS with aggregate in subquery', () => {
+    it('should support EXISTS with aggregate in subquery', () => {
       // Select customers who have more than 1 order
       const result = db.prepare(`
         SELECT * FROM customers c

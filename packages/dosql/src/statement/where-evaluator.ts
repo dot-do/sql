@@ -1,9 +1,10 @@
 /**
  * WHERE clause evaluator with support for complex conditions
- * Handles: AND, OR, NOT, IN, NOT IN, BETWEEN, comparisons
+ * Handles: AND, OR, NOT, IN, NOT IN, BETWEEN, comparisons, CASE expressions
  */
 
 import type { SqlValue } from './types.js';
+import { evaluateCaseExpr, containsCaseExpression } from './case-expr.js';
 
 type ParseValueListFn = (valueList: string, params: SqlValue[], startParamIndex: number) => { values: SqlValue[]; paramIndex: number };
 type ValuesEqualFn = (a: SqlValue, b: SqlValue) => boolean;
@@ -186,6 +187,64 @@ export function evaluateWhereCondition(
     return isNot ? colVal !== null : colVal === null;
   }
 
+  // Handle CASE expression in WHERE clause (e.g., CASE WHEN ... END = value)
+  if (containsCaseExpression(trimmed)) {
+    // Find comparison operator outside CASE...END blocks
+    let caseDepth = 0;
+    let inStr = false;
+    let parenDep = 0;
+    const upperTrimmed = trimmed.toUpperCase();
+
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (ch === "'" && !inStr) { inStr = true; continue; }
+      if (ch === "'" && inStr) {
+        if (trimmed[i + 1] === "'") { i++; continue; }
+        inStr = false; continue;
+      }
+      if (inStr) continue;
+      if (ch === '(') { parenDep++; continue; }
+      if (ch === ')') { parenDep--; continue; }
+      if (upperTrimmed.slice(i).startsWith('CASE') && (i + 4 >= trimmed.length || !/\w/.test(trimmed[i + 4]))) {
+        caseDepth++; i += 3; continue;
+      }
+      if (upperTrimmed.slice(i).startsWith('END') && (i + 3 >= trimmed.length || !/\w/.test(trimmed[i + 3]))) {
+        if (caseDepth > 0) caseDepth--;
+        i += 2; continue;
+      }
+
+      if (caseDepth === 0 && parenDep === 0) {
+        const twoChar = trimmed.slice(i, i + 2);
+        let op: string | null = null;
+        let opLen = 0;
+        if (twoChar === '>=' || twoChar === '<=' || twoChar === '<>' || twoChar === '!=') {
+          op = twoChar; opLen = 2;
+        } else if (ch === '>' || ch === '<' || ch === '=') {
+          const next = trimmed[i + 1];
+          if ((ch === '>' || ch === '<') && next === '=') continue;
+          if (ch === '<' && next === '>') continue;
+          op = ch; opLen = 1;
+        }
+
+        if (op) {
+          const leftExpr = trimmed.slice(0, i).trim();
+          const rightExpr = trimmed.slice(i + opLen).trim();
+          if (containsCaseExpression(leftExpr)) {
+            const pIdx2 = { value: pIdx.value };
+            const leftVal = evaluateCaseExpr(leftExpr, row, params, pIdx2);
+            const rightVal = parseConditionValue(rightExpr, params, pIdx);
+            return compareValues(leftVal, rightVal, op.toUpperCase(), deps);
+          }
+        }
+      }
+    }
+
+    // If we got here with a CASE expression but no comparison, evaluate as boolean
+    const pIdx2 = { value: pIdx.value };
+    const val = evaluateCaseExpr(trimmed, row, params, pIdx2);
+    return val !== null && val !== 0 && val !== false && val !== '';
+  }
+
   // Handle comparison: col op val
   const compMatch = trimmed.match(/^(\w+(?:\.\w+)?)\s*(>=|<=|<>|!=|>|<|=|LIKE)\s*(.+)$/i);
   if (compMatch) {
@@ -335,10 +394,22 @@ function compareValues(left: SqlValue, right: SqlValue, op: string, deps: WhereE
     case '=': return deps.valuesEqual(left, right);
     case '<>':
     case '!=': return !deps.valuesEqual(left, right);
-    case '>': return Number(left) > Number(right);
-    case '<': return Number(left) < Number(right);
-    case '>=': return Number(left) >= Number(right);
-    case '<=': return Number(left) <= Number(right);
+    case '>': {
+      if (typeof left === 'string' && typeof right === 'string') return left > right;
+      return Number(left) > Number(right);
+    }
+    case '<': {
+      if (typeof left === 'string' && typeof right === 'string') return left < right;
+      return Number(left) < Number(right);
+    }
+    case '>=': {
+      if (typeof left === 'string' && typeof right === 'string') return left >= right;
+      return Number(left) >= Number(right);
+    }
+    case '<=': {
+      if (typeof left === 'string' && typeof right === 'string') return left <= right;
+      return Number(left) <= Number(right);
+    }
     case 'LIKE':
       if (typeof left === 'string' && typeof right === 'string') {
         const regex = new RegExp(

@@ -302,7 +302,7 @@ function valuesEqualForExpr(a: SqlValue, b: SqlValue): boolean {
  * Token types for expression lexer
  */
 interface ArithToken {
-  type: 'number' | 'identifier' | 'operator' | 'lparen' | 'rparen' | 'comma' | 'null';
+  type: 'number' | 'identifier' | 'operator' | 'lparen' | 'rparen' | 'comma' | 'null' | 'string';
   value: string;
 }
 
@@ -311,6 +311,7 @@ interface ArithToken {
  */
 type ArithExprNode =
   | { type: 'number'; value: number }
+  | { type: 'string'; value: string }
   | { type: 'column'; name: string }
   | { type: 'null' }
   | { type: 'binary'; op: '+' | '-' | '*' | '/' | '%'; left: ArithExprNode; right: ArithExprNode }
@@ -337,6 +338,27 @@ function tokenizeArith(expr: string): ArithToken[] {
         num += expr[i++];
       }
       tokens.push({ type: 'number', value: num });
+      continue;
+    }
+
+    // String literals
+    if (ch === "'") {
+      let str = '';
+      i++; // skip opening quote
+      while (i < expr.length) {
+        if (expr[i] === "'") {
+          if (i + 1 < expr.length && expr[i + 1] === "'") {
+            str += "'";
+            i += 2;
+          } else {
+            i++; // skip closing quote
+            break;
+          }
+        } else {
+          str += expr[i++];
+        }
+      }
+      tokens.push({ type: 'string', value: str });
       continue;
     }
 
@@ -431,6 +453,11 @@ function parseArithTokens(tokens: ArithToken[]): ArithExprNode {
       return { type: 'number', value: parseFloat(tok.value) };
     }
 
+    if (tok.type === 'string') {
+      consume();
+      return { type: 'string', value: tok.value };
+    }
+
     if (tok.type === 'null') {
       consume();
       return { type: 'null' };
@@ -474,6 +501,7 @@ function parseArithTokens(tokens: ArithToken[]): ArithExprNode {
 function evalArithAST(node: ArithExprNode, row: Record<string, SqlValue>): SqlValue {
   switch (node.type) {
     case 'number': return node.value;
+    case 'string': return node.value;
     case 'null': return null;
     case 'column': return row[node.name] ?? null;
 
@@ -524,6 +552,21 @@ function evalArithAST(node: ArithExprNode, row: Record<string, SqlValue>): SqlVa
           const num = Number(arg);
           if (isNaN(num)) return null;
           return Math.abs(num);
+        }
+        case 'upper': {
+          const arg = args[0];
+          if (arg === null) return null;
+          return String(arg).toUpperCase();
+        }
+        case 'lower': {
+          const arg = args[0];
+          if (arg === null) return null;
+          return String(arg).toLowerCase();
+        }
+        case 'length': {
+          const arg = args[0];
+          if (arg === null) return null;
+          return String(arg).length;
         }
         default: return null;
       }

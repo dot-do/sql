@@ -196,11 +196,20 @@ export async function getSegmentInfo(
     const data = await ctx.backend.read(path);
     const sizeBytes = data ? data.length : 0;
 
+    // Use the earliest entry timestamp as createdAt for more accurate age tracking.
+    // This handles the case where entry timestamps differ from segment creation time.
+    let effectiveCreatedAt = segment.createdAt;
+    for (const entry of segment.entries) {
+      if (entry.timestamp < effectiveCreatedAt) {
+        effectiveCreatedAt = entry.timestamp;
+      }
+    }
+
     return {
       id: segmentId,
       startLSN: segment.startLSN,
       endLSN: segment.endLSN,
-      createdAt: segment.createdAt,
+      createdAt: effectiveCreatedAt,
       entryCount: segment.entries.length,
       sizeBytes,
     };

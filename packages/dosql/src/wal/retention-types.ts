@@ -235,6 +235,30 @@ export interface RetentionPolicy {
   regions?: string[];
   /** Whether to wait for all regions */
   waitForAllRegions?: boolean;
+
+  // ========== Per-table retention ==========
+  /** Per-table retention configuration */
+  tableRetention?: Record<string, { retentionDays?: number; retentionHours?: number; archiveToR2?: boolean }>;
+
+  // ========== Transaction importance ==========
+  /** Whether to respect retention hints on entries */
+  respectRetentionHints?: boolean;
+
+  // ========== Cleanup windows ==========
+  /** Scheduled cleanup windows */
+  cleanupWindows?: CleanupWindow[];
+  /** Whether to block cleanup outside windows */
+  blockCleanupOutsideWindows?: boolean;
+
+  // ========== Atomic cleanup ==========
+  /** Whether to use atomic (all-or-nothing) cleanup */
+  atomicCleanup?: boolean;
+
+  // ========== Metrics events ==========
+  /** Callback for metrics update events */
+  onMetricsUpdate?: (event: { type: string; timestamp: number; data: unknown }) => void;
+  /** Metrics emission interval in ms */
+  metricsInterval?: number;
 }
 
 // =============================================================================
@@ -347,6 +371,8 @@ export interface RetentionCheckResult {
   decisions?: PolicyDecision[];
   /** Segments protected by CDC */
   protectedByCDC?: string[];
+  /** Count of entries protected by retention hint */
+  protectedByHint?: number;
 }
 
 /**
@@ -365,6 +391,12 @@ export interface RetentionCleanupResult {
   durationMs: number;
   /** Corrupted segments encountered */
   corruptedSegments?: string[];
+  /** Transaction ID for atomic cleanup */
+  transactionId?: string;
+  /** Whether atomic cleanup was committed */
+  committed?: boolean;
+  /** Whether atomic cleanup was rolled back */
+  rolledBack?: boolean;
 }
 
 // =============================================================================
@@ -693,6 +725,41 @@ export interface WALRetentionManager {
 // =============================================================================
 // Error Types
 // =============================================================================
+
+// =============================================================================
+// Table Retention Types
+// =============================================================================
+
+/**
+ * Per-table retention policy
+ */
+export interface TableRetentionPolicy {
+  retentionHours?: number;
+  retentionDays?: number;
+  archiveToR2?: boolean;
+}
+
+/**
+ * Cleanup window configuration
+ */
+export interface CleanupWindow {
+  start: string;
+  end: string;
+  timezone?: string;
+}
+
+/**
+ * Cleanup impact analysis result
+ */
+export interface CleanupImpact {
+  segmentsToDelete: number;
+  bytesToFree: number;
+  affectedTables: string[];
+  oldestRetainedLSN: bigint;
+  affectedReplicationSlots: string[];
+  estimatedDuration: number;
+  risks: string[];
+}
 
 /**
  * Retention-specific error codes

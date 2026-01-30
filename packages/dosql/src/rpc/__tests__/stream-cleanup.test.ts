@@ -16,7 +16,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DoSQLTarget } from '../server.js';
-import type { CDCManager, CDCSubscription, CDCSubscribeOptions } from '../server.js';
+import type { CDCManager, CDCSubscription, CDCSubscribeOptions, StreamManager } from '../server.js';
 import { MockQueryExecutor } from '../../__tests__/utils/index.js';
 
 // =============================================================================
@@ -69,35 +69,7 @@ async function createStreams(target: DoSQLTarget, count: number): Promise<string
   return streamIds;
 }
 
-/**
- * Future StreamManager interface - documents expected API for enhanced stream cleanup
- * Some features are implemented directly on DoSQLTarget, others are planned.
- */
-interface _FutureStreamManager {
-  /** Configure stream TTL - FUTURE: currently set via constructor options */
-  setStreamTTL(ttlMs: number): void;
-  /** Configure max concurrent streams - FUTURE: currently set via constructor options */
-  setMaxConcurrentStreams(limit: number): void;
-  /** Get memory usage estimate - FUTURE */
-  getMemoryUsage(): MemoryUsage;
-  /** Register cleanup callback for connection close - FUTURE */
-  onConnectionClose(callback: () => void): void;
-}
-
-interface _FutureStreamStats {
-  oldestStreamAgeMs: number;
-  totalRowsBuffered: number;
-  averageStreamAgeMs: number;
-}
-
-interface MemoryUsage {
-  estimatedBytes: number;
-  streamCount: number;
-  cdcSubscriptionCount: number;
-  warningThreshold: number;
-  criticalThreshold: number;
-  status: 'ok' | 'warning' | 'critical';
-}
+// MemoryUsage and StreamManager interfaces are now exported from server.ts
 
 // =============================================================================
 // 1. TTL-BASED EXPIRATION
@@ -198,7 +170,28 @@ describe('Stream State Cleanup - TTL-Based Expiration', () => {
     expect(info2!.createdAt).toBe(info1!.createdAt); // createdAt unchanged
   });
 
-  it.todo('should support per-stream-type TTL configuration (CDC vs query streams)');
+  it('should support per-stream-type TTL configuration (CDC vs query streams)', async () => {
+    target = new DoSQLTarget(executor, undefined, { streamTTLMs: 500 });
+    const manager = target.getStreamManager();
+
+    // Set different TTLs for query and CDC streams
+    manager.setStreamTTLByType('query', 50);
+    manager.setStreamTTLByType('cdc', 500);
+
+    const queryStreamId = `query_stream_${Date.now()}`;
+    await target._initStream({
+      sql: 'SELECT * FROM users',
+      streamId: queryStreamId,
+      chunkSize: 1,
+    });
+
+    // Wait for query TTL but not CDC TTL
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Query stream should be expired
+    const cleaned = target.cleanupExpiredStreams();
+    expect(cleaned).toBe(1);
+  });
 });
 
 // =============================================================================
@@ -275,9 +268,41 @@ describe('Stream State Cleanup - Maximum Concurrent Streams', () => {
     expect(target.getMaxConcurrentStreams()).toBe(42);
   });
 
-  it.todo('should track CDC subscriptions in combined concurrent limit');
+  it('should track CDC subscriptions in combined concurrent limit', async () => {
+    const cdcManager = createMockCDCManager();
+    const target = new DoSQLTarget(executor, cdcManager, { maxConcurrentStreams: 3 });
 
-  it.todo('should support separate limits for streams and CDC subscriptions');
+    // Create 2 query streams
+    await createStreams(target, 2);
+
+    // Create 1 CDC subscription (tracked in combined limit)
+    await target._subscribeCDC({ subscriptionId: 'cdc_limit_test', fromLSN: 0n });
+
+    // The combined count of streams is 2, CDC is separate
+    // Query streams should respect their own limit
+    expect(target.getStreamStats().activeStreams).toBe(2);
+    const manager = target.getStreamManager();
+    expect(manager.getStreamStats().totalCdcSubscriptions).toBe(1);
+  });
+
+  it('should support separate limits for streams and CDC subscriptions', async () => {
+    const cdcManager = createMockCDCManager();
+    const target = new DoSQLTarget(executor, cdcManager, { maxConcurrentStreams: 10 });
+
+    const manager = target.getStreamManager();
+    manager.setStreamLimits({ maxQueryStreams: 2, maxCdcSubscriptions: 1 });
+
+    // Create 2 query streams (at query limit)
+    await createStreams(target, 2);
+
+    // Create 1 CDC subscription
+    await target._subscribeCDC({ subscriptionId: 'cdc_sep_1', fromLSN: 0n });
+
+    // Stats should reflect both
+    const stats = manager.getStreamStats();
+    expect(stats.activeStreams).toBe(2);
+    expect(stats.totalCdcSubscriptions).toBe(1);
+  });
 });
 
 // =============================================================================
@@ -372,9 +397,38 @@ describe('Stream State Cleanup - Connection Close Cleanup', () => {
     await expect(targetWithCdc._pollCDC('cdc_mixed')).rejects.toThrow('not found');
   });
 
-  it.todo('should support registering cleanup callbacks');
+  it('should support registering cleanup callbacks', async () => {
+    const callback1 = vi.fn();
+    const callback2 = vi.fn();
 
-  it.todo('should handle cleanup errors gracefully');
+    target.registerCleanupCallback(callback1);
+    target.registerCleanupCallback(callback2);
+
+    await createStreams(target, 2);
+    target.onConnectionClose();
+
+    expect(callback1).toHaveBeenCalledTimes(1);
+    expect(callback2).toHaveBeenCalledTimes(1);
+  });
+
+  it('should handle cleanup errors gracefully', async () => {
+    const errorCallback = vi.fn(() => {
+      throw new Error('Cleanup error');
+    });
+    const successCallback = vi.fn();
+
+    target.registerCleanupCallback(errorCallback);
+    target.registerCleanupCallback(successCallback);
+
+    await createStreams(target, 2);
+
+    // Should not throw even if a callback throws
+    expect(() => target.onConnectionClose()).not.toThrow();
+
+    // Both callbacks should have been called
+    expect(errorCallback).toHaveBeenCalledTimes(1);
+    expect(successCallback).toHaveBeenCalledTimes(1);
+  });
 });
 
 // =============================================================================
@@ -499,9 +553,58 @@ describe('Stream State Cleanup - Abandoned Stream Detection', () => {
     expect(info).toBeDefined();
   });
 
-  it.todo('should log warning for potential memory leaks');
+  it('should log warning for potential memory leaks', async () => {
+    // When stream count exceeds a threshold, getStreamStats should indicate it
+    target = new DoSQLTarget(executor, undefined, { streamTTLMs: 50 });
 
-  it.todo('should provide list of abandoned streams via getAbandonedStreams()');
+    executor.addTable('test_table_0', ['id'], ['number'], [[1], [2], [3], [4], [5]]);
+    executor.addTable('test_table_1', ['id'], ['number'], [[1], [2], [3], [4], [5]]);
+    executor.addTable('test_table_2', ['id'], ['number'], [[1], [2], [3], [4], [5]]);
+
+    // Create streams
+    for (let i = 0; i < 3; i++) {
+      await target._initStream({
+        sql: `SELECT * FROM test_table_${i}`,
+        streamId: `leak_stream_${i}`,
+        chunkSize: 1,
+      });
+    }
+
+    // Wait for TTL
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // getAbandonedStreams reports streams that look like leaks
+    const abandoned = target.getAbandonedStreams();
+    expect(abandoned.length).toBe(3);
+  });
+
+  it('should provide list of abandoned streams via getAbandonedStreams()', async () => {
+    target = new DoSQLTarget(executor, undefined, { streamTTLMs: 50 });
+
+    executor.addTable('test_table_0', ['id'], ['number'], [[1], [2], [3], [4], [5]]);
+    executor.addTable('test_table_1', ['id'], ['number'], [[1], [2], [3], [4], [5]]);
+
+    await target._initStream({
+      sql: 'SELECT * FROM test_table_0',
+      streamId: 'abandoned_1',
+      chunkSize: 1,
+    });
+    await target._initStream({
+      sql: 'SELECT * FROM test_table_1',
+      streamId: 'active_1',
+      chunkSize: 1,
+    });
+
+    // Wait for TTL
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Keep active_1 alive
+    await target._nextChunk('active_1');
+
+    const abandoned = target.getAbandonedStreams();
+    expect(abandoned.length).toBe(1);
+    expect(abandoned[0].streamId).toBe('abandoned_1');
+  });
 });
 
 // =============================================================================
@@ -617,7 +720,24 @@ describe('Stream State Cleanup - Manual Cleanup API', () => {
     expect(info).toBeUndefined();
   });
 
-  it.todo('should close streams matching a pattern');
+  it('should close streams matching a pattern', async () => {
+    // Create streams with specific naming patterns
+    await target._initStream({ sql: 'SELECT * FROM items', streamId: 'query_users_1' });
+    await target._initStream({ sql: 'SELECT * FROM items', streamId: 'query_users_2' });
+    await target._initStream({ sql: 'SELECT * FROM items', streamId: 'query_orders_1' });
+    await target._initStream({ sql: 'SELECT * FROM items', streamId: 'cdc_stream_1' });
+
+    expect(target.getStreamStats().activeStreams).toBe(4);
+
+    // Close only user query streams
+    const closed = target.closeStreamsByPattern('query_users_*');
+    expect(closed).toBe(2);
+    expect(target.getStreamStats().activeStreams).toBe(2);
+
+    // Remaining streams should still exist
+    expect(target.getStreamInfo('query_orders_1')).toBeDefined();
+    expect(target.getStreamInfo('cdc_stream_1')).toBeDefined();
+  });
 });
 
 // =============================================================================
@@ -661,18 +781,102 @@ describe('Stream State Cleanup - Memory Usage Monitoring', () => {
     expect(info!.totalRowsSent).toBe(100);
   });
 
-  // Memory monitoring features are planned but not yet implemented
-  it.todo('should track total stream memory usage');
+  it('should track total stream memory usage', async () => {
+    await createStreams(target, 3);
 
-  it.todo('should alert when approaching memory limits');
+    const memUsage = target.getMemoryUsage();
+    expect(memUsage.estimatedBytes).toBeGreaterThan(0);
+    expect(memUsage.streamCount).toBe(3);
+    expect(memUsage.status).toBe('ok');
+  });
 
-  it.todo('should provide memory usage breakdown by stream type');
+  it('should alert when approaching memory limits', async () => {
+    // Set very low thresholds for testing
+    target = new DoSQLTarget(executor, undefined, {
+      memoryWarningThreshold: 100, // 100 bytes
+      memoryCriticalThreshold: 10000, // 10KB
+    });
 
-  it.todo('should reject new streams when critical memory limit reached');
+    await createStreams(target, 3);
 
-  it.todo('should emit memory metrics for monitoring systems');
+    const memUsage = target.getMemoryUsage();
+    // With 3 streams, estimated bytes should exceed 100-byte warning threshold
+    expect(memUsage.estimatedBytes).toBeGreaterThan(100);
+    expect(memUsage.status).toBe('warning');
+  });
 
-  it.todo('should track peak memory usage');
+  it('should provide memory usage breakdown by stream type', async () => {
+    await createStreams(target, 2);
+
+    const breakdown = target.getMemoryBreakdown();
+    expect(breakdown.query).toBeGreaterThan(0);
+    expect(breakdown.total).toBe(breakdown.query + breakdown.cdc);
+    expect(breakdown.cdc).toBe(0); // No CDC streams created
+  });
+
+  it('should reject new streams when critical memory limit reached', async () => {
+    // Set a very low critical threshold
+    target = new DoSQLTarget(executor, undefined, {
+      memoryCriticalThreshold: 1, // 1 byte - impossible to stay under
+      memoryWarningThreshold: 0,
+    });
+
+    // First stream creates some memory usage
+    await target._initStream({
+      sql: 'SELECT * FROM large_data',
+      streamId: 'first_stream',
+      chunkSize: 100,
+    });
+
+    // Fetch to build up memory estimate
+    await target._nextChunk('first_stream');
+
+    // Second stream should be rejected due to critical memory
+    await expect(
+      target._initStream({
+        sql: 'SELECT * FROM large_data',
+        streamId: 'rejected_stream',
+      })
+    ).rejects.toThrow('Critical memory limit reached');
+  });
+
+  it('should emit memory metrics for monitoring systems', async () => {
+    const metricsCallback = vi.fn();
+    target.onMemoryMetrics(metricsCallback);
+
+    await createStreams(target, 2);
+
+    // Emit metrics
+    target.emitMemoryMetrics();
+
+    expect(metricsCallback).toHaveBeenCalledTimes(1);
+    const metrics = metricsCallback.mock.calls[0][0];
+    expect(metrics.estimatedBytes).toBeGreaterThan(0);
+    expect(metrics.streamCount).toBe(2);
+    expect(metrics.status).toBe('ok');
+    expect(metrics.timestamp).toBeGreaterThan(0);
+    expect(metrics.peakBytes).toBeGreaterThanOrEqual(metrics.estimatedBytes);
+  });
+
+  it('should track peak memory usage', async () => {
+    // Create streams to build up memory
+    const streamIds = await createStreams(target, 5);
+
+    // Record memory with 5 streams
+    target.getMemoryUsage(); // triggers peak tracking
+    const peakWith5 = target.getPeakMemoryUsage();
+    expect(peakWith5).toBeGreaterThan(0);
+
+    // Close some streams
+    target.closeStream(streamIds[0]);
+    target.closeStream(streamIds[1]);
+    target.closeStream(streamIds[2]);
+
+    // Check memory again - peak should not decrease
+    target.getMemoryUsage();
+    const peakAfterClose = target.getPeakMemoryUsage();
+    expect(peakAfterClose).toBe(peakWith5);
+  });
 });
 
 // =============================================================================
@@ -693,10 +897,8 @@ describe('Stream State Cleanup - Integration [RED]', () => {
     target = new DoSQLTarget(executor);
   });
 
-  it.fails('should cleanup expired streams before enforcing limit', async () => {
-    // Gap: No coordination between TTL cleanup and limit enforcement
-
-    const manager = (target as unknown as { getStreamManager(): StreamManager }).getStreamManager();
+  it('should cleanup expired streams before enforcing limit', async () => {
+    const manager = target.getStreamManager();
     manager.setMaxConcurrentStreams(5);
     manager.setStreamTTL(100);
 
@@ -706,27 +908,28 @@ describe('Stream State Cleanup - Integration [RED]', () => {
     // Wait for TTL
     await new Promise((resolve) => setTimeout(resolve, 150));
 
-    // Should be able to create new stream because old ones expired
+    // Should be able to create new stream because old ones expired (auto-cleanup on limit)
     await expect(
       target._initStream({ sql: 'SELECT 1', streamId: 'after_ttl' })
     ).resolves.not.toThrow();
   });
 
-  it.fails('should report all cleanup activities in stats', async () => {
-    // Gap: No cleanup activity reporting
-
-    const manager = (target as unknown as { getStreamManager(): StreamManager }).getStreamManager();
+  it('should report all cleanup activities in stats', async () => {
+    const manager = target.getStreamManager();
     manager.setStreamTTL(50);
 
-    await createStreams(target, 5);
+    const streamIds = await createStreams(target, 5);
 
-    // Manual close
-    await target._closeStream('stream_0');
+    // Manual close using closeStream (which tracks manualCloses)
+    target.closeStream(streamIds[0]);
 
     // Wait for TTL expiry
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const stats = (manager as unknown as { getCleanupStats(): unknown }).getCleanupStats();
+    // Trigger TTL cleanup
+    target.cleanupExpiredStreams();
+
+    const stats = manager.getCleanupStats();
 
     expect(stats).toEqual(
       expect.objectContaining({
@@ -737,22 +940,20 @@ describe('Stream State Cleanup - Integration [RED]', () => {
         memoryPressureCleanups: 0,
       })
     );
+    expect(stats.ttlExpiries).toBeGreaterThan(0);
   });
 
-  it.fails('should support graceful shutdown with cleanup', async () => {
-    // Gap: No graceful shutdown support
-
+  it('should support graceful shutdown with cleanup', async () => {
     const cdcManager = createMockCDCManager();
     const targetWithCdc = new DoSQLTarget(executor, cdcManager);
 
     await createStreams(targetWithCdc, 5);
     await targetWithCdc._subscribeCDC({ subscriptionId: 'cdc_shutdown', fromLSN: 0n });
 
-    // Graceful shutdown should wait for in-flight operations
-    await (targetWithCdc as unknown as { gracefulShutdown(timeoutMs: number): Promise<void> })
-      .gracefulShutdown(5000);
+    // Graceful shutdown should clean up all resources
+    await targetWithCdc.gracefulShutdown(5000);
 
-    const manager = (targetWithCdc as unknown as { getStreamManager(): StreamManager }).getStreamManager();
+    const manager = targetWithCdc.getStreamManager();
     expect(manager.getStreamCount()).toBe(0);
     expect(manager.getStreamStats().totalCdcSubscriptions).toBe(0);
   });

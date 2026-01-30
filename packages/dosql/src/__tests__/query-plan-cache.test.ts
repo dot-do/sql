@@ -937,7 +937,7 @@ describe('Cache Stats Exposed via PRAGMA', () => {
   /**
    * GAP: PRAGMA query_plan_cache_stats does not exist
    */
-  it.fails('should expose cache stats via PRAGMA', async () => {
+  it('should expose cache stats via PRAGMA', async () => {
     const { createDatabase } = await import('../database.js');
 
     const db = createDatabase();
@@ -967,7 +967,7 @@ describe('Cache Stats Exposed via PRAGMA', () => {
   /**
    * GAP: PRAGMA to view cached plans does not exist
    */
-  it.fails('should list cached plans via PRAGMA', async () => {
+  it('should list cached plans via PRAGMA', async () => {
     const { createDatabase } = await import('../database.js');
 
     const db = createDatabase();
@@ -991,7 +991,7 @@ describe('Cache Stats Exposed via PRAGMA', () => {
   /**
    * GAP: PRAGMA to clear cache does not exist
    */
-  it.fails('should clear cache via PRAGMA', async () => {
+  it('should clear cache via PRAGMA', async () => {
     const { createDatabase } = await import('../database.js');
 
     const db = createDatabase();
@@ -1014,7 +1014,7 @@ describe('Cache Stats Exposed via PRAGMA', () => {
   /**
    * GAP: PRAGMA to configure cache does not exist
    */
-  it.fails('should configure cache via PRAGMA', async () => {
+  it('should configure cache via PRAGMA', async () => {
     const { createDatabase } = await import('../database.js');
 
     const db = createDatabase();
@@ -1039,7 +1039,7 @@ describe('Cache Stats Exposed via PRAGMA', () => {
   /**
    * GAP: PRAGMA to view specific plan does not exist
    */
-  it.fails('should view specific cached plan via PRAGMA', async () => {
+  it('should view specific cached plan via PRAGMA', async () => {
     const { createDatabase } = await import('../database.js');
 
     const db = createDatabase();
@@ -1061,7 +1061,7 @@ describe('Cache Stats Exposed via PRAGMA', () => {
   /**
    * GAP: PRAGMA for cache hit rate threshold alerting
    */
-  it.fails('should support cache hit rate threshold via PRAGMA', async () => {
+  it('should support cache hit rate threshold via PRAGMA', async () => {
     const { createDatabase } = await import('../database.js');
 
     const db = createDatabase();
@@ -1087,7 +1087,7 @@ describe('Query Plan Cache Integration', () => {
   /**
    * GAP: End-to-end cache integration does not exist
    */
-  it.fails('should integrate cache with query execution', async () => {
+  it('should integrate cache with query execution', async () => {
     const { createDatabase } = await import('../database.js');
 
     const db = createDatabase({
@@ -1115,12 +1115,10 @@ describe('Query Plan Cache Integration', () => {
   /**
    * GAP: Cache should work with optimizer
    */
-  it.fails('should cache optimized plans from cost-based optimizer', async () => {
+  it('should cache optimized plans from cost-based optimizer', async () => {
     const { createDatabase } = await import('../database.js');
-    const { createQueryPlanCache } = await importPlannerCache();
 
     const db = createDatabase();
-    const cache: QueryPlanCache = createQueryPlanCache({ maxSize: 100 });
 
     db.exec('CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, total REAL)');
     db.exec('CREATE INDEX idx_user_id ON orders(user_id)');
@@ -1142,7 +1140,8 @@ describe('Query Plan Cache Integration', () => {
     // Plan should use index
     expect(plan).toContain('IndexScan');
 
-    // Cache should store this optimized plan
-    expect(cache.size()).toBeGreaterThan(0);
+    // Database's internal cache should store this optimized plan
+    const stats = db.exec('PRAGMA query_plan_cache_stats');
+    expect(stats[0].size).toBeGreaterThan(0);
   });
 });

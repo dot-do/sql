@@ -307,3 +307,23 @@ export function createNonFiniteNumberError(value: number): BindingError {
     { context: { metadata: { value: String(value) } } }
   );
 }
+
+/**
+ * Create a BindingError when mixing positional and named parameters
+ */
+export function createMixedParametersError(): BindingError {
+  return new BindingError(
+    BindingErrorCode.MIXED_PARAMS,
+    'Cannot mix positional (?) and named (:name) parameter styles in the same query'
+  );
+}
+
+/**
+ * Create a BindingError when array is passed for named parameters
+ */
+export function createArrayForNamedParamsError(): BindingError {
+  return new BindingError(
+    BindingErrorCode.NAMED_EXPECTED,
+    'SQL uses named parameters but received an array. Provide an object with named parameter keys instead'
+  );
+}

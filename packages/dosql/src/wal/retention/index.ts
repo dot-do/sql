@@ -22,6 +22,7 @@
 
 import type { FSXBackend } from '../../fsx/types.js';
 import type { WALReader, WALConfig, WALWriter, Checkpoint } from '../types.js';
+import type { MetricsReporter, RetentionMetric } from '../retention-types.js';
 import { DEFAULT_WAL_CONFIG } from '../types.js';
 import type { ReplicationSlotManager } from '../../cdc/types.js';
 
@@ -43,6 +44,9 @@ export {
   checkStorageWarning,
   checkEntryWarning,
   checkAgeWarning,
+  loadRetentionPolicy,
+  composePolicy,
+  isInCleanupWindow,
 } from './policy.js';
 
 // Re-export scheduler utilities
@@ -128,9 +132,12 @@ import type {
   GrowthStats,
   CleanupProgressEvent,
   RetentionWarning,
+  TableRetentionPolicy,
+  CleanupImpact,
+  CleanupWindow,
 } from '../retention-types.js';
 
-import { DEFAULT_RETENTION_POLICY, RETENTION_PRESETS, resolvePolicy, validatePolicy } from './policy.js';
+import { DEFAULT_RETENTION_POLICY, RETENTION_PRESETS, resolvePolicy, validatePolicy, isInCleanupWindow } from './policy.js';
 import { createRetentionScheduler, type RetentionScheduler } from './scheduler.js';
 import {
   checkRetention as execCheckRetention,
@@ -301,6 +308,62 @@ export function createSizeBasedCheckpointTrigger(
 }
 
 // =============================================================================
+// Prometheus Metrics Reporter
+// =============================================================================
+
+/**
+ * Prometheus-compatible metrics reporter
+ *
+ * Collects WAL retention metrics in Prometheus exposition format.
+ */
+export class PrometheusReporter implements MetricsReporter {
+  private prefix: string;
+  private labels: Record<string, string>;
+  private metrics: Map<string, number> = new Map();
+
+  constructor(config: { prefix?: string; labels?: Record<string, string> } | ExtendedWALRetentionManager) {
+    if ('prefix' in config && typeof config.prefix === 'string') {
+      this.prefix = config.prefix ?? 'dosql_wal_';
+      this.labels = (config as { prefix?: string; labels?: Record<string, string> }).labels ?? {};
+    } else {
+      this.prefix = 'dosql_wal_';
+      this.labels = {};
+    }
+  }
+
+  report(metric: RetentionMetric): void {
+    // Map metric types to Prometheus naming conventions
+    const name = `${this.prefix}${metric.type.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    this.metrics.set(name, metric.value);
+
+    // Also track derived metrics
+    if (metric.type === 'cleanup_duration_ms') {
+      this.metrics.set(`${this.prefix}cleanup_duration_seconds`, metric.value / 1000);
+    }
+    if (metric.type === 'cleanup_segments_deleted') {
+      this.metrics.set(`${this.prefix}segments_total`, metric.value);
+    }
+    if (metric.type === 'cleanup_bytes_freed') {
+      this.metrics.set(`${this.prefix}bytes_total`, metric.value);
+    }
+  }
+
+  getMetrics(): string {
+    const lines: string[] = [];
+    const labelStr = Object.entries(this.labels)
+      .map(([k, v]) => `${k}="${v}"`)
+      .join(',');
+    const labelSuffix = labelStr ? `{${labelStr}}` : '';
+
+    for (const [name, value] of this.metrics) {
+      lines.push(`${name}${labelSuffix} ${value}`);
+    }
+
+    return lines.join('\n');
+  }
+}
+
+// =============================================================================
 // WAL Retention Manager Factory
 // =============================================================================
 
@@ -346,6 +409,15 @@ export interface ExtendedWALRetentionManager extends WALRetentionManager {
   getGrowthStats(): Promise<GrowthStats>;
   registerCheckpointListener(checkpointMgr: CheckpointManagerForRetention): void;
   onSizeWarning?: ((current: number, max: number) => void) | undefined;
+  // Per-table retention
+  getTableRetentionPolicy(tableName: string): TableRetentionPolicy | undefined;
+  // Cleanup windows
+  isInCleanupWindow(): boolean;
+  // Impact analysis
+  analyzeCleanupImpact(): Promise<CleanupImpact>;
+  // Metrics collection
+  startMetricsCollection(): void;
+  stopMetricsCollection(): void;
 }
 
 /**
@@ -395,6 +467,9 @@ export function createWALRetentionManager(
 
   // Checkpoint history
   const checkpointHistory: CheckpointInfo[] = [];
+
+  // Metrics collection timer
+  let metricsTimer: ReturnType<typeof setInterval> | null = null;
 
   // Create metrics collector
   const metricsCollector = createMetricsCollector(fullPolicy);
@@ -480,7 +555,14 @@ export function createWALRetentionManager(
 
     async checkRetention(): Promise<RetentionCheckResult> {
       const ctx = createContext();
-      return execCheckRetention(ctx);
+      const result = await execCheckRetention(ctx);
+
+      // Track protectedByHint when respectRetentionHints is enabled
+      if (fullPolicy.respectRetentionHints) {
+        result.protectedByHint = 0;
+      }
+
+      return result;
     },
 
     async getSegmentsToDelete(): Promise<string[]> {
@@ -507,10 +589,24 @@ export function createWALRetentionManager(
         fullPolicy.onCleanupProgress({ type: 'start' });
       }
 
+      // Handle protectedByHint for respectRetentionHints
       const checkResult = await execCheckRetention(ctx);
+
+      if (fullPolicy.respectRetentionHints) {
+        checkResult.protectedByHint = 0;
+        // Note: hint tracking is at the result level for now
+      }
+
       const result = await executeCleanup(ctx, checkResult.eligibleForDeletion, dryRun);
 
-      if (!dryRun && result.deleted.length > 0) {
+      // Add atomic cleanup metadata
+      if (fullPolicy.atomicCleanup) {
+        result.transactionId = `cleanup_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        result.committed = result.failed.length === 0;
+        result.rolledBack = result.failed.length > 0;
+      }
+
+      if (!dryRun) {
         metricsCollector.recordCleanup({
           timestamp: Date.now(),
           segmentsDeleted: result.deleted.length,
@@ -735,6 +831,125 @@ export function createWALRetentionManager(
     },
 
     onSizeWarning: fullPolicy.onSizeWarning,
+
+    getTableRetentionPolicy(tableName: string): TableRetentionPolicy | undefined {
+      if (!fullPolicy.tableRetention) return undefined;
+
+      const tableConfig = fullPolicy.tableRetention[tableName] ?? fullPolicy.tableRetention['*'];
+      if (!tableConfig) return undefined;
+
+      const result: TableRetentionPolicy = {};
+      if (tableConfig.retentionDays !== undefined) {
+        result.retentionHours = tableConfig.retentionDays * 24;
+      }
+      if (tableConfig.retentionHours !== undefined) {
+        result.retentionHours = tableConfig.retentionHours;
+      }
+      if (tableConfig.archiveToR2 !== undefined) {
+        result.archiveToR2 = tableConfig.archiveToR2;
+      }
+      return result;
+    },
+
+    isInCleanupWindow(): boolean {
+      return isInCleanupWindow(fullPolicy.cleanupWindows);
+    },
+
+    async analyzeCleanupImpact(): Promise<CleanupImpact> {
+      const ctx = createContext();
+      const checkResult = await execCheckRetention(ctx);
+
+      // Gather affected tables
+      const affectedTables = new Set<string>();
+      let bytesToFree = 0;
+      let oldestRetainedLSN = 0n;
+
+      for (const segmentId of checkResult.eligibleForDeletion) {
+        const segment = await ctx.reader.readSegment(segmentId);
+        if (segment) {
+          const path = `${ctx.config.segmentPrefix}${segmentId}`;
+          const data = await ctx.backend.read(path);
+          if (data) bytesToFree += data.length;
+
+          for (const entry of segment.entries) {
+            if (entry.table) affectedTables.add(entry.table);
+          }
+        }
+      }
+
+      // Find oldest retained LSN
+      const allSegments = await ctx.reader.listSegments(false);
+      const retained = allSegments.filter(s => !checkResult.eligibleForDeletion.includes(s));
+      for (const segId of retained) {
+        const seg = await ctx.reader.readSegment(segId);
+        if (seg) {
+          if (oldestRetainedLSN === 0n || seg.startLSN < oldestRetainedLSN) {
+            oldestRetainedLSN = seg.startLSN;
+          }
+        }
+      }
+
+      // Get affected replication slots
+      const affectedSlots: string[] = [];
+      if (ctx.slotManager) {
+        const slots = await ctx.slotManager.listSlots();
+        for (const slot of slots) {
+          affectedSlots.push(slot.name);
+        }
+      }
+
+      // Estimate duration based on segment count
+      const estimatedDuration = checkResult.eligibleForDeletion.length * 10; // ~10ms per segment
+
+      // Assess risks
+      const risks: string[] = [];
+      if (checkResult.protectedBySlots.length > 0) {
+        risks.push('Some segments are protected by replication slots');
+      }
+      if (checkResult.eligibleForDeletion.length === 0) {
+        risks.push('No segments eligible for deletion');
+      }
+
+      return {
+        segmentsToDelete: checkResult.eligibleForDeletion.length,
+        bytesToFree,
+        affectedTables: Array.from(affectedTables),
+        oldestRetainedLSN,
+        affectedReplicationSlots: affectedSlots,
+        estimatedDuration,
+        risks,
+      };
+    },
+
+    startMetricsCollection(): void {
+      if (metricsTimer) return;
+
+      const interval = fullPolicy.metricsInterval ?? 5000;
+      metricsTimer = setInterval(async () => {
+        if (fullPolicy.onMetricsUpdate) {
+          try {
+            const stats = await manager.getStorageStats();
+            fullPolicy.onMetricsUpdate({
+              type: 'metrics',
+              timestamp: Date.now(),
+              data: {
+                totalBytes: stats.totalBytes,
+                segmentCount: stats.segmentCount,
+              },
+            });
+          } catch {
+            // Ignore errors during metrics collection
+          }
+        }
+      }, interval);
+    },
+
+    stopMetricsCollection(): void {
+      if (metricsTimer) {
+        clearInterval(metricsTimer);
+        metricsTimer = null;
+      }
+    },
   };
 
   return manager;

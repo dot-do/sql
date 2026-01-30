@@ -49,7 +49,132 @@ import {
   createLocalConnection,
   createHTTPConnection,
   createWebSocketConnection,
+  type Connection,
+  type ExecutionResult as CLIExecutionResult,
 } from '../cli/repl.js';
+
+// =============================================================================
+// TEST HELPERS
+// =============================================================================
+
+/**
+ * Creates a mock SQLite-like connection for testing BunREPL
+ * without requiring bun:sqlite or better-sqlite3.
+ */
+function createMockLocalConnection(): Connection {
+  // Simple in-memory table store for mock
+  const tables: Record<string, { columns: string[]; rows: Record<string, unknown>[] }> = {};
+
+  return {
+    async execute(sql: string): Promise<CLIExecutionResult> {
+      const start = performance.now();
+      const trimmed = sql.trim();
+      const upper = trimmed.toUpperCase();
+
+      // CREATE TABLE
+      const createMatch = trimmed.match(/CREATE\s+TABLE\s+(\w+)\s*\(([^)]+)\)/i);
+      if (createMatch) {
+        const tableName = createMatch[1];
+        const colDefs = createMatch[2].split(',').map(c => c.trim().split(/\s+/)[0]);
+        tables[tableName] = { columns: colDefs, rows: [] };
+        return { rows: [], columns: [], rowCount: 0, changes: 0, duration: performance.now() - start };
+      }
+
+      // INSERT INTO
+      const insertMatch = trimmed.match(/INSERT\s+INTO\s+(\w+)\s*(?:\(([^)]+)\))?\s*VALUES\s*\(([^)]+)\)/i);
+      if (insertMatch) {
+        const tableName = insertMatch[1];
+        if (!tables[tableName]) throw new Error(`no such table: ${tableName}`);
+        const cols = insertMatch[2] ? insertMatch[2].split(',').map(c => c.trim()) : tables[tableName].columns;
+        const vals = insertMatch[3].split(',').map(v => {
+          const t = v.trim();
+          if (t.startsWith("'") && t.endsWith("'")) return t.slice(1, -1);
+          if (!isNaN(Number(t))) return Number(t);
+          return t;
+        });
+        const row: Record<string, unknown> = {};
+        cols.forEach((c, i) => { row[c] = vals[i] ?? null; });
+        tables[tableName].rows.push(row);
+        return {
+          rows: [], columns: [], rowCount: 0,
+          changes: 1, lastInsertRowid: BigInt(tables[tableName].rows.length),
+          duration: performance.now() - start,
+        };
+      }
+
+      // SELECT
+      if (upper.startsWith('SELECT')) {
+        // SELECT <expr> AS <alias>; (no FROM)
+        const simpleSelectMatch = trimmed.match(/SELECT\s+(.+?)(?:\s+AS\s+(\w+))?\s*;?\s*$/i);
+
+        // Check for FROM clause
+        const fromMatch = trimmed.match(/FROM\s+(\w+)/i);
+        if (fromMatch) {
+          const tableName = fromMatch[1];
+          // sqlite_master query for .tables command
+          if (tableName === 'sqlite_master') {
+            const typeMatch = trimmed.match(/type='(\w+)'/i);
+            const nameMatch = trimmed.match(/name='(\w+)'/i);
+            const isSqlQuery = upper.includes('SELECT SQL');
+            const resultRows: Record<string, unknown>[] = [];
+            for (const [name, table] of Object.entries(tables)) {
+              if (typeMatch && typeMatch[1] !== 'table') continue;
+              if (nameMatch && nameMatch[1] !== name) continue;
+              if (isSqlQuery) {
+                const colDefs = table.columns.map(c => `${c} TEXT`).join(', ');
+                resultRows.push({ sql: `CREATE TABLE ${name} (${colDefs})` });
+              } else {
+                resultRows.push({ name });
+              }
+            }
+            const cols = resultRows.length > 0 ? Object.keys(resultRows[0]) : ['name'];
+            return { rows: resultRows, columns: cols, rowCount: resultRows.length, duration: performance.now() - start };
+          }
+
+          if (!tables[tableName]) throw new Error(`no such table: ${tableName}`);
+          const table = tables[tableName];
+          return { rows: [...table.rows], columns: table.columns, rowCount: table.rows.length, duration: performance.now() - start };
+        }
+
+        // Simple expression select like SELECT 1 AS value
+        if (simpleSelectMatch) {
+          const expr = simpleSelectMatch[1].trim();
+          const alias = simpleSelectMatch[2] || 'result';
+
+          // Parse value
+          let value: unknown;
+          const numVal = Number(expr);
+          if (!isNaN(numVal) && expr !== '') {
+            value = numVal;
+          } else if (expr.startsWith("'") && expr.endsWith("'")) {
+            value = expr.slice(1, -1);
+          } else {
+            // Try to parse "1 AS value" pattern
+            const asMatch = expr.match(/^(.+?)\s+AS\s+(\w+)$/i);
+            if (asMatch) {
+              const rawVal = asMatch[1].trim();
+              const asAlias = asMatch[2];
+              const nv = Number(rawVal);
+              value = !isNaN(nv) ? nv : rawVal;
+              const row: Record<string, unknown> = { [asAlias]: value };
+              return { rows: [row], columns: [asAlias], rowCount: 1, duration: performance.now() - start };
+            }
+            value = expr;
+          }
+          const row: Record<string, unknown> = { [alias]: value };
+          return { rows: [row], columns: [alias], rowCount: 1, duration: performance.now() - start };
+        }
+      }
+
+      // Unknown SQL - treat as syntax error
+      throw new Error(`near "${trimmed.split(/\s+/)[0]}": syntax error`);
+    },
+
+    async close(): Promise<void> {
+      // no-op
+    },
+  };
+}
 
 // =============================================================================
 // 1. REPL COMMAND PARSING
@@ -774,7 +899,10 @@ describe('Remote Connection Modes', () => {
   describe('Local bun:sqlite Connection', () => {
     /**
      * Should create local SQLite connection
-     * Skipped: Requires bun:sqlite or better-sqlite3 which isn't available in workers
+     * Skipped: Requires bun:sqlite or better-sqlite3 which aren't available in
+     * the Cloudflare Workers vitest pool environment. createLocalConnection()
+     * dynamically imports bun:sqlite (or better-sqlite3 fallback), neither of
+     * which can be resolved in the Workers runtime.
      */
     it.skip('should create local SQLite connection', async () => {
       const conn = await createLocalConnection({ database: ':memory:' });
@@ -788,7 +916,8 @@ describe('Remote Connection Modes', () => {
 
     /**
      * Should execute queries on local connection
-     * Skipped: Requires bun:sqlite or better-sqlite3 which isn't available in workers
+     * Skipped: Requires bun:sqlite or better-sqlite3 which aren't available in
+     * the Cloudflare Workers vitest pool environment.
      */
     it.skip('should execute queries on local connection', async () => {
       const conn = await createLocalConnection({ database: ':memory:' });
@@ -806,7 +935,8 @@ describe('Remote Connection Modes', () => {
 
     /**
      * Should handle connection errors
-     * Skipped: Requires bun:sqlite or better-sqlite3 which isn't available in workers
+     * Skipped: Requires bun:sqlite or better-sqlite3 which aren't available in
+     * the Cloudflare Workers vitest pool environment.
      */
     it.skip('should handle invalid database path', async () => {
       await expect(
@@ -900,18 +1030,27 @@ describe('Remote Connection Modes', () => {
 
     /**
      * Should support query timeout
-     * Skipped: AbortController timeout behavior differs in Workers environment
+     * Uses a mock fetch that never resolves, with a short timeout
      */
-    it.skip('should support query timeout', async () => {
+    it('should support query timeout', async () => {
       const mockFetch = vi.fn().mockImplementation(
-        () => new Promise(resolve => setTimeout(resolve, 10000))
+        (_url: string, options?: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+          // Listen for the abort signal to simulate real fetch abort behavior
+          if (options?.signal) {
+            options.signal.addEventListener('abort', () => {
+              const err = new Error('The operation was aborted');
+              err.name = 'AbortError';
+              reject(err);
+            });
+          }
+        })
       );
 
       const conn = await createHTTPConnection({
         url: 'https://sql.example.com',
         apiKey: 'test-key',
-        fetch: mockFetch,
-        timeout: 1000,
+        fetch: mockFetch as unknown as typeof fetch,
+        timeout: 100,
       });
 
       await expect(conn.execute('SELECT 1')).rejects.toThrow(/timeout/i);
@@ -1054,7 +1193,16 @@ describe('Remote Connection Modes', () => {
 
     /**
      * Should queue messages during reconnection
-     * Skipped: Complex async behavior with reconnection - tested manually
+     *
+     * Skipped: This test involves complex async interleaving between
+     * WebSocket reconnection and message queuing. The reconnect() call
+     * closes the existing WebSocket (which rejects pending requests via the
+     * 'close' event handler) and creates a new one. Testing the exact
+     * ordering of: execute -> reconnect -> execute -> all resolve requires
+     * precise control over microtask scheduling that is not reliably
+     * reproducible in the Workers vitest pool. The underlying queue
+     * mechanism (messageQueue + isReconnecting flag) is covered by
+     * inspection of the implementation.
      */
     it.skip('should queue messages during reconnection', async () => {
       const sentMessages: string[] = [];
@@ -1200,10 +1348,10 @@ describe('REPL Lifecycle', () => {
 
   /**
    * Should process input line by line
-   * Skipped: Requires bun:sqlite or better-sqlite3 which isn't available in workers
+   * Uses injected mock connection to avoid bun:sqlite dependency
    */
-  it.skip('should process input', async () => {
-    const repl = new BunREPL({ mode: 'local', database: ':memory:' });
+  it('should process input', async () => {
+    const repl = new BunREPL({ mode: 'local', database: ':memory:', connection: createMockLocalConnection() });
     await repl.start();
 
     const output = await repl.processInput('SELECT 1 AS value;');
@@ -1216,20 +1364,29 @@ describe('REPL Lifecycle', () => {
 
   /**
    * Should handle CTRL+C gracefully
-   * Skipped: Requires bun:sqlite or better-sqlite3 which isn't available in workers
+   * Uses injected mock connection with a delayed query to test interrupt
    */
-  it.skip('should handle interrupt signal', async () => {
-    const repl = new BunREPL({ mode: 'local', database: ':memory:' });
+  it('should handle interrupt signal', async () => {
+    // Create a connection that takes a small delay so interrupt can be set before result is checked
+    const slowConnection: Connection = {
+      async execute(_sql: string): Promise<CLIExecutionResult> {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return { rows: [{ n: 1 }], columns: ['n'], rowCount: 1, duration: 100 };
+      },
+      async close(): Promise<void> {},
+    };
+    const repl = new BunREPL({ mode: 'local', database: ':memory:', connection: slowConnection });
     await repl.start();
 
-    // Start a long-running query
+    // Start a query
     const queryPromise = repl.processInput('SELECT * FROM generate_series(1, 1000000);');
 
-    // Interrupt
+    // Interrupt while the query is "running" (before 100ms resolve)
     repl.interrupt();
 
-    // Should be cancelled
-    await expect(queryPromise).rejects.toThrow(/cancel|interrupt/i);
+    // processInput catches the thrown "Query cancelled" error and returns it as a string
+    const output = await queryPromise;
+    expect(output).toMatch(/cancel|interrupt/i);
 
     await repl.close();
   });
@@ -1252,14 +1409,15 @@ describe('REPL Lifecycle', () => {
 
   /**
    * Should display welcome message on start
-   * Skipped: Requires bun:sqlite or better-sqlite3 which isn't available in workers
+   * Uses injected mock connection to avoid bun:sqlite dependency
    */
-  it.skip('should display welcome message', async () => {
+  it('should display welcome message', async () => {
     const output: string[] = [];
     const repl = new BunREPL({
       mode: 'local',
       database: ':memory:',
       output: (msg: string) => output.push(msg),
+      connection: createMockLocalConnection(),
     });
 
     await repl.start();
@@ -1272,14 +1430,15 @@ describe('REPL Lifecycle', () => {
 
   /**
    * Should change prompt for multi-line input
-   * Skipped: Requires bun:sqlite or better-sqlite3 which isn't available in workers
+   * Uses injected mock connection to avoid bun:sqlite dependency
    */
-  it.skip('should change prompt for multi-line input', async () => {
+  it('should change prompt for multi-line input', async () => {
     const repl = new BunREPL({
       mode: 'local',
       database: ':memory:',
       prompt: 'dosql> ',
       multilinePrompt: '   ...> ',
+      connection: createMockLocalConnection(),
     });
     await repl.start();
 
@@ -1304,10 +1463,10 @@ describe('REPL Lifecycle', () => {
 describe('Error Handling', () => {
   /**
    * Should display SQL errors clearly
-   * Skipped: Requires bun:sqlite or better-sqlite3 which isn't available in workers
+   * Uses injected mock connection to avoid bun:sqlite dependency
    */
-  it.skip('should display SQL syntax errors', async () => {
-    const repl = new BunREPL({ mode: 'local', database: ':memory:' });
+  it('should display SQL syntax errors', async () => {
+    const repl = new BunREPL({ mode: 'local', database: ':memory:', connection: createMockLocalConnection() });
     await repl.start();
 
     const output = await repl.processInput('SELEC * FROM users;');
@@ -1319,10 +1478,10 @@ describe('Error Handling', () => {
 
   /**
    * Should display table not found errors
-   * Skipped: Requires bun:sqlite or better-sqlite3 which isn't available in workers
+   * Uses injected mock connection to avoid bun:sqlite dependency
    */
-  it.skip('should display table not found errors', async () => {
-    const repl = new BunREPL({ mode: 'local', database: ':memory:' });
+  it('should display table not found errors', async () => {
+    const repl = new BunREPL({ mode: 'local', database: ':memory:', connection: createMockLocalConnection() });
     await repl.start();
 
     const output = await repl.processInput('SELECT * FROM nonexistent;');
@@ -1334,10 +1493,10 @@ describe('Error Handling', () => {
 
   /**
    * Should continue after errors
-   * Skipped: Requires bun:sqlite or better-sqlite3 which isn't available in workers
+   * Uses injected mock connection to avoid bun:sqlite dependency
    */
-  it.skip('should continue after errors', async () => {
-    const repl = new BunREPL({ mode: 'local', database: ':memory:' });
+  it('should continue after errors', async () => {
+    const repl = new BunREPL({ mode: 'local', database: ':memory:', connection: createMockLocalConnection() });
     await repl.start();
 
     // Error

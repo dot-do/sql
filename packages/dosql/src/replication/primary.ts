@@ -105,7 +105,8 @@ export function createPrimaryDO(
         ...info,
         registeredAt: existing.info.registeredAt,
       };
-      existing.info.status = 'syncing';
+      // Preserve explicitly provided status (e.g. 'offline'), otherwise default to 'syncing'
+      existing.info.status = info.status === 'offline' ? 'offline' : 'syncing';
       return;
     }
 
@@ -113,7 +114,8 @@ export function createPrimaryDO(
     const replicaInfo: ReplicaInfo = {
       ...info,
       registeredAt: Date.now(),
-      status: 'registering',
+      // Preserve explicitly provided status (e.g. 'offline'), otherwise default to 'registering'
+      status: info.status === 'offline' ? 'offline' : 'registering',
     };
 
     const trackingState: ReplicaTrackingState = {
@@ -133,8 +135,10 @@ export function createPrimaryDO(
     // Persist replica info
     await persistReplicaState();
 
-    // Update status to syncing
-    trackingState.info.status = 'syncing';
+    // Update status to syncing (unless explicitly registered as offline)
+    if (info.status !== 'offline') {
+      trackingState.info.status = 'syncing';
+    }
   }
 
   async function deregisterReplica(replicaId: ReplicaId): Promise<void> {

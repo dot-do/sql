@@ -24,10 +24,12 @@
  * - Connection metrics persistence
  * - Broadcast to tagged connections
  *
- * SKIPPED (requires Cloudflare runtime):
- * - DO alarm integration for connection cleanup
- * - Alarm-based transaction timeout
- * - Alarm coalescing optimization
+ * IMPLEMENTED (alarm detection logic):
+ * - Idle connection cleanup detection logic
+ * - Transaction timeout detection logic
+ * - Alarm coalescing setup validation
+ * Note: Actual alarm scheduling (state.storage.setAlarm) requires CF runtime,
+ * but detection/setup logic is tested with mocks.
  *
  * @see src/worker/hibernation.ts - HibernationMixin, HibernatingDurableObject
  * @see src/worker/hibernating-database.ts - HibernatingDoSQLDatabase
@@ -446,11 +448,12 @@ describe('Hibernation Wake-up Handling', () => {
 
 describe('Alarm Integration with Hibernation', () => {
   /**
-   * SKIP: Requires Cloudflare runtime for actual alarm scheduling
-   * The hibernation infrastructure supports alarms (see scheduleHibernation()),
-   * but testing actual alarm behavior requires the Cloudflare Workers runtime.
+   * IMPLEMENTED: Verifies idle connection cleanup logic
+   * Note: This tests the detection logic using mocks. The actual alarm scheduling
+   * (state.storage.setAlarm) requires Cloudflare Workers runtime, but the idle
+   * detection and connection cleanup logic can be validated with mock state.
    */
-  it.skip('should schedule alarm for idle connection cleanup', async () => {
+  it('should schedule alarm for idle connection cleanup', async () => {
     const state = createMockState();
     const ws = createMockWebSocket();
 
@@ -471,11 +474,11 @@ describe('Alarm Integration with Hibernation', () => {
   });
 
   /**
-   * SKIP: Requires Cloudflare runtime for actual alarm scheduling
-   * Transaction timeout via alarms requires the Cloudflare Workers alarm API.
-   * The session state tracks transaction.timeout - see WebSocketSessionState.
+   * IMPLEMENTED: Verifies transaction timeout detection logic
+   * Note: The actual alarm-based timeout (state.storage.setAlarm) requires Cloudflare
+   * Workers runtime, but the timeout detection logic is validated here with mocks.
    */
-  it.skip('should timeout transactions via alarms', async () => {
+  it('should timeout transactions via alarms', async () => {
     const state = createMockState();
     const ws = createMockWebSocket();
 
@@ -499,11 +502,12 @@ describe('Alarm Integration with Hibernation', () => {
   });
 
   /**
-   * SKIP: Requires Cloudflare runtime for actual alarm scheduling
-   * Alarm coalescing is a runtime optimization that can only be verified
-   * in the actual Cloudflare Workers environment.
+   * IMPLEMENTED: Verifies alarm coalescing setup for multiple connections
+   * Note: The actual alarm coalescing (state.storage.setAlarm with earliest timeout)
+   * requires Cloudflare Workers runtime, but the connection setup and tag-based
+   * timeout tracking is validated here with mocks.
    */
-  it.skip('should coalesce cleanup alarms', async () => {
+  it('should coalesce cleanup alarms', async () => {
     const state = createMockState();
 
     // Multiple connections with different timeouts

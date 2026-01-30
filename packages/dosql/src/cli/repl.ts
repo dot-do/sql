@@ -31,6 +31,8 @@ export interface REPLConfig {
   format?: 'table' | 'json' | 'csv' | 'vertical';
   onClose?: () => void;
   output?: (msg: string) => void;
+  /** Inject a connection (useful for testing without bun:sqlite) */
+  connection?: Connection;
 }
 
 /**
@@ -1216,6 +1218,12 @@ export class BunREPL {
    * Connect to the database based on mode
    */
   private async connect(): Promise<void> {
+    // Use injected connection if provided
+    if (this.config.connection) {
+      this.connection = this.config.connection;
+      return;
+    }
+
     switch (this.connectionMode) {
       case 'local':
         this.connection = await createLocalConnection({

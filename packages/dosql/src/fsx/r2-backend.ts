@@ -9,6 +9,10 @@
  * - ETag-based integrity checking
  * - Metadata preservation
  * - Structured error handling with R2-specific error types
+ * - Retry with exponential backoff and jitter
+ * - Circuit breaker pattern for fault tolerance
+ * - Read cache for graceful degradation
+ * - Health status reporting
  */
 
 import {
@@ -19,16 +23,20 @@ import {
   FSXError,
   FSXErrorCode,
 } from './types.js';
-import { R2Error, R2ErrorCode, createR2Error } from './r2-errors.js';
+import {
+  R2Error,
+  R2ErrorCode,
+  createR2Error,
+  createRetriesExhaustedError,
+  createCircuitOpenError,
+  createPartialWriteError,
+  detectR2ErrorType,
+} from './r2-errors.js';
 
 // =============================================================================
 // R2 Interface Types (Cloudflare Workers Types)
 // =============================================================================
 
-/**
- * Minimal R2Bucket interface
- * Compatible with Cloudflare Workers R2Bucket binding
- */
 export interface R2BucketLike {
   get(key: string, options?: R2GetOptions): Promise<R2ObjectLike | null>;
   put(key: string, value: R2PutValue, options?: R2PutOptions): Promise<R2ObjectLike>;
@@ -127,35 +135,101 @@ export interface R2ObjectsLike {
 }
 
 // =============================================================================
+// Circuit Breaker
+// =============================================================================
+
+class CircuitBreaker {
+  private _failureCount = 0;
+  private readonly threshold: number;
+
+  constructor(threshold = 5) {
+    this.threshold = threshold;
+  }
+
+  get failureCount(): number {
+    return this._failureCount;
+  }
+
+  /** Whether circuit is open (too many consecutive failures) */
+  isOpen(): boolean {
+    return this._failureCount >= this.threshold;
+  }
+
+  recordSuccess(): void {
+    this._failureCount = 0;
+  }
+
+  recordFailure(): void {
+    this._failureCount++;
+  }
+}
+
+// =============================================================================
+// Retry Helper
+// =============================================================================
+
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 100;
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setTimeout(() => resolve(), ms);
+  });
+}
+
+function computeDelay(attempt: number): number {
+  const base = BASE_DELAY_MS * Math.pow(2, attempt);
+  const jitter = base * 0.25 * (Math.random() * 2 - 1);
+  return Math.max(1, Math.round(base + jitter));
+}
+
+function isRetryableError(error: unknown): boolean {
+  const errorType = detectR2ErrorType(error);
+  return [
+    R2ErrorCode.TIMEOUT,
+    R2ErrorCode.RATE_LIMITED,
+    R2ErrorCode.NETWORK_ERROR,
+    R2ErrorCode.READ_DURING_WRITE,
+  ].includes(errorType);
+}
+
+// =============================================================================
 // R2 Backend Implementation
 // =============================================================================
 
-/**
- * R2 storage backend configuration
- */
 export interface R2BackendConfig {
-  /** Key prefix for all objects */
   keyPrefix?: string;
-  /** Default storage class for new objects */
   defaultStorageClass?: 'Standard' | 'InfrequentAccess';
-  /** Custom metadata to attach to all objects */
   defaultMetadata?: Record<string, string>;
+  maxRetries?: number;
+  circuitBreakerThreshold?: number;
 }
 
-/**
- * R2 storage backend implementation
- */
+export interface R2HealthStatus {
+  status: 'healthy' | 'degraded' | 'unavailable';
+  r2Available: boolean;
+  circuitState: string;
+  failureCount: number;
+}
+
 export class R2StorageBackend implements FSXBackendWithMeta {
   private readonly bucket: R2BucketLike;
   private readonly keyPrefix: string;
   private readonly defaultStorageClass: 'Standard' | 'InfrequentAccess';
   private readonly defaultMetadata: Record<string, string>;
+  private readonly maxRetries: number;
+  private readonly circuitBreaker: CircuitBreaker;
+  private readonly readCache = new Map<string, Uint8Array>();
+  private readonly degradedListeners: Array<(entering: boolean) => void> = [];
+  private isDegraded = false;
 
   constructor(bucket: R2BucketLike, config: R2BackendConfig = {}) {
     this.bucket = bucket;
     this.keyPrefix = config.keyPrefix ?? '';
     this.defaultStorageClass = config.defaultStorageClass ?? 'Standard';
     this.defaultMetadata = config.defaultMetadata ?? {};
+    this.maxRetries = config.maxRetries ?? MAX_RETRIES;
+    this.circuitBreaker = new CircuitBreaker(config.circuitBreakerThreshold ?? 5);
   }
 
   // ===========================================================================
@@ -164,53 +238,143 @@ export class R2StorageBackend implements FSXBackendWithMeta {
 
   async read(path: string, range?: ByteRange): Promise<Uint8Array | null> {
     const key = this.toR2Key(path);
+    const circuitOpen = this.circuitBreaker.isOpen();
 
-    try {
-      const options: R2GetOptions = {};
-
-      if (range) {
-        const [start, end] = range;
-        // R2 uses offset + length, not start + end
-        options.range = {
-          offset: start,
-          length: end - start + 1,
-        };
-      }
-
-      const obj = await this.bucket.get(key, options);
-      if (!obj) return null;
-
-      const buffer = await obj.arrayBuffer();
-      return new Uint8Array(buffer);
-    } catch (error) {
-      throw createR2Error(error, path, 'read');
+    // When circuit is open, try one probe attempt (no retries)
+    // If we have cached data, return it directly when circuit is open
+    if (circuitOpen) {
+      const cached = this.readCache.get(path);
+      if (cached) return cached;
     }
+
+    const maxAttempts = circuitOpen ? 0 : this.maxRetries;
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+      try {
+        const options: R2GetOptions = {};
+        if (range) {
+          const [start, end] = range;
+          options.range = { offset: start, length: end - start + 1 };
+        }
+
+        const obj = await this.bucket.get(key, options);
+        if (!obj) return null;
+
+        const buffer = await obj.arrayBuffer();
+        const result = new Uint8Array(buffer);
+
+        this.readCache.set(path, result);
+        this.circuitBreaker.recordSuccess();
+        this.checkDegradedExit();
+        return result;
+      } catch (error) {
+        lastError = error;
+        this.circuitBreaker.recordFailure();
+        this.checkDegradedEnter();
+
+        if (!isRetryableError(error) || attempt === maxAttempts) {
+          break;
+        }
+
+        // If circuit just opened mid-retry, check cache and bail
+        if (this.circuitBreaker.isOpen()) {
+          const cached = this.readCache.get(path);
+          if (cached) return cached;
+          break;
+        }
+
+        await sleep(computeDelay(attempt));
+      }
+    }
+
+    // Try cache as last resort
+    const cached = this.readCache.get(path);
+    if (cached) return cached;
+
+    // If circuit is open, throw circuit error
+    if (this.circuitBreaker.isOpen()) {
+      throw createCircuitOpenError(path, 'read', this.circuitBreaker.failureCount);
+    }
+
+    if (maxAttempts > 0 && isRetryableError(lastError)) {
+      throw createRetriesExhaustedError(lastError, path, 'read', maxAttempts);
+    }
+
+    throw createR2Error(lastError, path, 'read');
   }
 
   async write(path: string, data: Uint8Array): Promise<void> {
     const key = this.toR2Key(path);
+    const circuitOpen = this.circuitBreaker.isOpen();
 
-    try {
-      // Convert to ArrayBuffer for R2
-      const buffer = this.toArrayBuffer(data);
+    // When circuit is open, allow one probe attempt (no retries)
+    const maxAttempts = circuitOpen ? 0 : this.maxRetries;
+    let lastError: unknown;
 
-      await this.bucket.put(key, buffer, {
-        customMetadata: {
-          ...this.defaultMetadata,
-          'fsx-created': new Date().toISOString(),
-        },
-        storageClass: this.defaultStorageClass,
-      });
-    } catch (error) {
-      throw createR2Error(error, path, 'write');
+    for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+      try {
+        const buffer = this.toArrayBuffer(data);
+
+        const result = await this.bucket.put(key, buffer, {
+          customMetadata: {
+            ...this.defaultMetadata,
+            'fsx-created': new Date().toISOString(),
+          },
+          storageClass: this.defaultStorageClass,
+        });
+
+        // Verify write integrity
+        if (result.size !== data.length) {
+          try { await this.bucket.delete(key); } catch { /* ignore */ }
+          throw createPartialWriteError(path, new Error(`Expected ${data.length} bytes, wrote ${result.size}`));
+        }
+
+        this.circuitBreaker.recordSuccess();
+        this.checkDegradedExit();
+        return;
+      } catch (error) {
+        lastError = error;
+
+        // Propagate FSXError immediately
+        if (error instanceof FSXError) {
+          try { await this.bucket.delete(key); } catch { /* ignore */ }
+          throw error;
+        }
+
+        this.circuitBreaker.recordFailure();
+        this.checkDegradedEnter();
+
+        if (!isRetryableError(error) || attempt === maxAttempts) {
+          break;
+        }
+
+        // If circuit just opened, fail fast
+        if (this.circuitBreaker.isOpen()) {
+          break;
+        }
+
+        await sleep(computeDelay(attempt));
+      }
     }
+
+    // If circuit is open, throw circuit error
+    if (this.circuitBreaker.isOpen()) {
+      throw createCircuitOpenError(path, 'write', this.circuitBreaker.failureCount);
+    }
+
+    if (maxAttempts > 0 && isRetryableError(lastError)) {
+      throw createRetriesExhaustedError(lastError, path, 'write', maxAttempts);
+    }
+
+    throw createR2Error(lastError, path, 'write');
   }
 
   async delete(path: string): Promise<void> {
     const key = this.toR2Key(path);
-
     try {
       await this.bucket.delete(key);
+      this.readCache.delete(path);
     } catch (error) {
       throw createR2Error(error, path, 'delete');
     }
@@ -244,7 +408,6 @@ export class R2StorageBackend implements FSXBackendWithMeta {
 
   async exists(path: string): Promise<boolean> {
     const key = this.toR2Key(path);
-
     try {
       const obj = await this.bucket.head(key);
       return obj !== null;
@@ -259,11 +422,9 @@ export class R2StorageBackend implements FSXBackendWithMeta {
 
   async metadata(path: string): Promise<FSXMetadata | null> {
     const key = this.toR2Key(path);
-
     try {
       const obj = await this.bucket.head(key);
       if (!obj) return null;
-
       return {
         size: obj.size,
         lastModified: obj.uploaded,
@@ -279,9 +440,6 @@ export class R2StorageBackend implements FSXBackendWithMeta {
   // Extended R2 Operations
   // ===========================================================================
 
-  /**
-   * Read with conditional get (if-match/if-none-match)
-   */
   async readConditional(
     path: string,
     conditions: { etag?: string; ifNotEtag?: string }
@@ -298,7 +456,6 @@ export class R2StorageBackend implements FSXBackendWithMeta {
     const obj = await this.bucket.get(key, options);
 
     if (!obj) {
-      // Could be not found OR not modified (304)
       const exists = await this.exists(path);
       if (exists && conditions.etag) {
         return { data: null, notModified: true };
@@ -310,9 +467,6 @@ export class R2StorageBackend implements FSXBackendWithMeta {
     return { data: new Uint8Array(buffer), notModified: false };
   }
 
-  /**
-   * Write with custom metadata
-   */
   async writeWithMetadata(
     path: string,
     data: Uint8Array,
@@ -323,6 +477,19 @@ export class R2StorageBackend implements FSXBackendWithMeta {
     }
   ): Promise<{ etag: string }> {
     const key = this.toR2Key(path);
+
+    // Optimistic locking via if-match ETag
+    const ifMatch = metadata.customMetadata?.['if-match'];
+    if (ifMatch) {
+      const current = await this.bucket.head(key);
+      if (current && current.etag !== ifMatch) {
+        throw new FSXError(
+          FSXErrorCode.WRITE_FAILED,
+          `R2 concurrent write conflict for path "${path}": ETag conflict - retry the operation`,
+          path,
+        );
+      }
+    }
 
     try {
       const buffer = this.toArrayBuffer(data);
@@ -345,25 +512,16 @@ export class R2StorageBackend implements FSXBackendWithMeta {
     }
   }
 
-  /**
-   * Batch delete multiple paths
-   */
   async deleteMany(paths: string[]): Promise<void> {
     if (paths.length === 0) return;
-
     try {
       const keys = paths.map((p) => this.toR2Key(p));
-
-      // R2 supports batch delete
       await this.bucket.delete(keys);
     } catch (error) {
       throw createR2Error(error, paths.join(', '), 'deleteMany');
     }
   }
 
-  /**
-   * List with metadata included
-   */
   async listWithMetadata(
     prefix: string
   ): Promise<Array<{ path: string; metadata: FSXMetadata }>> {
@@ -402,6 +560,54 @@ export class R2StorageBackend implements FSXBackendWithMeta {
   }
 
   // ===========================================================================
+  // Health & Degraded Mode
+  // ===========================================================================
+
+  async getHealthStatus(): Promise<R2HealthStatus> {
+    const isOpen = this.circuitBreaker.isOpen();
+
+    let status: 'healthy' | 'degraded' | 'unavailable';
+    if (!isOpen && this.circuitBreaker.failureCount === 0) {
+      status = 'healthy';
+    } else {
+      status = 'degraded';
+    }
+
+    return {
+      status,
+      r2Available: !isOpen,
+      circuitState: isOpen ? 'open' : 'closed',
+      failureCount: this.circuitBreaker.failureCount,
+    };
+  }
+
+  onDegradedMode(listener: (entering: boolean) => void): void {
+    this.degradedListeners.push(listener);
+  }
+
+  // ===========================================================================
+  // Degraded Mode Helpers
+  // ===========================================================================
+
+  private checkDegradedEnter(): void {
+    if (!this.isDegraded && this.circuitBreaker.isOpen()) {
+      this.isDegraded = true;
+      for (const listener of this.degradedListeners) {
+        listener(true);
+      }
+    }
+  }
+
+  private checkDegradedExit(): void {
+    if (this.isDegraded && !this.circuitBreaker.isOpen()) {
+      this.isDegraded = false;
+      for (const listener of this.degradedListeners) {
+        listener(false);
+      }
+    }
+  }
+
+  // ===========================================================================
   // Utility Methods
   // ===========================================================================
 
@@ -419,10 +625,6 @@ export class R2StorageBackend implements FSXBackendWithMeta {
     return key;
   }
 
-  /**
-   * Convert Uint8Array to ArrayBuffer for R2
-   * Handles subarray views correctly
-   */
   private toArrayBuffer(data: Uint8Array): ArrayBuffer {
     return data.buffer.slice(
       data.byteOffset,
@@ -434,9 +636,6 @@ export class R2StorageBackend implements FSXBackendWithMeta {
   // Administrative Methods
   // ===========================================================================
 
-  /**
-   * Get storage statistics for a prefix
-   */
   async getStats(prefix: string = ''): Promise<{
     objectCount: number;
     totalSize: number;
@@ -459,7 +658,6 @@ export class R2StorageBackend implements FSXBackendWithMeta {
         for (const obj of result.objects) {
           objectCount++;
           totalSize += obj.size;
-
           const storageClass = obj.storageClass ?? 'Standard';
           storageClasses[storageClass] = (storageClasses[storageClass] ?? 0) + 1;
         }
@@ -478,11 +676,6 @@ export class R2StorageBackend implements FSXBackendWithMeta {
 // Factory Function
 // =============================================================================
 
-/**
- * Create an R2 storage backend
- * @param bucket - R2Bucket binding from Cloudflare Workers
- * @param config - Optional configuration
- */
 export function createR2Backend(
   bucket: R2BucketLike,
   config?: R2BackendConfig

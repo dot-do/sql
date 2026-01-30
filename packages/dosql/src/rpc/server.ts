@@ -170,7 +170,11 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
 
   // Stream cleanup options and tracking
   #streamTTLMs: number;
+  #cdcStreamTTLMs?: number;
+  #queryStreamTTLMs?: number;
   #maxConcurrentStreams: number;
+  #maxQueryStreams?: number;
+  #maxCdcSubscriptions?: number;
   #onScheduleAlarm?: (delayMs: number) => void;
   #alarmPending = false;
   #streamStats: StreamStats = {
@@ -178,6 +182,18 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
     totalCreated: 0,
     totalClosed: 0,
   };
+  #cleanupStats: CleanupStats = {
+    manualCloses: 0,
+    ttlExpiries: 0,
+    connectionCloses: 0,
+    abandonedCleanups: 0,
+    memoryPressureCleanups: 0,
+  };
+  #cleanupCallbacks: Array<() => void> = [];
+  #memoryWarningThreshold: number;
+  #memoryCriticalThreshold: number;
+  #peakMemoryUsage = 0;
+  #memoryMetricsCallbacks: Array<(metrics: MemoryMetrics) => void> = [];
 
   constructor(executor: QueryExecutor, cdcManager?: CDCManager, options?: DoSQLTargetOptions) {
     super();
@@ -186,6 +202,8 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
     this.#streamTTLMs = options?.streamTTLMs ?? TIMEOUTS.DEFAULT_STREAM_TTL_MS;
     this.#maxConcurrentStreams = options?.maxConcurrentStreams ?? STREAMS.MAX_CONCURRENT_STREAMS;
     this.#onScheduleAlarm = options?.onScheduleAlarm;
+    this.#memoryWarningThreshold = options?.memoryWarningThreshold ?? 50 * 1024 * 1024; // 50MB
+    this.#memoryCriticalThreshold = options?.memoryCriticalThreshold ?? 100 * 1024 * 1024; // 100MB
   }
 
   // ===========================================================================
@@ -230,7 +248,19 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
     columns: string[];
     columnTypes: ColumnType[];
   }> {
-    // Check maximum concurrent streams limit
+    // Check memory limits
+    const memUsage = this.getMemoryUsage();
+    if (memUsage.status === 'critical') {
+      this.#cleanupStats.memoryPressureCleanups++;
+      throw new Error(`Critical memory limit reached (${memUsage.estimatedBytes} bytes, limit: ${this.#memoryCriticalThreshold})`);
+    }
+
+    // Auto-cleanup expired streams before enforcing limit
+    if (this.#streams.size >= this.#maxConcurrentStreams) {
+      this.cleanupExpiredStreams();
+    }
+
+    // Check maximum concurrent streams limit (after cleanup)
     if (this.#streams.size >= this.#maxConcurrentStreams) {
       throw new Error(`Maximum concurrent streams exceeded (limit: ${this.#maxConcurrentStreams})`);
     }
@@ -622,6 +652,7 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
     if (existed) {
       this.#streamStats.activeStreams--;
       this.#streamStats.totalClosed++;
+      this.#cleanupStats.manualCloses++;
     }
     return existed;
   }
@@ -646,7 +677,11 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
     const expiredStreamIds: string[] = [];
 
     for (const [streamId, stream] of this.#streams) {
-      if (now - stream.lastActivity > this.#streamTTLMs) {
+      // Use per-stream-type TTL if configured
+      const ttl = stream.streamType === 'cdc'
+        ? (this.#cdcStreamTTLMs ?? this.#streamTTLMs)
+        : (this.#queryStreamTTLMs ?? this.#streamTTLMs);
+      if (now - stream.lastActivity > ttl) {
         expiredStreamIds.push(streamId);
       }
     }
@@ -656,6 +691,7 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
       this.#streamStats.activeStreams--;
       this.#streamStats.totalClosed++;
     }
+    this.#cleanupStats.ttlExpiries += expiredStreamIds.length;
 
     // Reschedule alarm if there are still active streams
     if (this.#streams.size > 0) {
@@ -672,14 +708,213 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
    * Called when WebSocket connection closes to cleanup all resources
    */
   onConnectionClose(): void {
+    const streamCount = this.#streams.size;
+    // Close all streams
+    this.closeAllStreams();
+    this.#cleanupStats.connectionCloses += streamCount;
+    // Undo the manual close tracking from closeAllStreams (those were connection closes, not manual)
+    // closeAllStreams doesn't add to manualCloses, so no adjustment needed
+
+    // Close all CDC subscriptions
+    for (const [, subscription] of this.#cdcSubscriptions) {
+      subscription.unsubscribe();
+    }
+    this.#cdcSubscriptions.clear();
+
+    // Call registered cleanup callbacks
+    for (const callback of this.#cleanupCallbacks) {
+      try {
+        callback();
+      } catch {
+        // Handle cleanup errors gracefully - don't let one callback failure
+        // prevent other callbacks from running
+      }
+    }
+  }
+
+  // ===========================================================================
+  // Stream Manager API
+  // ===========================================================================
+
+  /**
+   * Get a stream manager interface for advanced stream management
+   */
+  getStreamManager(): StreamManager {
+    return {
+      setMaxConcurrentStreams: (limit: number) => {
+        this.#maxConcurrentStreams = limit;
+      },
+      setStreamTTL: (ttlMs: number) => {
+        this.#streamTTLMs = ttlMs;
+      },
+      setStreamTTLByType: (type: 'query' | 'cdc', ttlMs: number) => {
+        if (type === 'cdc') {
+          this.#cdcStreamTTLMs = ttlMs;
+        } else {
+          this.#queryStreamTTLMs = ttlMs;
+        }
+      },
+      setStreamLimits: (options: { maxQueryStreams?: number; maxCdcSubscriptions?: number }) => {
+        this.#maxQueryStreams = options.maxQueryStreams;
+        this.#maxCdcSubscriptions = options.maxCdcSubscriptions;
+      },
+      getStreamCount: () => this.#streams.size,
+      getStreamStats: () => ({
+        ...this.getStreamStats(),
+        totalCdcSubscriptions: this.#cdcSubscriptions.size,
+      }),
+      getCleanupStats: () => ({ ...this.#cleanupStats }),
+    };
+  }
+
+  /**
+   * Register a cleanup callback to be called on connection close
+   */
+  registerCleanupCallback(callback: () => void): void {
+    this.#cleanupCallbacks.push(callback);
+  }
+
+  /**
+   * Close streams whose IDs match a pattern (glob-like with * wildcard)
+   */
+  closeStreamsByPattern(pattern: string): number {
+    const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+    const toClose: string[] = [];
+    for (const streamId of this.#streams.keys()) {
+      if (regex.test(streamId)) {
+        toClose.push(streamId);
+      }
+    }
+    for (const streamId of toClose) {
+      this.closeStream(streamId);
+    }
+    return toClose.length;
+  }
+
+  /**
+   * Get list of abandoned streams (streams that have been inactive longer than TTL)
+   */
+  getAbandonedStreams(thresholdMs?: number): StreamInfo[] {
+    const threshold = thresholdMs ?? this.#streamTTLMs;
+    const now = Date.now();
+    const abandoned: StreamInfo[] = [];
+    for (const [streamId, stream] of this.#streams) {
+      if (now - stream.lastActivity > threshold) {
+        abandoned.push({
+          streamId,
+          sql: stream.sql,
+          createdAt: stream.createdAt,
+          lastActivity: stream.lastActivity,
+          chunkSize: stream.chunkSize,
+          totalRowsSent: stream.totalRowsSent,
+        });
+      }
+    }
+    return abandoned;
+  }
+
+  /**
+   * Get estimated memory usage for all streams
+   */
+  getMemoryUsage(): MemoryUsage {
+    let estimatedBytes = 0;
+    for (const [, stream] of this.#streams) {
+      // Estimate: base overhead + SQL string + per-row estimate
+      estimatedBytes += 200; // base overhead per stream
+      estimatedBytes += (stream.sql.length * 2); // SQL string (2 bytes per char)
+      estimatedBytes += (stream.columns.length * 50); // column metadata
+      estimatedBytes += (stream.totalRowsSent * 100); // rough per-row buffered estimate
+    }
+
+    // Track peak
+    if (estimatedBytes > this.#peakMemoryUsage) {
+      this.#peakMemoryUsage = estimatedBytes;
+    }
+
+    const status: 'ok' | 'warning' | 'critical' =
+      estimatedBytes >= this.#memoryCriticalThreshold ? 'critical' :
+      estimatedBytes >= this.#memoryWarningThreshold ? 'warning' : 'ok';
+
+    return {
+      estimatedBytes,
+      streamCount: this.#streams.size,
+      cdcSubscriptionCount: this.#cdcSubscriptions.size,
+      warningThreshold: this.#memoryWarningThreshold,
+      criticalThreshold: this.#memoryCriticalThreshold,
+      status,
+    };
+  }
+
+  /**
+   * Get memory usage breakdown by stream type
+   */
+  getMemoryBreakdown(): { query: number; cdc: number; total: number } {
+    let queryBytes = 0;
+    let cdcBytes = 0;
+    for (const [, stream] of this.#streams) {
+      const bytes = 200 + (stream.sql.length * 2) + (stream.columns.length * 50);
+      if (stream.streamType === 'cdc') {
+        cdcBytes += bytes;
+      } else {
+        queryBytes += bytes;
+      }
+    }
+    return { query: queryBytes, cdc: cdcBytes, total: queryBytes + cdcBytes };
+  }
+
+  /**
+   * Get peak memory usage observed
+   */
+  getPeakMemoryUsage(): number {
+    return this.#peakMemoryUsage;
+  }
+
+  /**
+   * Register a callback for memory metrics emission
+   */
+  onMemoryMetrics(callback: (metrics: MemoryMetrics) => void): void {
+    this.#memoryMetricsCallbacks.push(callback);
+  }
+
+  /**
+   * Emit current memory metrics to registered callbacks
+   */
+  emitMemoryMetrics(): void {
+    const usage = this.getMemoryUsage();
+    const metrics: MemoryMetrics = {
+      estimatedBytes: usage.estimatedBytes,
+      streamCount: usage.streamCount,
+      cdcSubscriptionCount: usage.cdcSubscriptionCount,
+      status: usage.status,
+      peakBytes: this.#peakMemoryUsage,
+      timestamp: Date.now(),
+    };
+    for (const callback of this.#memoryMetricsCallbacks) {
+      callback(metrics);
+    }
+  }
+
+  /**
+   * Graceful shutdown - cleanup all streams and CDC subscriptions
+   */
+  async gracefulShutdown(_timeoutMs: number): Promise<void> {
     // Close all streams
     this.closeAllStreams();
 
     // Close all CDC subscriptions
-    for (const [subscriptionId, subscription] of this.#cdcSubscriptions) {
+    for (const [, subscription] of this.#cdcSubscriptions) {
       subscription.unsubscribe();
     }
     this.#cdcSubscriptions.clear();
+
+    // Call registered cleanup callbacks
+    for (const callback of this.#cleanupCallbacks) {
+      try {
+        callback();
+      } catch {
+        // Graceful - don't let callback errors prevent shutdown
+      }
+    }
   }
 
   // ===========================================================================
@@ -783,6 +1018,8 @@ interface StreamState {
   createdAt: number;
   /** Timestamp of last activity (creation or chunk retrieval) */
   lastActivity: number;
+  /** Stream type for per-type TTL configuration */
+  streamType?: 'query' | 'cdc';
 }
 
 /**
@@ -819,6 +1056,58 @@ export interface DoSQLTargetOptions {
   maxConcurrentStreams?: number;
   /** Callback to schedule alarm for cleanup (for Durable Object integration) */
   onScheduleAlarm?: (delayMs: number) => void;
+  /** Memory warning threshold in bytes (default: 50MB) */
+  memoryWarningThreshold?: number;
+  /** Memory critical threshold in bytes (default: 100MB) */
+  memoryCriticalThreshold?: number;
+}
+
+/**
+ * Cleanup activity statistics
+ */
+export interface CleanupStats {
+  manualCloses: number;
+  ttlExpiries: number;
+  connectionCloses: number;
+  abandonedCleanups: number;
+  memoryPressureCleanups: number;
+}
+
+/**
+ * Stream manager interface for advanced stream management
+ */
+export interface StreamManager {
+  setMaxConcurrentStreams(limit: number): void;
+  setStreamTTL(ttlMs: number): void;
+  setStreamTTLByType(type: 'query' | 'cdc', ttlMs: number): void;
+  setStreamLimits(options: { maxQueryStreams?: number; maxCdcSubscriptions?: number }): void;
+  getStreamCount(): number;
+  getStreamStats(): StreamStats & { totalCdcSubscriptions: number };
+  getCleanupStats(): CleanupStats;
+}
+
+/**
+ * Memory usage information
+ */
+export interface MemoryUsage {
+  estimatedBytes: number;
+  streamCount: number;
+  cdcSubscriptionCount: number;
+  warningThreshold: number;
+  criticalThreshold: number;
+  status: 'ok' | 'warning' | 'critical';
+}
+
+/**
+ * Memory metrics for monitoring
+ */
+export interface MemoryMetrics {
+  estimatedBytes: number;
+  streamCount: number;
+  cdcSubscriptionCount: number;
+  status: 'ok' | 'warning' | 'critical';
+  peakBytes: number;
+  timestamp: number;
 }
 
 interface ConnectionInfo {

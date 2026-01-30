@@ -705,7 +705,9 @@ describe('DoSQL Router - Configuration', () => {
 describe('DoSQL Router - WebSocket', () => {
   it('should forward WebSocket upgrade to DO when websocket enabled', async () => {
     const stub = createMockDOStub();
-    stub.fetch.mockResolvedValue(new Response(null, { status: 101 }));
+    // Note: Response constructor doesn't accept status 101, so we use 200
+    // and verify the stub was called with the correct upgrade request
+    stub.fetch.mockResolvedValue(new Response(null, { status: 200 }));
     const namespace = createMockNamespace(stub);
 
     const router = createDoSQLRouter({
@@ -720,8 +722,11 @@ describe('DoSQL Router - WebSocket', () => {
 
     const response = await router.fetch(request, { SQL_DO: namespace });
 
+    // Verify the WebSocket upgrade was forwarded to the DO stub
     expect(stub.fetch).toHaveBeenCalled();
-    expect(response.status).toBe(101);
+    const calledRequest = stub.fetch.mock.calls[0][0] as Request;
+    expect(calledRequest.headers.get('upgrade')).toBe('websocket');
+    expect(response.status).toBe(200);
   });
 
   it('should not handle WebSocket when websocket disabled', async () => {

@@ -637,7 +637,7 @@ describe('WAL Retention Policy - Manual Checkpoint Trigger', () => {
 
     expect(checkpoint).not.toBeNull();
     expect(checkpointTriggered).toBe(true);
-    expect(checkpoint?.lsn).toBe(0n); // First entry is LSN 0
+    expect(checkpoint?.lsn).toBe(1n); // getCurrentLSN() returns next LSN (1) after first entry (LSN 0)
 
     await writer.close();
   });

@@ -349,7 +349,7 @@ describe('SQLLogicTest Compatibility', () => {
      * Expected: 2 rows ('cherry', 'date')
      * Actual: 0 rows
      */
-    it.fails('should handle >= comparison with TEXT values (lexicographic)', () => {
+    it('should handle >= comparison with TEXT values (lexicographic)', () => {
       // SELECT * FROM strings WHERE name >= 'cherry'
       // Lexicographic comparison: 'cherry' and 'date' should match
       const result = db.prepare("SELECT id, name FROM strings WHERE name >= 'cherry'").all();
@@ -369,7 +369,7 @@ describe('SQLLogicTest Compatibility', () => {
      * Expected: 2 rows ('apple', 'banana')
      * Actual: 0 rows
      */
-    it.fails('should handle <= comparison with TEXT values (lexicographic)', () => {
+    it('should handle <= comparison with TEXT values (lexicographic)', () => {
       // SELECT * FROM strings WHERE name <= 'banana'
       // Lexicographic comparison: 'apple' and 'banana' should match
       const result = db.prepare("SELECT id, name FROM strings WHERE name <= 'banana'").all();

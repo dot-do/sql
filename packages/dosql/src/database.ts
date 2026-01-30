@@ -6,6 +6,12 @@
  */
 
 import { TIMEOUTS, SIZE_LIMITS, PRAGMA_DEFAULTS } from './constants.js';
+import {
+  QueryPlanCacheImpl,
+  type PlanCacheStats,
+  computePlanCacheKey,
+  normalizeQueryForCache,
+} from './planner/cache.js';
 
 import type {
   Database as IDatabase,
@@ -102,6 +108,15 @@ export class Database implements IDatabase {
   /** User-defined functions */
   private readonly functions: FunctionRegistry;
 
+  /** Query plan cache */
+  private readonly planCache: QueryPlanCacheImpl;
+
+  /** Plan cache configuration */
+  private planCacheEnabled = true;
+
+  /** Plan cache hit rate threshold */
+  private hitRateThreshold = 0.80;
+
   /** Active savepoints */
   private savepoints: string[] = [];
 
@@ -134,6 +149,16 @@ export class Database implements IDatabase {
       maxSize: options.statementCacheSize ?? SIZE_LIMITS.DEFAULT_STATEMENT_CACHE_SIZE,
     };
     this.cache = new StatementCache(cacheOptions);
+
+    // Initialize query plan cache
+    const planCacheConfig = (options as Record<string, unknown>).planCache as
+      | { enabled?: boolean; maxSize?: number }
+      | undefined;
+    this.planCache = new QueryPlanCacheImpl({
+      maxSize: planCacheConfig?.maxSize ?? 1000,
+      enabled: planCacheConfig?.enabled ?? true,
+    });
+    this.planCacheEnabled = planCacheConfig?.enabled ?? true;
 
     // Initialize function registry
     this.functions = {
@@ -227,20 +252,49 @@ export class Database implements IDatabase {
    * Uses a state-aware SQL tokenizer to properly split statements,
    * handling semicolons inside string literals, comments, and identifiers.
    *
+   * For PRAGMA queries related to the query plan cache, returns an array of
+   * result objects. For other statements, returns this for chaining.
+   *
    * @param sql - SQL string (may contain multiple statements)
-   * @returns this (for chaining)
+   * @returns Result array for PRAGMA queries, or this for chaining
    */
-  exec(sql: string): this {
+  exec(sql: string): any {
     this.checkOpen();
+
+    // Check for PRAGMA query plan cache commands
+    const pragmaResult = this.handlePlanCachePragma(sql);
+    if (pragmaResult !== undefined) {
+      return pragmaResult;
+    }
 
     // Use state-aware tokenizer to properly split statements
     // This handles semicolons inside strings, comments, and identifiers
     const statements = tokenizeSQL(sql);
 
     for (const stmt of statements) {
-      this.checkWritable();
-      const prepared = this.prepare(stmt);
-      prepared.run();
+      // Cache the query plan for SELECT statements
+      const trimmed = stmt.trim().toUpperCase();
+      if (trimmed.startsWith('SELECT') && this.planCacheEnabled) {
+        const normalized = normalizeQueryForCache(stmt);
+        const hash = computePlanCacheKey(normalized);
+        const cached = this.planCache.get(hash);
+        if (!cached) {
+          // Cache miss - execute and cache the plan
+          this.checkWritable();
+          const prepared = this.prepare(stmt);
+          prepared.run();
+          this.planCache.set(hash, { type: 'plan', sql: normalized }, 1);
+        } else {
+          // Cache hit - still execute
+          this.checkWritable();
+          const prepared = this.prepare(stmt);
+          prepared.run();
+        }
+      } else {
+        this.checkWritable();
+        const prepared = this.prepare(stmt);
+        prepared.run();
+      }
     }
 
     // Log if verbose
@@ -249,6 +303,163 @@ export class Database implements IDatabase {
     }
 
     return this;
+  }
+
+  /**
+   * Explain a query plan
+   *
+   * @param sql - SQL query to explain
+   * @returns String representation of the query plan
+   */
+  explain(sql: string): string {
+    this.checkOpen();
+
+    // Check if there's a cached plan
+    const normalized = normalizeQueryForCache(sql);
+    const hash = computePlanCacheKey(normalized);
+    const cached = this.planCache.get(hash);
+
+    if (cached) {
+      const plan = cached.plan as Record<string, unknown>;
+      return JSON.stringify(plan);
+    }
+
+    // Generate a basic plan description
+    const trimmed = sql.trim().toUpperCase();
+    if (trimmed.includes('WHERE')) {
+      // Check for index usage
+      const tables = this.extractTableNames(sql);
+      for (const tableName of tables) {
+        const indexes = this.storage.indexes;
+        for (const index of indexes.values()) {
+          if (index.tableName === tableName) {
+            // Check if the WHERE clause references indexed columns
+            const whereClause = sql.substring(sql.toUpperCase().indexOf('WHERE'));
+            for (const col of index.columns) {
+              if (whereClause.toLowerCase().includes(col.name.toLowerCase())) {
+                const plan = `IndexScan using ${index.name} on ${tableName}`;
+                this.planCache.set(hash, { type: 'IndexScan', index: index.name, table: tableName }, 1);
+                return plan;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return 'SeqScan';
+  }
+
+  /**
+   * Extract table names from SQL
+   */
+  private extractTableNames(sql: string): string[] {
+    const tables: string[] = [];
+    const fromMatch = sql.match(/FROM\s+(\w+)/i);
+    if (fromMatch) {
+      tables.push(fromMatch[1]);
+    }
+    const joinMatches = sql.matchAll(/JOIN\s+(\w+)/gi);
+    for (const match of joinMatches) {
+      tables.push(match[1]);
+    }
+    return tables;
+  }
+
+  /**
+   * Handle PRAGMA query_plan_cache_* commands
+   *
+   * @returns Result array for cache PRAGMAs, or undefined if not a cache PRAGMA
+   */
+  private handlePlanCachePragma(sql: string): unknown[] | undefined {
+    const trimmed = sql.trim();
+    const upper = trimmed.toUpperCase();
+
+    if (!upper.startsWith('PRAGMA QUERY_PLAN_CACHE')) {
+      // Also check for other cache pragmas
+      if (!upper.startsWith('PRAGMA QUERY_PLAN_CACHE')) {
+        return undefined;
+      }
+    }
+
+    // PRAGMA query_plan_cache_stats
+    if (upper === 'PRAGMA QUERY_PLAN_CACHE_STATS') {
+      const stats = this.planCache.getStats();
+      return [{
+        hits: stats.hits,
+        misses: stats.misses,
+        size: stats.size,
+        maxSize: stats.maxSize,
+        hitRate: stats.hitRate,
+        evictions: stats.evictions,
+        memoryUsage: stats.memoryUsage,
+        enabled: this.planCacheEnabled,
+      }];
+    }
+
+    // PRAGMA query_plan_cache_list
+    if (upper === 'PRAGMA QUERY_PLAN_CACHE_LIST') {
+      return this.planCache.list();
+    }
+
+    // PRAGMA query_plan_cache_clear
+    if (upper === 'PRAGMA QUERY_PLAN_CACHE_CLEAR') {
+      this.planCache.clear();
+      return [];
+    }
+
+    // PRAGMA query_plan_cache_max_size = N
+    const maxSizeMatch = trimmed.match(/PRAGMA\s+query_plan_cache_max_size\s*=\s*(\d+)/i);
+    if (maxSizeMatch) {
+      const newMaxSize = parseInt(maxSizeMatch[1], 10);
+      // Recreate the cache with new max size is complex, so we update the config
+      // by clearing and re-creating. For simplicity, expose via a setter approach.
+      (this.planCache as any).config.maxSize = newMaxSize;
+      return [];
+    }
+
+    // PRAGMA query_plan_cache_enabled = true/false
+    const enabledMatch = trimmed.match(/PRAGMA\s+query_plan_cache_enabled\s*=\s*(true|false)/i);
+    if (enabledMatch) {
+      this.planCacheEnabled = enabledMatch[1].toLowerCase() === 'true';
+      (this.planCache as any).config.enabled = this.planCacheEnabled;
+      return [];
+    }
+
+    // PRAGMA query_plan_cache_show('hash')
+    const showMatch = trimmed.match(/PRAGMA\s+query_plan_cache_show\s*\(\s*'([^']+)'\s*\)/i);
+    if (showMatch) {
+      const hash = showMatch[1];
+      const planInfo = this.planCache.show(hash);
+      if (planInfo) {
+        return [planInfo];
+      }
+      return [];
+    }
+
+    // PRAGMA query_plan_cache_hit_rate_threshold = N
+    const thresholdMatch = trimmed.match(/PRAGMA\s+query_plan_cache_hit_rate_threshold\s*=\s*([\d.]+)/i);
+    if (thresholdMatch) {
+      this.hitRateThreshold = parseFloat(thresholdMatch[1]);
+      return [];
+    }
+
+    // PRAGMA query_plan_cache_health
+    if (upper === 'PRAGMA QUERY_PLAN_CACHE_HEALTH') {
+      const stats = this.planCache.getStats();
+      const hitRate = stats.hitRate / 100; // Convert from percentage to ratio
+      const belowThreshold = hitRate < this.hitRateThreshold;
+      return [{
+        status: belowThreshold ? 'warning' : 'ok',
+        hitRate,
+        threshold: this.hitRateThreshold,
+        recommendation: belowThreshold
+          ? 'Hit rate is below threshold. Consider increasing cache size or reviewing query patterns.'
+          : 'Cache is performing well.',
+      }];
+    }
+
+    return undefined;
   }
 
   // ==========================================================================
