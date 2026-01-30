@@ -218,7 +218,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Note: Implementing unique constraint enforcement requires modifying the
      * INSERT execution path to check all unique indexes on the table.
      */
-    it.fails('should enforce uniqueness on insert after creating unique index', () => {
+    it('should enforce uniqueness on insert after creating unique index', () => {
       db.exec('CREATE UNIQUE INDEX t1i4 ON t1(a)');
 
       // First insert should succeed
@@ -483,7 +483,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Expected: index_info pragma returns columns in the index
      * Actual: Not implemented or fails
      */
-    it.fails('should get index column info via pragma index_info', () => {
+    it('should get index column info via pragma index_info', () => {
       db.exec('CREATE INDEX t1i_ab ON t1(a, b)');
 
       // Note: This pragma may need different invocation
@@ -662,7 +662,7 @@ describe('Index Performance Tests', () => {
    * is not yet implemented. The indexes are stored as metadata but are not
    * used to speed up queries.
    */
-  it.fails('should demonstrate improved query performance with index', () => {
+  it('should demonstrate improved query performance with index', () => {
     // Create index on indexed_col
     db.exec('CREATE INDEX idx_col ON large_table(indexed_col)');
 
@@ -694,7 +694,7 @@ describe('Index Performance Tests', () => {
    * Expected: EXPLAIN shows index scan instead of full table scan
    * Actual: EXPLAIN may not be fully implemented or index not used
    */
-  it.fails('should show index usage in EXPLAIN output', () => {
+  it('should show index usage in EXPLAIN output', () => {
     db.exec('CREATE INDEX idx_col ON large_table(indexed_col)');
 
     const explain = db.prepare('EXPLAIN QUERY PLAN SELECT * FROM large_table WHERE indexed_col = 50').all();

@@ -231,7 +231,7 @@ describe('ProjectOperator', () => {
       await operator.close();
     });
 
-    it.fails('should support computed expression aliases', async () => {
+    it('should support computed expression aliases', async () => {
       // SELECT amount, amount * 1.1 AS amount_with_tax FROM orders
       const { ProjectOperator } = await import('../engine/operators/project.js');
 
@@ -260,7 +260,9 @@ describe('ProjectOperator', () => {
       await operator.open(ctx);
       const row = await operator.next();
 
-      expect(row).toEqual({ amount: 100, amount_with_tax: 110 });
+      expect(row).toBeDefined();
+      expect(row!.amount).toBe(100);
+      expect(row!.amount_with_tax).toBeCloseTo(110, 10);
       await operator.close();
     });
   });
@@ -399,7 +401,7 @@ describe('JoinOperator', () => {
       expect(eveRow!['departments.name']).toBeNull();
     });
 
-    it.fails('should implement RIGHT OUTER JOIN', async () => {
+    it('should implement RIGHT OUTER JOIN', async () => {
       // SELECT * FROM users u RIGHT JOIN departments d ON u.department_id = d.id
       const { JoinOperator } = await import('../engine/operators/join.js');
 
@@ -443,7 +445,7 @@ describe('JoinOperator', () => {
       expect(salesRow!['users.name']).toBeNull();
     });
 
-    it.fails('should implement FULL OUTER JOIN', async () => {
+    it('should implement FULL OUTER JOIN', async () => {
       // SELECT * FROM users u FULL OUTER JOIN departments d ON u.department_id = d.id
       const { JoinOperator } = await import('../engine/operators/join.js');
 
@@ -962,7 +964,7 @@ describe('Operator Pipeline Composition', () => {
     ]);
   });
 
-  it.skip('should compose operators: Scan -> Join -> Aggregate -> Sort -> Limit', async () => {
+  it('should compose operators: Scan -> Join -> Aggregate -> Sort -> Limit', async () => {
     // SELECT u.name, COUNT(o.id) as order_count
     // FROM users u
     // JOIN orders o ON u.id = o.user_id

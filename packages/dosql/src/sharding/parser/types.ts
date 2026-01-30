@@ -37,6 +37,10 @@ export interface ParsedQuery {
   aggregates?: AggregateOp[];
   /** Whether query has DISTINCT */
   distinct?: boolean;
+  /** Compound query type (UNION, UNION ALL, INTERSECT, EXCEPT) */
+  compound?: {
+    type: 'UNION' | 'UNION ALL' | 'INTERSECT' | 'EXCEPT';
+  };
 }
 
 // =============================================================================

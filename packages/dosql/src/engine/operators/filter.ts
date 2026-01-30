@@ -29,7 +29,15 @@ export function evaluateExpression(expr: Expression, row: Row): SqlValue {
         const fullKey = `${expr.table}.${expr.column}`;
         if (fullKey in row) return row[fullKey];
       }
-      return row[expr.column] ?? null;
+      // Try direct column name
+      if (expr.column in row) return row[expr.column];
+      // Try finding column in prefixed keys (e.g., "users.name" when looking for "name")
+      for (const key of Object.keys(row)) {
+        if (key.endsWith(`.${expr.column}`)) {
+          return row[key];
+        }
+      }
+      return null;
     }
 
     case 'literal':
@@ -39,25 +47,30 @@ export function evaluateExpression(expr: Expression, row: Row): SqlValue {
       const left = evaluateExpression(expr.left, row);
       const right = evaluateExpression(expr.right, row);
 
-      // Arithmetic operators
+      // Arithmetic operators (support both named and symbol forms)
       switch (expr.op) {
         case 'add':
+        case '+' as any:
           if (typeof left === 'number' && typeof right === 'number') return left + right;
           if (typeof left === 'bigint' && typeof right === 'bigint') return left + right;
           return null;
         case 'sub':
+        case '-' as any:
           if (typeof left === 'number' && typeof right === 'number') return left - right;
           if (typeof left === 'bigint' && typeof right === 'bigint') return left - right;
           return null;
         case 'mul':
+        case '*' as any:
           if (typeof left === 'number' && typeof right === 'number') return left * right;
           if (typeof left === 'bigint' && typeof right === 'bigint') return left * right;
           return null;
         case 'div':
+        case '/' as any:
           if (typeof left === 'number' && typeof right === 'number' && right !== 0) return left / right;
           if (typeof left === 'bigint' && typeof right === 'bigint' && right !== 0n) return left / right;
           return null;
         case 'mod':
+        case '%' as any:
           if (typeof left === 'number' && typeof right === 'number' && right !== 0) return left % right;
           if (typeof left === 'bigint' && typeof right === 'bigint' && right !== 0n) return left % right;
           return null;

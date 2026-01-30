@@ -184,6 +184,24 @@ export class SQLParser {
       }
     }
 
+    // Detect compound queries (UNION, UNION ALL, INTERSECT, EXCEPT)
+    const unionIndex = findKeywordIndex(tokens, 'UNION');
+    const intersectIndex = findKeywordIndex(tokens, 'INTERSECT');
+    const exceptIndex = findKeywordIndex(tokens, 'EXCEPT');
+
+    if (unionIndex !== -1) {
+      // Check for UNION ALL (UNION followed by ALL)
+      if (unionIndex + 1 < tokens.length && tokens[unionIndex + 1].type === 'keyword' && tokens[unionIndex + 1].value === 'ALL') {
+        parsed.compound = { type: 'UNION ALL' };
+      } else {
+        parsed.compound = { type: 'UNION' };
+      }
+    } else if (intersectIndex !== -1) {
+      parsed.compound = { type: 'INTERSECT' };
+    } else if (exceptIndex !== -1) {
+      parsed.compound = { type: 'EXCEPT' };
+    }
+
     return parsed;
   }
 

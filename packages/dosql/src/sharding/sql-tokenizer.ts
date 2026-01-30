@@ -854,6 +854,49 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
       continue;
     }
 
+    // Handle function calls in WHERE clause: FUNC(...) op value
+    // Function keywords (like LOWER, UPPER, etc.) followed by '(' are function calls
+    if (token.type === 'keyword' && i + 1 < whereTokens.length && whereTokens[i + 1].value === '(') {
+      const funcName = token.value;
+      // Skip past the function call including its parentheses
+      let depth = 0;
+      let funcEnd = i + 1;
+      while (funcEnd < whereTokens.length) {
+        if (whereTokens[funcEnd].value === '(') depth++;
+        if (whereTokens[funcEnd].value === ')') {
+          depth--;
+          if (depth === 0) {
+            funcEnd++;
+            break;
+          }
+        }
+        funcEnd++;
+      }
+
+      // Now check if there's an operator and value after the function call
+      if (funcEnd < whereTokens.length) {
+        const opToken = whereTokens[funcEnd];
+        if (opToken.value === '=' || ['!=', '<>', '>', '<', '>=', '<='].includes(opToken.value)) {
+          const valueIndex = funcEnd + 1;
+          if (valueIndex < whereTokens.length) {
+            const valueToken = whereTokens[valueIndex];
+            const value = parseTokenValue(valueToken);
+            conditions.push({
+              column: funcName,
+              operator: opToken.value === '<>' ? '!=' : opToken.value,
+              value,
+            });
+            i = valueIndex + 1;
+            continue;
+          }
+        }
+      }
+
+      // Skip past the function call even if we can't parse the condition
+      i = funcEnd;
+      continue;
+    }
+
     // Look for column identifier
     if (token.type === 'identifier') {
       let column = token.value;
@@ -879,6 +922,31 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
           nextIndex++;
           if (nextIndex < whereTokens.length) {
             const valueToken = whereTokens[nextIndex];
+
+            // Check for subquery: = (SELECT ...)
+            if (valueToken.value === '(') {
+              // Look ahead to see if this is a subquery
+              if (nextIndex + 1 < whereTokens.length && whereTokens[nextIndex + 1].type === 'keyword' && whereTokens[nextIndex + 1].value === 'SELECT') {
+                // This is a scalar subquery - store as a subquery marker, not a number
+                // Skip past the subquery
+                let depth = 1;
+                let subEnd = nextIndex + 1;
+                while (subEnd < whereTokens.length && depth > 0) {
+                  if (whereTokens[subEnd].value === '(') depth++;
+                  if (whereTokens[subEnd].value === ')') depth--;
+                  subEnd++;
+                }
+                conditions.push({
+                  column,
+                  tableAlias,
+                  operator: '=',
+                  value: { subquery: true },
+                });
+                i = subEnd;
+                continue;
+              }
+            }
+
             const value = parseTokenValue(valueToken);
             if (value !== null || valueToken.type === 'string' || valueToken.type === 'number') {
               conditions.push({

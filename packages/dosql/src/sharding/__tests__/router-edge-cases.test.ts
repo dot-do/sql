@@ -375,7 +375,7 @@ describe('SQLParser Nested Expressions', () => {
   /**
    * BUG: Function calls in WHERE conditions are not handled properly.
    */
-  it.fails('should handle function calls in WHERE clause', () => {
+  it('should handle function calls in WHERE clause', () => {
     const sql = `SELECT * FROM users WHERE LOWER(email) = 'test@example.com' AND id = 1`;
     const parsed = parser.parse(sql);
 
@@ -460,7 +460,7 @@ describe('SQLParser Subquery and CTE Handling', () => {
   /**
    * BUG: Scalar subqueries are parsed as numeric values.
    */
-  it.fails('should recognize scalar subquery (not parse as number)', () => {
+  it('should recognize scalar subquery (not parse as number)', () => {
     const sql = `SELECT * FROM users WHERE id = (SELECT user_id FROM orders WHERE order_id = 1 LIMIT 1)`;
     const parsed = parser.parse(sql);
 
@@ -520,7 +520,7 @@ describe('SQLParser UNION Handling', () => {
   /**
    * BUG: UNION vs UNION ALL are parsed identically.
    */
-  it.fails('should distinguish UNION from UNION ALL', () => {
+  it('should distinguish UNION from UNION ALL', () => {
     const sql1 = `SELECT id FROM users WHERE id = 1 UNION SELECT id FROM users WHERE id = 2`;
     const sql2 = `SELECT id FROM users WHERE id = 1 UNION ALL SELECT id FROM users WHERE id = 2`;
 

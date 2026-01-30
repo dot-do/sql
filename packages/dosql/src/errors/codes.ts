@@ -56,6 +56,8 @@ export enum StatementErrorCode {
   INVALID_SQL = 'STMT_INVALID_SQL',
   /** Unsupported operation */
   UNSUPPORTED = 'STMT_UNSUPPORTED',
+  /** Constraint violation */
+  CONSTRAINT_VIOLATION = 'STMT_CONSTRAINT_VIOLATION',
 }
 
 // =============================================================================
@@ -76,6 +78,8 @@ export enum BindingErrorCode {
   COUNT_MISMATCH = 'BIND_COUNT_MISMATCH',
   /** Named parameter expected but positional provided */
   NAMED_EXPECTED = 'BIND_NAMED_EXPECTED',
+  /** Mixed positional and named parameters */
+  MIXED_PARAMS = 'BIND_MIXED_PARAMS',
 }
 
 // =============================================================================

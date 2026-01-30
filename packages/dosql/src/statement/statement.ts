@@ -459,6 +459,11 @@ export class InMemoryEngine implements ExecutionEngine {
       return this.executeInsert(sql, params);
     }
 
+    // Handle EXPLAIN
+    if (normalized.startsWith('EXPLAIN')) {
+      return this.executeSelect(sql, params);
+    }
+
     // Handle SELECT
     if (normalized.startsWith('SELECT')) {
       return this.executeSelect(sql, params);
@@ -472,6 +477,16 @@ export class InMemoryEngine implements ExecutionEngine {
     // Handle DELETE
     if (normalized.startsWith('DELETE')) {
       return this.executeDelete(sql, params);
+    }
+
+    // Handle ANALYZE (no-op for in-memory engine)
+    if (normalized.startsWith('ANALYZE')) {
+      return { rows: [], columns: [], changes: 0, lastInsertRowid: 0 };
+    }
+
+    // Handle BEGIN/COMMIT/ROLLBACK (no-op for in-memory engine)
+    if (normalized.startsWith('BEGIN') || normalized.startsWith('COMMIT') || normalized.startsWith('ROLLBACK')) {
+      return { rows: [], columns: [], changes: 0, lastInsertRowid: 0 };
     }
 
     throw createUnsupportedSqlError(sql);
@@ -530,13 +545,38 @@ export class InMemoryEngine implements ExecutionEngine {
     for (const part of columnParts) {
       const colMatch = part.match(/^(\w+)\s+(\w+)/);
       if (colMatch) {
-        columns.push({
+        const col: ColumnInfo & { primaryKey?: boolean; autoIncrement?: boolean; defaultValue?: SqlValue } = {
           name: colMatch[1],
           column: colMatch[1],
           table: tableName,
           database: 'main',
           type: colMatch[2].toUpperCase(),
-        });
+        };
+
+        // Check for PRIMARY KEY
+        if (/PRIMARY\s+KEY/i.test(part)) {
+          col.primaryKey = true;
+        }
+
+        // Check for AUTOINCREMENT
+        if (/AUTOINCREMENT/i.test(part)) {
+          col.autoIncrement = true;
+        }
+
+        // Check for DEFAULT value
+        const defaultMatch = part.match(/DEFAULT\s+(-?\d+(?:\.\d+)?|'[^']*'|NULL)/i);
+        if (defaultMatch) {
+          const defVal = defaultMatch[1];
+          if (defVal.toUpperCase() === 'NULL') {
+            col.defaultValue = null;
+          } else if (defVal.startsWith("'") && defVal.endsWith("'")) {
+            col.defaultValue = defVal.slice(1, -1);
+          } else {
+            col.defaultValue = Number(defVal);
+          }
+        }
+
+        columns.push(col);
       }
     }
 
@@ -661,45 +701,29 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   private executeInsert(sql: string, params: SqlValue[]): ExecutionResult {
-    // Try matching INSERT with explicit column list first
-    // Support both quoted ("table") and unquoted (table) table names
-    let match = sql.match(
-      /INSERT\s+INTO\s+(?:"([^"]+)"|(\w+))\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i
-    );
+    // Parse the INSERT statement to extract table name, optional column list, and value tuples
+    const parsed = this.parseInsertStatement(sql);
+    if (!parsed) {
+      throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid INSERT syntax', sql);
+    }
 
-    let tableName: string;
-    let columnNames: string[];
-    let valuePlaceholders: string[];
+    const { tableName, columnNames: explicitColumns, valueTuples } = parsed;
 
-    if (match) {
-      // INSERT INTO t (cols) VALUES (vals)
-      // Table name is either in group 1 (quoted) or group 2 (unquoted)
-      tableName = match[1] || match[2];
-      columnNames = match[3].split(',').map(c => c.trim());
-      valuePlaceholders = this.parseInsertValues(match[4]);
-    } else {
-      // Try matching INSERT without column list: INSERT INTO t VALUES (vals)
-      // Support both quoted ("table") and unquoted (table) table names
-      const noColMatch = sql.match(
-        /INSERT\s+INTO\s+(?:"([^"]+)"|(\w+))\s+VALUES\s*\(([^)]+)\)/i
-      );
+    const table = this.storage.tables.get(tableName);
+    if (!table) {
+      throw createTableNotFoundError(tableName, sql);
+    }
 
-      if (!noColMatch) {
-        throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid INSERT syntax', sql);
-      }
+    // Determine column names
+    const columnNames = explicitColumns ?? table.columns.map(c => c.name);
 
-      // Table name is either in group 1 (quoted) or group 2 (unquoted)
-      tableName = noColMatch[1] || noColMatch[2];
-      valuePlaceholders = this.parseInsertValues(noColMatch[3]);
+    // Get default values from CREATE TABLE (parse from column definitions)
+    const columnDefaults = this.getColumnDefaults(table);
 
-      // Get column names from table schema
-      const table = this.storage.tables.get(tableName);
-      if (!table) {
-        throw createTableNotFoundError(tableName, sql);
-      }
+    let totalChanges = 0;
+    let paramIndex = 0;
 
-      columnNames = table.columns.map(c => c.name);
-
+    for (const valuePlaceholders of valueTuples) {
       // Validate value count matches column count
       if (valuePlaceholders.length !== columnNames.length) {
         throw new StatementError(
@@ -708,48 +732,397 @@ export class InMemoryEngine implements ExecutionEngine {
           sql
         );
       }
-    }
 
-    const table = this.storage.tables.get(tableName);
-    if (!table) {
-      throw createTableNotFoundError(tableName, sql);
-    }
+      // Build row from params
+      const row: Record<string, SqlValue> = {};
 
-    // Build row from params
-    const row: Record<string, SqlValue> = {};
-    let paramIndex = 0;
+      for (let i = 0; i < columnNames.length; i++) {
+        const colName = columnNames[i];
+        const placeholder = valuePlaceholders[i];
 
-    for (let i = 0; i < columnNames.length; i++) {
-      const colName = columnNames[i];
-      const placeholder = valuePlaceholders[i];
-
-      if (placeholder === '?') {
-        row[colName] = params[paramIndex++];
-      } else if (placeholder.startsWith(':')) {
-        // Named parameter - look up in params object
-        // For named params, the binding module converts them to positional
-        row[colName] = params[paramIndex++];
-      } else {
-        // Literal value - try to parse
-        row[colName] = this.parseInsertLiteralValue(placeholder);
+        if (placeholder === '?') {
+          row[colName] = params[paramIndex++];
+        } else if (placeholder.startsWith(':')) {
+          row[colName] = params[paramIndex++];
+        } else if (placeholder.toUpperCase() === 'DEFAULT') {
+          // Use column default value
+          row[colName] = columnDefaults.get(colName) ?? null;
+        } else {
+          // Try to evaluate as expression (handles arithmetic, || concat, function calls)
+          row[colName] = this.evaluateInsertExpression(placeholder, params, paramIndex);
+          // Count any ? params consumed in expression
+          const qCount = (placeholder.match(/\?/g) || []).length;
+          paramIndex += qCount;
+        }
       }
-    }
 
-    // Handle auto-increment ID
-    const idCol = table.columns.find(c => c.type === 'INTEGER' && c.name.toLowerCase() === 'id');
-    if (idCol && row[idCol.name] === undefined) {
-      row[idCol.name] = table.autoIncrement++;
-    }
+      // Handle auto-increment for INTEGER PRIMARY KEY columns
+      // When NULL is inserted into an INTEGER PRIMARY KEY, auto-generate an ID
+      const pkCol = this.findPrimaryKeyColumn(table);
+      if (pkCol && (row[pkCol] === null || row[pkCol] === undefined)) {
+        row[pkCol] = table.autoIncrement++;
+      }
 
-    table.rows.push(row);
-    this.storage.lastInsertRowid = row['id'] ?? table.rows.length;
+      // Enforce unique index constraints
+      this.checkUniqueConstraints(tableName, row, sql);
+
+      table.rows.push(row);
+      this.storage.lastInsertRowid = row['id'] ?? row[pkCol ?? ''] ?? table.rows.length;
+      totalChanges++;
+    }
 
     return {
       rows: [],
       columns: [],
-      changes: 1,
+      changes: totalChanges,
       lastInsertRowid: this.storage.lastInsertRowid,
     };
+  }
+
+  /**
+   * Parse an INSERT statement, supporting:
+   * - INSERT INTO t (cols) VALUES (v1), (v2), ...
+   * - INSERT INTO t VALUES (v1), (v2), ...
+   * - Quoted table names
+   */
+  private parseInsertStatement(sql: string): {
+    tableName: string;
+    columnNames: string[] | null;
+    valueTuples: string[][];
+  } | null {
+    // Match: INSERT INTO table_name
+    const headerMatch = sql.match(/^INSERT\s+INTO\s+(?:"([^"]+)"|(\w+))\s*/i);
+    if (!headerMatch) return null;
+
+    const tableName = headerMatch[1] || headerMatch[2];
+    let rest = sql.slice(headerMatch[0].length);
+
+    // Check for optional column list
+    let columnNames: string[] | null = null;
+    if (rest.startsWith('(')) {
+      // Find closing paren for column list (before VALUES keyword)
+      const upperRest = rest.toUpperCase();
+      const valuesIdx = upperRest.indexOf('VALUES');
+      if (valuesIdx === -1) return null;
+
+      const colListStr = rest.slice(0, valuesIdx).trim();
+      // colListStr should be "(col1, col2, ...)"
+      const colMatch = colListStr.match(/^\(([^)]+)\)\s*$/);
+      if (colMatch) {
+        columnNames = colMatch[1].split(',').map(c => c.trim());
+        rest = rest.slice(valuesIdx);
+      }
+    }
+
+    // Now rest should start with VALUES
+    const valuesMatch = rest.match(/^VALUES\s*/i);
+    if (!valuesMatch) return null;
+    rest = rest.slice(valuesMatch[0].length);
+
+    // Parse multiple value tuples: (v1, v2), (v3, v4), ...
+    const valueTuples: string[][] = [];
+    let pos = 0;
+    while (pos < rest.length) {
+      // Skip whitespace and commas between tuples
+      while (pos < rest.length && (/\s/.test(rest[pos]) || rest[pos] === ',')) pos++;
+      if (pos >= rest.length) break;
+
+      if (rest[pos] !== '(') break;
+      pos++; // skip '('
+
+      // Find matching close paren, respecting strings and nested parens
+      let depth = 1;
+      let tupleStart = pos;
+      let inQuote = false;
+      let quoteChar = '';
+
+      while (pos < rest.length && depth > 0) {
+        const ch = rest[pos];
+        if (!inQuote) {
+          if (ch === "'" || ch === '"') {
+            inQuote = true;
+            quoteChar = ch;
+          } else if (ch === '(') {
+            depth++;
+          } else if (ch === ')') {
+            depth--;
+            if (depth === 0) break;
+          }
+        } else {
+          if (ch === quoteChar) {
+            if (pos + 1 < rest.length && rest[pos + 1] === quoteChar) {
+              pos++; // skip escaped quote
+            } else {
+              inQuote = false;
+            }
+          }
+        }
+        pos++;
+      }
+
+      const tupleContent = rest.slice(tupleStart, pos);
+      pos++; // skip closing ')'
+
+      const values = this.parseInsertValues(tupleContent);
+      valueTuples.push(values);
+    }
+
+    if (valueTuples.length === 0) return null;
+
+    return { tableName, columnNames, valueTuples };
+  }
+
+  /**
+   * Find the PRIMARY KEY column name for a table
+   */
+  /**
+   * Execute a pragma table function: SELECT * FROM pragma_xxx('arg')
+   */
+  private executePragmaTableFunction(pragmaName: string, arg: string): ExecutionResult {
+    switch (pragmaName.toLowerCase()) {
+      case 'index_info': {
+        const index = this.storage.indexes.get(arg);
+        if (!index) {
+          return { rows: [], columns: [] };
+        }
+        const rows = index.columns.map((col, i) => ({
+          seqno: i as SqlValue,
+          cid: i as SqlValue,
+          name: col.name as SqlValue,
+        }));
+        return { rows, columns: [] };
+      }
+      case 'index_list': {
+        const indexes: Record<string, SqlValue>[] = [];
+        let seq = 0;
+        for (const index of this.storage.indexes.values()) {
+          if (index.tableName === arg) {
+            indexes.push({
+              seq: seq++ as SqlValue,
+              name: index.name as SqlValue,
+              unique: (index.unique ? 1 : 0) as SqlValue,
+              origin: 'c' as SqlValue,
+              partial: 0 as SqlValue,
+            });
+          }
+        }
+        return { rows: indexes, columns: [] };
+      }
+      default:
+        return { rows: [], columns: [] };
+    }
+  }
+
+  /**
+   * Execute EXPLAIN QUERY PLAN
+   */
+  private executeExplainQueryPlan(sql: string): ExecutionResult {
+    // Simple explain that shows index usage when applicable
+    const selectMatch = sql.match(/SELECT\s+.*?\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?/i);
+    if (!selectMatch) {
+      return { rows: [{ id: 0, parent: 0, notused: 0, detail: 'SCAN' as SqlValue }], columns: [] };
+    }
+
+    const tableName = selectMatch[1];
+    const whereClause = selectMatch[2];
+
+    // Check if any index could be used for the WHERE clause
+    if (whereClause) {
+      // Extract column names from simple equality conditions
+      const conditions = whereClause.split(/\s+AND\s+/i);
+      for (const cond of conditions) {
+        const colMatch = cond.match(/^(\w+)\s*=/);
+        if (colMatch) {
+          const colName = colMatch[1];
+          // Check if any index on this table covers this column
+          for (const index of this.storage.indexes.values()) {
+            if (index.tableName === tableName && index.columns[0]?.name === colName) {
+              return {
+                rows: [{
+                  id: 0 as SqlValue,
+                  parent: 0 as SqlValue,
+                  notused: 0 as SqlValue,
+                  detail: `SEARCH ${tableName} USING INDEX ${index.name} (${colName}=?)` as SqlValue,
+                }],
+                columns: [],
+              };
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      rows: [{
+        id: 0 as SqlValue,
+        parent: 0 as SqlValue,
+        notused: 0 as SqlValue,
+        detail: `SCAN ${tableName}` as SqlValue,
+      }],
+      columns: [],
+    };
+  }
+
+  /**
+   * Check unique index constraints for a new row
+   */
+  private checkUniqueConstraints(tableName: string, row: Record<string, SqlValue>, sql: string): void {
+    const table = this.storage.tables.get(tableName);
+    if (!table) return;
+
+    for (const index of this.storage.indexes.values()) {
+      if (index.tableName !== tableName || !index.unique) continue;
+
+      // Build the key for the new row from index columns
+      const newKeyValues = index.columns.map(c => row[c.name]);
+
+      // Check if any existing row has the same key values
+      for (const existingRow of table.rows) {
+        const existingKeyValues = index.columns.map(c => existingRow[c.name]);
+
+        // NULL values don't violate uniqueness
+        if (newKeyValues.some(v => v === null || v === undefined)) continue;
+        if (existingKeyValues.some(v => v === null || v === undefined)) continue;
+
+        // Compare all key columns
+        const matches = newKeyValues.every((v, i) => v === existingKeyValues[i]);
+        if (matches) {
+          throw new StatementError(
+            StatementErrorCode.CONSTRAINT_VIOLATION,
+            `UNIQUE constraint failed: ${index.name}`,
+            sql
+          );
+        }
+      }
+    }
+  }
+
+  private findPrimaryKeyColumn(table: InMemoryTable): string | null {
+    // Check column metadata - look for INTEGER PRIMARY KEY pattern
+    // We store this info from CREATE TABLE parsing
+    for (const col of table.columns) {
+      if ((col as { primaryKey?: boolean }).primaryKey) {
+        return col.name;
+      }
+    }
+    // Fallback: check for 'id' column
+    const idCol = table.columns.find(c => c.type === 'INTEGER' && c.name.toLowerCase() === 'id');
+    return idCol ? idCol.name : null;
+  }
+
+  /**
+   * Get default values for table columns
+   */
+  private getColumnDefaults(table: InMemoryTable): Map<string, SqlValue> {
+    const defaults = new Map<string, SqlValue>();
+    for (const col of table.columns) {
+      const def = (col as { defaultValue?: SqlValue }).defaultValue;
+      if (def !== undefined) {
+        defaults.set(col.name, def);
+      }
+    }
+    return defaults;
+  }
+
+  /**
+   * Evaluate an INSERT expression (handles literals, arithmetic, || concatenation, function calls)
+   */
+  private evaluateInsertExpression(expr: string, params: SqlValue[], _paramIndex: number): SqlValue {
+    const trimmed = expr.trim();
+
+    // Simple literal values (fast path)
+    if (trimmed === '?') return params[_paramIndex];
+    if (trimmed.toUpperCase() === 'NULL') return null;
+    if (trimmed.toUpperCase().startsWith("X'") && trimmed.endsWith("'")) {
+      const hex = trimmed.slice(2, -1);
+      const bytes = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < hex.length; i += 2) {
+        bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+      }
+      return bytes;
+    }
+    if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
+
+    // Check for string concatenation (||) before single string literal
+    if (trimmed.includes('||')) {
+      return this.evaluateStringConcat(trimmed);
+    }
+
+    // Single string literal (must check after || to avoid 'a' || 'b' being treated as one string)
+    if (this.isSingleStringLiteral(trimmed)) {
+      return trimmed.slice(1, -1).replace(/''/g, "'");
+    }
+
+    // Check for function calls or arithmetic expressions
+    if (/[+\-*/%]/.test(trimmed) || /\w+\s*\(/.test(trimmed)) {
+      return evaluateCaseExpr(trimmed, {}, params, { value: _paramIndex });
+    }
+
+    // Fallback
+    return trimmed;
+  }
+
+  /**
+   * Check if a string is a single string literal (not containing || or other operators)
+   */
+  private isSingleStringLiteral(s: string): boolean {
+    if (!s.startsWith("'") || !s.endsWith("'")) return false;
+    // Walk through the string, tracking quote state
+    let i = 1; // skip opening quote
+    while (i < s.length) {
+      if (s[i] === "'") {
+        if (i + 1 < s.length && s[i + 1] === "'") {
+          i += 2; // escaped quote
+          continue;
+        }
+        // End of string - should be at the last character
+        return i === s.length - 1;
+      }
+      i++;
+    }
+    return false;
+  }
+
+  /**
+   * Evaluate string concatenation with || operator
+   */
+  private evaluateStringConcat(expr: string): SqlValue {
+    // Split on || outside of quotes
+    const parts: string[] = [];
+    let current = '';
+    let inQuote = false;
+
+    for (let i = 0; i < expr.length; i++) {
+      const ch = expr[i];
+      if (!inQuote && ch === "'" ) {
+        inQuote = true;
+        current += ch;
+      } else if (inQuote && ch === "'") {
+        if (i + 1 < expr.length && expr[i + 1] === "'") {
+          current += "''";
+          i++;
+        } else {
+          inQuote = false;
+          current += ch;
+        }
+      } else if (!inQuote && ch === '|' && i + 1 < expr.length && expr[i + 1] === '|') {
+        parts.push(current.trim());
+        current = '';
+        i++; // skip second |
+      } else {
+        current += ch;
+      }
+    }
+    if (current.trim()) parts.push(current.trim());
+
+    const evaluatedParts = parts.map(p => {
+      const t = p.trim();
+      if (t.startsWith("'") && t.endsWith("'")) return t.slice(1, -1).replace(/''/g, "'");
+      if (/^-?\d+(\.\d+)?$/.test(t)) return String(Number(t));
+      return t;
+    });
+
+    return evaluatedParts.join('');
   }
 
   /**
@@ -840,6 +1213,18 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   private executeSelect(sql: string, params: SqlValue[]): ExecutionResult {
+    // Handle pragma table functions: SELECT * FROM pragma_xxx('arg')
+    const pragmaMatch = sql.match(/SELECT\s+\*\s+FROM\s+pragma_(\w+)\s*\(\s*'([^']+)'\s*\)/i);
+    if (pragmaMatch) {
+      return this.executePragmaTableFunction(pragmaMatch[1], pragmaMatch[2]);
+    }
+
+    // Handle EXPLAIN QUERY PLAN
+    const explainMatch = sql.match(/^EXPLAIN\s+QUERY\s+PLAN\s+(.*)/i);
+    if (explainMatch) {
+      return this.executeExplainQueryPlan(explainMatch[1]);
+    }
+
     // Parse SELECT with CASE expression support
     const parsed = this.parseSelectStatement(sql);
     if (!parsed) {
@@ -924,6 +1309,13 @@ export class InMemoryEngine implements ExecutionEngine {
         const resultRows: Record<string, SqlValue>[] = [];
 
         for (const [, groupRows] of groups) {
+          // Apply HAVING filter if present
+          if (havingClause) {
+            if (!this.evaluateHavingClause(havingClause, groupRows, params)) {
+              continue; // Skip this group
+            }
+          }
+
           const resultRow: Record<string, SqlValue> = {};
 
           for (const col of colDefs) {
@@ -1157,23 +1549,45 @@ export class InMemoryEngine implements ExecutionEngine {
 
   /**
    * Order rows with alias-aware column resolution
+   * Supports CASE expressions and simple column references in ORDER BY
    */
   private orderRowsWithAliases(
     rows: Record<string, SqlValue>[],
     orderBy: string
   ): Record<string, SqlValue>[] {
-    const parts = orderBy.split(',').map(p => {
-      const match = p.trim().match(/^(\w+(?:\.\w+)?)(?:\s+(ASC|DESC))?$/i);
-      if (match) {
-        return { col: match[1], desc: match[2]?.toUpperCase() === 'DESC' };
+    // Split ORDER BY terms respecting CASE...END blocks
+    const orderTerms = this.splitOrderByTerms(orderBy);
+
+    const parts: Array<{ expr: string; desc: boolean; isExpr: boolean }> = [];
+    for (const term of orderTerms) {
+      const trimmed = term.trim();
+      // Check for trailing ASC/DESC
+      let desc = false;
+      let exprPart = trimmed;
+      const ascDescMatch = trimmed.match(/^([\s\S]+?)\s+(ASC|DESC)\s*$/i);
+      if (ascDescMatch) {
+        exprPart = ascDescMatch[1].trim();
+        desc = ascDescMatch[2].toUpperCase() === 'DESC';
       }
-      return null;
-    }).filter((p): p is { col: string; desc: boolean } => p !== null);
+      const isExpr = containsCaseExpression(exprPart) || /[+\-*/%()]/.test(exprPart);
+      parts.push({ expr: exprPart, desc, isExpr });
+    }
 
     return [...rows].sort((a, b) => {
-      for (const { col, desc } of parts) {
-        const aVal = this.getColumnValue(a, col);
-        const bVal = this.getColumnValue(b, col);
+      for (const { expr, desc, isExpr } of parts) {
+        let aVal: SqlValue;
+        let bVal: SqlValue;
+
+        if (isExpr) {
+          // Evaluate expression for each row
+          const pIdx1 = { value: 0 };
+          const pIdx2 = { value: 0 };
+          aVal = evaluateCaseExpr(expr, a, [], pIdx1);
+          bVal = evaluateCaseExpr(expr, b, [], pIdx2);
+        } else {
+          aVal = this.getColumnValue(a, expr);
+          bVal = this.getColumnValue(b, expr);
+        }
 
         if (aVal === bVal) continue;
         if (aVal === null) return desc ? -1 : 1;
@@ -1184,6 +1598,51 @@ export class InMemoryEngine implements ExecutionEngine {
       }
       return 0;
     });
+  }
+
+  /**
+   * Split ORDER BY terms respecting CASE...END blocks
+   */
+  private splitOrderByTerms(orderBy: string): string[] {
+    const terms: string[] = [];
+    let current = '';
+    let caseDepth = 0;
+    let inString = false;
+    let parenDepth = 0;
+    const upper = orderBy.toUpperCase();
+
+    for (let i = 0; i < orderBy.length; i++) {
+      const ch = orderBy[i];
+
+      if (ch === "'" && !inString) { inString = true; current += ch; continue; }
+      if (ch === "'" && inString) {
+        if (orderBy[i + 1] === "'") { current += "''"; i++; continue; }
+        inString = false; current += ch; continue;
+      }
+      if (inString) { current += ch; continue; }
+
+      if (ch === '(') { parenDepth++; current += ch; continue; }
+      if (ch === ')') { parenDepth--; current += ch; continue; }
+
+      if (upper.slice(i).startsWith('CASE') && (i + 4 >= orderBy.length || !/\w/.test(orderBy[i + 4]))) {
+        caseDepth++; current += orderBy.slice(i, i + 4); i += 3; continue;
+      }
+      if (upper.slice(i).startsWith('END') && (i + 3 >= orderBy.length || !/\w/.test(orderBy[i + 3]))) {
+        if (caseDepth > 0) caseDepth--;
+        current += orderBy.slice(i, i + 3); i += 2; continue;
+      }
+
+      if (ch === ',' && caseDepth === 0 && parenDepth === 0) {
+        terms.push(current.trim());
+        current = '';
+        continue;
+      }
+
+      current += ch;
+    }
+
+    if (current.trim()) terms.push(current.trim());
+    return terms;
   }
 
   // ==========================================================================
@@ -1330,6 +1789,29 @@ export class InMemoryEngine implements ExecutionEngine {
       });
     }
 
+    // Check for compound AND with multiple subqueries
+    const andParts = this.splitAndOutsideSubqueries(trimmed);
+    if (andParts.length > 1) {
+      let result = rows;
+      for (const part of andParts) {
+        if (this.containsSubquery(part)) {
+          result = this.filterWithSubquery(result, part, params, tableName);
+        } else {
+          // Use simple filtering for non-subquery parts
+          const deps: WhereEvaluatorDeps = {
+            parseValueList: (valueList, params, startParamIndex) => this.parseValueList(valueList, params, startParamIndex),
+            valuesEqual: (a, b) => this.valuesEqual(a, b),
+            getColumnValue: (row, colRef) => this.getColumnValue(row, colRef),
+          };
+          result = result.filter(row => {
+            const pIdx = { value: 0 };
+            return evaluateWhereCondition(part, row, params, pIdx, deps);
+          });
+        }
+      }
+      return result;
+    }
+
     // Check for comparison with scalar subquery: col > (SELECT ...)
     const scalarCompMatch = this.parseScalarComparison(trimmed);
     if (scalarCompMatch) {
@@ -1468,6 +1950,39 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   /**
+   * Split WHERE clause by AND, respecting parentheses and strings
+   */
+  private splitAndOutsideSubqueries(where: string): string[] {
+    const parts: string[] = [];
+    let current = '';
+    let depth = 0;
+    let inStr = false;
+    const upper = where.toUpperCase();
+
+    for (let i = 0; i < where.length; i++) {
+      const ch = where[i];
+      if (ch === "'" && !inStr) { inStr = true; current += ch; continue; }
+      if (ch === "'" && inStr) {
+        if (where[i + 1] === "'") { current += "''"; i++; continue; }
+        inStr = false; current += ch; continue;
+      }
+      if (inStr) { current += ch; continue; }
+      if (ch === '(') { depth++; current += ch; continue; }
+      if (ch === ')') { depth--; current += ch; continue; }
+
+      if (depth === 0 && upper.slice(i).startsWith(' AND ')) {
+        parts.push(current.trim());
+        current = '';
+        i += 4; // skip ' AND '
+        continue;
+      }
+      current += ch;
+    }
+    if (current.trim()) parts.push(current.trim());
+    return parts;
+  }
+
+  /**
    * Parse EXISTS condition
    */
   private parseExistsCondition(whereClause: string): { isNot: boolean; subquery: string } | null {
@@ -1537,6 +2052,59 @@ export class InMemoryEngine implements ExecutionEngine {
       case '<=': return numLeft <= numRight;
       default: return false;
     }
+  }
+
+  /**
+   * Evaluate a HAVING clause against a group of rows
+   */
+  private evaluateHavingClause(
+    havingClause: string,
+    groupRows: Record<string, SqlValue>[],
+    params: SqlValue[]
+  ): boolean {
+    // Parse HAVING condition: aggregate_fn op value
+    // e.g., count(*) > 1, sum(amount) >= 100
+    const trimmed = havingClause.trim();
+
+    // Match: aggregate(arg) op value
+    const match = trimmed.match(/^(.+?)\s*(>=|<=|<>|!=|>|<|=)\s*(.+)$/);
+    if (match) {
+      const leftExpr = match[1].trim();
+      const op = match[2];
+      const rightStr = match[3].trim();
+
+      let leftVal: SqlValue;
+      if (this.isAggregateFunction(leftExpr)) {
+        leftVal = this.evaluateAggregate(leftExpr, groupRows, params);
+      } else {
+        leftVal = groupRows.length > 0 ? (groupRows[0][leftExpr] ?? null) : null;
+      }
+
+      let rightVal: SqlValue;
+      if (/^-?\d+(\.\d+)?$/.test(rightStr)) {
+        rightVal = Number(rightStr);
+      } else if (rightStr.startsWith("'") && rightStr.endsWith("'")) {
+        rightVal = rightStr.slice(1, -1);
+      } else {
+        rightVal = rightStr;
+      }
+
+      if (leftVal === null || rightVal === null) return false;
+      const numL = Number(leftVal);
+      const numR = Number(rightVal);
+
+      switch (op) {
+        case '=': return numL === numR;
+        case '<>': case '!=': return numL !== numR;
+        case '>': return numL > numR;
+        case '<': return numL < numR;
+        case '>=': return numL >= numR;
+        case '<=': return numL <= numR;
+        default: return false;
+      }
+    }
+
+    return true; // No condition matched, pass through
   }
 
   /**
