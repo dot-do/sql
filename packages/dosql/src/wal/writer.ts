@@ -29,6 +29,7 @@ import {
   type HLCEventHandler,
 } from '../hlc.js';
 import { crc32 } from '../utils/crypto.js';
+import { exactBase64Length } from '../utils/encoding.js';
 
 // Re-export crc32 for backward compatibility
 export { crc32 } from '../utils/crypto.js';
@@ -255,15 +256,20 @@ export function createWALWriter(
 
   /**
    * Estimate entry size in bytes
+   *
+   * Uses exact Base64 length calculation: ceil(length / 3) * 4
+   * This is the correct formula for Base64 expansion, not the approximate 1.34.
+   * See: https://en.wikipedia.org/wiki/Base64#Output_padding
    */
   function estimateEntrySize(entry: WALEntry): number {
     let size = 100; // Base overhead for JSON structure
     size += entry.txnId.length;
     size += entry.table.length;
-    if (entry.key) size += entry.key.length * 1.34; // Base64 overhead
-    if (entry.before) size += entry.before.length * 1.34;
-    if (entry.after) size += entry.after.length * 1.34;
-    return Math.ceil(size);
+    // Use exact Base64 length calculation instead of approximate 1.34 multiplier
+    if (entry.key) size += exactBase64Length(entry.key.length);
+    if (entry.before) size += exactBase64Length(entry.before.length);
+    if (entry.after) size += exactBase64Length(entry.after.length);
+    return size; // No need for Math.ceil since exactBase64Length returns integers
   }
 
   /**

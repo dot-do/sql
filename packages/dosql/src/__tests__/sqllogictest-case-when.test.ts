@@ -927,3 +927,254 @@ describe('InMemoryEngine CASE WHEN Tests', () => {
     expect(result.rows[2].above).toBe(1); // 15 > 7
   });
 });
+
+// =============================================================================
+// CASE EXPRESSION EDGE CASES - TDD Tests (sql-14xz)
+// =============================================================================
+
+describe('CASE Expression Edge Cases (sql-14xz)', () => {
+  let engine: InMemoryEngine;
+  let storage: InMemoryStorage;
+
+  beforeEach(() => {
+    storage = createInMemoryStorage();
+    engine = new InMemoryEngine(storage);
+  });
+
+  // ===========================================================================
+  // SIMPLE CASE WITH COMPUTED EXPRESSION
+  // ===========================================================================
+
+  describe('Simple CASE with computed expression (a+1 WHEN b)', () => {
+    beforeEach(() => {
+      // SQLLogicTest t1 table structure with sample data
+      engine.execute('CREATE TABLE t1 (a INTEGER, b INTEGER, c INTEGER, d INTEGER, e INTEGER)', []);
+      // Row where a+1 = b (a=4, b=5)
+      engine.execute('INSERT INTO t1 (a, b, c, d, e) VALUES (?, ?, ?, ?, ?)', [4, 5, 6, 7, 8]);
+      // Row where a+1 = c (a=5, c=6)
+      engine.execute('INSERT INTO t1 (a, b, c, d, e) VALUES (?, ?, ?, ?, ?)', [5, 10, 6, 20, 30]);
+      // Row where a+1 = d (a=6, d=7)
+      engine.execute('INSERT INTO t1 (a, b, c, d, e) VALUES (?, ?, ?, ?, ?)', [6, 10, 20, 7, 40]);
+      // Row where nothing matches (else case)
+      engine.execute('INSERT INTO t1 (a, b, c, d, e) VALUES (?, ?, ?, ?, ?)', [100, 1, 2, 3, 4]);
+    });
+
+    /**
+     * SQLLogicTest failing query:
+     * SELECT CASE a+1 WHEN b THEN 111 WHEN c THEN 222 WHEN d THEN 333 WHEN e THEN 444 ELSE 555 END FROM t1
+     *
+     * This tests simple CASE with:
+     * 1. Computed operand expression (a+1)
+     * 2. Column references in WHEN values (b, c, d, e)
+     * 3. Multiple WHEN branches
+     */
+    it('should evaluate simple CASE with computed expression matching different columns', () => {
+      const result = engine.execute(
+        'SELECT a, CASE a+1 WHEN b THEN 111 WHEN c THEN 222 WHEN d THEN 333 WHEN e THEN 444 ELSE 555 END as result FROM t1 ORDER BY a',
+        []
+      );
+
+      expect(result.rows.length).toBe(4);
+      // a=4, a+1=5, b=5 -> 111
+      expect(result.rows[0].result).toBe(111);
+      // a=5, a+1=6, c=6 -> 222
+      expect(result.rows[1].result).toBe(222);
+      // a=6, a+1=7, d=7 -> 333
+      expect(result.rows[2].result).toBe(333);
+      // a=100, a+1=101, nothing matches -> 555
+      expect(result.rows[3].result).toBe(555);
+    });
+
+    it('should return first matching WHEN when multiple columns equal operand', () => {
+      // Add a row where multiple columns equal a+1
+      engine.execute('INSERT INTO t1 (a, b, c, d, e) VALUES (?, ?, ?, ?, ?)', [10, 11, 11, 11, 11]);
+
+      const result = engine.execute(
+        'SELECT a, CASE a+1 WHEN b THEN 111 WHEN c THEN 222 WHEN d THEN 333 WHEN e THEN 444 ELSE 555 END as result FROM t1 WHERE a = 10',
+        []
+      );
+
+      expect(result.rows.length).toBe(1);
+      // a=10, a+1=11, b=11 matches first -> 111 (not 222, 333, or 444)
+      expect(result.rows[0].result).toBe(111);
+    });
+  });
+
+  // ===========================================================================
+  // NULL HANDLING IN SIMPLE CASE
+  // ===========================================================================
+
+  describe('NULL handling in CASE (NULL = NULL is NULL, not true)', () => {
+    beforeEach(() => {
+      engine.execute('CREATE TABLE nullable (id INTEGER, val INTEGER)', []);
+      engine.execute('INSERT INTO nullable (id, val) VALUES (?, ?)', [1, 10]);
+      engine.execute('INSERT INTO nullable (id, val) VALUES (?, ?)', [2, null]);
+      engine.execute('INSERT INTO nullable (id, val) VALUES (?, ?)', [3, 20]);
+    });
+
+    /**
+     * Critical edge case: CASE x WHEN NULL THEN ... should NEVER match
+     * because NULL = NULL is NULL, not true.
+     */
+    it('should NOT match WHEN NULL in simple CASE (NULL = NULL is NULL)', () => {
+      const result = engine.execute(
+        "SELECT id, CASE val WHEN NULL THEN 'was_null' ELSE 'not_null' END as result FROM nullable ORDER BY id",
+        []
+      );
+
+      expect(result.rows.length).toBe(3);
+      // val=10, WHEN NULL doesn't match -> 'not_null'
+      expect(result.rows[0].result).toBe('not_null');
+      // val=NULL, WHEN NULL doesn't match (NULL = NULL is NULL) -> 'not_null'
+      expect(result.rows[1].result).toBe('not_null');
+      // val=20, WHEN NULL doesn't match -> 'not_null'
+      expect(result.rows[2].result).toBe('not_null');
+    });
+
+    it('should skip WHEN clauses with NULL operand in simple CASE', () => {
+      const result = engine.execute(
+        "SELECT id, CASE val WHEN 10 THEN 'ten' WHEN 20 THEN 'twenty' ELSE 'other' END as result FROM nullable ORDER BY id",
+        []
+      );
+
+      expect(result.rows.length).toBe(3);
+      // val=10 -> 'ten'
+      expect(result.rows[0].result).toBe('ten');
+      // val=NULL, NULL = 10 is NULL, NULL = 20 is NULL, falls to ELSE -> 'other'
+      expect(result.rows[1].result).toBe('other');
+      // val=20 -> 'twenty'
+      expect(result.rows[2].result).toBe('twenty');
+    });
+
+    it('should handle NULL in searched CASE WHEN conditions', () => {
+      const result = engine.execute(
+        "SELECT id, CASE WHEN val > 15 THEN 'high' WHEN val > 5 THEN 'medium' ELSE 'low_or_null' END as result FROM nullable ORDER BY id",
+        []
+      );
+
+      expect(result.rows.length).toBe(3);
+      // val=10, 10 > 5 -> 'medium'
+      expect(result.rows[0].result).toBe('medium');
+      // val=NULL, NULL > 15 is NULL, NULL > 5 is NULL -> ELSE 'low_or_null'
+      expect(result.rows[1].result).toBe('low_or_null');
+      // val=20, 20 > 15 -> 'high'
+      expect(result.rows[2].result).toBe('high');
+    });
+  });
+
+  // ===========================================================================
+  // SEARCHED CASE WITH MULTIPLE CONDITIONS
+  // ===========================================================================
+
+  describe('Searched CASE with complex conditions', () => {
+    beforeEach(() => {
+      engine.execute('CREATE TABLE t1 (a INTEGER, b INTEGER)', []);
+      engine.execute('INSERT INTO t1 (a, b) VALUES (?, ?)', [5, 10]);
+      engine.execute('INSERT INTO t1 (a, b) VALUES (?, ?)', [7, 10]);
+      engine.execute('INSERT INTO t1 (a, b) VALUES (?, ?)', [10, 10]);
+      engine.execute('INSERT INTO t1 (a, b) VALUES (?, ?)', [13, 10]);
+      engine.execute('INSERT INTO t1 (a, b) VALUES (?, ?)', [15, 10]);
+    });
+
+    /**
+     * SQLLogicTest failing query:
+     * SELECT CASE WHEN a<b-3 THEN 111 WHEN a<=b THEN 222 WHEN a<b+3 THEN 333 ELSE 444 END FROM t1
+     *
+     * For b=10: b-3=7, b+3=13
+     * - a=5:  5 < 7 (true)  -> 111
+     * - a=7:  7 < 7 (false), 7 <= 10 (true) -> 222
+     * - a=10: 10 < 7 (false), 10 <= 10 (true) -> 222
+     * - a=13: 13 < 7 (false), 13 <= 10 (false), 13 < 13 (false) -> 444
+     * - a=15: 15 < 7 (false), 15 <= 10 (false), 15 < 13 (false) -> 444
+     */
+    it('should evaluate searched CASE with arithmetic in conditions', () => {
+      const result = engine.execute(
+        'SELECT a, CASE WHEN a < b - 3 THEN 111 WHEN a <= b THEN 222 WHEN a < b + 3 THEN 333 ELSE 444 END as result FROM t1 ORDER BY a',
+        []
+      );
+
+      expect(result.rows.length).toBe(5);
+      // a=5, b=10: 5 < 7 -> 111
+      expect(result.rows[0].result).toBe(111);
+      // a=7, b=10: 7 < 7 is false, 7 <= 10 -> 222
+      expect(result.rows[1].result).toBe(222);
+      // a=10, b=10: 10 < 7 is false, 10 <= 10 -> 222
+      expect(result.rows[2].result).toBe(222);
+      // a=13, b=10: 13 < 7 is false, 13 <= 10 is false, 13 < 13 is false -> 444
+      expect(result.rows[3].result).toBe(444);
+      // a=15, b=10: all conditions false -> 444
+      expect(result.rows[4].result).toBe(444);
+    });
+  });
+
+  // ===========================================================================
+  // NESTED CASE EXPRESSIONS
+  // ===========================================================================
+
+  describe('Nested CASE expressions', () => {
+    beforeEach(() => {
+      engine.execute('CREATE TABLE data (category TEXT, value INTEGER)', []);
+      engine.execute('INSERT INTO data (category, value) VALUES (?, ?)', ['A', 10]);
+      engine.execute('INSERT INTO data (category, value) VALUES (?, ?)', ['A', 50]);
+      engine.execute('INSERT INTO data (category, value) VALUES (?, ?)', ['B', 30]);
+      engine.execute('INSERT INTO data (category, value) VALUES (?, ?)', ['B', 70]);
+    });
+
+    it('should evaluate nested CASE in THEN clause', () => {
+      const result = engine.execute(`
+        SELECT category, value,
+          CASE category
+            WHEN 'A' THEN CASE WHEN value < 30 THEN 'A-small' ELSE 'A-large' END
+            WHEN 'B' THEN CASE WHEN value < 50 THEN 'B-small' ELSE 'B-large' END
+            ELSE 'unknown'
+          END as label
+        FROM data
+        ORDER BY category, value
+      `, []);
+
+      expect(result.rows.length).toBe(4);
+      expect(result.rows[0].label).toBe('A-small'); // A, 10
+      expect(result.rows[1].label).toBe('A-large'); // A, 50
+      expect(result.rows[2].label).toBe('B-small'); // B, 30
+      expect(result.rows[3].label).toBe('B-large'); // B, 70
+    });
+  });
+
+  // ===========================================================================
+  // EVALUATION ORDER (FIRST MATCH WINS)
+  // ===========================================================================
+
+  describe('First matching WHEN wins (short-circuit evaluation)', () => {
+    beforeEach(() => {
+      engine.execute('CREATE TABLE scores (score INTEGER)', []);
+      engine.execute('INSERT INTO scores (score) VALUES (?)', [95]);
+      engine.execute('INSERT INTO scores (score) VALUES (?)', [85]);
+      engine.execute('INSERT INTO scores (score) VALUES (?)', [75]);
+      engine.execute('INSERT INTO scores (score) VALUES (?)', [65]);
+      engine.execute('INSERT INTO scores (score) VALUES (?)', [55]);
+    });
+
+    it('should stop at first matching WHEN clause', () => {
+      const result = engine.execute(
+        `SELECT score,
+          CASE
+            WHEN score >= 90 THEN 'A'
+            WHEN score >= 80 THEN 'B'
+            WHEN score >= 70 THEN 'C'
+            WHEN score >= 60 THEN 'D'
+            ELSE 'F'
+          END as grade
+        FROM scores
+        ORDER BY score DESC`,
+        []
+      );
+
+      expect(result.rows.length).toBe(5);
+      expect(result.rows[0].grade).toBe('A'); // 95 >= 90
+      expect(result.rows[1].grade).toBe('B'); // 85 >= 80 (also >= 70, 60 but stops at 80)
+      expect(result.rows[2].grade).toBe('C'); // 75 >= 70
+      expect(result.rows[3].grade).toBe('D'); // 65 >= 60
+      expect(result.rows[4].grade).toBe('F'); // 55 < 60 -> ELSE
+    });
+  });
+});

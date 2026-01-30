@@ -56,11 +56,12 @@ export async function handleMigrateAction(options: MigrateActionOptions): Promis
 
     // Connect to database
     logInfo(`\nConnecting to ${url}...`);
-    const connection = await createMigrationConnection({
+    const connectionOptions = {
       url,
-      token: options.token,
       timeout: parseInt(options.timeout, 10),
-    });
+      ...(options.token !== undefined && { token: options.token }),
+    };
+    const connection = await createMigrationConnection(connectionOptions);
 
     try {
       // Run migrations with the connection

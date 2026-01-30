@@ -3,6 +3,28 @@ import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
 export default defineWorkersConfig({
   test: {
     include: ['src/**/*.test.ts'],
+    coverage: {
+      provider: 'istanbul',
+      reporter: ['text', 'json', 'html', 'lcov'],
+      reportsDirectory: './coverage',
+      exclude: [
+        '**/node_modules/**',
+        '**/dist/**',
+        '**/*.test.ts',
+        '**/__tests__/**',
+        '**/benchmarks/**',
+        '**/e2e/**',
+        '**/scripts/**',
+        // Exclude tests that require Node.js modules
+        'src/orm/knex/**',
+      ],
+      thresholds: {
+        lines: 50,
+        branches: 50,
+        functions: 50,
+        statements: 50,
+      },
+    },
     // Exclude tests that require Node.js modules not available in Workers
     exclude: [
       '**/node_modules/**',

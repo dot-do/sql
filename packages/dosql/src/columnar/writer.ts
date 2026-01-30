@@ -3,6 +3,11 @@
  *
  * Accepts rows, buffers them, and flushes to columnar chunks.
  * Auto-selects encoding per column based on data characteristics.
+ *
+ * SAFETY NOTES:
+ * - All buffer operations include bounds checking to prevent memory corruption
+ * - Values are snapshotted before encoding to prevent TOCTOU vulnerabilities
+ * - Debug assertions verify invariants during development
  */
 
 import {
@@ -34,6 +39,45 @@ import {
   generateRowGroupId,
   estimateRowGroupSize,
 } from './chunk.js';
+
+// ============================================================================
+// Debug Utilities
+// ============================================================================
+
+/**
+ * Debug assertion that throws in development but is stripped in production.
+ * Used to verify safety invariants during development.
+ */
+function debugAssert(condition: boolean, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(`Assertion failed: ${message}`);
+  }
+}
+
+/**
+ * Verify buffer bounds before a write operation.
+ * Throws a descriptive error if the write would overflow.
+ */
+function assertBufferBounds(
+  offset: number,
+  length: number,
+  bufferSize: number,
+  context: string
+): void {
+  if (offset < 0) {
+    throw new Error(
+      `Buffer underflow in ${context}: offset ${offset} is negative`
+    );
+  }
+  if (offset + length > bufferSize) {
+    throw new Error(
+      `Buffer overflow in ${context}: ` +
+      `attempting to write ${length} bytes at offset ${offset}, ` +
+      `but buffer size is only ${bufferSize} bytes ` +
+      `(would overflow by ${offset + length - bufferSize} bytes)`
+    );
+  }
+}
 
 // ============================================================================
 // Writer Configuration
@@ -429,32 +473,65 @@ export class ColumnarWriter {
 
   /**
    * Encode a bytes column.
+   *
+   * Safety invariants:
+   * - Buffer is allocated based on size calculated from snapshotted values
+   * - Snapshot prevents TOCTOU (time-of-check-time-of-use) vulnerabilities
+   * - Before each buffer.set(), we verify: offset + value.length <= buffer.length
+   * - Size mismatches throw descriptive errors rather than corrupting memory
    */
   private encodeBytesColumn(values: (Uint8Array | null)[]): Uint8Array {
-    // Calculate total size
+    const context = 'bytes column encoding';
+
+    // Snapshot the values array to prevent TOCTOU issues
+    // This ensures we iterate over the same data for both size calculation and copying
+    const snapshot = values.map(v => v);
+
+    // Calculate total size from snapshot
     let totalSize = 0;
-    for (const value of values) {
-      totalSize += 4; // Length prefix
+    for (const value of snapshot) {
+      totalSize += 4; // Length prefix (uint32)
       if (value !== null) {
         totalSize += value.length;
       }
     }
 
+    // Debug assertion: totalSize should be non-negative
+    debugAssert(totalSize >= 0, `totalSize must be non-negative, got ${totalSize}`);
+
     const buffer = new Uint8Array(totalSize);
     const view = new DataView(buffer.buffer);
     let offset = 0;
 
-    for (const value of values) {
+    for (let i = 0; i < snapshot.length; i++) {
+      const value = snapshot[i];
+
       if (value !== null) {
-        view.setUint32(offset, value.length, true);
+        // Cache length to detect mutations
+        const valueLength = value.length;
+
+        // Verify bounds before writing length prefix
+        assertBufferBounds(offset, 4, buffer.length, `${context} length prefix at index ${i}`);
+        view.setUint32(offset, valueLength, true);
         offset += 4;
+
+        // Verify bounds before buffer.set()
+        assertBufferBounds(offset, valueLength, buffer.length, `${context} data at index ${i}`);
         buffer.set(value, offset);
-        offset += value.length;
+        offset += valueLength;
       } else {
+        // Null value: just write zero-length prefix
+        assertBufferBounds(offset, 4, buffer.length, `${context} null at index ${i}`);
         view.setUint32(offset, 0, true);
         offset += 4;
       }
     }
+
+    // Final consistency check
+    debugAssert(
+      offset === totalSize,
+      `offset (${offset}) should equal totalSize (${totalSize}) after encoding`
+    );
 
     return buffer;
   }

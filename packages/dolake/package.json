@@ -1,5 +1,5 @@
 {
-  "name": "dolake",
+  "name": "@dotdo/dolake",
   "version": "0.1.0",
   "description": "DoLake - Lakehouse worker for CDC streaming to Iceberg/Parquet on R2",
   "type": "module",
@@ -18,6 +18,7 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:types": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
@@ -33,13 +34,14 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "lake.do": "workspace:*",
     "hyparquet": "^1.9.0",
+    "lake.do": "workspace:*",
     "zod": "^4.3.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.5",
     "@cloudflare/workers-types": "^4.0.0",
+    "@vitest/coverage-istanbul": "^2.1.9",
     "@vitest/runner": "^2.1.9",
     "@vitest/snapshot": "^2.1.9",
     "typescript": "^5.3.0",

@@ -57,7 +57,9 @@ async function hashString(input: string, length: number): Promise<string> {
   const bytes = new Uint8Array(hashBuffer);
   let hashHex = '';
   for (let i = 0; i < bytes.length && hashHex.length < length; i++) {
-    hashHex += bytes[i].toString(16).padStart(2, '0');
+    const byte = bytes[i];
+    if (byte === undefined) break;
+    hashHex += byte.toString(16).padStart(2, '0');
   }
   return hashHex.slice(0, length);
 }

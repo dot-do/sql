@@ -323,13 +323,21 @@ export async function checkRetention(ctx: ExecutorContext): Promise<RetentionChe
   result.clockSkewDetected = clockSkewDetected;
 
   // Calculate bytes/entries over limit
-  if (ctx.policy.maxTotalBytes && totalBytes > ctx.policy.maxTotalBytes) {
-    result.bytesOverLimit = totalBytes - ctx.policy.maxTotalBytes;
+  if (ctx.policy.maxTotalBytes) {
+    if (totalBytes > ctx.policy.maxTotalBytes) {
+      result.bytesOverLimit = totalBytes - ctx.policy.maxTotalBytes;
+    }
 
-    // Check warning threshold
+    // Check warning threshold (can trigger even when not over limit)
     const warning = checkStorageWarning(totalBytes, ctx.policy);
-    if (warning && ctx.policy.onWarning) {
-      ctx.policy.onWarning(warning);
+    if (warning) {
+      if (ctx.policy.onWarning) {
+        ctx.policy.onWarning(warning);
+      }
+      // Also call onSizeWarning callback if configured
+      if (ctx.policy.onSizeWarning) {
+        ctx.policy.onSizeWarning(totalBytes, ctx.policy.maxTotalBytes);
+      }
     }
   }
 

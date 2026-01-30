@@ -114,6 +114,28 @@ export function evaluateWhereCondition(
     return !values.some(v => deps.valuesEqual(v, literalValue));
   }
 
+  // Handle literal IN: 1 IN (1, 2, 3)
+  // Must come before column IN to catch numeric/string literals
+  const literalInMatch = trimmed.match(/^(-?\d+(?:\.\d+)?|'[^']*')\s+IN\s*\(([^)]*)\)$/i);
+  if (literalInMatch) {
+    const literalStr = literalInMatch[1];
+    const valueList = literalInMatch[2];
+    const literalValue: SqlValue = literalStr.startsWith("'")
+      ? literalStr.slice(1, -1)
+      : Number(literalStr);
+    const values: SqlValue[] = [];
+    if (valueList.trim()) {
+      const items = deps.parseValueList(valueList, params, pIdx.value);
+      values.push(...items.values);
+      pIdx.value = items.paramIndex;
+    }
+    // Empty list: x IN () is always FALSE
+    if (values.length === 0) return false;
+    // If value is found, return TRUE even if NULL is in list
+    // If value not found and NULL in list, return FALSE (NULL is falsy in WHERE)
+    return values.some(v => deps.valuesEqual(v, literalValue));
+  }
+
   // Handle column NOT IN: col NOT IN (1, 2, 3)
   const notInMatch = trimmed.match(/^(\w+(?:\.\w+)?)\s+NOT\s+IN\s*\(([^)]*)\)$/i);
   if (notInMatch) {

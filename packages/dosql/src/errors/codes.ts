@@ -99,6 +99,104 @@ export enum SyntaxErrorCode {
 }
 
 // =============================================================================
+// Planner Error Codes
+// =============================================================================
+
+/**
+ * Error codes for query planner operations
+ */
+export enum PlannerErrorCode {
+  /** No tables to join */
+  NO_TABLES = 'PLANNER_NO_TABLES',
+  /** Failed to find optimal join order */
+  JOIN_ORDER_FAILED = 'PLANNER_JOIN_ORDER_FAILED',
+  /** Invalid query plan */
+  INVALID_PLAN = 'PLANNER_INVALID_PLAN',
+  /** Cost estimation failed */
+  COST_ESTIMATION_FAILED = 'PLANNER_COST_ESTIMATION_FAILED',
+  /** Index selection failed */
+  INDEX_SELECTION_FAILED = 'PLANNER_INDEX_SELECTION_FAILED',
+  /** Optimization failed */
+  OPTIMIZATION_FAILED = 'PLANNER_OPTIMIZATION_FAILED',
+}
+
+// =============================================================================
+// Executor Error Codes
+// =============================================================================
+
+/**
+ * Error codes for query executor operations
+ */
+export enum ExecutorErrorCode {
+  /** Unknown plan type */
+  UNKNOWN_PLAN_TYPE = 'EXECUTOR_UNKNOWN_PLAN_TYPE',
+  /** Query timeout */
+  QUERY_TIMEOUT = 'EXECUTOR_QUERY_TIMEOUT',
+  /** Operator error */
+  OPERATOR_ERROR = 'EXECUTOR_OPERATOR_ERROR',
+  /** Subquery error */
+  SUBQUERY_ERROR = 'EXECUTOR_SUBQUERY_ERROR',
+  /** CTE not materialized */
+  CTE_NOT_MATERIALIZED = 'EXECUTOR_CTE_NOT_MATERIALIZED',
+  /** Aggregate error */
+  AGGREGATE_ERROR = 'EXECUTOR_AGGREGATE_ERROR',
+  /** Window function error */
+  WINDOW_FUNCTION_ERROR = 'EXECUTOR_WINDOW_FUNCTION_ERROR',
+  /** Transaction error */
+  TRANSACTION_ERROR = 'EXECUTOR_TRANSACTION_ERROR',
+}
+
+// =============================================================================
+// Parser Error Codes
+// =============================================================================
+
+/**
+ * Error codes for SQL parser operations
+ */
+export enum ParserErrorCode {
+  /** Empty SQL query */
+  EMPTY_SQL = 'PARSER_EMPTY_SQL',
+  /** Unsupported SQL operation */
+  UNSUPPORTED_OPERATION = 'PARSER_UNSUPPORTED_OPERATION',
+  /** Invalid statement structure */
+  INVALID_STATEMENT = 'PARSER_INVALID_STATEMENT',
+  /** Unknown SQL operation */
+  UNKNOWN_OPERATION = 'PARSER_UNKNOWN_OPERATION',
+  /** Invalid data type */
+  INVALID_DATA_TYPE = 'PARSER_INVALID_DATA_TYPE',
+  /** Invalid reference action */
+  INVALID_REFERENCE_ACTION = 'PARSER_INVALID_REFERENCE_ACTION',
+  /** Unknown window name */
+  UNKNOWN_WINDOW_NAME = 'PARSER_UNKNOWN_WINDOW_NAME',
+  /** Invalid frame specification */
+  INVALID_FRAME_SPEC = 'PARSER_INVALID_FRAME_SPEC',
+  /** Unknown function */
+  UNKNOWN_FUNCTION = 'PARSER_UNKNOWN_FUNCTION',
+}
+
+// =============================================================================
+// Storage Error Codes
+// =============================================================================
+
+/**
+ * Error codes for storage operations
+ */
+export enum StorageErrorCode {
+  /** Invalid snapshot ID */
+  INVALID_SNAPSHOT_ID = 'STORAGE_INVALID_SNAPSHOT_ID',
+  /** Read operation failed */
+  READ_FAILED = 'STORAGE_READ_FAILED',
+  /** Write operation failed */
+  WRITE_FAILED = 'STORAGE_WRITE_FAILED',
+  /** Invalid page ID */
+  INVALID_PAGE_ID = 'STORAGE_INVALID_PAGE_ID',
+  /** Bucket not found */
+  BUCKET_NOT_FOUND = 'STORAGE_BUCKET_NOT_FOUND',
+  /** Corruption detected */
+  CORRUPTION = 'STORAGE_CORRUPTION',
+}
+
+// =============================================================================
 // All Error Codes Union Type
 // =============================================================================
 
@@ -109,7 +207,11 @@ export type DoSQLErrorCode =
   | DatabaseErrorCode
   | StatementErrorCode
   | BindingErrorCode
-  | SyntaxErrorCode;
+  | SyntaxErrorCode
+  | PlannerErrorCode
+  | ExecutorErrorCode
+  | ParserErrorCode
+  | StorageErrorCode;
 
 /**
  * Get error code category prefix

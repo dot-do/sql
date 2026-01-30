@@ -289,13 +289,12 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Correlated subquery with count
-     * TODO: Correlated scalar subqueries in SELECT clause not supported
+     * Correlated subquery with count - FIXED in sql-aayr
      *
      * SQLLogicTest: SELECT (SELECT count(*) FROM t1 AS x WHERE x.b < t1.b) FROM t1
      * For each row, count how many rows have smaller b values
      */
-    it.fails('should support correlated subquery counting rows with smaller values', () => {
+    it('should support correlated subquery counting rows with smaller values', () => {
       const result = db.prepare(`
         SELECT a, (SELECT count(*) FROM t1 AS x WHERE x.b < t1.b) AS cnt FROM t1
       `).all();
@@ -318,10 +317,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Correlated subquery with max
-     * TODO: Correlated scalar subqueries in SELECT clause not supported
+     * Correlated subquery with max - FIXED in sql-aayr
      */
-    it.fails('should support correlated subquery with max of smaller values', () => {
+    it('should support correlated subquery with max of smaller values', () => {
       const result = db.prepare(`
         SELECT a, (SELECT max(x.b) FROM t1 AS x WHERE x.b < t1.b) AS max_smaller FROM t1
       `).all();
@@ -361,10 +359,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Correlated subquery with sum
-     * TODO: Correlated scalar subqueries in SELECT clause not supported
+     * Correlated subquery with sum - FIXED
      */
-    it.fails('should support correlated subquery with sum', () => {
+    it('should support correlated subquery with sum', () => {
       const result = db.prepare(`
         SELECT a, (SELECT sum(x.c) FROM t1 AS x WHERE x.a <= t1.a) AS running_sum FROM t1
       `).all();
@@ -405,12 +402,11 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Subquery in CASE WHEN condition
-     * TODO: Subqueries in CASE conditions not supported
+     * Subquery in CASE WHEN condition - FIXED
      *
      * SQLLogicTest: SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END FROM t1
      */
-    it.fails('should support subquery in CASE WHEN condition', () => {
+    it('should support subquery in CASE WHEN condition', () => {
       // avg(c) = (100 + 200 + 300 + 400 + 500) / 5 = 300
       // For c > 300: a * 2 (rows with c = 400, 500 -> 4*2=8, 5*2=10)
       // For c <= 300: b * 10 (rows with c = 100, 200, 300 -> 10*10=100, 20*10=200, 30*10=300)
@@ -431,10 +427,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Subquery in CASE THEN branch
-     * TODO: Subqueries in CASE THEN branches not supported
+     * Subquery in CASE THEN branch - FIXED
      */
-    it.fails('should support subquery in CASE THEN branch', () => {
+    it('should support subquery in CASE THEN branch', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a > 3 THEN (SELECT max(b) FROM t1) ELSE b END AS result FROM t1
       `).all();
@@ -452,10 +447,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Subquery in CASE ELSE branch
-     * TODO: Subqueries in CASE ELSE branches not supported
+     * Subquery in CASE ELSE branch - FIXED
      */
-    it.fails('should support subquery in CASE ELSE branch', () => {
+    it('should support subquery in CASE ELSE branch', () => {
       const result = db.prepare(`
         SELECT a, CASE WHEN a < 3 THEN b ELSE (SELECT min(c) FROM t1) END AS result FROM t1
       `).all();
@@ -706,10 +700,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Subquery in arithmetic expression
-     * TODO: Subqueries in arithmetic expressions not supported
+     * Subquery in arithmetic expression - FIXED
      */
-    it.fails('should support subquery in arithmetic expression', () => {
+    it('should support subquery in arithmetic expression', () => {
       // Calculate each a as a percentage of the total
       // sum(a) = 150, so percentage = a * 100 / 150
       const result = db.prepare(`
@@ -730,10 +723,9 @@ describe('SQLLogicTest Subqueries', () => {
     });
 
     /**
-     * KNOWN FAILURE: Subquery with subtraction
-     * TODO: Subqueries in arithmetic expressions not supported
+     * Subquery with subtraction - FIXED
      */
-    it.fails('should support subquery in subtraction expression', () => {
+    it('should support subquery in subtraction expression', () => {
       // Calculate deviation from average
       // avg(a) = 30
       const result = db.prepare(`

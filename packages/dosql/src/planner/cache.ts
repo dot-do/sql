@@ -8,8 +8,44 @@
  * - Hash-based query lookup with normalization
  * - Parameterized query sharing (literals normalized)
  * - LRU eviction policy
- * - Schema change invalidation
+ * - Schema change invalidation (table-level granularity)
  * - Cache statistics tracking
+ *
+ * ## Schema Invalidation Strategy
+ *
+ * The cache implements partial invalidation on schema changes to ensure
+ * cached plans remain valid:
+ *
+ * 1. **Table Dependency Tracking**: Each cached plan extracts and stores the
+ *    tables it references. Tables are normalized to lowercase for
+ *    case-insensitive matching.
+ *
+ * 2. **DDL Operations**: When DDL operations occur, only plans referencing
+ *    the affected table(s) are invalidated:
+ *    - ALTER TABLE: Invalidates all plans for the altered table
+ *    - CREATE INDEX: Invalidates plans that may benefit from the new index
+ *    - DROP TABLE: Invalidates all plans referencing the dropped table
+ *    - DROP INDEX: Invalidates plans that may have used the index
+ *
+ * 3. **Schema Version**: Each plan stores the schema version at cache time.
+ *    Use `isPlanStale()` to check if a plan was cached before recent changes.
+ *
+ * 4. **Multi-table Queries**: Join queries track all referenced tables and
+ *    are invalidated when any referenced table changes.
+ *
+ * @example
+ * ```typescript
+ * const cache = createQueryPlanCache({ maxSize: 100 });
+ *
+ * // Cache a plan
+ * cache.set(queryHash, plan, schemaVersion);
+ *
+ * // After DDL, invalidate affected plans
+ * processDDL(cache, 'ALTER TABLE users ADD COLUMN email TEXT');
+ *
+ * // Or invalidate directly
+ * cache.invalidateTable('users');
+ * ```
  *
  * @packageDocumentation
  */
@@ -317,6 +353,7 @@ function estimatePlanSize(plan: unknown, query?: string): number {
 
 /**
  * Extract table names from a query plan
+ * Table names are normalized to lowercase for case-insensitive matching
  */
 function extractTablesFromPlan(plan: unknown): Set<string> {
   const tables = new Set<string>();
@@ -328,14 +365,14 @@ function extractTablesFromPlan(plan: unknown): Set<string> {
 
     // Check for table property
     if (typeof obj.table === 'string') {
-      tables.add(obj.table);
+      tables.add(obj.table.toLowerCase());
     }
 
     // Check for tables array
     if (Array.isArray(obj.tables)) {
       for (const t of obj.tables) {
         if (typeof t === 'string') {
-          tables.add(t);
+          tables.add(t.toLowerCase());
         }
       }
     }
@@ -578,9 +615,12 @@ export class QueryPlanCacheImpl implements QueryPlanCache {
 
   /**
    * Invalidate plans for a specific table
+   * Table names are matched case-insensitively
    */
   invalidateTable(tableName: string): number {
-    const hashes = this.tableToPlanMap.get(tableName);
+    // Normalize table name to lowercase for case-insensitive matching
+    const normalizedTableName = tableName.toLowerCase();
+    const hashes = this.tableToPlanMap.get(normalizedTableName);
     if (!hashes) {
       return 0;
     }
@@ -593,7 +633,7 @@ export class QueryPlanCacheImpl implements QueryPlanCache {
     }
 
     // Clear the table mapping
-    this.tableToPlanMap.delete(tableName);
+    this.tableToPlanMap.delete(normalizedTableName);
 
     return count;
   }
@@ -981,13 +1021,28 @@ export function notifyIndexChange(
 
 /**
  * Process DDL statement and invalidate affected plans
+ *
+ * Handles various DDL statements:
+ * - ALTER TABLE table_name ...
+ * - DROP TABLE [IF EXISTS] table_name [CASCADE]
+ * - CREATE [UNIQUE] INDEX [IF NOT EXISTS] index_name ON table_name ...
+ * - DROP INDEX index_name [ON table_name]
  */
 export function processDDL(cache: QueryPlanCacheImpl, sql: string): void {
   // Extract table name from DDL
+  // ALTER TABLE table_name ...
   const alterMatch = sql.match(/ALTER\s+TABLE\s+(\w+)/i);
-  const dropMatch = sql.match(/DROP\s+TABLE\s+(\w+)/i);
-  const createIndexMatch = sql.match(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+\w+\s+ON\s+(\w+)/i);
-  const dropIndexMatch = sql.match(/DROP\s+INDEX\s+\w+\s+ON\s+(\w+)/i);
+
+  // DROP TABLE [IF EXISTS] table_name [CASCADE|RESTRICT]
+  const dropMatch = sql.match(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i);
+
+  // CREATE [UNIQUE] INDEX [IF NOT EXISTS] index_name ON table_name
+  const createIndexMatch = sql.match(
+    /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?\w+\s+ON\s+(\w+)/i
+  );
+
+  // DROP INDEX index_name [ON table_name]
+  const dropIndexMatch = sql.match(/DROP\s+INDEX\s+\w+(?:\s+ON\s+(\w+))?/i);
 
   const tableName =
     alterMatch?.[1] ||

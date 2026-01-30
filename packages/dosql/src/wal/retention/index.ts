@@ -168,6 +168,139 @@ import {
 export { RetentionError, RetentionErrorCode } from '../retention-types.js';
 
 // =============================================================================
+// Size-Based Checkpoint Trigger
+// =============================================================================
+
+/**
+ * Configuration for size-based checkpoint trigger
+ */
+export interface SizeBasedCheckpointTriggerConfig {
+  /** Maximum WAL size in bytes before triggering checkpoint */
+  maxWALSizeBytes: number;
+  /** Interval in milliseconds to check WAL size (default: 5000) */
+  checkIntervalMs?: number;
+}
+
+/**
+ * Size-based checkpoint trigger interface
+ */
+export interface SizeBasedCheckpointTrigger {
+  /** Start monitoring WAL size */
+  start(): void;
+  /** Stop monitoring */
+  stop(): void;
+  /** Check WAL size and trigger checkpoint if needed */
+  checkAndTrigger(): Promise<boolean>;
+  /** Whether the trigger is active */
+  isActive(): boolean;
+}
+
+/**
+ * Auto-checkpointer interface (minimal for type checking)
+ */
+interface AutoCheckpointer {
+  forceCheckpoint(): Promise<unknown>;
+}
+
+/**
+ * Create a size-based checkpoint trigger
+ *
+ * Monitors WAL size and triggers a checkpoint when the total size
+ * exceeds the configured threshold.
+ *
+ * @param reader - WAL reader for listing segments
+ * @param backend - Storage backend for reading segment sizes
+ * @param autoCheckpointer - Auto-checkpointer to trigger checkpoints
+ * @param config - Configuration options
+ * @returns Size-based checkpoint trigger
+ *
+ * @example
+ * ```typescript
+ * const sizeTrigger = createSizeBasedCheckpointTrigger(
+ *   reader,
+ *   backend,
+ *   autoCheckpointer,
+ *   { maxWALSizeBytes: 1024 * 1024 } // 1MB threshold
+ * );
+ *
+ * sizeTrigger.start();
+ * // ... later
+ * sizeTrigger.stop();
+ * ```
+ */
+export function createSizeBasedCheckpointTrigger(
+  reader: WALReader,
+  backend: FSXBackend,
+  autoCheckpointer: AutoCheckpointer,
+  config: SizeBasedCheckpointTriggerConfig
+): SizeBasedCheckpointTrigger {
+  const checkIntervalMs = config.checkIntervalMs ?? 5000;
+  let intervalId: ReturnType<typeof setInterval> | null = null;
+  let active = false;
+
+  /**
+   * Calculate current WAL size
+   */
+  async function getWALSize(): Promise<number> {
+    const segments = await reader.listSegments(false);
+    let totalSize = 0;
+
+    for (const segmentId of segments) {
+      const data = await backend.read(`_wal/segments/${segmentId}`);
+      if (data) {
+        totalSize += data.length;
+      }
+    }
+
+    return totalSize;
+  }
+
+  /**
+   * Check if checkpoint is needed and trigger if so
+   */
+  async function checkAndTrigger(): Promise<boolean> {
+    const currentSize = await getWALSize();
+
+    if (currentSize >= config.maxWALSizeBytes) {
+      try {
+        await autoCheckpointer.forceCheckpoint();
+        return true;
+      } catch (error) {
+        // Log but don't throw - checkpoint failure shouldn't crash the trigger
+        console.error('Size-based checkpoint trigger failed:', error);
+      }
+    }
+
+    return false;
+  }
+
+  return {
+    start(): void {
+      if (active) return;
+      active = true;
+
+      intervalId = setInterval(async () => {
+        await checkAndTrigger();
+      }, checkIntervalMs);
+    },
+
+    stop(): void {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+      active = false;
+    },
+
+    checkAndTrigger,
+
+    isActive(): boolean {
+      return active;
+    },
+  };
+}
+
+// =============================================================================
 // WAL Retention Manager Factory
 // =============================================================================
 

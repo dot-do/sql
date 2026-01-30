@@ -34,6 +34,10 @@ import {
   splitSelectColumns,
   containsCaseExpression,
   findKeywordOutsideCaseAndStrings,
+  evaluateExprWithSubqueries,
+  containsSubqueryExpr,
+  type ExprEvalContext,
+  type SubqueryEvaluator,
 } from './case-expr.js';
 
 // Re-export StatementError for backwards compatibility
@@ -854,10 +858,13 @@ export class InMemoryEngine implements ExecutionEngine {
       aliasToTable.set(ref.alias, table);
     }
 
-    // Build rows: if single table, use directly; if multiple, compute cross product
+    // Build rows: if no tables (FROM-less), single table, or multiple tables
     let rows: Record<string, SqlValue>[];
 
-    if (tableRefs.length === 1) {
+    if (tableRefs.length === 0) {
+      // FROM-less SELECT (e.g., SELECT 1, SELECT (SELECT ...))
+      rows = [{}];
+    } else if (tableRefs.length === 1) {
       // Single table query - prefix columns with alias for consistent resolution
       const ref = tableRefs[0];
       const table = aliasToTable.get(ref.alias)!;
@@ -976,8 +983,27 @@ export class InMemoryEngine implements ExecutionEngine {
 
             // Check if expression is a scalar subquery
             if (this.isScalarSubquery(expr)) {
-              const subquerySql = expr.slice(1, -1).trim(); // Remove outer parens
+              let subquerySql = expr.slice(1, -1).trim(); // Remove outer parens
+
+              // Check if this is a correlated subquery referencing outer row
+              // We need to detect references like "t1.b" where t1 is the outer table
+              const isCorrelated = this.isCorrelatedSubqueryForSelect(subquerySql, row);
+
+              if (isCorrelated) {
+                // Substitute outer row references with actual values
+                subquerySql = this.substituteOuterReferences(subquerySql, row);
+              }
+
               const subqueryResult = this.execute(subquerySql, params);
+
+              // Scalar subquery must return at most one row
+              if (subqueryResult.rows.length > 1) {
+                throw new StatementError(
+                  StatementErrorCode.INVALID_SQL,
+                  'Scalar subquery must return a single row, but returned more than one row',
+                  expr
+                );
+              }
 
               let value: SqlValue = null;
               if (subqueryResult.rows.length > 0) {
@@ -992,10 +1018,18 @@ export class InMemoryEngine implements ExecutionEngine {
                 projected[outputAlias] = value;
               }
             } else if (containsCaseExpression(expr) || this.isArithmeticOrFunctionExpression(expr)) {
-              // Evaluate CASE or arithmetic expression (+ - * / % unary, functions like abs())
+              // Evaluate CASE or arithmetic expression with subquery support
               // Only set if not already present (first column wins in collision)
               if (!(outputAlias in projected)) {
-                projected[outputAlias] = evaluateCaseExpr(expr, row, params, pIdx);
+                if (containsSubqueryExpr(expr)) {
+                  projected[outputAlias] = evaluateExprWithSubqueries(expr, row, {
+                    params,
+                    pIdx,
+                    evaluateSubquery: (sql, p, outerRow) => this.evaluateScalarSubquery(sql, p, outerRow ?? row),
+                  });
+                } else {
+                  projected[outputAlias] = evaluateCaseExpr(expr, row, params, pIdx);
+                }
               }
             } else {
               // Resolve column reference (could be alias.col or just col)
@@ -1155,6 +1189,37 @@ export class InMemoryEngine implements ExecutionEngine {
   // ==========================================================================
   // SUBQUERY SUPPORT
   // ==========================================================================
+
+  /**
+   * Evaluate a scalar subquery, returning its single value or null.
+   * Throws if the subquery returns more than one row.
+   */
+  private evaluateScalarSubquery(sql: string, params: SqlValue[], outerRow?: Record<string, SqlValue>): SqlValue {
+    let subquerySql = sql;
+
+    // Handle correlated subquery references
+    if (outerRow) {
+      const isCorrelated = this.isCorrelatedSubqueryForSelect(subquerySql, outerRow);
+      if (isCorrelated) {
+        subquerySql = this.substituteOuterReferences(subquerySql, outerRow);
+      }
+    }
+
+    const result = this.execute(subquerySql, params);
+
+    if (result.rows.length > 1) {
+      throw new StatementError(
+        StatementErrorCode.INVALID_SQL,
+        'Scalar subquery must return a single row, but returned more than one row',
+        sql
+      );
+    }
+
+    if (result.rows.length === 0) return null;
+    const firstRow = result.rows[0];
+    const keys = Object.keys(firstRow);
+    return keys.length > 0 ? firstRow[keys[0]] : null;
+  }
 
   /**
    * Check if SQL contains a subquery
@@ -1325,6 +1390,28 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Get column names from first outer row (includes alias.col format)
     const outerRow = outerRows[0];
+    const outerColumns = Object.keys(outerRow);
+
+    // Look for references in the subquery that match outer columns
+    // Match patterns like: alias.column where alias.column exists in outer row
+    for (const col of outerColumns) {
+      if (col.includes('.')) {
+        // Check if subquery contains this alias.column reference
+        const regex = new RegExp(`\\b${this.escapeRegex(col)}\\b`, 'i');
+        if (regex.test(subquerySql)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if a scalar subquery in SELECT references columns from the current outer row (correlated).
+   * This version takes a single row instead of an array of rows.
+   */
+  private isCorrelatedSubqueryForSelect(subquerySql: string, outerRow: Record<string, SqlValue>): boolean {
     const outerColumns = Object.keys(outerRow);
 
     // Look for references in the subquery that match outer columns
@@ -1648,7 +1735,20 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Find FROM using CASE-aware search
     const fromPos = findKeywordOutsideCaseAndStrings(sql, selectStart, 'FROM');
-    if (fromPos === -1) return null;
+    if (fromPos === -1) {
+      // Handle FROM-less SELECT (e.g., SELECT 1, SELECT (SELECT ...))
+      const columnList = sql.slice(selectStart).trim();
+      return {
+        columnList,
+        tableName: '',
+        tableRefs: [],
+        whereClause: undefined,
+        groupBy: undefined,
+        havingClause: undefined,
+        orderBy: undefined,
+        limit: undefined,
+      };
+    }
 
     const columnList = sql.slice(selectStart, fromPos).trim();
 
@@ -1768,10 +1868,11 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   /**
-   * Find AS keyword position outside CASE...END blocks and string literals
+   * Find AS keyword position outside CASE...END blocks, parentheses, and string literals
    */
   private findAsKeyword(col: string): number {
     let caseDepth = 0;
+    let parenDepth = 0;
     let inString = false;
     const upper = col.toUpperCase();
 
@@ -1786,6 +1887,10 @@ export class InMemoryEngine implements ExecutionEngine {
       }
       if (inString) continue;
 
+      // Track parentheses depth
+      if (ch === '(') { parenDepth++; continue; }
+      if (ch === ')') { parenDepth--; continue; }
+
       // Track CASE depth
       if (upper.slice(i).startsWith('CASE') && (i + 4 >= col.length || !/\w/.test(col[i + 4]))) {
         caseDepth++; i += 3; continue;
@@ -1795,8 +1900,8 @@ export class InMemoryEngine implements ExecutionEngine {
         i += 2; continue;
       }
 
-      // Look for ' AS ' pattern outside CASE blocks
-      if (caseDepth === 0 && upper.slice(i).match(/^\s+AS\s+/)) {
+      // Look for ' AS ' pattern outside CASE blocks and parentheses (subqueries)
+      if (caseDepth === 0 && parenDepth === 0 && upper.slice(i).match(/^\s+AS\s+/)) {
         return i;
       }
     }

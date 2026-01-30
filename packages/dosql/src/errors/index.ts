@@ -25,6 +25,10 @@ export {
   StatementErrorCode,
   BindingErrorCode,
   SyntaxErrorCode,
+  PlannerErrorCode,
+  ExecutorErrorCode,
+  ParserErrorCode,
+  StorageErrorCode,
   getErrorCodeCategory,
   isErrorCodeInCategory,
   type DoSQLErrorCode,
@@ -61,6 +65,23 @@ export {
   createNamedExpectedError,
   createNonFiniteNumberError,
 } from './binding-errors.js';
+
+// Typed errors (Planner, Executor, Parser, Storage)
+export {
+  PlannerError,
+  ExecutorError,
+  ParserError,
+  StorageError,
+  createNoTablesToJoinError,
+  createJoinOrderFailedError,
+  createUnknownPlanTypeError,
+  createQueryTimeoutError,
+  createEmptySqlError,
+  createUnsupportedOperationError,
+  createInvalidSnapshotIdError,
+  createStorageReadError,
+  createStorageWriteError,
+} from './typed-errors.js';
 
 // Syntax errors
 export {

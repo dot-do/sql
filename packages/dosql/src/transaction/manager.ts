@@ -13,6 +13,7 @@
 import type { WALWriter, LSN, TransactionId } from '../wal/types.js';
 import { createLSN, createTransactionId } from '../wal/types.js';
 import { generateTxnId } from '../wal/writer.js';
+import { createLogger, type StructuredLogger, type LogSink, NoOpSink } from '../logging/index.js';
 import {
   type TransactionManager,
   type TransactionContext,
@@ -42,6 +43,18 @@ import {
   type TransactionTimeoutEnforcer,
 } from './timeout.js';
 import type { LockManager } from './isolation.js';
+
+// =============================================================================
+// Module-level Logger for Helper Functions
+// =============================================================================
+
+/**
+ * Module-level logger for helper functions (executeInTransaction, executeWithSavepoint)
+ * that don't have access to the transaction manager's logger instance.
+ */
+const moduleLogger = createLogger({
+  defaultContext: { component: 'TransactionHelpers' },
+});
 
 // =============================================================================
 // Transaction Manager Implementation
@@ -77,6 +90,10 @@ export interface TransactionManagerOptions {
   ioTimeoutMs?: number;
   /** Lock manager for isolation */
   lockManager?: LockManager;
+  /** Structured logger instance */
+  logger?: StructuredLogger;
+  /** Custom log sink for structured logging */
+  logSink?: LogSink;
 }
 
 /**
@@ -136,7 +153,15 @@ export function createTransactionManager(
     trackQueries,
     ioTimeoutMs,
     lockManager,
+    logger: providedLogger,
+    logSink,
   } = options;
+
+  // Create structured logger for transaction manager
+  const logger: StructuredLogger = providedLogger ?? createLogger({
+    sink: logSink,
+    defaultContext: { component: 'TransactionManager' },
+  });
 
   // Current transaction state
   let currentContext: TransactionContext | null = null;
@@ -166,46 +191,175 @@ export function createTransactionManager(
   // Set rollback function for timeout enforcer
   timeoutEnforcer.setRollbackFn(async (txnId: TransactionId) => {
     if (currentContext && currentContext.txnId === txnId) {
-      await performRollback(currentContext);
+      await executeRollback(currentContext, { suppressErrors: true });
     }
   });
 
   /**
-   * Perform rollback for a context (internal helper)
+   * Options for executeRollback
    */
-  async function performRollback(context: TransactionContext): Promise<void> {
-    // Apply rollback for all logged operations that need undo
-    const undoableEntries = context.log.entries.filter(
-      (e) => e.op === 'INSERT' || e.op === 'UPDATE' || e.op === 'DELETE'
-    );
+  interface ExecuteRollbackOptions {
+    /**
+     * Savepoint name to rollback to. If provided, only changes after this
+     * savepoint will be reverted. If not provided, the entire transaction
+     * is rolled back.
+     */
+    toSavepoint?: string;
 
-    if (undoableEntries.length > 0 && applyFn) {
-      try {
-        await applyRollback(context.log, 0, context.log.entries.length);
-      } catch (error) {
-        // Log but continue with cleanup
-        console.error('Failed to apply rollback operations:', error);
+    /**
+     * If true, skip writing ROLLBACK to WAL. Used for savepoint rollback
+     * which doesn't require WAL persistence.
+     */
+    skipWAL?: boolean;
+
+    /**
+     * If true, errors during undo operations will be logged but not thrown.
+     * Used for timeout-triggered rollback where we must ensure cleanup happens.
+     */
+    suppressErrors?: boolean;
+
+    /**
+     * If true, skip clearing the transaction context (used for savepoint rollback
+     * where the transaction remains active).
+     */
+    keepTransaction?: boolean;
+  }
+
+  /**
+   * Unified rollback implementation
+   *
+   * This method handles all rollback scenarios:
+   * - Full transaction rollback (public rollback() method)
+   * - Rollback to savepoint (rollbackTo() method)
+   * - Timeout-triggered rollback (performRollback helper)
+   *
+   * The method ensures consistent behavior across all paths:
+   * 1. Undo operations are applied in reverse order
+   * 2. Locks are always released (even if undo fails)
+   * 3. WAL is updated (unless skipWAL is set)
+   * 4. Transaction state is cleaned up
+   *
+   * @param context - The transaction context to rollback
+   * @param options - Rollback options
+   * @throws TransactionError if rollback fails and suppressErrors is false
+   */
+  async function executeRollback(
+    context: TransactionContext,
+    options: ExecuteRollbackOptions = {}
+  ): Promise<void> {
+    const {
+      toSavepoint,
+      skipWAL = false,
+      suppressErrors = false,
+      keepTransaction = false,
+    } = options;
+
+    let undoError: Error | null = null;
+    let startIndex = 0;
+    let endIndex = context.log.entries.length;
+    let savepointFound: { savepoint: Savepoint; index: number } | null = null;
+
+    // If rolling back to a savepoint, find it and adjust indices
+    if (toSavepoint) {
+      savepointFound = findSavepoint(context.savepoints, toSavepoint);
+      if (!savepointFound) {
+        throw new TransactionError(
+          TransactionErrorCode.SAVEPOINT_NOT_FOUND,
+          `Savepoint '${toSavepoint}' not found`,
+          { txnId: context.txnId }
+        );
       }
+      startIndex = savepointFound.savepoint.logSnapshotIndex;
     }
 
-    // Write ROLLBACK to WAL
-    try {
-      await writeToWAL('ROLLBACK', context.txnId);
-    } catch (error) {
-      // Log but don't fail - rollback already applied in memory
-      console.error('Failed to write ROLLBACK to WAL:', error);
+    // Step 1: Apply undo operations (in reverse order)
+    const hasUndoableEntries = context.log.entries
+      .slice(startIndex, endIndex)
+      .some((e) => e.op === 'INSERT' || e.op === 'UPDATE' || e.op === 'DELETE');
+
+    if (hasUndoableEntries && applyFn) {
+      try {
+        await applyRollback(context.log, startIndex, endIndex);
+      } catch (error) {
+        undoError = error instanceof Error ? error : new Error(String(error));
+        // Log rollback failure with structured context
+        logger.error(
+          'Failed to apply rollback operations',
+          undoError,
+          {
+            txnId: context.txnId,
+            operation: 'ROLLBACK',
+            startIndex,
+            endIndex,
+            toSavepoint,
+            suppressErrors,
+          }
+        );
+      }
+    } else if (hasUndoableEntries && !applyFn && !suppressErrors) {
+      undoError = new TransactionError(
+        TransactionErrorCode.ROLLBACK_FAILED,
+        'No apply function set for rollback operations',
+        { txnId: context.txnId }
+      );
     }
 
-    // Release locks if lock manager is available
-    if (lockManager) {
+    // Step 2: Always release locks (even if undo failed)
+    // This is critical for preventing lock leaks
+    if (lockManager && !keepTransaction) {
       lockManager.releaseAll(context.txnId);
     }
 
-    // Clear state
-    activeTransactions.delete(context.txnId);
-    timeoutEnforcer.unregisterTransaction(context.txnId);
-    if (currentContext === context) {
-      currentContext = null;
+    // Step 3: Write to WAL (unless skipWAL is set)
+    if (!skipWAL) {
+      try {
+        await writeToWAL('ROLLBACK', context.txnId);
+      } catch (error) {
+        // Log but don't fail - rollback already applied in memory
+        logger.error(
+          'Failed to write ROLLBACK to WAL',
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            txnId: context.txnId,
+            operation: 'WAL_WRITE',
+            walOp: 'ROLLBACK',
+            toSavepoint,
+          }
+        );
+      }
+    }
+
+    // Step 4: Update transaction state
+    if (toSavepoint && savepointFound) {
+      // For savepoint rollback: truncate log and remove nested savepoints
+      context.log.entries = context.log.entries.slice(0, startIndex);
+      context.log.currentSequence = startIndex;
+
+      // Remove savepoints after this one (but keep this one)
+      context.savepoints.savepoints = context.savepoints.savepoints.slice(
+        0,
+        savepointFound.index + 1
+      );
+    }
+
+    // Step 5: If undo failed, keep transaction active (data not rolled back)
+    if (undoError && !suppressErrors) {
+      throw new TransactionError(
+        TransactionErrorCode.ROLLBACK_FAILED,
+        toSavepoint
+          ? `Failed to rollback to savepoint '${toSavepoint}'`
+          : 'Failed to apply rollback operations',
+        { txnId: context.txnId, cause: undoError }
+      );
+    }
+
+    // Step 6: Clean up transaction context (unless keepTransaction)
+    if (!keepTransaction) {
+      activeTransactions.delete(context.txnId);
+      timeoutEnforcer.unregisterTransaction(context.txnId);
+      if (currentContext === context) {
+        currentContext = null;
+      }
     }
   }
 
@@ -416,53 +570,7 @@ export function createTransactionManager(
         );
       }
 
-      const context = currentContext;
-
-      // Apply rollback for all logged operations that need undo
-      const undoableEntries = context.log.entries.filter(
-        (e) => e.op === 'INSERT' || e.op === 'UPDATE' || e.op === 'DELETE'
-      );
-
-      if (undoableEntries.length > 0) {
-        if (!applyFn) {
-          throw new TransactionError(
-            TransactionErrorCode.ROLLBACK_FAILED,
-            'No apply function set for rollback operations',
-            context.txnId
-          );
-        }
-
-        try {
-          await applyRollback(context.log, 0, context.log.entries.length);
-        } catch (error) {
-          throw new TransactionError(
-            TransactionErrorCode.ROLLBACK_FAILED,
-            'Failed to apply rollback operations',
-            context.txnId,
-            error instanceof Error ? error : undefined
-          );
-        }
-      }
-
-      // Write ROLLBACK to WAL
-      try {
-        await writeToWAL('ROLLBACK', context.txnId);
-      } catch (error) {
-        // Log but don't fail - rollback already applied in memory
-        console.error('Failed to write ROLLBACK to WAL:', error);
-      }
-
-      // Release locks if lock manager is available
-      if (lockManager) {
-        lockManager.releaseAll(context.txnId);
-      }
-
-      // Unregister from timeout enforcer
-      timeoutEnforcer.unregisterTransaction(context.txnId);
-
-      // Clear state
-      activeTransactions.delete(context.txnId);
-      currentContext = null;
+      await executeRollback(currentContext);
     },
 
     async savepoint(name: string): Promise<Savepoint> {
@@ -510,6 +618,10 @@ export function createTransactionManager(
         table: '',
         savepointName: name,
       });
+
+      // Update logSnapshotIndex to include the SAVEPOINT log entry itself
+      // so rollbackTo preserves the SAVEPOINT entry in the log
+      savepoint.logSnapshotIndex = context.log.entries.length;
 
       return savepoint;
     },
@@ -749,7 +861,15 @@ export async function executeInTransaction<T>(
       await manager.rollback();
     } catch (rollbackError) {
       // Log rollback failure but return original error
-      console.error('Rollback failed:', rollbackError);
+      moduleLogger.error(
+        'Rollback failed',
+        rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError)),
+        {
+          txnId: context.txnId,
+          operation: 'ROLLBACK',
+          originalError: error instanceof Error ? error.message : String(error),
+        }
+      );
     }
 
     return {

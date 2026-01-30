@@ -103,3 +103,61 @@ export function decodeJson<T>(data: BufferSource): T {
 export function getByteLength(str: string): number {
   return textEncoder.encode(str).length;
 }
+
+// =============================================================================
+// BASE64 ENCODING UTILITIES
+// =============================================================================
+
+/**
+ * The exact Base64 expansion ratio.
+ *
+ * Base64 encoding converts 3 bytes of binary data into 4 ASCII characters.
+ * The expansion ratio is therefore exactly 4/3 (approximately 1.333...).
+ *
+ * IMPORTANT: Do NOT use approximations like 1.34 for size calculations.
+ * The correct formula for Base64 encoded length is: ceil(inputLength / 3) * 4
+ *
+ * @example
+ * ```ts
+ * // Correct usage for size estimation:
+ * const estimatedSize = Math.ceil(byteLength / 3) * 4;
+ *
+ * // Or use the exactBase64Length utility function:
+ * const estimatedSize = exactBase64Length(byteLength);
+ * ```
+ */
+export const BASE64_EXPANSION = 4 / 3;
+
+/**
+ * Calculate the exact Base64 encoded length for a given input byte length.
+ *
+ * Base64 encoding works by:
+ * 1. Taking 3 bytes of input (24 bits)
+ * 2. Splitting into 4 groups of 6 bits each
+ * 3. Encoding each 6-bit group as one Base64 character
+ *
+ * When the input length is not divisible by 3, padding ('=') is added:
+ * - 1 byte input -> 4 chars (2 padding '=')
+ * - 2 bytes input -> 4 chars (1 padding '=')
+ * - 3 bytes input -> 4 chars (0 padding)
+ *
+ * The formula is: ceil(inputLength / 3) * 4
+ *
+ * @param inputLength - The number of bytes to be Base64 encoded
+ * @returns The exact length of the Base64 encoded string
+ *
+ * @example
+ * ```ts
+ * exactBase64Length(0)    // 0
+ * exactBase64Length(1)    // 4  (3 bytes of padding)
+ * exactBase64Length(2)    // 4  (2 bytes of padding)
+ * exactBase64Length(3)    // 4  (no padding)
+ * exactBase64Length(4)    // 8
+ * exactBase64Length(100)  // 136
+ * exactBase64Length(1000) // 1336
+ * ```
+ */
+export function exactBase64Length(inputLength: number): number {
+  if (inputLength <= 0) return 0;
+  return Math.ceil(inputLength / 3) * 4;
+}

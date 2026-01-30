@@ -189,7 +189,8 @@ export interface SetOperation {
 export interface ParsedSelect {
   type: 'select';
   columns: ParsedColumn[];
-  from: ParsedFrom;
+  /** FROM clause - optional for value-only queries like `SELECT 1` */
+  from?: ParsedFrom;
   joins?: ParsedJoin[];
   where?: ParsedExpr;
   groupBy?: ParsedExpr[];
@@ -645,21 +646,27 @@ export class SubqueryParser {
     try {
       const columns = this.parseSelectList();
 
-      this.expect('keyword', 'from');
-      const from = this.parseFromClause();
+      // FROM clause is optional (e.g., SELECT 1, SELECT 1+1, etc.)
+      let from: ParsedFrom | undefined;
+      let joins: ParsedJoin[] = [];
 
-      // Update scope with actual FROM info (handles derived tables)
-      const tableAlias = from.type === 'table'
-        ? from.alias || from.table
-        : from.alias;
-      if (tableAlias && !currentScope.has(tableAlias)) {
-        currentScope.set(tableAlias, tableAlias);
-      }
+      if (this.matchKeyword('from')) {
+        this.advance(); // consume 'from'
+        from = this.parseFromClause();
 
-      const joins = this.parseJoins();
-      for (const join of joins) {
-        const alias = join.alias || (join.table.type === 'table' ? join.table.table : join.table.alias);
-        if (alias) currentScope.set(alias, alias);
+        // Update scope with actual FROM info (handles derived tables)
+        const tableAlias = from.type === 'table'
+          ? from.alias || from.table
+          : from.alias;
+        if (tableAlias && !currentScope.has(tableAlias)) {
+          currentScope.set(tableAlias, tableAlias);
+        }
+
+        joins = this.parseJoins();
+        for (const join of joins) {
+          const alias = join.alias || (join.table.type === 'table' ? join.table.table : join.table.alias);
+          if (alias) currentScope.set(alias, alias);
+        }
       }
 
       let where: ParsedExpr | undefined;
@@ -1101,6 +1108,19 @@ export class SubqueryParser {
       const subquery = this.parseSubquery('in');
       this.expect('punctuation', ')');
 
+      // Validate: if left is not a tuple (row value expression), subquery must return single column
+      // Per SQLite: "The subquery on the right of an IN or NOT IN operator must be
+      // a scalar subquery if the left expression is not a row value expression."
+      if (left.type !== 'tuple' && subquery.query.columns.length > 1) {
+        const nonStar = subquery.query.columns.filter(c => c.expr.type !== 'star');
+        if (nonStar.length > 1) {
+          throw new SyntaxError(
+            'Scalar subquery must return a single column',
+            loc
+          );
+        }
+      }
+
       const inExpr: ParsedExpr = { type: 'in', expr: left, values: subquery, location: loc };
       return not
         ? { type: 'unary', op: 'not', operand: inExpr, location: loc }
@@ -1310,7 +1330,9 @@ export class SubqueryParser {
     const loc = this.current().location;
     const query = this.parseSelect();
 
-    // Validate scalar subquery returns single column
+    // Validate scalar subqueries return single column
+    // Note: For IN subqueries, validation is done in parseInExpression where
+    // we have access to the left side (which may be a tuple allowing multiple columns)
     if (subqueryType === 'scalar' && query.columns.length > 1) {
       const nonStar = query.columns.filter(c => c.expr.type !== 'star');
       if (nonStar.length > 1) {
@@ -1417,10 +1439,13 @@ export class SubqueryParser {
   private collectInnerTables(query: ParsedSelect): Set<string> {
     const tables = new Set<string>();
 
-    if (query.from.type === 'table') {
-      tables.add(query.from.alias || query.from.table);
-    } else {
-      tables.add(query.from.alias);
+    // FROM clause is optional for value-only queries like `SELECT 1`
+    if (query.from) {
+      if (query.from.type === 'table') {
+        tables.add(query.from.alias || query.from.table);
+      } else {
+        tables.add(query.from.alias);
+      }
     }
 
     if (query.joins) {

@@ -2,9 +2,32 @@
  * CASE Expression Support for DoSQL
  *
  * Provides parsing and evaluation of SQL CASE expressions.
+ * Also supports scalar subquery evaluation within expressions.
  */
 
 import type { SqlValue } from './types.js';
+
+// =============================================================================
+// SUBQUERY EVALUATOR TYPE
+// =============================================================================
+
+/**
+ * Function type for evaluating scalar subqueries
+ * Returns the first column of the first row, or null if empty
+ */
+export type SubqueryEvaluator = (sql: string, params: SqlValue[], outerRow?: Record<string, SqlValue>) => SqlValue;
+
+/**
+ * Context for expression evaluation that includes optional subquery support
+ */
+export interface ExprEvalContext {
+  params: SqlValue[];
+  pIdx: { value: number };
+  /** Optional function to evaluate scalar subqueries */
+  evaluateSubquery?: SubqueryEvaluator;
+  /** Current outer row for correlated subquery support */
+  outerRow?: Record<string, SqlValue>;
+}
 
 // =============================================================================
 // CASE EXPRESSION TYPES
@@ -672,4 +695,291 @@ export function findKeywordOutsideCaseAndStrings(sql: string, startPos: number, 
     }
   }
   return -1;
+}
+
+// =============================================================================
+// SUBQUERY-AWARE EXPRESSION EVALUATION
+// =============================================================================
+
+/**
+ * Check if an expression is a scalar subquery: (SELECT ...)
+ */
+export function isScalarSubqueryExpr(expr: string): boolean {
+  const trimmed = expr.trim();
+  return trimmed.startsWith('(') && trimmed.endsWith(')') &&
+         /^\(\s*SELECT\b/i.test(trimmed);
+}
+
+/**
+ * Check if expression contains a scalar subquery
+ */
+export function containsSubqueryExpr(expr: string): boolean {
+  return /\(\s*SELECT\b/i.test(expr);
+}
+
+/**
+ * Evaluate an expression with subquery support.
+ * This is an enhanced version of evaluateCaseExpr that can handle scalar subqueries.
+ */
+export function evaluateExprWithSubqueries(
+  expr: string,
+  row: Record<string, SqlValue>,
+  ctx: ExprEvalContext
+): SqlValue {
+  const tr = expr.trim();
+  const utr = tr.toUpperCase();
+
+  // Handle CASE expressions
+  if (utr.startsWith('CASE')) {
+    const p = parseCaseExpression(tr);
+    if (p) return evalCaseExprWithSubqueries(p.caseExpr, row, ctx);
+  }
+
+  // Handle scalar subquery: (SELECT ...)
+  if (isScalarSubqueryExpr(tr)) {
+    if (!ctx.evaluateSubquery) {
+      // Fallback: return null if no subquery evaluator provided
+      return null;
+    }
+    const subquerySql = tr.slice(1, -1).trim(); // Remove outer parens
+    return ctx.evaluateSubquery(subquerySql, ctx.params, row);
+  }
+
+  // Handle NOT IN expression: col NOT IN (val1, val2, ...)
+  const notInMatch = tr.match(/^(\w+)\s+NOT\s+IN\s*\(([^)]*)\)$/i);
+  if (notInMatch) {
+    const colName = notInMatch[1];
+    const valueList = notInMatch[2];
+    const colVal = row[colName] ?? null;
+    if (colVal === null) return null;
+    const values = parseValueListForExpr(valueList, ctx.params, ctx.pIdx);
+    const hasNull = values.some(v => v === null);
+    if (values.length === 0) return 1;
+    const inList = values.some(v => v !== null && valuesEqualForExpr(v, colVal));
+    if (inList) return 0;
+    if (hasNull) return null;
+    return 1;
+  }
+
+  // Handle IN expression: col IN (val1, val2, ...)
+  const inMatch = tr.match(/^(\w+)\s+IN\s*\(([^)]*)\)$/i);
+  if (inMatch) {
+    const colName = inMatch[1];
+    const valueList = inMatch[2];
+    const colVal = row[colName] ?? null;
+    if (colVal === null) return null;
+    const values = parseValueListForExpr(valueList, ctx.params, ctx.pIdx);
+    if (values.length === 0) return 0;
+    const inList = values.some(v => v !== null && valuesEqualForExpr(v, colVal));
+    return inList ? 1 : 0;
+  }
+
+  if (tr === '?') return ctx.params[ctx.pIdx.value++];
+  if (utr === 'NULL') return null;
+  if (tr.startsWith("'") && tr.endsWith("'")) return tr.slice(1, -1).replace(/''/g, "'");
+  if (/^-?\d+(\.\d+)?$/.test(tr)) return Number(tr);
+
+  // Handle parenthesized expressions - check for subquery first
+  if (tr.startsWith('(') && tr.endsWith(')')) {
+    const inner = tr.slice(1, -1).trim();
+    // Check if it's a subquery
+    if (/^\s*SELECT\b/i.test(inner)) {
+      if (!ctx.evaluateSubquery) return null;
+      return ctx.evaluateSubquery(inner, ctx.params, row);
+    }
+    return evaluateExprWithSubqueries(inner, row, ctx);
+  }
+
+  if (/^\w+$/.test(tr)) return row[tr] ?? null;
+
+  // Handle table.column references (e.g., t1.x)
+  if (/^\w+\.\w+$/.test(tr)) return row[tr] ?? null;
+
+  // Handle arithmetic/comparison expressions with subquery support
+  return evalArithWithSubqueries(tr, row, ctx);
+}
+
+/**
+ * Evaluate arithmetic expression with subquery support
+ */
+function evalArithWithSubqueries(
+  expr: string,
+  row: Record<string, SqlValue>,
+  ctx: ExprEvalContext
+): SqlValue {
+  // If the expression contains a subquery, we need to handle it specially
+  if (containsSubqueryExpr(expr)) {
+    // Try to parse as a binary expression with subquery operand
+    // Pattern: expr OP (SELECT ...)
+    const binaryWithSubqueryMatch = expr.match(/^(.+?)\s*([-+*\/%])\s*(\(\s*SELECT\b.+\))$/i);
+    if (binaryWithSubqueryMatch) {
+      const leftExpr = binaryWithSubqueryMatch[1].trim();
+      const op = binaryWithSubqueryMatch[2];
+      const rightExpr = binaryWithSubqueryMatch[3].trim();
+
+      const leftVal = evaluateExprWithSubqueries(leftExpr, row, ctx);
+      const rightVal = evaluateExprWithSubqueries(rightExpr, row, ctx);
+
+      if (leftVal === null || rightVal === null) return null;
+      const numL = Number(leftVal), numR = Number(rightVal);
+      if (isNaN(numL) || isNaN(numR)) return null;
+
+      switch (op) {
+        case '+': return numL + numR;
+        case '-': return numL - numR;
+        case '*': return numL * numR;
+        case '/': return numR === 0 ? null : (Number.isInteger(numL) && Number.isInteger(numR) ? Math.trunc(numL / numR) : numL / numR);
+        case '%': return numR === 0 ? null : numL % numR;
+      }
+    }
+
+    // Pattern: (SELECT ...) OP expr
+    const subqueryFirstMatch = expr.match(/^(\(\s*SELECT\b.+?\))\s*([-+*\/%])\s*(.+)$/i);
+    if (subqueryFirstMatch) {
+      const leftExpr = subqueryFirstMatch[1].trim();
+      const op = subqueryFirstMatch[2];
+      const rightExpr = subqueryFirstMatch[3].trim();
+
+      const leftVal = evaluateExprWithSubqueries(leftExpr, row, ctx);
+      const rightVal = evaluateExprWithSubqueries(rightExpr, row, ctx);
+
+      if (leftVal === null || rightVal === null) return null;
+      const numL = Number(leftVal), numR = Number(rightVal);
+      if (isNaN(numL) || isNaN(numR)) return null;
+
+      switch (op) {
+        case '+': return numL + numR;
+        case '-': return numL - numR;
+        case '*': return numL * numR;
+        case '/': return numR === 0 ? null : (Number.isInteger(numL) && Number.isInteger(numR) ? Math.trunc(numL / numR) : numL / numR);
+        case '%': return numR === 0 ? null : numL % numR;
+      }
+    }
+  }
+
+  // Fall back to regular arithmetic parsing
+  try {
+    const tokens = tokenizeArith(expr);
+    if (tokens.length === 0) return row[expr.trim()] ?? null;
+    const ast = parseArithTokens(tokens);
+    return evalArithAST(ast, row);
+  } catch {
+    return row[expr.trim()] ?? null;
+  }
+}
+
+/**
+ * Evaluate CASE expression condition with subquery support
+ */
+function evalCondWithSubqueries(
+  cond: string,
+  row: Record<string, SqlValue>,
+  ctx: ExprEvalContext
+): boolean {
+  const tr = cond.trim();
+
+  // Handle IS NULL / IS NOT NULL
+  const nullMatch = tr.match(/^(.+?)\s+IS\s+(NOT\s+)?NULL$/i);
+  if (nullMatch) {
+    const val = evaluateExprWithSubqueries(nullMatch[1], row, ctx);
+    return nullMatch[2] ? val !== null : val === null;
+  }
+
+  // Handle comparison operators with subquery support
+  // Need to be careful to match subqueries properly
+  const compMatch = parseComparisonWithSubquery(tr);
+  if (compMatch) {
+    const l = evaluateExprWithSubqueries(compMatch.left, row, ctx);
+    const r = evaluateExprWithSubqueries(compMatch.right, row, ctx);
+
+    if (l === null || r === null) return false;
+
+    const op = compMatch.op;
+    if (op === '=') return l === r || Number(l) === Number(r);
+    if (op === '<>' || op === '!=') return l !== r && Number(l) !== Number(r);
+    if (op === '>') return Number(l) > Number(r);
+    if (op === '<') return Number(l) < Number(r);
+    if (op === '>=') return Number(l) >= Number(r);
+    if (op === '<=') return Number(l) <= Number(r);
+  }
+
+  const val = evaluateExprWithSubqueries(tr, row, ctx);
+  return val !== null && val !== 0 && val !== false && val !== '';
+}
+
+/**
+ * Parse a comparison expression that may contain subqueries
+ */
+function parseComparisonWithSubquery(expr: string): { left: string; op: string; right: string } | null {
+  // Find comparison operators outside of parentheses
+  let depth = 0;
+  let inStr = false;
+
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i];
+
+    if (ch === "'" && !inStr) { inStr = true; continue; }
+    if (ch === "'" && inStr) {
+      if (expr[i + 1] === "'") { i++; continue; }
+      inStr = false; continue;
+    }
+    if (inStr) continue;
+
+    if (ch === '(') { depth++; continue; }
+    if (ch === ')') { depth--; continue; }
+
+    if (depth === 0) {
+      // Check for multi-char operators first
+      const twoChar = expr.slice(i, i + 2);
+      if (twoChar === '>=' || twoChar === '<=' || twoChar === '<>' || twoChar === '!=') {
+        return {
+          left: expr.slice(0, i).trim(),
+          op: twoChar,
+          right: expr.slice(i + 2).trim()
+        };
+      }
+      // Single char operators
+      if (ch === '>' || ch === '<' || ch === '=') {
+        // Make sure it's not part of a multi-char operator
+        const next = expr[i + 1];
+        if ((ch === '>' || ch === '<') && next === '=') continue;
+        if (ch === '<' && next === '>') continue;
+
+        return {
+          left: expr.slice(0, i).trim(),
+          op: ch,
+          right: expr.slice(i + 1).trim()
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Evaluate CASE expression with subquery support
+ */
+function evalCaseExprWithSubqueries(
+  ce: CaseExpression,
+  row: Record<string, SqlValue>,
+  ctx: ExprEvalContext
+): SqlValue {
+  if (ce.type === 'searched') {
+    for (const w of ce.whenClauses) {
+      if (evalCondWithSubqueries(w.condition, row, ctx)) {
+        return evaluateExprWithSubqueries(w.result, row, ctx);
+      }
+    }
+  } else {
+    const opVal = evaluateExprWithSubqueries(ce.operand!, row, ctx);
+    for (const w of ce.whenClauses) {
+      const wVal = evaluateExprWithSubqueries(w.condition, row, ctx);
+      if (opVal === null || wVal === null) continue;
+      if (opVal === wVal || Number(opVal) === Number(wVal)) {
+        return evaluateExprWithSubqueries(w.result, row, ctx);
+      }
+    }
+  }
+
+  return ce.elseResult !== undefined ? evaluateExprWithSubqueries(ce.elseResult, row, ctx) : null;
 }

@@ -146,8 +146,8 @@ export class SQLError extends Error {
     super(error.message);
     this.name = 'SQLError';
     this.code = error.code;
-    this.details = error.details;
-    this.suggestion = error.suggestion;
+    if (error.details !== undefined) this.details = error.details;
+    if (error.suggestion !== undefined) this.suggestion = error.suggestion;
   }
 }
 

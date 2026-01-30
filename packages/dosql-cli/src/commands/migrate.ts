@@ -97,3 +97,63 @@ export async function runMigrations(options: MigrateOptions): Promise<MigrateRes
     pending,
   };
 }
+
+/**
+ * Connection options for migrations
+ */
+export interface MigrationConnectionOptions {
+  url: string;
+  token?: string;
+  timeout?: number;
+}
+
+/**
+ * Migration connection interface
+ */
+export interface MigrationConnection {
+  execute: (sql: string) => Promise<void>;
+  close: () => Promise<void>;
+}
+
+/**
+ * Create a connection for running migrations.
+ * TODO: Implement actual database connection
+ */
+export async function createMigrationConnection(
+  _options: MigrationConnectionOptions
+): Promise<MigrationConnection> {
+  // TODO: Implement WebSocket connection to DoSQL
+  throw new Error('Remote migrations not yet implemented. Please run migrations locally.');
+}
+
+/**
+ * Options for running migrations with a connection
+ */
+export interface RunMigrationsWithConnectionOptions {
+  connection: MigrationConnection;
+  migrationsDir: string;
+  dryRun?: boolean;
+}
+
+/**
+ * Run migrations with an established connection.
+ * TODO: Implement migration tracking table
+ */
+export async function runMigrationsWithConnection(
+  options: RunMigrationsWithConnectionOptions
+): Promise<MigrateResult> {
+  const migrations = await findMigrations(options.migrationsDir);
+
+  // TODO: Query applied migrations from _dosql_migrations table
+  const appliedMigrations: string[] = [];
+
+  const migrateOptions = {
+    migrations,
+    executor: async (sql: string, _name: string) => {
+      await options.connection.execute(sql);
+    },
+    appliedMigrations,
+    ...(options.dryRun !== undefined && { dryRun: options.dryRun }),
+  };
+  return runMigrations(migrateOptions);
+}

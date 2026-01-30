@@ -605,7 +605,11 @@ export function bytesToLSN(bytes: Uint8Array): LSN {
   }
   let value = 0n;
   for (let i = 0; i < 8; i++) {
-    value = (value << 8n) | BigInt(bytes[i]);
+    const byte = bytes[i];
+    if (byte === undefined) {
+      throw new Error('LSN bytes must be exactly 8 bytes');
+    }
+    value = (value << 8n) | BigInt(byte);
   }
   return createLSN(value);
 }
@@ -2097,9 +2101,8 @@ export function serverToClientCDCEvent<T = unknown>(
   const transactionId = serverEvent.transactionId ?? serverEvent.txId;
   if (transactionId !== undefined) result.transactionId = transactionId;
 
-  copyOptionalCDCFields(result, serverEvent, {
-    primaryKey: serverEvent.primaryKey ?? serverEvent.newRow ?? serverEvent.oldRow,
-  });
+  const primaryKey = serverEvent.primaryKey ?? serverEvent.newRow ?? serverEvent.oldRow;
+  copyOptionalCDCFields(result, serverEvent, primaryKey !== undefined ? { primaryKey } : {});
 
   return result;
 }
@@ -2155,9 +2158,7 @@ export function clientToServerCDCEvent<T = unknown>(
   const newRow = clientEvent.after as Record<string, unknown> | undefined;
   if (newRow !== undefined) result.newRow = newRow;
 
-  copyOptionalCDCFields(result, clientEvent, {
-    primaryKey: clientEvent.primaryKey,
-  });
+  copyOptionalCDCFields(result, clientEvent, clientEvent.primaryKey !== undefined ? { primaryKey: clientEvent.primaryKey } : {});
 
   return result;
 }
@@ -2427,10 +2428,9 @@ export function failure(
   message: string,
   details?: Record<string, unknown>
 ): Failure {
-  return {
-    success: false,
-    error: { code, message, details },
-  };
+  const error: ResultError = { code, message };
+  if (details !== undefined) error.details = details;
+  return { success: false, error };
 }
 
 /**
