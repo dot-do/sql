@@ -12,21 +12,19 @@ import { DurableObject } from 'cloudflare:workers';
 
 export class DoSQLBenchmarkDO extends DurableObject {
   private db: any;
-  private initialized = false;
+  private rowCount = 1000;
 
   async ensureDb() {
     if (!this.db) {
       const { Database } = await import('./src/database.js');
       this.db = new Database(':memory:');
+      // Auto-setup when DO wakes up - this is the overhead of in-memory DB
+      await this.doSetup(this.rowCount);
     }
   }
 
-  async setup(rowCount: number) {
-    await this.ensureDb();
-
-    // Drop and recreate table for clean benchmark
-    try { this.db.exec('DROP TABLE IF EXISTS bench'); } catch (e) {}
-
+  private async doSetup(rowCount: number) {
+    this.rowCount = rowCount;
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS bench (
         id INTEGER PRIMARY KEY,
@@ -40,14 +38,20 @@ export class DoSQLBenchmarkDO extends DurableObject {
     for (let i = 1; i <= rowCount; i++) {
       insert.run(i, `name_${i}`, Math.random() * 1000, `data_${i}`);
     }
+  }
 
-    this.initialized = true;
+  async setup(rowCount: number) {
+    this.db = null; // Force re-init
+    await this.ensureDb();
+    this.rowCount = rowCount;
+    // Re-setup with new row count
+    this.db.exec('DROP TABLE IF EXISTS bench');
+    await this.doSetup(rowCount);
     return { rowCount };
   }
 
   async selectByPK(id: number) {
     await this.ensureDb();
-    if (!this.initialized) throw new Error('Run setup first');
     const start = performance.now();
     const result = this.db.prepare('SELECT * FROM bench WHERE id = ?').all(id);
     return { latencyMs: performance.now() - start, rows: result.length };
@@ -55,7 +59,6 @@ export class DoSQLBenchmarkDO extends DurableObject {
 
   async rangeSelect(min: number, max: number) {
     await this.ensureDb();
-    if (!this.initialized) throw new Error('Run setup first');
     const start = performance.now();
     const result = this.db.prepare('SELECT * FROM bench WHERE id >= ? AND id <= ?').all(min, max);
     return { latencyMs: performance.now() - start, rows: result.length };
@@ -63,7 +66,6 @@ export class DoSQLBenchmarkDO extends DurableObject {
 
   async aggregate() {
     await this.ensureDb();
-    if (!this.initialized) throw new Error('Run setup first');
     const start = performance.now();
     const result = this.db.prepare('SELECT COUNT(*), AVG(value), MAX(value), MIN(value) FROM bench').all();
     return { latencyMs: performance.now() - start, rows: 1 };
@@ -71,7 +73,6 @@ export class DoSQLBenchmarkDO extends DurableObject {
 
   async insert(id: number, name: string, value: number, data: string) {
     await this.ensureDb();
-    if (!this.initialized) throw new Error('Run setup first');
     const start = performance.now();
     // Use plain INSERT - IDs are unique (100000+)
     this.db.prepare('INSERT INTO bench (id, name, value, data) VALUES (?, ?, ?, ?)').run(id, name, value, data);
