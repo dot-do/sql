@@ -1536,6 +1536,11 @@ export class InMemoryEngine implements ExecutionEngine {
               if (!(outputAlias in projected)) {
                 projected[outputAlias] = value;
               }
+            } else if (this.isInExpressionWithSubquery(expr)) {
+              // Handle IN/NOT IN with subquery: expr [NOT] IN (SELECT ...)
+              if (!(outputAlias in projected)) {
+                projected[outputAlias] = this.evaluateInExpressionWithSubquery(expr, row, params);
+              }
             } else if (containsCaseExpression(expr) || this.isArithmeticOrFunctionExpression(expr)) {
               // Evaluate CASE or arithmetic expression with subquery support
               // Only set if not already present (first column wins in collision)
@@ -1890,19 +1895,221 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   /**
-   * Check if expression contains arithmetic/comparison operators or function calls
+   * Check if expression contains arithmetic/comparison operators, function calls, or IN/NOT IN
    */
   private isArithmeticOrFunctionExpression(expr: string): boolean {
     const trimmed = expr.trim();
+    const upper = trimmed.toUpperCase();
     // Check for arithmetic operators: + - * / %
     // Check for comparison operators: < > <= >= = != <>
     // Check for function calls: identifier followed by parenthesis like abs(...)
     // Check for numeric literals
     // Check for string literals
+    // Check for IN/NOT IN expressions
     return /[+\-*/%<>=!]/.test(trimmed) ||
            /\w+\s*\(/.test(trimmed) ||
            /^-?\d+(\.\d+)?$/.test(trimmed) ||
-           (trimmed.startsWith("'") && trimmed.endsWith("'"));
+           (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+           /\s+NOT\s+IN\s*\(/i.test(upper) ||
+           /\s+IN\s*\(/i.test(upper);
+  }
+
+  /**
+   * Check if expression is an IN/NOT IN with subquery: expr [NOT] IN (SELECT ...)
+   */
+  private isInExpressionWithSubquery(expr: string): boolean {
+    const trimmed = expr.trim();
+    // Match patterns like: 1 IN (SELECT ...) or x NOT IN (SELECT ...)
+    return /\s+(NOT\s+)?IN\s*\(\s*SELECT\b/i.test(trimmed);
+  }
+
+  /**
+   * Evaluate an IN/NOT IN expression with subquery
+   * Returns 1 (true), 0 (false), or null
+   */
+  private evaluateInExpressionWithSubquery(
+    expr: string,
+    row: Record<string, SqlValue>,
+    params: SqlValue[]
+  ): SqlValue {
+    const trimmed = expr.trim();
+
+    // Parse the IN expression to extract left operand and subquery
+    const inParsed = this.parseInExpressionWithSubquery(trimmed);
+    if (!inParsed) return null;
+
+    const { leftExpr, subquery, isNot } = inParsed;
+
+    // Evaluate the left operand
+    const leftVal = this.evaluateLeftOperandForIn(leftExpr, row, params);
+
+    // Execute the subquery to get all values
+    const subqueryResult = this.execute(subquery, params);
+
+    // Validate that subquery returns exactly one column
+    if (subqueryResult.rows.length > 0) {
+      const columnCount = Object.keys(subqueryResult.rows[0]).length;
+      if (columnCount > 1) {
+        throw new StatementError(
+          StatementErrorCode.INVALID_SQL,
+          `sub-select returns ${columnCount} columns - expected 1`,
+          expr
+        );
+      }
+    }
+
+    // Extract values from subquery results
+    const subqueryValues = subqueryResult.rows.map(r => {
+      const keys = Object.keys(r);
+      return keys.length > 0 ? r[keys[0]] : null;
+    });
+
+    // Handle empty subquery result
+    if (subqueryValues.length === 0) {
+      // x IN () = FALSE for all x (including NULL)
+      // x NOT IN () = TRUE for all x (including NULL)
+      return isNot ? 1 : 0;
+    }
+
+    // NULL left operand with non-empty list returns NULL
+    if (leftVal === null) return null;
+
+    // Check if list contains NULL
+    const hasNullInList = subqueryValues.some(v => v === null);
+
+    // Check if value is in the list
+    const inList = subqueryValues.some(v => {
+      if (v === null) return false;
+      return v === leftVal || Number(v) === Number(leftVal);
+    });
+
+    if (isNot) {
+      // NOT IN logic
+      if (inList) return 0; // value found, NOT IN = FALSE
+      if (hasNullInList) return null; // NULL in list, result is NULL
+      return 1; // NOT IN = TRUE
+    } else {
+      // IN logic
+      if (inList) return 1; // value found, IN = TRUE
+      if (hasNullInList) return null; // NULL in list, result is NULL
+      return 0; // IN = FALSE
+    }
+  }
+
+  /**
+   * Parse an IN/NOT IN expression with subquery
+   */
+  private parseInExpressionWithSubquery(expr: string): { leftExpr: string; subquery: string; isNot: boolean } | null {
+    const upper = expr.toUpperCase();
+
+    // Find " NOT IN (" or " IN (" at depth 0
+    let inPos = -1;
+    let isNot = false;
+    let inString = false;
+
+    for (let i = 0; i < expr.length; i++) {
+      const ch = expr[i];
+
+      if (ch === "'" && !inString) { inString = true; continue; }
+      if (ch === "'" && inString) {
+        if (expr[i + 1] === "'") { i++; continue; }
+        inString = false; continue;
+      }
+      if (inString) continue;
+
+      // Check for " NOT IN ("
+      const slice = upper.slice(i);
+      if (slice.match(/^\s+NOT\s+IN\s*\(/)) {
+        const match = expr.slice(i).match(/^\s+NOT\s+IN\s*\(/i);
+        if (match) {
+          inPos = i;
+          isNot = true;
+          break;
+        }
+      }
+      // Check for " IN ("
+      if (slice.match(/^\s+IN\s*\(/)) {
+        const match = expr.slice(i).match(/^\s+IN\s*\(/i);
+        if (match) {
+          inPos = i;
+          isNot = false;
+          break;
+        }
+      }
+    }
+
+    if (inPos === -1) return null;
+
+    const leftExpr = expr.slice(0, inPos).trim();
+    const rest = expr.slice(inPos);
+
+    // Find the opening paren
+    const openParen = rest.indexOf('(');
+    if (openParen === -1) return null;
+
+    // Find the matching closing paren
+    let parenDepth = 0;
+    let closeParen = -1;
+    let inStr = false;
+
+    for (let i = openParen; i < rest.length; i++) {
+      const ch = rest[i];
+
+      if (ch === "'" && !inStr) { inStr = true; continue; }
+      if (ch === "'" && inStr) {
+        if (rest[i + 1] === "'") { i++; continue; }
+        inStr = false; continue;
+      }
+      if (inStr) continue;
+
+      if (ch === '(') parenDepth++;
+      if (ch === ')') {
+        parenDepth--;
+        if (parenDepth === 0) {
+          closeParen = i;
+          break;
+        }
+      }
+    }
+
+    if (closeParen === -1) return null;
+
+    const subquery = rest.slice(openParen + 1, closeParen).trim();
+
+    // Verify it's a SELECT subquery
+    if (!/^SELECT\b/i.test(subquery)) return null;
+
+    return { leftExpr, subquery, isNot };
+  }
+
+  /**
+   * Evaluate the left operand of an IN expression
+   */
+  private evaluateLeftOperandForIn(expr: string, row: Record<string, SqlValue>, params: SqlValue[]): SqlValue {
+    const trimmed = expr.trim();
+    const upper = trimmed.toUpperCase();
+
+    // NULL literal
+    if (upper === 'NULL') return null;
+
+    // String literal
+    if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+      return trimmed.slice(1, -1).replace(/''/g, "'");
+    }
+
+    // Numeric literal (integer or decimal, including negative)
+    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+      return Number(trimmed);
+    }
+
+    // Column reference
+    if (/^[a-zA-Z_]\w*(\.[a-zA-Z_]\w*)?$/.test(trimmed)) {
+      return row[trimmed] ?? null;
+    }
+
+    // For more complex expressions, use evaluateCaseExpr
+    const pIdx = { value: 0 };
+    return evaluateCaseExpr(trimmed, row, params, pIdx);
   }
 
   /**
