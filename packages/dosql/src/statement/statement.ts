@@ -421,9 +421,25 @@ export function createInMemoryStorage(): InMemoryStorage {
  */
 export class InMemoryEngine implements ExecutionEngine {
   private storage: InMemoryStorage;
+  /**
+   * Cache for scalar subquery results to avoid re-executing identical subqueries.
+   * Key is the SQL string (after substitution for correlated subqueries).
+   * This dramatically improves performance for queries like:
+   * SELECT * FROM products WHERE unit_price > (SELECT AVG(unit_price) FROM products)
+   * which would otherwise execute the subquery for every row.
+   */
+  private scalarSubqueryCache: Map<string, SqlValue> = new Map();
 
   constructor(storage?: InMemoryStorage) {
     this.storage = storage ?? createInMemoryStorage();
+  }
+
+  /**
+   * Clear the scalar subquery cache.
+   * Call this between queries to avoid stale results.
+   */
+  clearSubqueryCache(): void {
+    this.scalarSubqueryCache.clear();
   }
 
   /**
@@ -1213,6 +1229,11 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   private executeSelect(sql: string, params: SqlValue[]): ExecutionResult {
+    // Clear the subquery cache at the start of each top-level SELECT
+    // This ensures we don't use stale cached results from previous queries
+    // while still benefiting from caching within a single query execution
+    this.scalarSubqueryCache.clear();
+
     // Handle pragma table functions: SELECT * FROM pragma_xxx('arg')
     const pragmaMatch = sql.match(/SELECT\s+\*\s+FROM\s+pragma_(\w+)\s*\(\s*'([^']+)'\s*\)/i);
     if (pragmaMatch) {
@@ -1706,6 +1727,7 @@ export class InMemoryEngine implements ExecutionEngine {
   /**
    * Evaluate a scalar subquery, returning its single value or null.
    * Throws if the subquery returns more than one row.
+   * Uses caching to avoid re-executing identical subqueries.
    */
   private evaluateScalarSubquery(sql: string, params: SqlValue[], outerRow?: Record<string, SqlValue>): SqlValue {
     let subquerySql = sql;
@@ -1718,6 +1740,14 @@ export class InMemoryEngine implements ExecutionEngine {
       }
     }
 
+    // Create cache key including params for complete uniqueness
+    const cacheKey = subquerySql + '|' + JSON.stringify(params);
+
+    // Check cache first - this is the key optimization for subquery performance
+    if (this.scalarSubqueryCache.has(cacheKey)) {
+      return this.scalarSubqueryCache.get(cacheKey)!;
+    }
+
     const result = this.execute(subquerySql, params);
 
     if (result.rows.length > 1) {
@@ -1728,10 +1758,19 @@ export class InMemoryEngine implements ExecutionEngine {
       );
     }
 
-    if (result.rows.length === 0) return null;
-    const firstRow = result.rows[0];
-    const keys = Object.keys(firstRow);
-    return keys.length > 0 ? firstRow[keys[0]] : null;
+    let value: SqlValue = null;
+    if (result.rows.length > 0) {
+      const firstRow = result.rows[0];
+      const keys = Object.keys(firstRow);
+      if (keys.length > 0) {
+        value = firstRow[keys[0]];
+      }
+    }
+
+    // Cache the result for future use
+    this.scalarSubqueryCache.set(cacheKey, value);
+
+    return value;
   }
 
   /**
@@ -1784,11 +1823,20 @@ export class InMemoryEngine implements ExecutionEngine {
       const isCorrelated = this.isCorrelatedSubquery(existsMatch.subquery, rows);
 
       if (isCorrelated && rows.length > 0) {
-        // For correlated EXISTS, evaluate subquery for each outer row
+        // For correlated EXISTS, evaluate subquery for each outer row with caching
         return rows.filter(outerRow => {
           const substitutedSubquery = this.substituteOuterReferences(existsMatch.subquery, outerRow);
-          const subqueryResult = this.execute(substitutedSubquery, params);
-          const exists = subqueryResult.rows.length > 0;
+          const cacheKey = 'EXISTS:' + substitutedSubquery + '|' + JSON.stringify(params);
+
+          let exists: boolean;
+          if (this.scalarSubqueryCache.has(cacheKey)) {
+            exists = this.scalarSubqueryCache.get(cacheKey) as unknown as boolean;
+          } else {
+            const subqueryResult = this.execute(substitutedSubquery, params);
+            exists = subqueryResult.rows.length > 0;
+            this.scalarSubqueryCache.set(cacheKey, exists as unknown as SqlValue);
+          }
+
           return existsMatch.isNot ? !exists : exists;
         });
       } else {
@@ -1844,6 +1892,34 @@ export class InMemoryEngine implements ExecutionEngine {
       });
     }
 
+    // Check for compound OR with subqueries (must check before AND to handle precedence)
+    const orParts = this.splitOrOutsideSubqueries(trimmed);
+    if (orParts.length > 1) {
+      // For OR, we need to find rows matching ANY of the conditions
+      const matchedRows = new Set<Record<string, SqlValue>>();
+      for (const part of orParts) {
+        let partMatches: Record<string, SqlValue>[];
+        if (this.containsSubquery(part)) {
+          partMatches = this.filterWithSubquery(rows, part, params, tableName);
+        } else {
+          // Use simple filtering for non-subquery parts
+          const deps: WhereEvaluatorDeps = {
+            parseValueList: (valueList, params, startParamIndex) => this.parseValueList(valueList, params, startParamIndex),
+            valuesEqual: (a, b) => this.valuesEqual(a, b),
+            getColumnValue: (row, colRef) => this.getColumnValue(row, colRef),
+          };
+          partMatches = rows.filter(row => {
+            const pIdx = { value: 0 };
+            return evaluateWhereCondition(part, row, params, pIdx, deps);
+          });
+        }
+        for (const row of partMatches) {
+          matchedRows.add(row);
+        }
+      }
+      return Array.from(matchedRows);
+    }
+
     // Check for compound AND with multiple subqueries
     const andParts = this.splitAndOutsideSubqueries(trimmed);
     if (andParts.length > 1) {
@@ -1874,18 +1950,10 @@ export class InMemoryEngine implements ExecutionEngine {
       const isCorrelated = this.isCorrelatedSubquery(scalarCompMatch.subquery, rows);
 
       if (isCorrelated && rows.length > 0) {
-        // For correlated scalar comparison, evaluate for each row
+        // For correlated scalar comparison, evaluate for each row with caching
         return rows.filter(outerRow => {
-          const substitutedSubquery = this.substituteOuterReferences(scalarCompMatch.subquery, outerRow);
-          const subqueryResult = this.execute(substitutedSubquery, params);
-          let scalarValue: SqlValue = null;
-          if (subqueryResult.rows.length > 0) {
-            const firstRow = subqueryResult.rows[0];
-            const keys = Object.keys(firstRow);
-            if (keys.length > 0) {
-              scalarValue = firstRow[keys[0]];
-            }
-          }
+          // Use evaluateScalarSubquery which has built-in caching
+          const scalarValue = this.evaluateScalarSubquery(scalarCompMatch.subquery, params, outerRow);
           const col = scalarCompMatch.column.includes('.')
             ? scalarCompMatch.column.split('.')[1]
             : scalarCompMatch.column;
@@ -1893,16 +1961,8 @@ export class InMemoryEngine implements ExecutionEngine {
           return this.compareValuesForSubquery(rowVal, scalarValue, scalarCompMatch.op);
         });
       } else {
-        // Non-correlated scalar comparison
-        const subqueryResult = this.execute(scalarCompMatch.subquery, params);
-        let scalarValue: SqlValue = null;
-        if (subqueryResult.rows.length > 0) {
-          const firstRow = subqueryResult.rows[0];
-          const keys = Object.keys(firstRow);
-          if (keys.length > 0) {
-            scalarValue = firstRow[keys[0]];
-          }
-        }
+        // Non-correlated scalar comparison - use caching
+        const scalarValue = this.evaluateScalarSubquery(scalarCompMatch.subquery, params);
 
         return rows.filter(row => {
           const col = scalarCompMatch.column.includes('.')
@@ -2005,9 +2065,9 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   /**
-   * Split WHERE clause by AND, respecting parentheses and strings
+   * Split WHERE clause by OR, respecting parentheses and strings
    */
-  private splitAndOutsideSubqueries(where: string): string[] {
+  private splitOrOutsideSubqueries(where: string): string[] {
     const parts: string[] = [];
     let current = '';
     let depth = 0;
@@ -2025,7 +2085,57 @@ export class InMemoryEngine implements ExecutionEngine {
       if (ch === '(') { depth++; current += ch; continue; }
       if (ch === ')') { depth--; current += ch; continue; }
 
+      if (depth === 0 && upper.slice(i).startsWith(' OR ')) {
+        parts.push(current.trim());
+        current = '';
+        i += 3; // skip ' OR '
+        continue;
+      }
+      current += ch;
+    }
+    if (current.trim()) parts.push(current.trim());
+    return parts;
+  }
+
+  /**
+   * Split WHERE clause by AND, respecting parentheses, strings, and BETWEEN...AND
+   */
+  private splitAndOutsideSubqueries(where: string): string[] {
+    const parts: string[] = [];
+    let current = '';
+    let depth = 0;
+    let inStr = false;
+    let inBetween = false;
+    const upper = where.toUpperCase();
+
+    for (let i = 0; i < where.length; i++) {
+      const ch = where[i];
+      if (ch === "'" && !inStr) { inStr = true; current += ch; continue; }
+      if (ch === "'" && inStr) {
+        if (where[i + 1] === "'") { current += "''"; i++; continue; }
+        inStr = false; current += ch; continue;
+      }
+      if (inStr) { current += ch; continue; }
+      if (ch === '(') { depth++; current += ch; continue; }
+      if (ch === ')') { depth--; current += ch; continue; }
+
+      // Check for BETWEEN keyword at depth 0
+      if (depth === 0 && upper.slice(i).startsWith(' BETWEEN ')) {
+        inBetween = true;
+        current += where.slice(i, i + 9);
+        i += 8;
+        continue;
+      }
+
       if (depth === 0 && upper.slice(i).startsWith(' AND ')) {
+        // If we're inside a BETWEEN...AND, this AND is part of BETWEEN
+        if (inBetween) {
+          inBetween = false; // Consume the BETWEEN...AND
+          current += where.slice(i, i + 5);
+          i += 4;
+          continue;
+        }
+        // Otherwise, this is a logical AND - split here
         parts.push(current.trim());
         current = '';
         i += 4; // skip ' AND '
@@ -2713,15 +2823,22 @@ export class InMemoryEngine implements ExecutionEngine {
 
     let paramIndex = startParamIndex;
     for (const cond of conditions) {
-      // Check for literal NOT IN pattern (e.g., 1 NOT IN (2, 3))
+      // Check for literal NOT IN pattern (e.g., 1 NOT IN (2, 3), NULL NOT IN ())
+      // Now includes NULL as a valid literal
       const literalNotInMatch = cond.match(
-        /^(-?\d+(?:\.\d+)?|'[^']*')\s+NOT\s+IN\s*\(([^)]*)\)$/i
+        /^(-?\d+(?:\.\d+)?|'[^']*'|NULL)\s+NOT\s+IN\s*\(([^)]*)\)$/i
       );
       if (literalNotInMatch) {
         const [, literalStr, valueList] = literalNotInMatch;
-        const literalValue: SqlValue = literalStr.startsWith("'")
-          ? literalStr.slice(1, -1)
-          : Number(literalStr);
+        // Parse the literal value, handling NULL, strings, and numbers
+        let literalValue: SqlValue;
+        if (literalStr.toUpperCase() === 'NULL') {
+          literalValue = null;
+        } else if (literalStr.startsWith("'")) {
+          literalValue = literalStr.slice(1, -1);
+        } else {
+          literalValue = Number(literalStr);
+        }
         const values: SqlValue[] = [];
         let hasNull = false;
         if (valueList.trim()) {
@@ -2733,11 +2850,18 @@ export class InMemoryEngine implements ExecutionEngine {
           paramIndex = items.paramIndex;
         }
         // For literal NOT IN, evaluate immediately and skip if false
-        const conditionResult = hasNull
-          ? false
-          : values.length === 0
-            ? true
-            : !values.some(v => this.valuesEqual(v, literalValue));
+        // Per SQL standard (R-52275-55503): When the right operand is an empty set,
+        // NOT IN returns TRUE regardless of the left operand (even if NULL)
+        let conditionResult: boolean;
+        if (values.length === 0) {
+          // Empty list: NOT IN () is always TRUE, even for NULL
+          conditionResult = true;
+        } else if (literalValue === null || hasNull) {
+          // NULL NOT IN non-empty list, or list contains NULL: result is NULL (falsy)
+          conditionResult = false;
+        } else {
+          conditionResult = !values.some(v => this.valuesEqual(v, literalValue));
+        }
         if (!conditionResult) {
           return { filtered: [], paramIndex };
         }
@@ -2788,7 +2912,11 @@ export class InMemoryEngine implements ExecutionEngine {
       for (const cond of parsedConditions) {
         if (cond.type === 'not_in') {
           const rowVal = row[cond.col];
-          // NULL NOT IN (...) always returns NULL (falsy)
+          // Per SQL standard (R-52275-55503): Empty list: NOT IN () is always TRUE
+          if (cond.values.length === 0) {
+            continue; // TRUE, proceed to next condition
+          }
+          // NULL NOT IN non-empty list returns NULL (falsy)
           if (rowVal === null) return false;
           // If list contains NULL, result is NULL (falsy) when value not found
           if (cond.hasNull) {

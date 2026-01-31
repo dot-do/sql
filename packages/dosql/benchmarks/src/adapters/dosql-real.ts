@@ -16,7 +16,7 @@ import type {
 } from '../types.js';
 
 // Import the REAL DoSQL Database
-import { Database } from '../../../src/database.js';
+import { Database, type SqlValue } from '../../../src/database.js';
 
 // =============================================================================
 // DoSQL Real Adapter Configuration
@@ -127,7 +127,7 @@ export class DoSQLRealAdapter implements BenchmarkAdapter {
     try {
       const columns = Object.keys(row);
       const placeholders = columns.map(() => '?').join(', ');
-      const values = columns.map((col) => row[col]);
+      const values = columns.map((col) => row[col] as SqlValue);
 
       const stmt = this.db.prepare(
         `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`
@@ -190,7 +190,7 @@ export class DoSQLRealAdapter implements BenchmarkAdapter {
       // Use DoSQL's transaction for batch inserts
       const insertMany = this.db.transaction((rows: Record<string, unknown>[]) => {
         for (const row of rows) {
-          const values = columns.map((col) => row[col]);
+          const values = columns.map((col) => row[col] as SqlValue);
           stmt.run(...values);
         }
       });
@@ -235,7 +235,7 @@ export class DoSQLRealAdapter implements BenchmarkAdapter {
       const stmt = this.db.prepare(
         `SELECT * FROM ${tableName} WHERE ${primaryKey} = ?`
       );
-      const rows = stmt.all(primaryKeyValue);
+      const rows = stmt.all(primaryKeyValue as SqlValue);
 
       const durationMs = performance.now() - startedAt;
       this.recordFirstQuery(durationMs);
@@ -275,12 +275,12 @@ export class DoSQLRealAdapter implements BenchmarkAdapter {
 
     try {
       let sql = `SELECT * FROM ${tableName} WHERE ${whereClause}`;
-      const values: unknown[] = [];
+      const values: SqlValue[] = [];
 
       if (params) {
         for (const [key, value] of Object.entries(params)) {
           sql = sql.replace(`:${key}`, '?');
-          values.push(value);
+          values.push(value as SqlValue);
         }
       }
 
@@ -328,7 +328,7 @@ export class DoSQLRealAdapter implements BenchmarkAdapter {
       const setClauses = Object.keys(updates)
         .map((col) => `${col} = ?`)
         .join(', ');
-      const values = [...Object.values(updates), primaryKeyValue];
+      const values = [...Object.values(updates), primaryKeyValue] as SqlValue[];
 
       const stmt = this.db.prepare(
         `UPDATE ${tableName} SET ${setClauses} WHERE ${primaryKey} = ?`
@@ -375,7 +375,7 @@ export class DoSQLRealAdapter implements BenchmarkAdapter {
       const stmt = this.db.prepare(
         `DELETE FROM ${tableName} WHERE ${primaryKey} = ?`
       );
-      const result = stmt.run(primaryKeyValue);
+      const result = stmt.run(primaryKeyValue as SqlValue);
 
       const durationMs = performance.now() - startedAt;
       this.recordFirstQuery(durationMs);
@@ -414,12 +414,12 @@ export class DoSQLRealAdapter implements BenchmarkAdapter {
 
     try {
       let query = sql;
-      const values: unknown[] = [];
+      const values: SqlValue[] = [];
 
       if (params) {
         for (const [key, value] of Object.entries(params)) {
           query = query.replace(`:${key}`, '?');
-          values.push(value);
+          values.push(value as SqlValue);
         }
       }
 
@@ -481,7 +481,7 @@ export class DoSQLRealAdapter implements BenchmarkAdapter {
             case 'insert': {
               const columns = Object.keys(op.data);
               const placeholders = columns.map(() => '?').join(', ');
-              const values = columns.map((col) => op.data[col]);
+              const values = columns.map((col) => op.data[col] as SqlValue);
               const stmt = this.db!.prepare(
                 `INSERT INTO ${op.tableName} (${columns.join(', ')}) VALUES (${placeholders})`
               );
@@ -494,7 +494,7 @@ export class DoSQLRealAdapter implements BenchmarkAdapter {
               const setClauses = Object.keys(updates)
                 .map((col) => `${col} = ?`)
                 .join(', ');
-              const values = [...Object.values(updates), id];
+              const values = [...Object.values(updates), id] as SqlValue[];
               const stmt = this.db!.prepare(
                 `UPDATE ${op.tableName} SET ${setClauses} WHERE id = ?`
               );
@@ -507,7 +507,7 @@ export class DoSQLRealAdapter implements BenchmarkAdapter {
               const stmt = this.db!.prepare(
                 `DELETE FROM ${op.tableName} WHERE id = ?`
               );
-              const result = stmt.run(id);
+              const result = stmt.run(id as SqlValue);
               rowCount += result.changes ?? 0;
               break;
             }

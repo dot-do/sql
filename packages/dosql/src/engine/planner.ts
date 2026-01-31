@@ -499,10 +499,14 @@ class Parser {
     if (this.matchKeyword('in')) {
       this.advance();
       this.expect('punctuation', '(');
-      const values: ParsedExpr[] = [this.parseExpression()];
-      while (this.match('punctuation', ',')) {
-        this.advance();
+      // SQLite allows empty IN lists (extension to SQL standard)
+      const values: ParsedExpr[] = [];
+      if (!this.match('punctuation', ')')) {
         values.push(this.parseExpression());
+        while (this.match('punctuation', ',')) {
+          this.advance();
+          values.push(this.parseExpression());
+        }
       }
       this.expect('punctuation', ')');
       return { type: 'in', expr: left, values };
@@ -514,10 +518,14 @@ class Parser {
       if (this.matchKeyword('in')) {
         this.advance();
         this.expect('punctuation', '(');
-        const values: ParsedExpr[] = [this.parseExpression()];
-        while (this.match('punctuation', ',')) {
-          this.advance();
+        // SQLite allows empty IN lists (extension to SQL standard)
+        const values: ParsedExpr[] = [];
+        if (!this.match('punctuation', ')')) {
           values.push(this.parseExpression());
+          while (this.match('punctuation', ',')) {
+            this.advance();
+            values.push(this.parseExpression());
+          }
         }
         this.expect('punctuation', ')');
         return { type: 'unary', op: 'not', operand: { type: 'in', expr: left, values } };

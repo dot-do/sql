@@ -1408,8 +1408,13 @@ function evaluateExpr(expr: ParsedExpr, row: Row): SqlValue {
 
     case 'in': {
       const value = evaluateExpr(expr.expr, row);
-      if (value === null) return false;
       if (Array.isArray(expr.values)) {
+        // Per SQL standard: When the right operand is an empty set, IN returns false
+        // regardless of the left operand (even if NULL)
+        if (expr.values.length === 0) {
+          return false;
+        }
+        if (value === null) return false;
         for (const v of expr.values) {
           const evalV = evaluateExpr(v, row);
           if (evalV === value) return true;

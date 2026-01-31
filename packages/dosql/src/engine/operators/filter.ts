@@ -364,18 +364,53 @@ export function evaluatePredicate(predicate: Predicate, row: Row): boolean {
 
     case 'in': {
       const value = evaluateExpression(predicate.expr, row);
-      if (value === null) return false;
 
       if (Array.isArray(predicate.values)) {
-        // List of expressions
+        // Per SQL standard: When the right operand is an empty set, IN returns false
+        // regardless of the left operand (even if NULL)
+        if (predicate.values.length === 0) {
+          return false;
+        }
+
+        // If left operand is NULL and list is non-empty, result depends on list contents
+        // - If list contains the value: true (but NULL can't equal anything)
+        // - If list doesn't contain the value but contains NULL: NULL (treated as false in boolean context)
+        // - If list doesn't contain the value and no NULL: false
+        if (value === null) return false;
+
+        // List of expressions - check for match
+        let hasNull = false;
         for (const expr of predicate.values) {
           const v = evaluateExpression(expr, row);
+          if (v === value) return true;
+          if (v === null) hasNull = true;
+        }
+        // If no match found and list contains NULL, result should be NULL (false in boolean context)
+        // If no match found and no NULL in list, result is false
+        return false;
+      }
+
+      // Subquery case - predicate.values is a QueryPlan
+      // The subquery should have been executed and materialized into the predicate
+      // For now, if we get a plan object, check if it has been materialized
+      const subqueryValues = predicate.values as unknown;
+      if (subqueryValues && typeof subqueryValues === 'object' && 'materializedValues' in subqueryValues) {
+        const values = (subqueryValues as { materializedValues: unknown[] }).materializedValues;
+        if (!Array.isArray(values)) return false;
+
+        // Empty subquery result: IN returns false
+        if (values.length === 0) return false;
+
+        if (value === null) return false;
+
+        for (const v of values) {
           if (v === value) return true;
         }
         return false;
       }
-      // Subquery - would need executor context
-      throw new Error('IN with subquery not supported');
+
+      // Subquery needs to be executed during planning/materialization phase
+      throw new Error('IN with subquery requires subquery to be materialized first');
     }
 
     case 'isNull': {

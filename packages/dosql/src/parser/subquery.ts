@@ -1127,16 +1127,16 @@ export class SubqueryParser {
         : inExpr;
     }
 
-    // It's a value list - must have at least one value
-    if (this.match('punctuation', ')')) {
-      throw new SyntaxError('Expected at least one value in IN list', this.current().location);
-    }
-
+    // It's a value list - SQLite allows empty IN lists (extension to SQL standard)
+    // Per R-64309-54027: "SQLite allows the parenthesized list of scalar values on
+    // the right-hand side of an IN or NOT IN operator to be an empty list"
     const values: ParsedExpr[] = [];
-    values.push(this.parseExpression());
-    while (this.match('punctuation', ',')) {
-      this.advance();
+    if (!this.match('punctuation', ')')) {
       values.push(this.parseExpression());
+      while (this.match('punctuation', ',')) {
+        this.advance();
+        values.push(this.parseExpression());
+      }
     }
 
     this.expect('punctuation', ')');

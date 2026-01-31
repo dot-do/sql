@@ -73,33 +73,60 @@ export function evaluateWhereCondition(
     return true;
   }
 
-  // Handle BETWEEN: col BETWEEN low AND high
-  const betweenMatch = trimmed.match(/^(\w+(?:\.\w+)?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+)$/i);
-  if (betweenMatch) {
-    const col = betweenMatch[1];
-    const lowStr = betweenMatch[2].trim();
-    const highStr = betweenMatch[3].trim();
-    const colVal = deps.getColumnValue(row, col);
-    if (colVal === null) return false;
+  // Handle NOT BETWEEN: col NOT BETWEEN low AND high
+  const notBetweenMatch = trimmed.match(/^(.+?)\s+NOT\s+BETWEEN\s+(.+?)\s+AND\s+(.+)$/i);
+  if (notBetweenMatch) {
+    const exprStr = notBetweenMatch[1].trim();
+    const lowStr = notBetweenMatch[2].trim();
+    const highStr = notBetweenMatch[3].trim();
+    const exprVal = evaluateSimpleExpr(exprStr, row, params, pIdx, deps);
+    if (exprVal === null) return false;
 
-    const low = parseConditionValue(lowStr, params, pIdx);
-    const high = parseConditionValue(highStr, params, pIdx);
+    const low = evaluateSimpleExpr(lowStr, row, params, pIdx, deps);
+    const high = evaluateSimpleExpr(highStr, row, params, pIdx, deps);
     if (low === null || high === null) return false;
 
-    const numVal = Number(colVal);
+    const numVal = Number(exprVal);
+    const numLow = Number(low);
+    const numHigh = Number(high);
+    // NOT BETWEEN means outside the range
+    return numVal < numLow || numVal > numHigh;
+  }
+
+  // Handle BETWEEN: expr BETWEEN low AND high (supports expressions like col, b-2, d+2)
+  const betweenMatch = trimmed.match(/^(.+?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+)$/i);
+  if (betweenMatch) {
+    const exprStr = betweenMatch[1].trim();
+    const lowStr = betweenMatch[2].trim();
+    const highStr = betweenMatch[3].trim();
+    const exprVal = evaluateSimpleExpr(exprStr, row, params, pIdx, deps);
+    if (exprVal === null) return false;
+
+    const low = evaluateSimpleExpr(lowStr, row, params, pIdx, deps);
+    const high = evaluateSimpleExpr(highStr, row, params, pIdx, deps);
+    if (low === null || high === null) return false;
+
+    const numVal = Number(exprVal);
     const numLow = Number(low);
     const numHigh = Number(high);
     return numVal >= numLow && numVal <= numHigh;
   }
 
-  // Handle literal NOT IN: 1 NOT IN (2, 3)
-  const literalNotInMatch = trimmed.match(/^(-?\d+(?:\.\d+)?|'[^']*')\s+NOT\s+IN\s*\(([^)]*)\)$/i);
+  // Handle literal NOT IN: 1 NOT IN (2, 3), NULL NOT IN ()
+  // Now includes NULL as a valid literal
+  const literalNotInMatch = trimmed.match(/^(-?\d+(?:\.\d+)?|'[^']*'|NULL)\s+NOT\s+IN\s*\(([^)]*)\)$/i);
   if (literalNotInMatch) {
     const literalStr = literalNotInMatch[1];
     const valueList = literalNotInMatch[2];
-    const literalValue: SqlValue = literalStr.startsWith("'")
-      ? literalStr.slice(1, -1)
-      : Number(literalStr);
+    // Parse the literal value, handling NULL, strings, and numbers
+    let literalValue: SqlValue;
+    if (literalStr.toUpperCase() === 'NULL') {
+      literalValue = null;
+    } else if (literalStr.startsWith("'")) {
+      literalValue = literalStr.slice(1, -1);
+    } else {
+      literalValue = Number(literalStr);
+    }
     const values: SqlValue[] = [];
     let hasNull = false;
     if (valueList.trim()) {
@@ -110,28 +137,42 @@ export function evaluateWhereCondition(
       }
       pIdx.value = items.paramIndex;
     }
-    if (hasNull) return false;
+    // Per SQL standard (R-52275-55503): When the right operand is an empty set,
+    // NOT IN returns TRUE regardless of the left operand (even if NULL)
     if (values.length === 0) return true;
+    // NULL NOT IN non-empty list returns NULL (falsy in WHERE)
+    if (literalValue === null) return false;
+    // If list contains NULL and value not found, result is NULL (falsy)
+    if (hasNull) return false;
     return !values.some(v => deps.valuesEqual(v, literalValue));
   }
 
-  // Handle literal IN: 1 IN (1, 2, 3)
+  // Handle literal IN: 1 IN (1, 2, 3), NULL IN (...)
   // Must come before column IN to catch numeric/string literals
-  const literalInMatch = trimmed.match(/^(-?\d+(?:\.\d+)?|'[^']*')\s+IN\s*\(([^)]*)\)$/i);
+  // Now includes NULL as a valid literal
+  const literalInMatch = trimmed.match(/^(-?\d+(?:\.\d+)?|'[^']*'|NULL)\s+IN\s*\(([^)]*)\)$/i);
   if (literalInMatch) {
     const literalStr = literalInMatch[1];
     const valueList = literalInMatch[2];
-    const literalValue: SqlValue = literalStr.startsWith("'")
-      ? literalStr.slice(1, -1)
-      : Number(literalStr);
+    // Parse the literal value, handling NULL, strings, and numbers
+    let literalValue: SqlValue;
+    if (literalStr.toUpperCase() === 'NULL') {
+      literalValue = null;
+    } else if (literalStr.startsWith("'")) {
+      literalValue = literalStr.slice(1, -1);
+    } else {
+      literalValue = Number(literalStr);
+    }
     const values: SqlValue[] = [];
     if (valueList.trim()) {
       const items = deps.parseValueList(valueList, params, pIdx.value);
       values.push(...items.values);
       pIdx.value = items.paramIndex;
     }
-    // Empty list: x IN () is always FALSE
+    // Per SQL standard: Empty list: x IN () is always FALSE, even for NULL
     if (values.length === 0) return false;
+    // NULL IN non-empty list returns NULL (falsy in WHERE)
+    if (literalValue === null) return false;
     // If value is found, return TRUE even if NULL is in list
     // If value not found and NULL in list, return FALSE (NULL is falsy in WHERE)
     return values.some(v => deps.valuesEqual(v, literalValue));
@@ -254,10 +295,27 @@ export function evaluateWhereCondition(
 
     const colVal = deps.getColumnValue(row, col);
 
-    // Check if right side is a column reference
-    if (/^[a-zA-Z_]\w*\.[a-zA-Z_]\w*$/.test(rightStr)) {
+    // Check if right side is a column reference (table.column or just column)
+    if (/^[a-zA-Z_]\w*(\.[a-zA-Z_]\w*)?$/.test(rightStr)) {
       const rightVal = deps.getColumnValue(row, rightStr);
-      return compareValues(colVal, rightVal, op, deps);
+      // If the column exists in the row, use it; otherwise treat as literal
+      if (rightVal !== null || rightStr in row) {
+        return compareValues(colVal, rightVal, op, deps);
+      }
+    }
+
+    // Check if right side is an arithmetic expression involving columns (e.g., b-2, b+2)
+    const arithMatch = rightStr.match(/^([a-zA-Z_]\w*(?:\.\w+)?)\s*([+\-])\s*(\d+(?:\.\d+)?)$/);
+    if (arithMatch) {
+      const rightColName = arithMatch[1];
+      const arithOp = arithMatch[2];
+      const arithNum = Number(arithMatch[3]);
+      const rightColVal = deps.getColumnValue(row, rightColName);
+      if (rightColVal !== null) {
+        const numVal = Number(rightColVal);
+        const rightVal = arithOp === '+' ? numVal + arithNum : numVal - arithNum;
+        return compareValues(colVal, rightVal, op, deps);
+      }
     }
 
     const rightVal = parseConditionValue(rightStr, params, pIdx);
@@ -336,6 +394,14 @@ function splitByLogicalOpNotBetween(condition: string, op: string): string[] {
     if (ch === '(') { depth++; current += ch; continue; }
     if (ch === ')') { depth--; current += ch; continue; }
 
+    // Check for NOT BETWEEN keyword
+    if (depth === 0 && upperCond.slice(i).startsWith(' NOT BETWEEN ')) {
+      inBetween = true;
+      current += condition.slice(i, i + 13);
+      i += 12;
+      continue;
+    }
+
     // Check for BETWEEN keyword
     if (depth === 0 && upperCond.slice(i).startsWith(' BETWEEN ')) {
       inBetween = true;
@@ -380,6 +446,106 @@ function parseConditionValue(str: string, params: SqlValue[], pIdx: { value: num
   if (trimmed.toUpperCase() === 'NULL') return null;
   if (!isNaN(Number(trimmed))) return Number(trimmed);
   return trimmed;
+}
+
+/**
+ * Evaluate a simple expression that can be:
+ * - A column reference (col or alias.col)
+ * - A literal value (number, string, NULL)
+ * - A parameter (?)
+ * - A simple arithmetic expression (col+N, col-N, N+col, N-col)
+ */
+function evaluateSimpleExpr(
+  str: string,
+  row: Record<string, SqlValue>,
+  params: SqlValue[],
+  pIdx: { value: number },
+  deps: WhereEvaluatorDeps
+): SqlValue {
+  const trimmed = str.trim();
+
+  // Parameter
+  if (trimmed === '?') {
+    return params[pIdx.value++];
+  }
+
+  // String literal
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1).replace(/''/g, "'");
+  }
+
+  // NULL
+  if (trimmed.toUpperCase() === 'NULL') {
+    return null;
+  }
+
+  // Pure numeric literal
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+
+  // Simple column reference (no operators)
+  if (/^[a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)?$/.test(trimmed)) {
+    return deps.getColumnValue(row, trimmed);
+  }
+
+  // Handle addition: left + right
+  const addMatch = trimmed.match(/^(.+?)\s*\+\s*(.+)$/);
+  if (addMatch) {
+    const leftVal = evaluateSimpleExpr(addMatch[1], row, params, pIdx, deps);
+    const rightVal = evaluateSimpleExpr(addMatch[2], row, params, pIdx, deps);
+    if (leftVal === null || rightVal === null) return null;
+    return Number(leftVal) + Number(rightVal);
+  }
+
+  // Handle subtraction: left - right (be careful with negative numbers)
+  // Match from the end to handle cases like "col-2" vs "-2"
+  const subMatch = trimmed.match(/^(.+?)\s*-\s*(\d+(?:\.\d+)?|\w+(?:\.\w+)?)$/);
+  if (subMatch) {
+    const leftVal = evaluateSimpleExpr(subMatch[1], row, params, pIdx, deps);
+    const rightVal = evaluateSimpleExpr(subMatch[2], row, params, pIdx, deps);
+    if (leftVal === null || rightVal === null) return null;
+    return Number(leftVal) - Number(rightVal);
+  }
+
+  // Handle multiplication: left * right
+  const mulMatch = trimmed.match(/^(.+?)\s*\*\s*(.+)$/);
+  if (mulMatch) {
+    const leftVal = evaluateSimpleExpr(mulMatch[1], row, params, pIdx, deps);
+    const rightVal = evaluateSimpleExpr(mulMatch[2], row, params, pIdx, deps);
+    if (leftVal === null || rightVal === null) return null;
+    return Number(leftVal) * Number(rightVal);
+  }
+
+  // Handle division: left / right
+  const divMatch = trimmed.match(/^(.+?)\s*\/\s*(.+)$/);
+  if (divMatch) {
+    const leftVal = evaluateSimpleExpr(divMatch[1], row, params, pIdx, deps);
+    const rightVal = evaluateSimpleExpr(divMatch[2], row, params, pIdx, deps);
+    if (leftVal === null || rightVal === null) return null;
+    const rightNum = Number(rightVal);
+    if (rightNum === 0) return null;
+    return Number(leftVal) / rightNum;
+  }
+
+  // Parenthesized expression
+  if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+    return evaluateSimpleExpr(trimmed.slice(1, -1), row, params, pIdx, deps);
+  }
+
+  // Fallback: try as column reference or literal
+  const colVal = deps.getColumnValue(row, trimmed);
+  if (colVal !== null && colVal !== undefined) {
+    return colVal;
+  }
+
+  // If still not matched, try parsing as number
+  const num = Number(trimmed);
+  if (!isNaN(num)) {
+    return num;
+  }
+
+  return null;
 }
 
 /**

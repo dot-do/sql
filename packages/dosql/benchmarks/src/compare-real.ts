@@ -527,7 +527,8 @@ function formatLatency(value: number): string {
 
 function printResultsTable(results: BenchmarkResult[][]): void {
   // Group by scenario
-  const scenarios = new Set(results.flat().map((r) => r.name));
+  const scenariosSet = new Set(results.flat().map((r) => r.name));
+  const scenarios = Array.from(scenariosSet);
   const adapters = Array.from(new Set(results.flat().map((r) => r.adapter)));
 
   console.log('\n' + '='.repeat(100));
@@ -552,9 +553,9 @@ function printResultsTable(results: BenchmarkResult[][]): void {
 
     for (const adapter of adapters) {
       const result = results.flat().find((r) => r.name === scenario && r.adapter === adapter);
-      if (result) {
+      if (result && result.opsPerSecond > 0) {
         row.push(formatLatency(result.latency.median).padStart(16));
-        if (result.latency.median < minLatency) {
+        if (result.latency.median < minLatency && result.latency.median > 0) {
           minLatency = result.latency.median;
           winner = adapter;
         }
@@ -575,9 +576,9 @@ function printResultsTable(results: BenchmarkResult[][]): void {
 
     for (const adapter of adapters) {
       const result = results.flat().find((r) => r.name === scenario && r.adapter === adapter);
-      if (result) {
+      if (result && result.opsPerSecond > 0) {
         row.push(formatLatency(result.latency.p95).padStart(16));
-        if (result.latency.p95 < minLatency) {
+        if (result.latency.p95 < minLatency && result.latency.p95 > 0) {
           minLatency = result.latency.p95;
           winner = adapter;
         }
@@ -598,9 +599,9 @@ function printResultsTable(results: BenchmarkResult[][]): void {
 
     for (const adapter of adapters) {
       const result = results.flat().find((r) => r.name === scenario && r.adapter === adapter);
-      if (result) {
+      if (result && result.opsPerSecond > 0) {
         row.push(formatLatency(result.latency.p99).padStart(16));
-        if (result.latency.p99 < minLatency) {
+        if (result.latency.p99 < minLatency && result.latency.p99 > 0) {
           minLatency = result.latency.p99;
           winner = adapter;
         }
@@ -619,7 +620,7 @@ function printResultsTable(results: BenchmarkResult[][]): void {
 
     for (const adapter of adapters) {
       const result = results.flat().find((r) => r.name === scenario && r.adapter === adapter);
-      if (result) {
+      if (result && result.opsPerSecond > 0) {
         row.push(`${formatLatency(result.latency.min)}-${formatLatency(result.latency.max)}`.padStart(16));
       } else {
         row.push('N/A'.padStart(16));
@@ -665,7 +666,8 @@ function printResultsTable(results: BenchmarkResult[][]): void {
     let winner = '';
     for (const adapter of adapters) {
       const result = results.flat().find((r) => r.name === scenario && r.adapter === adapter);
-      if (result && result.latency.p95 < minLatency) {
+      // Only count results with actual ops (not 0 ops/sec which means all errors)
+      if (result && result.opsPerSecond > 0 && result.latency.p95 < minLatency && result.latency.p95 > 0) {
         minLatency = result.latency.p95;
         winner = adapter;
       }

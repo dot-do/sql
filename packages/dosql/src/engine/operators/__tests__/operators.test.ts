@@ -1383,6 +1383,84 @@ describe('Filter Operator', () => {
         };
         expect(evaluatePredicate(pred, { age: null })).toBe(false);
       });
+
+      it('should evaluate NOT BETWEEN predicate (via logical NOT)', () => {
+        // NOT BETWEEN is represented as: { type: 'logical', op: 'not', operands: [BETWEEN] }
+        const pred: Predicate = {
+          type: 'logical',
+          op: 'not',
+          operands: [{
+            type: 'between',
+            expr: col('d'),
+            low: lit(110),
+            high: lit(150),
+          }],
+        };
+        expect(evaluatePredicate(pred, { d: 100 })).toBe(true);   // 100 NOT BETWEEN 110 AND 150 = true
+        expect(evaluatePredicate(pred, { d: 110 })).toBe(false);  // 110 NOT BETWEEN 110 AND 150 = false (boundary)
+        expect(evaluatePredicate(pred, { d: 130 })).toBe(false);  // 130 NOT BETWEEN 110 AND 150 = false
+        expect(evaluatePredicate(pred, { d: 150 })).toBe(false);  // 150 NOT BETWEEN 110 AND 150 = false (boundary)
+        expect(evaluatePredicate(pred, { d: 160 })).toBe(true);   // 160 NOT BETWEEN 110 AND 150 = true
+      });
+
+      it('should evaluate BETWEEN with expression bounds', () => {
+        // c BETWEEN b-2 AND d+2 where b=50, c=60, d=70 should be true (60 >= 48 AND 60 <= 72)
+        const pred: Predicate = {
+          type: 'between',
+          expr: col('c'),
+          low: { type: 'binary', op: 'sub', left: col('b'), right: lit(2) },
+          high: { type: 'binary', op: 'add', left: col('d'), right: lit(2) },
+        };
+        expect(evaluatePredicate(pred, { b: 50, c: 60, d: 70 })).toBe(true);  // 60 BETWEEN 48 AND 72
+        expect(evaluatePredicate(pred, { b: 50, c: 47, d: 70 })).toBe(false); // 47 < 48
+        expect(evaluatePredicate(pred, { b: 50, c: 73, d: 70 })).toBe(false); // 73 > 72
+        expect(evaluatePredicate(pred, { b: 50, c: 48, d: 70 })).toBe(true);  // 48 BETWEEN 48 AND 72 (boundary)
+        expect(evaluatePredicate(pred, { b: 50, c: 72, d: 70 })).toBe(true);  // 72 BETWEEN 48 AND 72 (boundary)
+      });
+
+      it('should evaluate complex OR with NOT BETWEEN', () => {
+        // d NOT BETWEEN 110 AND 150 OR c BETWEEN b-2 AND d+2 OR (e>c OR e<d)
+        const notBetween: Predicate = {
+          type: 'logical',
+          op: 'not',
+          operands: [{
+            type: 'between',
+            expr: col('d'),
+            low: lit(110),
+            high: lit(150),
+          }],
+        };
+        const betweenExpr: Predicate = {
+          type: 'between',
+          expr: col('c'),
+          low: { type: 'binary', op: 'sub', left: col('b'), right: lit(2) },
+          high: { type: 'binary', op: 'add', left: col('d'), right: lit(2) },
+        };
+        const nestedOr: Predicate = {
+          type: 'logical',
+          op: 'or',
+          operands: [
+            { type: 'comparison', op: 'gt', left: col('e'), right: col('c') },
+            { type: 'comparison', op: 'lt', left: col('e'), right: col('d') },
+          ],
+        };
+        const fullPred: Predicate = {
+          type: 'logical',
+          op: 'or',
+          operands: [notBetween, betweenExpr, nestedOr],
+        };
+
+        // Test case 1: d=100, which is NOT BETWEEN 110-150, so should be true
+        expect(evaluatePredicate(fullPred, { b: 50, c: 60, d: 100, e: 55 })).toBe(true);
+
+        // Test case 2: d=130 (BETWEEN 110-150), c=60 (BETWEEN 48 AND 132), so 2nd condition true
+        expect(evaluatePredicate(fullPred, { b: 50, c: 60, d: 130, e: 55 })).toBe(true);
+
+        // Test case 3: all conditions false
+        // d=120 (BETWEEN 110-150, so NOT BETWEEN is false)
+        // c=90 with b=50, d=120 -> BETWEEN 48 AND 122, so 90 is in range -> true
+        expect(evaluatePredicate(fullPred, { b: 50, c: 90, d: 120, e: 90 })).toBe(true);
+      });
     });
 
     describe('IN Predicate', () => {

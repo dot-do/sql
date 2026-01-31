@@ -673,4 +673,76 @@ describe('SQLLogicTest NOT IN Operator', () => {
       expect(sorted[2]).toEqual({ id: 3, not_in_result: 0 });
     });
   });
+
+  // ===========================================================================
+  // NOT BETWEEN and BETWEEN WITH EXPRESSIONS
+  // ===========================================================================
+
+  describe('NOT BETWEEN and BETWEEN with Expressions', () => {
+    beforeEach(() => {
+      db.exec('CREATE TABLE t1 (a INTEGER, b INTEGER, c INTEGER, d INTEGER, e INTEGER)');
+      db.exec('INSERT INTO t1 (a, b, c, d, e) VALUES (100, 50, 60, 120, 55)');
+      db.exec('INSERT INTO t1 (a, b, c, d, e) VALUES (110, 50, 60, 130, 65)');
+      db.exec('INSERT INTO t1 (a, b, c, d, e) VALUES (140, 50, 60, 100, 70)');
+      db.exec('INSERT INTO t1 (a, b, c, d, e) VALUES (160, 50, 60, 110, 80)');
+    });
+
+    it('should handle NOT BETWEEN with literal bounds', () => {
+      // d NOT BETWEEN 110 AND 150 means d < 110 OR d > 150
+      const result = db.prepare('SELECT a, d FROM t1 WHERE d NOT BETWEEN 110 AND 150').all();
+
+      const sorted = (result as { a: number; d: number }[]).sort((a, b) => a.a - b.a);
+
+      // d=100 (< 110, so NOT BETWEEN), d=110 (in range, not matching)
+      expect(sorted.length).toBe(1);
+      expect(sorted[0]).toEqual({ a: 140, d: 100 });
+    });
+
+    it('should handle BETWEEN with expression bounds', () => {
+      // c BETWEEN b-2 AND d+2 where b=50 means c BETWEEN 48 AND d+2
+      // With b=50, c=60, d=120: 60 BETWEEN 48 AND 122 = true
+      // With b=50, c=60, d=130: 60 BETWEEN 48 AND 132 = true
+      // With b=50, c=60, d=100: 60 BETWEEN 48 AND 102 = true
+      // With b=50, c=60, d=110: 60 BETWEEN 48 AND 112 = true
+      const result = db.prepare('SELECT a, c, d FROM t1 WHERE c BETWEEN b-2 AND d+2').all();
+
+      // All rows should match since 60 is between 48 and at least 102
+      expect(result.length).toBe(4);
+    });
+
+    it('should handle complex OR with NOT BETWEEN', () => {
+      // d NOT BETWEEN 110 AND 150 OR c BETWEEN b-2 AND d+2
+      // First condition: d < 110 OR d > 150 (row with d=100 matches)
+      // Second condition: c BETWEEN 48 AND d+2 (all rows match since c=60)
+      const result = db.prepare(
+        'SELECT a, d FROM t1 WHERE d NOT BETWEEN 110 AND 150 OR c BETWEEN b-2 AND d+2'
+      ).all();
+
+      // All rows should match due to the second OR condition
+      expect(result.length).toBe(4);
+    });
+
+    it('should handle OR with multiple conditions', () => {
+      // d NOT BETWEEN 110 AND 150 OR e < d
+      // Row 1: d=120 (in range, NOT true), e=55 < d=120 TRUE -> TRUE
+      // Row 2: d=130 (in range, NOT true), e=65 < d=130 TRUE -> TRUE
+      // Row 3: d=100 (NOT in range) -> TRUE
+      // Row 4: d=110 (in range, NOT true), e=80 < d=110 TRUE -> TRUE
+      const result = db.prepare(
+        'SELECT a, d, e FROM t1 WHERE d NOT BETWEEN 110 AND 150 OR e < d'
+      ).all();
+
+      // All rows should match
+      expect(result.length).toBe(4);
+    });
+
+    it('should handle NOT BETWEEN in AND condition', () => {
+      // d NOT BETWEEN 110 AND 150 AND e > 60
+      // d=100 (NOT BETWEEN) AND e=70 > 60 -> TRUE (row with a=140)
+      const result = db.prepare('SELECT a, d, e FROM t1 WHERE d NOT BETWEEN 110 AND 150 AND e > 60').all();
+
+      expect(result.length).toBe(1);
+      expect((result[0] as { a: number }).a).toBe(140);
+    });
+  });
 });
