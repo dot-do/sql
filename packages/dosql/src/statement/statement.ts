@@ -1354,6 +1354,12 @@ export class InMemoryEngine implements ExecutionEngine {
         }
         rows = [aggregateRow];
       } else {
+        // For non-aggregate queries, sort BEFORE projection so ORDER BY can access
+        // columns not in the SELECT list (e.g., SELECT id, name FROM users ORDER BY age)
+        if (orderBy) {
+          rows = this.orderRowsWithAliases(rows, orderBy, colDefs, params);
+        }
+
         rows = rows.map(row => {
           const projected: Record<string, SqlValue> = {};
           const pIdx = { value: 0 };
@@ -1447,11 +1453,25 @@ export class InMemoryEngine implements ExecutionEngine {
           return unprefixed;
         });
       }
+
+      // For SELECT *, sort after unprefixing (ORDER BY can reference any column)
+      if (orderBy) {
+        rows = this.orderRowsWithAliases(rows, orderBy);
+      }
     }
 
-    // Order rows (after aggregation/grouping)
-    if (orderBy) {
-      rows = this.orderRowsWithAliases(rows, orderBy);
+    // Order rows for aggregate queries (groupBy or hasAggregate cases)
+    // Non-aggregate and SELECT * queries are already sorted above
+    if (orderBy && !selectAll) {
+      const colDefs = splitSelectColumns(columnList);
+      const hasAggregate = colDefs.some(col => {
+        const aliasInfo = this.parseColumnAlias(col);
+        return this.isAggregateFunction(aliasInfo.expr);
+      });
+      // Only sort here for aggregate queries (groupBy or hasAggregate)
+      if ((groupBy && groupBy.length > 0) || hasAggregate) {
+        rows = this.orderRowsWithAliases(rows, orderBy, colDefs, params);
+      }
     }
 
     // Limit rows
@@ -1549,16 +1569,22 @@ export class InMemoryEngine implements ExecutionEngine {
 
   /**
    * Order rows with alias-aware column resolution
-   * Supports CASE expressions and simple column references in ORDER BY
+   * Supports CASE expressions, simple column references, numeric column positions, and subqueries in ORDER BY
+   * @param rows The rows to sort
+   * @param orderBy The ORDER BY clause string
+   * @param selectColumns Optional array of SELECT column expressions for resolving numeric references
+   * @param params Optional query parameters for subquery evaluation
    */
   private orderRowsWithAliases(
     rows: Record<string, SqlValue>[],
-    orderBy: string
+    orderBy: string,
+    selectColumns?: string[],
+    params?: SqlValue[]
   ): Record<string, SqlValue>[] {
     // Split ORDER BY terms respecting CASE...END blocks
     const orderTerms = this.splitOrderByTerms(orderBy);
 
-    const parts: Array<{ expr: string; desc: boolean; isExpr: boolean }> = [];
+    const parts: Array<{ expr: string; desc: boolean; isExpr: boolean; hasSubquery: boolean }> = [];
     for (const term of orderTerms) {
       const trimmed = term.trim();
       // Check for trailing ASC/DESC
@@ -1569,12 +1595,25 @@ export class InMemoryEngine implements ExecutionEngine {
         exprPart = ascDescMatch[1].trim();
         desc = ascDescMatch[2].toUpperCase() === 'DESC';
       }
+
+      // Resolve numeric column references (e.g., ORDER BY 1)
+      const numericMatch = exprPart.match(/^(\d+)$/);
+      if (numericMatch && selectColumns) {
+        const colIndex = parseInt(numericMatch[1], 10) - 1; // 1-indexed to 0-indexed
+        if (colIndex >= 0 && colIndex < selectColumns.length) {
+          // Get the expression part (without alias)
+          const aliasInfo = this.parseColumnAlias(selectColumns[colIndex]);
+          exprPart = aliasInfo.expr;
+        }
+      }
+
       const isExpr = containsCaseExpression(exprPart) || /[+\-*/%()]/.test(exprPart);
-      parts.push({ expr: exprPart, desc, isExpr });
+      const hasSubquery = containsSubqueryExpr(exprPart);
+      parts.push({ expr: exprPart, desc, isExpr, hasSubquery });
     }
 
     return [...rows].sort((a, b) => {
-      for (const { expr, desc, isExpr } of parts) {
+      for (const { expr, desc, isExpr, hasSubquery } of parts) {
         let aVal: SqlValue;
         let bVal: SqlValue;
 
@@ -1582,8 +1621,23 @@ export class InMemoryEngine implements ExecutionEngine {
           // Evaluate expression for each row
           const pIdx1 = { value: 0 };
           const pIdx2 = { value: 0 };
-          aVal = evaluateCaseExpr(expr, a, [], pIdx1);
-          bVal = evaluateCaseExpr(expr, b, [], pIdx2);
+
+          if (hasSubquery) {
+            // Use evaluateExprWithSubqueries for expressions containing subqueries
+            aVal = evaluateExprWithSubqueries(expr, a, {
+              params: params ?? [],
+              pIdx: pIdx1,
+              evaluateSubquery: (sql, p, outerRow) => this.evaluateScalarSubquery(sql, p, outerRow ?? a),
+            });
+            bVal = evaluateExprWithSubqueries(expr, b, {
+              params: params ?? [],
+              pIdx: pIdx2,
+              evaluateSubquery: (sql, p, outerRow) => this.evaluateScalarSubquery(sql, p, outerRow ?? b),
+            });
+          } else {
+            aVal = evaluateCaseExpr(expr, a, params ?? [], pIdx1);
+            bVal = evaluateCaseExpr(expr, b, params ?? [], pIdx2);
+          }
         } else {
           aVal = this.getColumnValue(a, expr);
           bVal = this.getColumnValue(b, expr);

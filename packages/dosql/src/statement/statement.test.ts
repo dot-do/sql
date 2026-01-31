@@ -958,3 +958,64 @@ describe('Integration Tests', () => {
     db.close();
   });
 });
+
+// =============================================================================
+// ORDER BY TESTS
+// =============================================================================
+
+describe('ORDER BY', () => {
+  let db: Database;
+
+  beforeEach(() => {
+    db = createDatabase();
+    db.exec('CREATE TABLE users (id INTEGER, name TEXT, age INTEGER)');
+    db.prepare('INSERT INTO users (id, name, age) VALUES (?, ?, ?)').run(1, 'Alice', 30);
+    db.prepare('INSERT INTO users (id, name, age) VALUES (?, ?, ?)').run(2, 'Bob', 25);
+    db.prepare('INSERT INTO users (id, name, age) VALUES (?, ?, ?)').run(3, 'Charlie', 35);
+    db.prepare('INSERT INTO users (id, name, age) VALUES (?, ?, ?)').run(4, 'Diana', 28);
+    db.prepare('INSERT INTO users (id, name, age) VALUES (?, ?, ?)').run(5, 'Eve', 32);
+  });
+
+  it('should order by selected column ASC', () => {
+    const rows = db.prepare('SELECT id, name FROM users ORDER BY name').all() as Array<{ id: number; name: string }>;
+    expect(rows.map(r => r.name)).toEqual(['Alice', 'Bob', 'Charlie', 'Diana', 'Eve']);
+  });
+
+  it('should order by selected column DESC', () => {
+    const rows = db.prepare('SELECT id, name FROM users ORDER BY id DESC').all() as Array<{ id: number; name: string }>;
+    expect(rows.map(r => r.id)).toEqual([5, 4, 3, 2, 1]);
+  });
+
+  it('should order by non-selected column (BUG FIX: sql-1xhp)', () => {
+    // This is the key test case - ORDER BY a column not in SELECT list
+    const rows = db.prepare('SELECT id, name FROM users ORDER BY age DESC').all() as Array<{ id: number; name: string }>;
+    // Order by age DESC: Charlie(35), Eve(32), Alice(30), Diana(28), Bob(25)
+    expect(rows.map(r => r.name)).toEqual(['Charlie', 'Eve', 'Alice', 'Diana', 'Bob']);
+    expect(rows.map(r => r.id)).toEqual([3, 5, 1, 4, 2]);
+    // Verify age is NOT in the result (only id and name were selected)
+    expect(Object.keys(rows[0])).not.toContain('age');
+  });
+
+  it('should order by non-selected column ASC', () => {
+    const rows = db.prepare('SELECT id, name FROM users ORDER BY age ASC').all() as Array<{ id: number; name: string }>;
+    // Order by age ASC: Bob(25), Diana(28), Alice(30), Eve(32), Charlie(35)
+    expect(rows.map(r => r.name)).toEqual(['Bob', 'Diana', 'Alice', 'Eve', 'Charlie']);
+  });
+
+  it('should order by multiple columns including non-selected', () => {
+    // Add users with same age for testing multi-column sort
+    db.prepare('INSERT INTO users (id, name, age) VALUES (?, ?, ?)').run(6, 'Frank', 30);
+    db.prepare('INSERT INTO users (id, name, age) VALUES (?, ?, ?)').run(7, 'Grace', 30);
+
+    const rows = db.prepare('SELECT id, name FROM users ORDER BY age, name').all() as Array<{ id: number; name: string }>;
+
+    // Find users with age 30 (Alice, Frank, Grace) - should be sorted by name
+    const age30Users = rows.filter(r => [1, 6, 7].includes(r.id));
+    expect(age30Users.map(r => r.name)).toEqual(['Alice', 'Frank', 'Grace']);
+  });
+
+  it('should work with SELECT * and ORDER BY', () => {
+    const rows = db.prepare('SELECT * FROM users ORDER BY age DESC').all() as Array<{ id: number; name: string; age: number }>;
+    expect(rows.map(r => r.age)).toEqual([35, 32, 30, 28, 25]);
+  });
+});

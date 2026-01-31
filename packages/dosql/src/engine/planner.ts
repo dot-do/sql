@@ -874,7 +874,12 @@ export class QueryPlanner {
       plan = this.buildFilter(plan, parsed.having);
     }
 
-    // Add projection
+    // Add sort (ORDER BY) - BEFORE projection so sort can access non-selected columns
+    if (parsed.orderBy && parsed.orderBy.length > 0) {
+      plan = this.buildSort(plan, parsed.orderBy);
+    }
+
+    // Add projection - AFTER sort so ORDER BY can reference columns not in SELECT
     if (!this.isSelectStar(parsed.columns)) {
       plan = this.buildProject(plan, parsed);
     }
@@ -886,11 +891,6 @@ export class QueryPlanner {
         type: 'distinct',
         input: plan,
       };
-    }
-
-    // Add sort (ORDER BY)
-    if (parsed.orderBy && parsed.orderBy.length > 0) {
-      plan = this.buildSort(plan, parsed.orderBy);
     }
 
     // Add limit/offset
