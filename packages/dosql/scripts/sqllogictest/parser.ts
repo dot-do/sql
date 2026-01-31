@@ -517,7 +517,8 @@ export function sortValues(values: string[], sortMode: SortMode, columnCount: nu
  * The format joins values with newlines and computes the hash.
  */
 export async function hashValues(values: string[]): Promise<string> {
-  const text = values.join('\n');
+  // SQLLogicTest hash format: values joined with newlines, plus a trailing newline
+  const text = values.join('\n') + '\n';
 
   // Use Node.js crypto module (MD5 not available in Web Crypto API)
   const { createHash } = await import('crypto');
