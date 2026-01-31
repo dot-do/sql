@@ -29,6 +29,7 @@ import {
   shouldSkip,
   formatValue,
   sortValues,
+  hashValues,
   type Record,
   type StatementRecord,
   type QueryRecord,
@@ -119,6 +120,8 @@ interface TestResult {
   error?: string;
   expected?: string[];
   actual?: string[];
+  expectedHash?: string;
+  actualHash?: string;
   executionTime: number;
 }
 
@@ -217,7 +220,7 @@ class SqlLogicTestRunner {
       this.testCount++;
 
       // Run the test
-      const result = this.runRecord(record);
+      const result = await this.runRecord(record);
       this.results.push(result);
 
       if (result.passed) {
@@ -243,6 +246,11 @@ class SqlLogicTestRunner {
           if (result.expected && result.actual) {
             console.log(`  Expected (first 5): ${result.expected.slice(0, 5).join(', ')}`);
             console.log(`  Actual (first 5): ${result.actual.slice(0, 5).join(', ')}`);
+          }
+          if (result.expectedHash && result.actualHash) {
+            console.log(`  Expected hash: ${result.expectedHash}`);
+            console.log(`  Actual hash:   ${result.actualHash}`);
+            console.log(`  Values count:  ${result.actual?.length ?? 0}`);
           }
         }
 
@@ -305,7 +313,7 @@ class SqlLogicTestRunner {
   /**
    * Run a single record
    */
-  private runRecord(record: Record): TestResult {
+  private async runRecord(record: Record): Promise<TestResult> {
     const startTime = performance.now();
 
     switch (record.type) {
@@ -344,7 +352,7 @@ class SqlLogicTestRunner {
   /**
    * Run a query record
    */
-  private runQuery(record: QueryRecord, startTime: number): TestResult {
+  private async runQuery(record: QueryRecord, startTime: number): Promise<TestResult> {
     const result = this.db.query(record.sql);
     const executionTime = performance.now() - startTime;
 
@@ -369,9 +377,24 @@ class SqlLogicTestRunner {
 
     // Sort values according to sort mode
     const sortedActual = sortValues(actualValues, record.sortMode, record.columnTypes.length);
-    const sortedExpected = sortValues(record.expectedValues, record.sortMode, record.columnTypes.length);
 
-    // Compare results
+    // If expectedHash is provided and expectedValues is empty, use hash comparison
+    if (record.expectedHash && record.expectedValues.length === 0) {
+      const actualHash = await hashValues(sortedActual);
+      const passed = actualHash.toLowerCase() === record.expectedHash.toLowerCase();
+
+      return {
+        passed,
+        record,
+        actual: sortedActual,
+        expectedHash: record.expectedHash,
+        actualHash,
+        executionTime,
+      };
+    }
+
+    // Fall back to value comparison
+    const sortedExpected = sortValues(record.expectedValues, record.sortMode, record.columnTypes.length);
     const passed = this.compareResults(sortedExpected, sortedActual);
 
     return {

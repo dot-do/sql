@@ -512,20 +512,14 @@ export function sortValues(values: string[], sortMode: SortMode, columnCount: nu
 
 /**
  * Compute MD5 hash of values (for hash comparison)
+ *
+ * SQLLogicTest uses MD5 hashes to verify query results.
+ * The format joins values with newlines and computes the hash.
  */
 export async function hashValues(values: string[]): Promise<string> {
   const text = values.join('\n');
-  const encoder = new TextEncoder();
-  const data = encoder.encode(text);
 
-  // Use Web Crypto API
-  if (typeof crypto !== 'undefined' && crypto.subtle) {
-    const hashBuffer = await crypto.subtle.digest('MD5', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  // Fallback: simple hash for Node.js
+  // Use Node.js crypto module (MD5 not available in Web Crypto API)
   const { createHash } = await import('crypto');
   return createHash('md5').update(text).digest('hex');
 }
