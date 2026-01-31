@@ -22,6 +22,8 @@ import { JoinOperator } from './operators/join.js';
 import { AggregateOperator } from './operators/aggregate.js';
 import { SortOperator } from './operators/sort.js';
 import { LimitOperator } from './operators/limit.js';
+import { TopNOperator, shouldUseTopN } from './operators/topn.js';
+import { IndexLookupOperator } from './operators/index-lookup.js';
 
 // =============================================================================
 // OPERATOR FACTORY
@@ -36,15 +38,9 @@ export function createOperator(plan: QueryPlan, ctx: ExecutionContext): Operator
       return new ScanOperator(plan, ctx);
 
     case 'indexLookup':
-      // Index lookup is handled as a specialized scan
-      return new ScanOperator({
-        id: plan.id,
-        type: 'scan',
-        table: plan.table,
-        alias: plan.alias,
-        source: 'btree',
-        columns: plan.columns,
-      }, ctx);
+      // Use dedicated IndexLookupOperator for O(log n) point lookups
+      // instead of O(n) full table scans
+      return new IndexLookupOperator(plan, ctx);
 
     case 'filter':
       return new FilterOperator(plan, createOperator(plan.input, ctx), ctx);
@@ -67,6 +63,17 @@ export function createOperator(plan: QueryPlan, ctx: ExecutionContext): Operator
       return new SortOperator(plan, createOperator(plan.input, ctx), ctx);
 
     case 'limit':
+      // Optimization: Use TopN for LIMIT on top of SORT
+      if (plan.input.type === 'sort' && shouldUseTopN(plan.limit, plan.input.estimatedRows)) {
+        const sortPlan = plan.input;
+        return new TopNOperator(
+          sortPlan,
+          createOperator(sortPlan.input, ctx),
+          ctx,
+          plan.limit,
+          plan.offset ?? 0
+        );
+      }
       return new LimitOperator(plan, createOperator(plan.input, ctx), ctx);
 
     case 'distinct':
