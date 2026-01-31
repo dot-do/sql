@@ -5,8 +5,15 @@
  * SQLite implementation comparison suite.
  */
 
-// DoSQL (in-memory simulation)
+// DoSQL (in-memory simulation - DEPRECATED, use dosql-real)
 export { DoSQLAdapter, createDoSQLAdapter, type DoSQLAdapterConfig } from './dosql.js';
+
+// DoSQL REAL (actual Database class from src/database.ts)
+export {
+  DoSQLRealAdapter,
+  createDoSQLRealAdapter,
+  type DoSQLRealAdapterConfig,
+} from './dosql-real.js';
 
 // Native SQLite via better-sqlite3
 export {
@@ -45,6 +52,7 @@ export type { BenchmarkAdapter, AdapterType } from '../types.js';
 
 import type { AdapterType, BenchmarkAdapter } from '../types.js';
 import { DoSQLAdapter } from './dosql.js';
+import { DoSQLRealAdapter } from './dosql-real.js';
 import { BetterSQLite3Adapter } from './better-sqlite3.js';
 import { LibSQLAdapter } from './libsql.js';
 import { TursoAdapter, type TursoAdapterConfig } from './turso.js';
@@ -74,6 +82,9 @@ export async function createAdapter(
   switch (type) {
     case 'dosql':
       return new DoSQLAdapter();
+
+    case 'dosql-real':
+      return new DoSQLRealAdapter();
 
     case 'better-sqlite3':
       return new BetterSQLite3Adapter();
@@ -106,7 +117,7 @@ export async function createAdapter(
  * Get available adapters for the current environment
  */
 export function getAvailableAdapters(options: AdapterFactoryOptions = {}): AdapterType[] {
-  const adapters: AdapterType[] = ['dosql', 'better-sqlite3', 'libsql'];
+  const adapters: AdapterType[] = ['dosql', 'dosql-real', 'better-sqlite3', 'libsql'];
 
   if (options.turso?.url && options.turso?.authToken) {
     adapters.push('turso');
@@ -129,7 +140,8 @@ export function getAvailableAdapters(options: AdapterFactoryOptions = {}): Adapt
  * Adapter display names for reports
  */
 export const ADAPTER_DISPLAY_NAMES: Record<AdapterType, string> = {
-  dosql: 'DoSQL',
+  dosql: 'DoSQL (simulated)',
+  'dosql-real': 'DoSQL (real engine)',
   'better-sqlite3': 'SQLite (better-sqlite3)',
   libsql: 'LibSQL (local)',
   turso: 'Turso (edge)',
@@ -141,7 +153,8 @@ export const ADAPTER_DISPLAY_NAMES: Record<AdapterType, string> = {
  * Adapter descriptions for documentation
  */
 export const ADAPTER_DESCRIPTIONS: Record<AdapterType, string> = {
-  dosql: 'DoSQL in-memory implementation for benchmarking',
+  dosql: 'DoSQL simulated in-memory store (DEPRECATED - use dosql-real)',
+  'dosql-real': 'DoSQL REAL engine using src/database.ts Database class',
   'better-sqlite3': 'Native SQLite via better-sqlite3 (synchronous, fastest)',
   libsql: 'LibSQL embedded mode (async, SQLite fork with extensions)',
   turso: 'Turso edge SQLite over HTTP (includes network latency)',

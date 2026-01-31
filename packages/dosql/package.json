@@ -78,6 +78,8 @@
     "benchmark:all": "npx tsx benchmarks/src/cli.ts --all -v",
     "benchmark:json": "npx tsx benchmarks/src/cli.ts -f json -o benchmarks/results.json",
     "benchmark:report": "npx tsx benchmarks/src/cli.ts -f markdown -o benchmarks/RESULTS.md",
+    "benchmark:real": "npx tsx benchmarks/src/compare-real.ts",
+    "benchmark:real:quick": "npx tsx benchmarks/src/compare-real.ts --quick",
     "test:sqllogic": "cd scripts/sqllogictest && ./run-full-suite.sh",
     "test:sqllogic:quick": "cd scripts/sqllogictest && ./run-full-suite.sh --quick",
     "test:sqllogic:full": "cd scripts/sqllogictest && ./run-full-suite.sh --full",

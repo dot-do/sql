@@ -348,6 +348,7 @@ export type ScenarioExecutor = (
  */
 export type AdapterType =
   | 'dosql'
+  | 'dosql-real'
   | 'better-sqlite3'
   | 'libsql'
   | 'turso'
