@@ -1063,69 +1063,73 @@ describe('Filter Operator', () => {
     });
 
     describe('Comparison Operations', () => {
+      // SQL comparisons return 1 for true, 0 for false, null if either operand is null
       it('should evaluate equality', () => {
         const eq: Expression = { type: 'binary', op: 'eq', left: col('x'), right: lit(5) };
-        expect(evaluateExpression(eq, { x: 5 })).toBe(true);
-        expect(evaluateExpression(eq, { x: 6 })).toBe(false);
+        expect(evaluateExpression(eq, { x: 5 })).toBe(1);
+        expect(evaluateExpression(eq, { x: 6 })).toBe(0);
       });
 
       it('should evaluate inequality', () => {
         const ne: Expression = { type: 'binary', op: 'ne', left: col('x'), right: lit(5) };
-        expect(evaluateExpression(ne, { x: 5 })).toBe(false);
-        expect(evaluateExpression(ne, { x: 6 })).toBe(true);
+        expect(evaluateExpression(ne, { x: 5 })).toBe(0);
+        expect(evaluateExpression(ne, { x: 6 })).toBe(1);
       });
 
       it('should evaluate less than', () => {
         const lt: Expression = { type: 'binary', op: 'lt', left: col('x'), right: lit(5) };
-        expect(evaluateExpression(lt, { x: 3 })).toBe(true);
-        expect(evaluateExpression(lt, { x: 5 })).toBe(false);
+        expect(evaluateExpression(lt, { x: 3 })).toBe(1);
+        expect(evaluateExpression(lt, { x: 5 })).toBe(0);
       });
 
       it('should evaluate less than or equal', () => {
         const le: Expression = { type: 'binary', op: 'le', left: col('x'), right: lit(5) };
-        expect(evaluateExpression(le, { x: 5 })).toBe(true);
-        expect(evaluateExpression(le, { x: 6 })).toBe(false);
+        expect(evaluateExpression(le, { x: 5 })).toBe(1);
+        expect(evaluateExpression(le, { x: 6 })).toBe(0);
       });
 
       it('should evaluate greater than', () => {
         const gt: Expression = { type: 'binary', op: 'gt', left: col('x'), right: lit(5) };
-        expect(evaluateExpression(gt, { x: 7 })).toBe(true);
-        expect(evaluateExpression(gt, { x: 5 })).toBe(false);
+        expect(evaluateExpression(gt, { x: 7 })).toBe(1);
+        expect(evaluateExpression(gt, { x: 5 })).toBe(0);
       });
 
       it('should evaluate greater than or equal', () => {
         const ge: Expression = { type: 'binary', op: 'ge', left: col('x'), right: lit(5) };
-        expect(evaluateExpression(ge, { x: 5 })).toBe(true);
-        expect(evaluateExpression(ge, { x: 4 })).toBe(false);
+        expect(evaluateExpression(ge, { x: 5 })).toBe(1);
+        expect(evaluateExpression(ge, { x: 4 })).toBe(0);
       });
 
       it('should handle NULL in comparisons', () => {
+        // In SQL, comparisons with NULL return NULL (not false)
         const lt: Expression = { type: 'binary', op: 'lt', left: col('x'), right: lit(5) };
-        expect(evaluateExpression(lt, { x: null })).toBe(false);
+        expect(evaluateExpression(lt, { x: null })).toBe(null);
       });
     });
 
     describe('LIKE Pattern Matching', () => {
+      // SQL LIKE returns 1 for match, 0 for no match, null if either operand is null
       it('should match % wildcard', () => {
         const like: Expression = { type: 'binary', op: 'like', left: col('name'), right: lit('%son') };
-        expect(evaluateExpression(like, { name: 'Johnson' })).toBe(true);
-        expect(evaluateExpression(like, { name: 'Smith' })).toBe(false);
+        expect(evaluateExpression(like, { name: 'Johnson' })).toBe(1);
+        expect(evaluateExpression(like, { name: 'Smith' })).toBe(0);
       });
 
       it('should match _ wildcard', () => {
         const like: Expression = { type: 'binary', op: 'like', left: col('code'), right: lit('A_C') };
-        expect(evaluateExpression(like, { code: 'ABC' })).toBe(true);
-        expect(evaluateExpression(like, { code: 'ABCD' })).toBe(false);
+        expect(evaluateExpression(like, { code: 'ABC' })).toBe(1);
+        expect(evaluateExpression(like, { code: 'ABCD' })).toBe(0);
       });
 
       it('should match combined patterns', () => {
         const like: Expression = { type: 'binary', op: 'like', left: col('email'), right: lit('%@%.com') };
-        expect(evaluateExpression(like, { email: 'user@example.com' })).toBe(true);
-        expect(evaluateExpression(like, { email: 'user@example.org' })).toBe(false);
+        expect(evaluateExpression(like, { email: 'user@example.com' })).toBe(1);
+        expect(evaluateExpression(like, { email: 'user@example.org' })).toBe(0);
       });
     });
 
     describe('Logical Operations', () => {
+      // SQL AND/OR return 1 for true, 0 for false, null with proper three-valued logic
       it('should evaluate AND', () => {
         const and: Expression = {
           type: 'binary',
@@ -1133,8 +1137,8 @@ describe('Filter Operator', () => {
           left: { type: 'binary', op: 'gt', left: col('x'), right: lit(0) },
           right: { type: 'binary', op: 'lt', left: col('x'), right: lit(10) },
         };
-        expect(evaluateExpression(and, { x: 5 })).toBe(true);
-        expect(evaluateExpression(and, { x: 15 })).toBe(false);
+        expect(evaluateExpression(and, { x: 5 })).toBe(1);
+        expect(evaluateExpression(and, { x: 15 })).toBe(0);
       });
 
       it('should evaluate OR', () => {
@@ -1144,16 +1148,17 @@ describe('Filter Operator', () => {
           left: { type: 'binary', op: 'eq', left: col('x'), right: lit(1) },
           right: { type: 'binary', op: 'eq', left: col('x'), right: lit(2) },
         };
-        expect(evaluateExpression(or, { x: 1 })).toBe(true);
-        expect(evaluateExpression(or, { x: 2 })).toBe(true);
-        expect(evaluateExpression(or, { x: 3 })).toBe(false);
+        expect(evaluateExpression(or, { x: 1 })).toBe(1);
+        expect(evaluateExpression(or, { x: 2 })).toBe(1);
+        expect(evaluateExpression(or, { x: 3 })).toBe(0);
       });
     });
 
     describe('Unary Operations', () => {
+      // SQL NOT returns 1 for true, 0 for false, null if operand is null
       it('should evaluate NOT', () => {
         const not: Expression = { type: 'unary', op: 'not', operand: lit(true) };
-        expect(evaluateExpression(not, {})).toBe(false);
+        expect(evaluateExpression(not, {})).toBe(0);
       });
 
       it('should evaluate negation', () => {
@@ -1161,16 +1166,92 @@ describe('Filter Operator', () => {
         expect(evaluateExpression(neg, {})).toBe(-5);
       });
 
+      // SQL IS NULL always returns 1 or 0 (never null)
       it('should evaluate IS NULL', () => {
         const isNull: Expression = { type: 'unary', op: 'isNull', operand: col('x') };
-        expect(evaluateExpression(isNull, { x: null })).toBe(true);
-        expect(evaluateExpression(isNull, { x: 5 })).toBe(false);
+        expect(evaluateExpression(isNull, { x: null })).toBe(1);
+        expect(evaluateExpression(isNull, { x: 5 })).toBe(0);
       });
 
+      // SQL IS NOT NULL always returns 1 or 0 (never null)
       it('should evaluate IS NOT NULL', () => {
         const isNotNull: Expression = { type: 'unary', op: 'isNotNull', operand: col('x') };
-        expect(evaluateExpression(isNotNull, { x: null })).toBe(false);
-        expect(evaluateExpression(isNotNull, { x: 5 })).toBe(true);
+        expect(evaluateExpression(isNotNull, { x: null })).toBe(0);
+        expect(evaluateExpression(isNotNull, { x: 5 })).toBe(1);
+      });
+    });
+
+    /**
+     * SQL Comparison Operator Semantics (Issue sql-fzxw)
+     *
+     * This test suite verifies that comparison operators (<, >, <=, >=, =, !=)
+     * follow proper SQL semantics:
+     * - Return 1 for true, 0 for false (not JavaScript boolean)
+     * - Return NULL when either operand is NULL
+     *
+     * This is critical for:
+     * - SELECT 1<2 returning 1 (not null or true)
+     * - WHERE clauses working correctly with comparisons
+     * - CASE WHEN conditions evaluating properly
+     */
+    describe('SQL Comparison Semantics (sql-fzxw fix)', () => {
+      it('SELECT 1<2 should return 1 (true)', () => {
+        const lt: Expression = { type: 'binary', op: 'lt', left: lit(1), right: lit(2) };
+        expect(evaluateExpression(lt, {})).toBe(1);
+      });
+
+      it('SELECT 2<1 should return 0 (false)', () => {
+        const lt: Expression = { type: 'binary', op: 'lt', left: lit(2), right: lit(1) };
+        expect(evaluateExpression(lt, {})).toBe(0);
+      });
+
+      it('SELECT 2>1 should return 1 (true)', () => {
+        const gt: Expression = { type: 'binary', op: 'gt', left: lit(2), right: lit(1) };
+        expect(evaluateExpression(gt, {})).toBe(1);
+      });
+
+      it('SELECT 1>2 should return 0 (false)', () => {
+        const gt: Expression = { type: 'binary', op: 'gt', left: lit(1), right: lit(2) };
+        expect(evaluateExpression(gt, {})).toBe(0);
+      });
+
+      it('SELECT 1<=1 should return 1 (true)', () => {
+        const le: Expression = { type: 'binary', op: 'le', left: lit(1), right: lit(1) };
+        expect(evaluateExpression(le, {})).toBe(1);
+      });
+
+      it('SELECT 1>=1 should return 1 (true)', () => {
+        const ge: Expression = { type: 'binary', op: 'ge', left: lit(1), right: lit(1) };
+        expect(evaluateExpression(ge, {})).toBe(1);
+      });
+
+      it('comparison with column values should return 1 or 0', () => {
+        const lt: Expression = { type: 'binary', op: 'lt', left: col('a'), right: col('b') };
+        expect(evaluateExpression(lt, { a: 5, b: 10 })).toBe(1);
+        expect(evaluateExpression(lt, { a: 10, b: 5 })).toBe(0);
+      });
+
+      it('comparison with NULL should return NULL', () => {
+        const lt: Expression = { type: 'binary', op: 'lt', left: col('a'), right: col('b') };
+        expect(evaluateExpression(lt, { a: 5, b: null })).toBe(null);
+        expect(evaluateExpression(lt, { a: null, b: 10 })).toBe(null);
+        expect(evaluateExpression(lt, { a: null, b: null })).toBe(null);
+      });
+
+      it('equality with NULL should return NULL', () => {
+        const eq: Expression = { type: 'binary', op: 'eq', left: col('a'), right: lit(null) };
+        expect(evaluateExpression(eq, { a: 5 })).toBe(null);
+        expect(evaluateExpression(eq, { a: null })).toBe(null);
+      });
+
+      it('all comparison operators return integers', () => {
+        const row = { x: 5, y: 10 };
+        expect(evaluateExpression({ type: 'binary', op: 'lt', left: col('x'), right: col('y') }, row)).toBe(1);
+        expect(evaluateExpression({ type: 'binary', op: 'gt', left: col('y'), right: col('x') }, row)).toBe(1);
+        expect(evaluateExpression({ type: 'binary', op: 'le', left: col('x'), right: col('x') }, row)).toBe(1);
+        expect(evaluateExpression({ type: 'binary', op: 'ge', left: col('y'), right: col('y') }, row)).toBe(1);
+        expect(evaluateExpression({ type: 'binary', op: 'eq', left: col('x'), right: col('x') }, row)).toBe(1);
+        expect(evaluateExpression({ type: 'binary', op: 'ne', left: col('x'), right: col('y') }, row)).toBe(1);
       });
     });
 

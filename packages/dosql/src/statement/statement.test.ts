@@ -1019,3 +1019,146 @@ describe('ORDER BY', () => {
     expect(rows.map(r => r.age)).toEqual([35, 32, 30, 28, 25]);
   });
 });
+
+// =============================================================================
+// COMPARISON OPERATORS IN SELECT (BUG FIX: sql-fzxw)
+// =============================================================================
+
+describe('Comparison Operators in SELECT (sql-fzxw)', () => {
+  let db: Database;
+  let engine: InMemoryEngine;
+
+  beforeEach(() => {
+    db = createDatabase();
+    engine = new InMemoryEngine();
+  });
+
+  describe('Literal comparisons', () => {
+    it('SELECT 1<2 should return 1 (true)', () => {
+      const result = engine.execute('SELECT 1<2', []);
+      expect(result.rows[0]['1<2']).toBe(1);
+    });
+
+    it('SELECT 2<1 should return 0 (false)', () => {
+      const result = engine.execute('SELECT 2<1', []);
+      expect(result.rows[0]['2<1']).toBe(0);
+    });
+
+    it('SELECT 2>1 should return 1 (true)', () => {
+      const result = engine.execute('SELECT 2>1', []);
+      expect(result.rows[0]['2>1']).toBe(1);
+    });
+
+    it('SELECT 1>2 should return 0 (false)', () => {
+      const result = engine.execute('SELECT 1>2', []);
+      expect(result.rows[0]['1>2']).toBe(0);
+    });
+
+    it('SELECT 1<=1 should return 1 (true)', () => {
+      const result = engine.execute('SELECT 1<=1', []);
+      expect(result.rows[0]['1<=1']).toBe(1);
+    });
+
+    it('SELECT 1>=1 should return 1 (true)', () => {
+      const result = engine.execute('SELECT 1>=1', []);
+      expect(result.rows[0]['1>=1']).toBe(1);
+    });
+
+    it('SELECT 1=1 should return 1 (true)', () => {
+      const result = engine.execute('SELECT 1=1', []);
+      expect(result.rows[0]['1=1']).toBe(1);
+    });
+
+    it('SELECT 1!=2 should return 1 (true)', () => {
+      const result = engine.execute('SELECT 1!=2', []);
+      expect(result.rows[0]['1!=2']).toBe(1);
+    });
+
+    it('SELECT 1<>2 should return 1 (true)', () => {
+      const result = engine.execute('SELECT 1<>2', []);
+      expect(result.rows[0]['1<>2']).toBe(1);
+    });
+  });
+
+  describe('Column comparisons', () => {
+    beforeEach(() => {
+      engine.execute('CREATE TABLE t1 (a INTEGER, b INTEGER)', []);
+      engine.execute('INSERT INTO t1 (a, b) VALUES (?, ?)', [5, 10]);
+      engine.execute('INSERT INTO t1 (a, b) VALUES (?, ?)', [10, 5]);
+      engine.execute('INSERT INTO t1 (a, b) VALUES (?, ?)', [7, 7]);
+    });
+
+    it('SELECT a<b should return column comparison results', () => {
+      const result = engine.execute('SELECT a, b, a<b FROM t1', []);
+      expect(result.rows[0]['a<b']).toBe(1); // 5 < 10
+      expect(result.rows[1]['a<b']).toBe(0); // 10 < 5
+      expect(result.rows[2]['a<b']).toBe(0); // 7 < 7
+    });
+
+    it('SELECT a>b should return column comparison results', () => {
+      const result = engine.execute('SELECT a, b, a>b FROM t1', []);
+      expect(result.rows[0]['a>b']).toBe(0); // 5 > 10
+      expect(result.rows[1]['a>b']).toBe(1); // 10 > 5
+      expect(result.rows[2]['a>b']).toBe(0); // 7 > 7
+    });
+
+    it('SELECT a<=b should return column comparison results', () => {
+      const result = engine.execute('SELECT a, b, a<=b FROM t1', []);
+      expect(result.rows[0]['a<=b']).toBe(1); // 5 <= 10
+      expect(result.rows[1]['a<=b']).toBe(0); // 10 <= 5
+      expect(result.rows[2]['a<=b']).toBe(1); // 7 <= 7
+    });
+
+    it('SELECT a>=b should return column comparison results', () => {
+      const result = engine.execute('SELECT a, b, a>=b FROM t1', []);
+      expect(result.rows[0]['a>=b']).toBe(0); // 5 >= 10
+      expect(result.rows[1]['a>=b']).toBe(1); // 10 >= 5
+      expect(result.rows[2]['a>=b']).toBe(1); // 7 >= 7
+    });
+  });
+
+  describe('NULL handling', () => {
+    beforeEach(() => {
+      engine.execute('CREATE TABLE t2 (a INTEGER, b INTEGER)', []);
+      engine.execute('INSERT INTO t2 (a, b) VALUES (?, ?)', [5, null]);
+      engine.execute('INSERT INTO t2 (a, b) VALUES (?, ?)', [null, 10]);
+    });
+
+    it('comparison with NULL should return NULL', () => {
+      const result = engine.execute('SELECT a, b, a<b FROM t2', []);
+      expect(result.rows[0]['a<b']).toBe(null); // 5 < NULL
+      expect(result.rows[1]['a<b']).toBe(null); // NULL < 10
+    });
+  });
+
+  describe('WHERE clause with comparisons', () => {
+    beforeEach(() => {
+      engine.execute('CREATE TABLE nums (x INTEGER)', []);
+      engine.execute('INSERT INTO nums (x) VALUES (?)', [1]);
+      engine.execute('INSERT INTO nums (x) VALUES (?)', [2]);
+      engine.execute('INSERT INTO nums (x) VALUES (?)', [3]);
+      engine.execute('INSERT INTO nums (x) VALUES (?)', [4]);
+      engine.execute('INSERT INTO nums (x) VALUES (?)', [5]);
+    });
+
+    it('WHERE x < 3 should filter correctly', () => {
+      const result = engine.execute('SELECT x FROM nums WHERE x < 3', []);
+      expect(result.rows.map(r => r.x)).toEqual([1, 2]);
+    });
+
+    it('WHERE x > 3 should filter correctly', () => {
+      const result = engine.execute('SELECT x FROM nums WHERE x > 3', []);
+      expect(result.rows.map(r => r.x)).toEqual([4, 5]);
+    });
+
+    it('WHERE x <= 3 should filter correctly', () => {
+      const result = engine.execute('SELECT x FROM nums WHERE x <= 3', []);
+      expect(result.rows.map(r => r.x)).toEqual([1, 2, 3]);
+    });
+
+    it('WHERE x >= 3 should filter correctly', () => {
+      const result = engine.execute('SELECT x FROM nums WHERE x >= 3', []);
+      expect(result.rows.map(r => r.x)).toEqual([3, 4, 5]);
+    });
+  });
+});

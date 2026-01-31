@@ -235,6 +235,13 @@ export function evaluateCaseExpr(
   if (tr.startsWith('(') && tr.endsWith(')')) return evaluateCaseExpr(tr.slice(1, -1), row, params, pIdx);
   if (/^\w+$/.test(tr)) return row[tr] ?? null;
 
+  // Handle table.column references (e.g., t1.col)
+  if (/^\w+\.\w+$/.test(tr)) return row[tr] ?? null;
+
+  // Handle comparison expressions - return 1 for true, 0 for false, NULL if either operand is NULL
+  const compResult = evalComparison(tr, row, params, pIdx);
+  if (compResult !== undefined) return compResult;
+
   return evalArith(tr, row, params, pIdx);
 }
 
@@ -573,6 +580,96 @@ function evalArithAST(node: ArithExprNode, row: Record<string, SqlValue>): SqlVa
     }
   }
   return null;
+}
+
+/**
+ * Evaluate a comparison expression and return 1 (true), 0 (false), or null.
+ * Returns undefined if the expression is not a comparison.
+ * Properly handles SQL comparison semantics:
+ * - Returns 1 for true, 0 for false (SQL integers, not JS booleans)
+ * - Returns null if either operand is null
+ */
+function evalComparison(
+  expr: string,
+  row: Record<string, SqlValue>,
+  params: SqlValue[],
+  pIdx: {value: number}
+): SqlValue | undefined {
+  // Find comparison operator outside of parentheses and strings
+  // Order matters: check multi-char operators before single-char
+  let depth = 0;
+  let inStr = false;
+
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i];
+
+    if (ch === "'" && !inStr) { inStr = true; continue; }
+    if (ch === "'" && inStr) {
+      if (expr[i + 1] === "'") { i++; continue; }
+      inStr = false; continue;
+    }
+    if (inStr) continue;
+
+    if (ch === '(') { depth++; continue; }
+    if (ch === ')') { depth--; continue; }
+
+    if (depth === 0) {
+      // Check for multi-char operators first
+      const twoChar = expr.slice(i, i + 2);
+      let op: string | null = null;
+      let opLen = 0;
+
+      if (twoChar === '>=' || twoChar === '<=' || twoChar === '<>' || twoChar === '!=') {
+        op = twoChar;
+        opLen = 2;
+      } else if (ch === '>' || ch === '<' || ch === '=') {
+        // Make sure it's not part of a multi-char operator
+        const next = expr[i + 1];
+        if ((ch === '>' || ch === '<') && next === '=') continue;
+        if (ch === '<' && next === '>') continue;
+        if (ch === '!' && next === '=') continue;
+        op = ch;
+        opLen = 1;
+      }
+
+      if (op) {
+        const leftExpr = expr.slice(0, i).trim();
+        const rightExpr = expr.slice(i + opLen).trim();
+
+        // Ensure we have valid left and right expressions
+        if (!leftExpr || !rightExpr) continue;
+
+        const l = evaluateCaseExpr(leftExpr, row, params, { value: pIdx.value });
+        const r = evaluateCaseExpr(rightExpr, row, params, { value: pIdx.value });
+
+        // NULL comparison returns NULL (except IS NULL handled elsewhere)
+        if (l === null || r === null) return null;
+
+        switch (op) {
+          case '=':
+            return (l === r || Number(l) === Number(r)) ? 1 : 0;
+          case '<>':
+          case '!=':
+            return (l !== r && Number(l) !== Number(r)) ? 1 : 0;
+          case '>':
+            if (typeof l === 'string' && typeof r === 'string') return l > r ? 1 : 0;
+            return Number(l) > Number(r) ? 1 : 0;
+          case '<':
+            if (typeof l === 'string' && typeof r === 'string') return l < r ? 1 : 0;
+            return Number(l) < Number(r) ? 1 : 0;
+          case '>=':
+            if (typeof l === 'string' && typeof r === 'string') return l >= r ? 1 : 0;
+            return Number(l) >= Number(r) ? 1 : 0;
+          case '<=':
+            if (typeof l === 'string' && typeof r === 'string') return l <= r ? 1 : 0;
+            return Number(l) <= Number(r) ? 1 : 0;
+        }
+      }
+    }
+  }
+
+  // Not a comparison expression
+  return undefined;
 }
 
 function evalArith(

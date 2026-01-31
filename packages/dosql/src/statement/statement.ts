@@ -1751,15 +1751,16 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   /**
-   * Check if expression contains arithmetic operators or function calls
+   * Check if expression contains arithmetic/comparison operators or function calls
    */
   private isArithmeticOrFunctionExpression(expr: string): boolean {
     const trimmed = expr.trim();
     // Check for arithmetic operators: + - * / %
+    // Check for comparison operators: < > <= >= = != <>
     // Check for function calls: identifier followed by parenthesis like abs(...)
     // Check for numeric literals
     // Check for string literals
-    return /[+\-*/%]/.test(trimmed) ||
+    return /[+\-*/%<>=!]/.test(trimmed) ||
            /\w+\s*\(/.test(trimmed) ||
            /^-?\d+(\.\d+)?$/.test(trimmed) ||
            (trimmed.startsWith("'") && trimmed.endsWith("'"));

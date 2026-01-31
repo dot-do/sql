@@ -15,6 +15,23 @@ import {
 } from '../types.js';
 
 // =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+/**
+ * Convert a SQL value to a boolean for logical operations
+ * In SQL: 0 is false, non-zero numbers are true, NULL is NULL
+ */
+function sqlToBool(value: SqlValue): boolean {
+  if (value === null) return false;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'bigint') return value !== 0n;
+  if (typeof value === 'string') return value.length > 0;
+  return true;
+}
+
+// =============================================================================
 // EXPRESSION EVALUATION
 // =============================================================================
 
@@ -76,17 +93,42 @@ export function evaluateExpression(expr: Expression, row: Row): SqlValue {
           return null;
       }
 
-      // Comparison operators (for use in boolean context)
+      // Comparison operators - return SQL integers (1 for true, 0 for false, null if either operand is null)
       switch (expr.op) {
-        case 'eq': return left === right;
-        case 'ne': return left !== right;
-        case 'lt': return left !== null && right !== null && left < right;
-        case 'le': return left !== null && right !== null && left <= right;
-        case 'gt': return left !== null && right !== null && left > right;
-        case 'ge': return left !== null && right !== null && left >= right;
-        case 'like': return likeMatch(String(left), String(right));
-        case 'and': return Boolean(left) && Boolean(right);
-        case 'or': return Boolean(left) || Boolean(right);
+        case 'eq':
+          // NULL = NULL returns NULL in SQL (not true)
+          if (left === null || right === null) return null;
+          return left === right ? 1 : 0;
+        case 'ne':
+          if (left === null || right === null) return null;
+          return left !== right ? 1 : 0;
+        case 'lt':
+          if (left === null || right === null) return null;
+          return left < right ? 1 : 0;
+        case 'le':
+          if (left === null || right === null) return null;
+          return left <= right ? 1 : 0;
+        case 'gt':
+          if (left === null || right === null) return null;
+          return left > right ? 1 : 0;
+        case 'ge':
+          if (left === null || right === null) return null;
+          return left >= right ? 1 : 0;
+        case 'like':
+          if (left === null || right === null) return null;
+          return likeMatch(String(left), String(right)) ? 1 : 0;
+        case 'and':
+          // SQL AND: NULL AND FALSE = FALSE, NULL AND TRUE = NULL
+          if (left === null && right === null) return null;
+          if (left === null) return sqlToBool(right) ? null : 0;
+          if (right === null) return sqlToBool(left) ? null : 0;
+          return sqlToBool(left) && sqlToBool(right) ? 1 : 0;
+        case 'or':
+          // SQL OR: NULL OR TRUE = TRUE, NULL OR FALSE = NULL
+          if (left === null && right === null) return null;
+          if (left === null) return sqlToBool(right) ? 1 : null;
+          if (right === null) return sqlToBool(left) ? 1 : null;
+          return sqlToBool(left) || sqlToBool(right) ? 1 : 0;
       }
 
       return null;
@@ -95,13 +137,20 @@ export function evaluateExpression(expr: Expression, row: Row): SqlValue {
     case 'unary': {
       const operand = evaluateExpression(expr.operand, row);
       switch (expr.op) {
-        case 'not': return !operand;
+        case 'not':
+          // NOT NULL returns NULL in SQL
+          if (operand === null) return null;
+          return sqlToBool(operand) ? 0 : 1;
         case 'neg':
           if (typeof operand === 'number') return -operand;
           if (typeof operand === 'bigint') return -operand;
           return null;
-        case 'isNull': return operand === null;
-        case 'isNotNull': return operand !== null;
+        case 'isNull':
+          // IS NULL always returns 1 or 0 (never NULL)
+          return operand === null ? 1 : 0;
+        case 'isNotNull':
+          // IS NOT NULL always returns 1 or 0 (never NULL)
+          return operand !== null ? 1 : 0;
       }
       return null;
     }
