@@ -264,11 +264,13 @@ describe('Interactive Shell Commands', () => {
     it('should handle SQL errors gracefully', () => {
       const db = new Database(':memory:');
 
+      // SQL errors are thrown when executing, not when preparing
+      // Test that invalid SQL execution throws an error
       expect(() => {
-        db.prepare('INVALID SQL SYNTAX');
+        db.exec('SELECT * FROM nonexistent_table');
       }).toThrow();
 
-      // Database should still be usable
+      // Database should still be usable after an error
       db.exec('CREATE TABLE test (value INTEGER)');
       const tables = db.getTables();
       expect(tables).toContain('test');
@@ -348,6 +350,10 @@ describe('Main CLI Routing', () => {
     mkdirSync: ReturnType<typeof vi.fn>;
     readdirSync: ReturnType<typeof vi.fn>;
   };
+  let logSpy: ReturnType<typeof vi.fn>;
+  let errorSpy: ReturnType<typeof vi.fn>;
+  let originalLog: typeof console.log;
+  let originalError: typeof console.error;
 
   beforeEach(() => {
     mockFs = {
@@ -358,11 +364,17 @@ describe('Main CLI Routing', () => {
       readdirSync: vi.fn().mockReturnValue([]),
     };
     setFileSystem(mockFs);
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    logSpy = vi.fn();
+    errorSpy = vi.fn();
+    originalLog = console.log;
+    originalError = console.error;
+    console.log = logSpy;
+    console.error = errorSpy;
   });
 
   afterEach(() => {
+    console.log = originalLog;
+    console.error = originalError;
     vi.restoreAllMocks();
   });
 
@@ -376,17 +388,15 @@ describe('Main CLI Routing', () => {
     it('should route --help to main', async () => {
       await main(['--help']);
 
-      expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('DoSQL CLI')
-      );
+      const logCalls = logSpy.mock.calls.map((call: unknown[]) => call[0]);
+      expect(logCalls.some((msg: string) => msg.includes('DoSQL CLI'))).toBe(true);
     });
 
     it('should route --version to main', async () => {
       await main(['--version']);
 
-      expect(console.log).toHaveBeenCalledWith(
-        expect.stringMatching(/dosql v\d+\.\d+\.\d+/)
-      );
+      const logCalls = logSpy.mock.calls.map((call: unknown[]) => call[0]);
+      expect(logCalls.some((msg: string) => /dosql v\d+\.\d+\.\d+/.test(msg))).toBe(true);
     });
 
     it('should route migrate to main', async () => {
@@ -427,6 +437,10 @@ describe('Error Handling', () => {
     mkdirSync: ReturnType<typeof vi.fn>;
     readdirSync: ReturnType<typeof vi.fn>;
   };
+  let logSpy: ReturnType<typeof vi.fn>;
+  let errorSpy: ReturnType<typeof vi.fn>;
+  let originalLog: typeof console.log;
+  let originalError: typeof console.error;
 
   beforeEach(() => {
     mockFs = {
@@ -437,20 +451,25 @@ describe('Error Handling', () => {
       readdirSync: vi.fn().mockReturnValue([]),
     };
     setFileSystem(mockFs);
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    logSpy = vi.fn();
+    errorSpy = vi.fn();
+    originalLog = console.log;
+    originalError = console.error;
+    console.log = logSpy;
+    console.error = errorSpy;
   });
 
   afterEach(() => {
+    console.log = originalLog;
+    console.error = originalError;
     vi.restoreAllMocks();
   });
 
   it('should handle missing config file', async () => {
     await main(['migrate']);
 
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Error:')
-    );
+    const errorCalls = errorSpy.mock.calls.map((call: unknown[]) => call[0]);
+    expect(errorCalls.some((msg: string) => msg.includes('Error:'))).toBe(true);
   });
 
   it('should handle invalid config JSON', async () => {
@@ -459,17 +478,15 @@ describe('Error Handling', () => {
 
     await main(['migrate']);
 
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Error:')
-    );
+    const errorCalls = errorSpy.mock.calls.map((call: unknown[]) => call[0]);
+    expect(errorCalls.some((msg: string) => msg.includes('Error:'))).toBe(true);
   });
 
   it('should handle unknown commands', async () => {
     await main(['unknown-command']);
 
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('Unknown command')
-    );
+    const errorCalls = errorSpy.mock.calls.map((call: unknown[]) => call[0]);
+    expect(errorCalls.some((msg: string) => msg.includes('Unknown command'))).toBe(true);
   });
 
   it('should handle query without SQL', async () => {
@@ -480,9 +497,8 @@ describe('Error Handling', () => {
 
     await main(['query']);
 
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('requires a SQL argument')
-    );
+    const errorCalls = errorSpy.mock.calls.map((call: unknown[]) => call[0]);
+    expect(errorCalls.some((msg: string) => msg.includes('requires a SQL argument'))).toBe(true);
   });
 });
 
