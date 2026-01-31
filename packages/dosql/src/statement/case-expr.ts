@@ -575,6 +575,112 @@ function evalArithAST(node: ArithExprNode, row: Record<string, SqlValue>): SqlVa
           if (arg === null) return null;
           return String(arg).length;
         }
+        // Null handling functions
+        case 'coalesce': {
+          for (const arg of args) {
+            if (arg !== null) return arg;
+          }
+          return null;
+        }
+        case 'ifnull':
+        case 'isnull': {
+          return args[0] ?? args[1] ?? null;
+        }
+        case 'nullif': {
+          if (args.length >= 2 && args[0] === args[1]) {
+            return null;
+          }
+          return args[0] ?? null;
+        }
+        // Numeric aggregate-like functions
+        case 'min': {
+          const nums = args.filter(a => a !== null).map(Number);
+          if (nums.length === 0) return null;
+          return Math.min(...nums);
+        }
+        case 'max': {
+          const nums = args.filter(a => a !== null).map(Number);
+          if (nums.length === 0) return null;
+          return Math.max(...nums);
+        }
+        // Math functions
+        case 'round': {
+          const arg = args[0];
+          if (arg === null) return null;
+          const num = Number(arg);
+          if (isNaN(num)) return null;
+          const precision = args[1] !== null ? Number(args[1]) : 0;
+          const factor = Math.pow(10, precision);
+          return Math.round(num * factor) / factor;
+        }
+        case 'floor': {
+          const arg = args[0];
+          if (arg === null) return null;
+          const num = Number(arg);
+          if (isNaN(num)) return null;
+          return Math.floor(num);
+        }
+        case 'ceil':
+        case 'ceiling': {
+          const arg = args[0];
+          if (arg === null) return null;
+          const num = Number(arg);
+          if (isNaN(num)) return null;
+          return Math.ceil(num);
+        }
+        case 'sqrt': {
+          const arg = args[0];
+          if (arg === null) return null;
+          const num = Number(arg);
+          if (isNaN(num)) return null;
+          return Math.sqrt(num);
+        }
+        case 'power':
+        case 'pow': {
+          if (args[0] === null || args[1] === null) return null;
+          const base = Number(args[0]);
+          const exp = Number(args[1]);
+          if (isNaN(base) || isNaN(exp)) return null;
+          return Math.pow(base, exp);
+        }
+        // String functions
+        case 'substr':
+        case 'substring': {
+          if (args[0] === null) return null;
+          const str = String(args[0]);
+          const start = args[1] !== null ? Number(args[1]) - 1 : 0; // SQL is 1-indexed
+          const len = args[2] !== null ? Number(args[2]) : undefined;
+          return str.substring(start, len !== undefined ? start + len : undefined);
+        }
+        case 'trim': {
+          if (args[0] === null) return null;
+          return String(args[0]).trim();
+        }
+        case 'ltrim': {
+          if (args[0] === null) return null;
+          return String(args[0]).trimStart();
+        }
+        case 'rtrim': {
+          if (args[0] === null) return null;
+          return String(args[0]).trimEnd();
+        }
+        case 'replace': {
+          if (args[0] === null || args[1] === null) return null;
+          const str = String(args[0]);
+          const from = String(args[1]);
+          const to = args[2] !== null ? String(args[2]) : '';
+          return str.split(from).join(to);
+        }
+        case 'concat': {
+          return args.map(a => a !== null ? String(a) : '').join('');
+        }
+        case 'instr': {
+          if (args[0] === null || args[1] === null) return null;
+          const str = String(args[0]);
+          const needle = String(args[1]);
+          const idx = str.indexOf(needle);
+          return idx === -1 ? 0 : idx + 1; // SQL is 1-indexed
+        }
         default: return null;
       }
     }

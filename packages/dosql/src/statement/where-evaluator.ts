@@ -286,6 +286,21 @@ export function evaluateWhereCondition(
     return val !== null && val !== 0 && val !== false && val !== '';
   }
 
+  // Handle function call comparison: func(args) op val
+  // This matches patterns like: coalesce(a,b,c)<>0, abs(b-c)>5
+  const funcCompMatch = trimmed.match(/^(\w+\s*\([^)]*\))\s*(>=|<=|<>|!=|>|<|=)\s*(.+)$/i);
+  if (funcCompMatch) {
+    const funcExpr = funcCompMatch[1];
+    const op = funcCompMatch[2].toUpperCase();
+    const rightStr = funcCompMatch[3].trim();
+
+    const pIdx2 = { value: pIdx.value };
+    const leftVal = evaluateCaseExpr(funcExpr, row, params, pIdx2);
+    const rightVal = parseConditionValue(rightStr, params, pIdx);
+
+    return compareValues(leftVal, rightVal, op, deps);
+  }
+
   // Handle comparison: col op val
   const compMatch = trimmed.match(/^(\w+(?:\.\w+)?)\s*(>=|<=|<>|!=|>|<|=|LIKE)\s*(.+)$/i);
   if (compMatch) {

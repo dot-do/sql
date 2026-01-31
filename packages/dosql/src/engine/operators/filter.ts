@@ -164,9 +164,30 @@ export function evaluateExpression(expr: Expression, row: Row): SqlValue {
       return null;
 
     case 'case': {
-      for (const { condition, result } of expr.when) {
-        if (evaluateExpression(condition, row)) {
-          return evaluateExpression(result, row);
+      // Check if this is a simple CASE (has operand) or searched CASE
+      if (expr.operand !== undefined) {
+        // Simple CASE: CASE operand WHEN value THEN result END
+        const operandValue = evaluateExpression(expr.operand, row);
+        for (const whenClause of expr.when) {
+          // Simple CASE clauses have 'value' property
+          if ('value' in whenClause) {
+            const whenValue = evaluateExpression(whenClause.value, row);
+            // SQL equality: NULL is not equal to anything, including NULL
+            if (operandValue !== null && whenValue !== null && operandValue === whenValue) {
+              return evaluateExpression(whenClause.result, row);
+            }
+          }
+        }
+      } else {
+        // Searched CASE: CASE WHEN condition THEN result END
+        for (const whenClause of expr.when) {
+          // Searched CASE clauses have 'condition' property
+          if ('condition' in whenClause) {
+            const conditionValue = evaluateExpression(whenClause.condition, row);
+            if (sqlToBool(conditionValue)) {
+              return evaluateExpression(whenClause.result, row);
+            }
+          }
         }
       }
       return expr.else ? evaluateExpression(expr.else, row) : null;

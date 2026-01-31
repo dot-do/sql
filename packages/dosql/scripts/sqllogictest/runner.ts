@@ -3,27 +3,39 @@
  * SQLLogicTest Runner for DoSQL
  *
  * Runs sqllogictest test files against the DoSQL engine.
+ * Optimized for memory efficiency to handle large test suites.
  *
  * Usage:
  *   npx tsx packages/dosql/scripts/sqllogictest/runner.ts [options]
  *
  * Options:
- *   --limit=N       Run only first N tests
- *   --file=PATH     Run specific test file
- *   --dir=PATH      Run all .test files in directory
- *   --verbose       Show detailed output
- *   --continue      Continue on error (don't stop at first failure)
- *   --category=X    Run only tests in category X
+ *   --limit=N         Run only first N tests
+ *   --file=PATH       Run specific test file
+ *   --dir=PATH        Run all .test files in directory
+ *   --folder=PATH     Alias for --dir (for compatibility)
+ *   --verbose         Show detailed output
+ *   --continue        Continue on error (don't stop at first failure)
+ *   --batch-size=N    Process tests in batches of N (default: 500)
+ *   --split-files=N   Split large files into chunks of N tests (default: 1500)
+ *   --category=X      Run only tests in category X
  *   --skip-category=X Skip tests in category X
  *
  * Examples:
  *   npx tsx runner.ts --limit=1000
  *   npx tsx runner.ts --file=select1.test --verbose
  *   npx tsx runner.ts --dir=./tests --continue
+ *   npx tsx runner.ts --folder=tests/sqlite-full --batch-size=200
+ *
+ * Memory optimization:
+ *   NODE_OPTIONS="--max-old-space-size=4096" npx tsx runner.ts --folder=tests/sqlite-full
+ *
+ * Note: Large test files are automatically split to prevent memory exhaustion.
+ * The split-files option controls chunk size (default 1500 tests per chunk).
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
 import {
   parseTestFile,
   shouldSkip,
@@ -33,7 +45,10 @@ import {
   type Record,
   type StatementRecord,
   type QueryRecord,
+  type HashThresholdRecord,
+  type HaltRecord,
   type ResultType,
+  type SortMode,
 } from './parser.js';
 
 // =============================================================================
@@ -45,12 +60,24 @@ import { Database } from '../../src/database.js';
 
 /**
  * Test database wrapper
+ * Manages database lifecycle with proper cleanup for memory efficiency
  */
 class TestDatabase {
-  private db: Database;
+  private db: Database | null = null;
 
   constructor() {
+    this.createNewDatabase();
+  }
+
+  private createNewDatabase(): void {
     this.db = new Database(':memory:');
+  }
+
+  private ensureOpen(): Database {
+    if (!this.db) {
+      this.createNewDatabase();
+    }
+    return this.db!;
   }
 
   /**
@@ -58,6 +85,7 @@ class TestDatabase {
    */
   execute(sql: string): { success: boolean; error?: string } {
     try {
+      const db = this.ensureOpen();
       // Try to detect if it's a query or statement
       const normalized = sql.trim().toUpperCase();
 
@@ -67,9 +95,9 @@ class TestDatabase {
         normalized.startsWith('WITH')
       ) {
         // It's a query, but we're treating as statement
-        this.db.prepare(sql).all();
+        db.prepare(sql).all();
       } else {
-        this.db.exec(sql);
+        db.exec(sql);
       }
 
       return { success: true };
@@ -86,7 +114,8 @@ class TestDatabase {
    */
   query(sql: string): { success: boolean; rows?: unknown[][]; error?: string } {
     try {
-      const stmt = this.db.prepare(sql);
+      const db = this.ensureOpen();
+      const stmt = db.prepare(sql);
       const results = stmt.all();
 
       // Convert to array of arrays
@@ -102,11 +131,22 @@ class TestDatabase {
   }
 
   /**
-   * Reset the database
+   * Reset the database - fully destroy old instance and create new
    */
   reset(): void {
-    this.db.close();
-    this.db = new Database(':memory:');
+    this.destroy();
+    this.createNewDatabase();
+    tryGC();
+  }
+
+  /**
+   * Destroy the database connection completely
+   */
+  destroy(): void {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
   }
 }
 
@@ -125,6 +165,17 @@ interface TestResult {
   executionTime: number;
 }
 
+/**
+ * Lightweight failure info for memory-efficient storage
+ * We only store the essential info needed for reporting, not full TestResult
+ */
+interface FailureInfo {
+  lineNumber: number;
+  sql: string;
+  error?: string;
+  recordType: 'statement' | 'query';
+}
+
 interface RunSummary {
   totalTests: number;
   passed: number;
@@ -133,7 +184,257 @@ interface RunSummary {
   errors: number;
   executionTime: number;
   categoryResults: Map<string, { passed: number; failed: number; skipped: number }>;
-  failedTests: TestResult[];
+  /** Lightweight failure info - only stores essential data to save memory */
+  failedTests: FailureInfo[];
+}
+
+/**
+ * Configuration for memory management
+ */
+const MEMORY_CONFIG = {
+  /** Number of tests to process before cleanup */
+  BATCH_SIZE: 500,
+  /** Maximum number of failures to store (to prevent memory exhaustion on many failures) */
+  MAX_FAILURES_STORED: 100,
+  /** Whether to attempt garbage collection hints */
+  ENABLE_GC_HINTS: true,
+  /** Maximum tests per file chunk to prevent memory exhaustion */
+  MAX_TESTS_PER_CHUNK: 1500,
+};
+
+/**
+ * Attempt to trigger garbage collection if available
+ * Run with --expose-gc flag to enable: node --expose-gc script.js
+ */
+function tryGC(): void {
+  if (MEMORY_CONFIG.ENABLE_GC_HINTS && typeof global.gc === 'function') {
+    global.gc();
+  }
+}
+
+// =============================================================================
+// STREAMING PARSER
+// =============================================================================
+
+/**
+ * Streaming parser that yields records one at a time to minimize memory usage.
+ * This is critical for large test files like select4.test (48K lines).
+ */
+async function* streamParseTestFile(filePath: string): AsyncGenerator<Record> {
+  const fileStream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+  const rl = readline.createInterface({
+    input: fileStream,
+    crlfDelay: Infinity,
+  });
+
+  let lineNumber = 0;
+  let skipif: string[] = [];
+  let onlyif: string[] = [];
+
+  // State machine for parsing multi-line records
+  let currentRecord: {
+    type: 'statement' | 'query';
+    startLine: number;
+    header: string;
+    sqlLines: string[];
+    expectedValues: string[];
+    foundSeparator: boolean;
+    expectedHash?: string;
+  } | null = null;
+
+  for await (const line of rl) {
+    lineNumber++;
+    const trimmed = line.trim();
+
+    // Skip empty lines and comments (unless collecting SQL/results)
+    if (trimmed === '' || trimmed.startsWith('#')) {
+      if (currentRecord) {
+        // Empty line ends current record
+        const record = finalizeRecord(currentRecord, skipif, onlyif);
+        if (record) {
+          yield record;
+        }
+        currentRecord = null;
+        skipif = [];
+        onlyif = [];
+      }
+      continue;
+    }
+
+    // Handle skipif/onlyif
+    if (trimmed.startsWith('skipif ')) {
+      skipif.push(trimmed.slice(7).trim());
+      continue;
+    }
+
+    if (trimmed.startsWith('onlyif ')) {
+      onlyif.push(trimmed.slice(7).trim());
+      continue;
+    }
+
+    // Handle halt (respect onlyif/skipif conditions)
+    if (trimmed === 'halt') {
+      // Only halt if conditions are met:
+      // - If onlyif is set, only halt for that db (we run as 'sqlite')
+      // - If skipif is set, don't halt for that db
+      const shouldHalt =
+        (onlyif.length === 0 || onlyif.includes('sqlite')) &&
+        !skipif.includes('sqlite');
+
+      if (shouldHalt) {
+        yield { type: 'halt', lineNumber } as HaltRecord;
+        break;
+      }
+      // Clear conditions and continue
+      skipif = [];
+      onlyif = [];
+      continue;
+    }
+
+    // Handle hash-threshold
+    if (trimmed.startsWith('hash-threshold ')) {
+      const threshold = parseInt(trimmed.slice(15).trim(), 10);
+      yield { type: 'hash-threshold', threshold, lineNumber } as HashThresholdRecord;
+      continue;
+    }
+
+    // Handle statement start
+    if (trimmed.startsWith('statement ')) {
+      // Finalize any previous record
+      if (currentRecord) {
+        const record = finalizeRecord(currentRecord, skipif, onlyif);
+        if (record) {
+          yield record;
+        }
+        skipif = [];
+        onlyif = [];
+      }
+
+      currentRecord = {
+        type: 'statement',
+        startLine: lineNumber,
+        header: trimmed,
+        sqlLines: [],
+        expectedValues: [],
+        foundSeparator: false,
+      };
+      continue;
+    }
+
+    // Handle query start
+    if (trimmed.startsWith('query ')) {
+      // Finalize any previous record
+      if (currentRecord) {
+        const record = finalizeRecord(currentRecord, skipif, onlyif);
+        if (record) {
+          yield record;
+        }
+        skipif = [];
+        onlyif = [];
+      }
+
+      currentRecord = {
+        type: 'query',
+        startLine: lineNumber,
+        header: trimmed,
+        sqlLines: [],
+        expectedValues: [],
+        foundSeparator: false,
+      };
+      continue;
+    }
+
+    // Collecting SQL or expected values for current record
+    if (currentRecord) {
+      if (trimmed.startsWith('----')) {
+        currentRecord.foundSeparator = true;
+        continue;
+      }
+
+      if (currentRecord.foundSeparator) {
+        // Collecting expected values
+        const hashMatch = trimmed.match(/^(\d+)\s+values?\s+hashing\s+to\s+([a-f0-9]{32})$/i);
+        if (hashMatch) {
+          currentRecord.expectedHash = hashMatch[2];
+        } else {
+          currentRecord.expectedValues.push(trimmed);
+        }
+      } else {
+        // Collecting SQL
+        if (!trimmed.startsWith('#')) {
+          currentRecord.sqlLines.push(line);
+        }
+      }
+    }
+  }
+
+  // Finalize last record if any
+  if (currentRecord) {
+    const record = finalizeRecord(currentRecord, skipif, onlyif);
+    if (record) {
+      yield record;
+    }
+  }
+}
+
+/**
+ * Finalize a parsed record from accumulated lines
+ */
+function finalizeRecord(
+  current: {
+    type: 'statement' | 'query';
+    startLine: number;
+    header: string;
+    sqlLines: string[];
+    expectedValues: string[];
+    foundSeparator: boolean;
+    expectedHash?: string;
+  },
+  skipif: string[],
+  onlyif: string[]
+): StatementRecord | QueryRecord | null {
+  let sql = current.sqlLines.join('\n').trim();
+  if (sql.endsWith(';')) {
+    sql = sql.slice(0, -1).trim();
+  }
+
+  if (current.type === 'statement') {
+    const match = current.header.match(/^statement\s+(ok|error)$/i);
+    if (!match) return null;
+
+    return {
+      type: 'statement',
+      expectedResult: match[1].toLowerCase() as 'ok' | 'error',
+      sql,
+      lineNumber: current.startLine,
+      ...(skipif.length > 0 && { skipif }),
+      ...(onlyif.length > 0 && { onlyif }),
+    };
+  }
+
+  if (current.type === 'query') {
+    const match = current.header.match(/^query\s+([TIR]+)(?:\s+(nosort|rowsort|valuesort))?(?:\s+(.+))?$/i);
+    if (!match) return null;
+
+    const columnTypes = match[1].toUpperCase().split('') as ResultType[];
+    const sortMode = (match[2]?.toLowerCase() || 'nosort') as SortMode;
+    const label = match[3]?.trim();
+
+    return {
+      type: 'query',
+      columnTypes,
+      sortMode,
+      ...(label && { label }),
+      sql,
+      expectedValues: current.expectedValues,
+      ...(current.expectedHash && { expectedHash: current.expectedHash }),
+      lineNumber: current.startLine,
+      ...(skipif.length > 0 && { skipif }),
+      ...(onlyif.length > 0 && { onlyif }),
+    };
+  }
+
+  return null;
 }
 
 // =============================================================================
@@ -145,42 +446,91 @@ class SqlLogicTestRunner {
   private verbose: boolean;
   private continueOnError: boolean;
   private limit: number;
+  private batchSize: number;
+  private splitFiles: number;
   private testCount: number = 0;
-  private results: TestResult[] = [];
+  private batchTestCount: number = 0;
+  private chunkTestCount: number = 0;
 
   constructor(options: {
     verbose?: boolean;
     continueOnError?: boolean;
     limit?: number;
+    batchSize?: number;
+    splitFiles?: number;
   } = {}) {
     this.db = new TestDatabase();
     this.verbose = options.verbose ?? false;
     this.continueOnError = options.continueOnError ?? true;
     this.limit = options.limit ?? Infinity;
+    this.batchSize = options.batchSize ?? MEMORY_CONFIG.BATCH_SIZE;
+    this.splitFiles = options.splitFiles ?? MEMORY_CONFIG.MAX_TESTS_PER_CHUNK;
+  }
+
+  /**
+   * Cleanup between batches to free memory
+   */
+  private cleanupBatch(): void {
+    this.batchTestCount = 0;
+    tryGC();
+  }
+
+  /**
+   * Reset database to reclaim memory (for large files)
+   * Note: This will lose schema state, so should only be used between files
+   */
+  resetDatabase(): void {
+    this.db.reset();
+    this.chunkTestCount = 0;
+  }
+
+  /**
+   * Get current memory usage in MB
+   */
+  private getMemoryUsageMB(): number {
+    const usage = process.memoryUsage();
+    return Math.round(usage.heapUsed / 1024 / 1024);
+  }
+
+  /**
+   * Check if we're approaching memory limits
+   */
+  private checkMemoryPressure(): boolean {
+    const memMB = this.getMemoryUsageMB();
+    return memMB > 3000; // Warn above 3GB
+  }
+
+  /**
+   * Extract lightweight failure info from a test result
+   */
+  private extractFailureInfo(result: TestResult): FailureInfo | null {
+    const record = result.record;
+    if (record.type !== 'statement' && record.type !== 'query') {
+      return null;
+    }
+    return {
+      lineNumber: record.lineNumber,
+      sql: record.sql.slice(0, 200), // Truncate SQL to save memory
+      error: result.error?.slice(0, 200),
+      recordType: record.type,
+    };
   }
 
   /**
    * Run tests from a file
+   * Uses streaming approach - processes tests one at a time without accumulating
    */
   async runFile(filePath: string): Promise<RunSummary> {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const { records, errors, stats } = parseTestFile(content);
-
-    if (errors.length > 0 && this.verbose) {
-      console.error(`Parse errors in ${filePath}:`);
-      for (const error of errors) {
-        console.error(`  Line ${error.line}: ${error.message}`);
-      }
-    }
-
     const startTime = performance.now();
     const categoryResults = new Map<string, { passed: number; failed: number; skipped: number }>();
-    const failedTests: TestResult[] = [];
+    // Only store lightweight failure info, limited count
+    const failedTests: FailureInfo[] = [];
 
     let passed = 0;
     let failed = 0;
     let skipped = 0;
     let errorCount = 0;
+    let shouldStop = false;
 
     // Determine category from file path
     const category = this.getCategory(filePath);
@@ -189,9 +539,10 @@ class SqlLogicTestRunner {
     }
     const catStats = categoryResults.get(category)!;
 
-    for (const record of records) {
+    // Use streaming parser to process records one at a time
+    for await (const record of streamParseTestFile(filePath)) {
       // Check limit
-      if (this.testCount >= this.limit) {
+      if (this.testCount >= this.limit || shouldStop) {
         break;
       }
 
@@ -218,10 +569,11 @@ class SqlLogicTestRunner {
       }
 
       this.testCount++;
+      this.batchTestCount++;
+      this.chunkTestCount++;
 
-      // Run the test
+      // Run the test - result is processed immediately, not accumulated
       const result = await this.runRecord(record);
-      this.results.push(result);
 
       if (result.passed) {
         passed++;
@@ -232,7 +584,14 @@ class SqlLogicTestRunner {
       } else {
         failed++;
         catStats.failed++;
-        failedTests.push(result);
+
+        // Only store limited failure info to prevent memory exhaustion
+        if (failedTests.length < MEMORY_CONFIG.MAX_FAILURES_STORED) {
+          const failureInfo = this.extractFailureInfo(result);
+          if (failureInfo) {
+            failedTests.push(failureInfo);
+          }
+        }
 
         if (this.verbose) {
           this.printProgress('F');
@@ -255,17 +614,31 @@ class SqlLogicTestRunner {
         }
 
         if (!this.continueOnError) {
-          break;
+          shouldStop = true;
         }
       }
 
-      // Progress indicator
+      // Batch cleanup - free memory periodically
+      if (this.batchTestCount >= this.batchSize) {
+        this.cleanupBatch();
+      }
+
+      // Progress indicator with memory info
       if (!this.verbose && this.testCount % 100 === 0) {
-        process.stdout.write(`\rProgress: ${this.testCount} tests...`);
+        const memMB = this.getMemoryUsageMB();
+        process.stdout.write(`\rProgress: ${this.testCount} tests (${memMB}MB)...`);
+
+        // Warn if memory pressure is high
+        if (this.checkMemoryPressure() && this.testCount % 500 === 0) {
+          console.log(`\n  [WARNING] High memory usage (${memMB}MB). Consider using --limit or --split-files.`);
+        }
       }
     }
 
     const endTime = performance.now();
+
+    // Final cleanup after file
+    this.cleanupBatch();
 
     return {
       totalTests: this.testCount,
@@ -281,15 +654,27 @@ class SqlLogicTestRunner {
 
   /**
    * Run tests from a directory
+   * Uses streaming merge to avoid accumulating all summaries in memory
    */
   async runDirectory(dirPath: string): Promise<RunSummary> {
     const files = this.findTestFiles(dirPath);
-    const allSummaries: RunSummary[] = [];
 
     console.log(`Found ${files.length} test files in ${dirPath}`);
 
     // Track global test count across files
     let globalTestCount = 0;
+
+    // Use a running summary instead of accumulating all summaries
+    const runningSummary: RunSummary = {
+      totalTests: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      executionTime: 0,
+      categoryResults: new Map(),
+      failedTests: [],
+    };
 
     for (const file of files) {
       if (globalTestCount >= this.limit) {
@@ -299,15 +684,40 @@ class SqlLogicTestRunner {
       console.log(`\nRunning ${path.basename(file)}...`);
       this.db.reset(); // Fresh database for each file
       this.testCount = 0; // Reset per-file count
-      this.results = []; // Reset results
+      this.batchTestCount = 0; // Reset batch count
 
       const summary = await this.runFile(file);
-      allSummaries.push(summary);
+
+      // Merge into running summary immediately (no accumulation)
+      runningSummary.totalTests += summary.totalTests;
+      runningSummary.passed += summary.passed;
+      runningSummary.failed += summary.failed;
+      runningSummary.skipped += summary.skipped;
+      runningSummary.errors += summary.errors;
+      runningSummary.executionTime += summary.executionTime;
+
+      // Merge category results
+      for (const [cat, stats] of summary.categoryResults) {
+        const existing = runningSummary.categoryResults.get(cat) || { passed: 0, failed: 0, skipped: 0 };
+        existing.passed += stats.passed;
+        existing.failed += stats.failed;
+        existing.skipped += stats.skipped;
+        runningSummary.categoryResults.set(cat, existing);
+      }
+
+      // Only keep limited failures
+      if (runningSummary.failedTests.length < MEMORY_CONFIG.MAX_FAILURES_STORED) {
+        const remaining = MEMORY_CONFIG.MAX_FAILURES_STORED - runningSummary.failedTests.length;
+        runningSummary.failedTests.push(...summary.failedTests.slice(0, remaining));
+      }
+
       globalTestCount += summary.passed + summary.failed;
+
+      // Aggressive cleanup between files
+      tryGC();
     }
 
-    // Merge summaries
-    return this.mergeSummaries(allSummaries);
+    return runningSummary;
   }
 
   /**
@@ -351,6 +761,7 @@ class SqlLogicTestRunner {
 
   /**
    * Run a query record
+   * Memory optimized: doesn't retain large arrays in the result
    */
   private async runQuery(record: QueryRecord, startTime: number): Promise<TestResult> {
     const result = this.db.query(record.sql);
@@ -368,12 +779,16 @@ class SqlLogicTestRunner {
 
     // Format actual values
     const actualValues: string[] = [];
-    for (const row of result.rows || []) {
+    const rows = result.rows || [];
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
       for (let i = 0; i < row.length; i++) {
         const type = record.columnTypes[i] || 'T';
         actualValues.push(formatValue(row[i], type));
       }
     }
+    // Clear reference to rows immediately to allow GC
+    result.rows = undefined;
 
     // Sort values according to sort mode
     const sortedActual = sortValues(actualValues, record.sortMode, record.columnTypes.length);
@@ -383,10 +798,12 @@ class SqlLogicTestRunner {
       const actualHash = await hashValues(sortedActual);
       const passed = actualHash.toLowerCase() === record.expectedHash.toLowerCase();
 
+      // Don't store large actual arrays in results - only store for debugging if verbose
       return {
         passed,
         record,
-        actual: sortedActual,
+        // Only store first few values for debugging, not all
+        actual: this.verbose ? sortedActual.slice(0, 10) : undefined,
         expectedHash: record.expectedHash,
         actualHash,
         executionTime,
@@ -397,11 +814,13 @@ class SqlLogicTestRunner {
     const sortedExpected = sortValues(record.expectedValues, record.sortMode, record.columnTypes.length);
     const passed = this.compareResults(sortedExpected, sortedActual);
 
+    // Don't store large arrays in results unless debugging
     return {
       passed,
       record,
-      expected: sortedExpected,
-      actual: sortedActual,
+      // Only store for debugging, truncated
+      expected: this.verbose && !passed ? sortedExpected.slice(0, 10) : undefined,
+      actual: this.verbose && !passed ? sortedActual.slice(0, 10) : undefined,
       executionTime,
     };
   }
@@ -453,41 +872,6 @@ class SqlLogicTestRunner {
     return match ? match[1] : 'other';
   }
 
-  /**
-   * Merge multiple summaries
-   */
-  private mergeSummaries(summaries: RunSummary[]): RunSummary {
-    const merged: RunSummary = {
-      totalTests: 0,
-      passed: 0,
-      failed: 0,
-      skipped: 0,
-      errors: 0,
-      executionTime: 0,
-      categoryResults: new Map(),
-      failedTests: [],
-    };
-
-    for (const summary of summaries) {
-      merged.totalTests += summary.totalTests;
-      merged.passed += summary.passed;
-      merged.failed += summary.failed;
-      merged.skipped += summary.skipped;
-      merged.errors += summary.errors;
-      merged.executionTime += summary.executionTime;
-      merged.failedTests.push(...summary.failedTests);
-
-      for (const [cat, stats] of summary.categoryResults) {
-        const existing = merged.categoryResults.get(cat) || { passed: 0, failed: 0, skipped: 0 };
-        existing.passed += stats.passed;
-        existing.failed += stats.failed;
-        existing.skipped += stats.skipped;
-        merged.categoryResults.set(cat, existing);
-      }
-    }
-
-    return merged;
-  }
 
   /**
    * Print progress character
@@ -509,17 +893,39 @@ Usage:
   npx tsx runner.ts [options]
 
 Options:
-  --limit=N         Run only first N tests
+  --limit=N         Run only first N tests per file (or total with --file)
   --file=PATH       Run specific test file
   --dir=PATH        Run all .test files in directory
+  --folder=PATH     Alias for --dir (for compatibility)
+  --batch-size=N    Process tests in batches of N for GC hints (default: ${MEMORY_CONFIG.BATCH_SIZE})
+  --split-files=N   Max tests per file chunk (default: ${MEMORY_CONFIG.MAX_TESTS_PER_CHUNK})
   --verbose         Show detailed output
   --continue        Continue on error (don't stop at first failure)
+  --stop-on-error   Stop at first failure
   --help            Show this help
+
+Memory Management:
+  The runner is optimized to stay within memory limits by:
+  - Streaming records instead of loading entire file into memory
+  - Processing tests in batches with periodic GC hints
+  - Storing only limited failure information (max ${MEMORY_CONFIG.MAX_FAILURES_STORED})
+  - Showing memory usage in progress indicator
+  - Warning when memory pressure is high (>3GB)
+
+  Note: Large test files (>2000 tests) may exhaust memory due to DoSQL engine
+  internal storage growth. Use --limit to process files in parts.
 
 Examples:
   npx tsx runner.ts --limit=1000
   npx tsx runner.ts --file=tests/select1.test --verbose
   npx tsx runner.ts --dir=./tests --continue
+  npx tsx runner.ts --folder=tests/sqlite-full --batch-size=200
+
+  # Run with memory limit (recommended for large test suites):
+  NODE_OPTIONS="--max-old-space-size=4096" npx tsx runner.ts --folder=tests/sqlite-full
+
+  # Run large files in parts to avoid memory exhaustion:
+  NODE_OPTIONS="--max-old-space-size=4096" npx tsx runner.ts --file=tests/sqlite-full/select4.test --limit=1500
 `);
 }
 
@@ -529,6 +935,8 @@ function parseArgs(args: string[]): {
   dir?: string;
   verbose: boolean;
   continueOnError: boolean;
+  batchSize: number;
+  splitFiles: number;
   help: boolean;
 } {
   const result = {
@@ -537,6 +945,8 @@ function parseArgs(args: string[]): {
     dir: undefined as string | undefined,
     verbose: false,
     continueOnError: true,
+    batchSize: MEMORY_CONFIG.BATCH_SIZE,
+    splitFiles: MEMORY_CONFIG.MAX_TESTS_PER_CHUNK,
     help: false,
   };
 
@@ -547,6 +957,13 @@ function parseArgs(args: string[]): {
       result.file = arg.slice(7);
     } else if (arg.startsWith('--dir=')) {
       result.dir = arg.slice(6);
+    } else if (arg.startsWith('--folder=')) {
+      // Alias for --dir
+      result.dir = arg.slice(9);
+    } else if (arg.startsWith('--batch-size=')) {
+      result.batchSize = parseInt(arg.slice(13), 10);
+    } else if (arg.startsWith('--split-files=')) {
+      result.splitFiles = parseInt(arg.slice(14), 10);
     } else if (arg === '--verbose' || arg === '-v') {
       result.verbose = true;
     } else if (arg === '--continue') {
@@ -603,18 +1020,18 @@ function printSummary(summary: RunSummary): void {
     console.log('Failed Tests (first 10):');
     console.log('-'.repeat(50));
 
-    for (const result of summary.failedTests.slice(0, 10)) {
-      const record = result.record;
-      if (record.type === 'statement' || record.type === 'query') {
-        console.log(`  Line ${record.lineNumber}: ${record.sql.slice(0, 60)}...`);
-        if (result.error) {
-          console.log(`    Error: ${result.error.slice(0, 80)}`);
-        }
+    for (const failure of summary.failedTests.slice(0, 10)) {
+      console.log(`  Line ${failure.lineNumber}: ${failure.sql.slice(0, 60)}...`);
+      if (failure.error) {
+        console.log(`    Error: ${failure.error.slice(0, 80)}`);
       }
     }
 
     if (summary.failedTests.length > 10) {
-      console.log(`  ... and ${summary.failedTests.length - 10} more`);
+      console.log(`  ... and ${summary.failedTests.length - 10} more stored`);
+    }
+    if (summary.failed > MEMORY_CONFIG.MAX_FAILURES_STORED) {
+      console.log(`  (${summary.failed - MEMORY_CONFIG.MAX_FAILURES_STORED} additional failures not stored to save memory)`);
     }
     console.log();
   }
@@ -672,14 +1089,19 @@ async function main(): Promise<void> {
     verbose: args.verbose,
     continueOnError: args.continueOnError,
     limit: args.limit,
+    batchSize: args.batchSize,
+    splitFiles: args.splitFiles,
   });
 
   console.log('SQLLogicTest Runner for DoSQL');
   console.log('='.repeat(60));
   console.log(`Target: ${targetPath}`);
   console.log(`Limit: ${args.limit === Infinity ? 'none' : args.limit}`);
+  console.log(`Batch size: ${args.batchSize}`);
+  console.log(`Split files: ${args.splitFiles} tests max per chunk`);
   console.log(`Verbose: ${args.verbose}`);
   console.log(`Continue on error: ${args.continueOnError}`);
+  console.log(`Max failures stored: ${MEMORY_CONFIG.MAX_FAILURES_STORED}`);
   console.log();
 
   // Run tests

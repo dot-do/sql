@@ -289,10 +289,27 @@ export interface AggregateExpr {
 
 /**
  * CASE expression
+ *
+ * Supports both:
+ * - Simple CASE: CASE operand WHEN value THEN result END
+ * - Searched CASE: CASE WHEN condition THEN result END
+ *
+ * For simple CASE, operand is set and when clauses have 'value' property.
+ * For searched CASE, operand is undefined and when clauses have 'condition' property.
  */
 export interface CaseExpr {
   type: 'case';
-  when: { condition: Expression; result: Expression }[];
+  /** Operand for simple CASE (undefined for searched CASE) */
+  operand?: Expression;
+  /**
+   * WHEN clauses
+   * - For searched CASE: each has { condition: Expression, result: Expression }
+   * - For simple CASE: each has { value: Expression, result: Expression }
+   */
+  when: Array<
+    | { condition: Expression; result: Expression }
+    | { value: Expression; result: Expression }
+  >;
   else?: Expression;
 }
 

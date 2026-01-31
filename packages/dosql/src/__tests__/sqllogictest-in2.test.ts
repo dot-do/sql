@@ -84,44 +84,34 @@ describe('SQLLogicTest in2.test - IN Edge Cases', () => {
     // R-35033-20570: The subquery on the right of an IN or NOT IN operator must
     // be a scalar subquery if the left expression is not a row value expression.
     //
-    // NOTE: Literal IN with subquery (e.g., 1 IN (SELECT 1)) is not yet fully supported
-    // in InMemoryEngine. The engine currently handles column IN (SELECT ...) for cases
-    // where the left operand is a column reference. Literal IN with subquery support
-    // requires additional work to handle IN expressions where the left side is a
-    // constant value.
-    //
-    // The subquery parser (SubqueryParser) correctly parses these queries.
-    // The limitation is in the InMemoryEngine's WHERE clause evaluation.
+    // IMPLEMENTED: Literal IN with subquery now works.
+    // The statement executor validates that subqueries return exactly one column.
 
-    it.skip('should support 1 IN (SELECT 1) - line 296 (3 rows)', () => {
-      // This requires subquery materialization and IN evaluation for literal operands
-      // TODO: Implement literal IN (SELECT ...) support in InMemoryEngine
+    it('should support 1 IN (SELECT 1) - line 296 (3 rows)', () => {
+      // Literal IN with scalar subquery
       const result = db.prepare('SELECT 1 FROM t1 WHERE 1 IN (SELECT 1)').all();
       expect(result.length).toBe(3);
     });
 
-    it.skip('should error on 1 IN (SELECT 1, 2) - line 304', () => {
+    it('should error on 1 IN (SELECT 1, 2) - line 304', () => {
       // Scalar subquery must return single column
-      // TODO: Validate subquery column count at parse/prepare time
       expect(() => {
-        db.prepare('SELECT 1 FROM t1 WHERE 1 IN (SELECT 1, 2)');
-      }).toThrow();
+        db.prepare('SELECT 1 FROM t1 WHERE 1 IN (SELECT 1, 2)').all();
+      }).toThrow(/sub-select returns 2 columns/);
     });
 
-    it.skip('should error on 1 IN (SELECT x, y FROM t1) - line 307', () => {
+    it('should error on 1 IN (SELECT x, y FROM t1) - line 307', () => {
       // Multi-column subquery not allowed for scalar IN
-      // TODO: Validate subquery column count at parse/prepare time
       expect(() => {
-        db.prepare('SELECT 1 FROM t1 WHERE 1 IN (SELECT x, y FROM t1)');
-      }).toThrow();
+        db.prepare('SELECT 1 FROM t1 WHERE 1 IN (SELECT x, y FROM t1)').all();
+      }).toThrow(/sub-select returns 2 columns/);
     });
 
-    it.skip('should error on 1 IN (SELECT * FROM t1) - line 310', () => {
-      // SELECT * returns multiple columns
-      // TODO: Validate subquery column count at parse/prepare time
+    it('should error on 1 IN (SELECT * FROM t1) - line 310', () => {
+      // SELECT * returns multiple columns (table has x and y columns)
       expect(() => {
-        db.prepare('SELECT 1 FROM t1 WHERE 1 IN (SELECT * FROM t1)');
-      }).toThrow();
+        db.prepare('SELECT 1 FROM t1 WHERE 1 IN (SELECT * FROM t1)').all();
+      }).toThrow(/sub-select returns 2 columns/);
     });
   });
 

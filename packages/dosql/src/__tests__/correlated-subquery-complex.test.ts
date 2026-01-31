@@ -118,6 +118,51 @@ describe('Complex Correlated Subqueries', () => {
       console.log('Correlated with x.c>t1.c AND x.d<t1.d:', result);
       expect(result.length).toBe(30);
     });
+
+    it('should return correct count values for compound WHERE in correlated subquery', () => {
+      // Test with a smaller dataset for verifiable results
+      const testDb = new Database(':memory:');
+      testDb.exec('CREATE TABLE t1(a INTEGER, c INTEGER, d INTEGER)');
+      // c=10, d=5 : rows with c>10 AND d<5 = 0
+      testDb.exec('INSERT INTO t1 VALUES(1, 10, 5)');
+      // c=20, d=15: rows with c>20 AND d<15 = row 1 (10>20=F)? no. row 3 (30>20=T, 10<15=T)=1
+      testDb.exec('INSERT INTO t1 VALUES(2, 20, 15)');
+      // c=30, d=10: rows with c>30 AND d<10 = row 1 (10>30=F, 5<10=T) = 0
+      testDb.exec('INSERT INTO t1 VALUES(3, 30, 10)');
+      // c=5, d=25: rows with c>5 AND d<25 = row 1 (10>5=T, 5<25=T), row 2 (20>5=T, 15<25=T), row 3 (30>5=T, 10<25=T) = 3
+      testDb.exec('INSERT INTO t1 VALUES(4, 5, 25)');
+
+      const result = testDb.prepare(`
+        SELECT a, c, d,
+               (SELECT count(*) FROM t1 AS x WHERE x.c>t1.c AND x.d<t1.d) AS cnt
+        FROM t1
+        ORDER BY a
+      `).all() as { a: number; c: number; d: number; cnt: number }[];
+
+      // For a=1, c=10, d=5: count rows where x.c>10 AND x.d<5 = none
+      expect(result[0].cnt).toBe(0);
+
+      // For a=2, c=20, d=15: count rows where x.c>20 AND x.d<15
+      //   row 1: 10>20=F, skip
+      //   row 2: 20>20=F, skip
+      //   row 3: 30>20=T, 10<15=T = 1
+      //   row 4: 5>20=F, skip
+      expect(result[1].cnt).toBe(1);
+
+      // For a=3, c=30, d=10: count rows where x.c>30 AND x.d<10
+      //   row 1: 10>30=F, skip
+      //   row 2: 20>30=F, skip
+      //   row 3: 30>30=F, skip
+      //   row 4: 5>30=F, skip
+      expect(result[2].cnt).toBe(0);
+
+      // For a=4, c=5, d=25: count rows where x.c>5 AND x.d<25
+      //   row 1: 10>5=T, 5<25=T = 1
+      //   row 2: 20>5=T, 15<25=T = 1
+      //   row 3: 30>5=T, 10<25=T = 1
+      //   row 4: 5>5=F, skip
+      expect(result[3].cnt).toBe(3);
+    });
   });
 
   describe('EXISTS correlated subquery in WHERE', () => {
@@ -176,11 +221,6 @@ describe('Complex Correlated Subqueries', () => {
     });
 
     it('should match SQLLogicTest line 634 query - EXISTS OR boolean condition', () => {
-      // Debug: check what splitOrOutsideSubqueries does
-      const whereClause = `EXISTS(SELECT 1 FROM t1 AS x WHERE x.b<t1.b)
-         OR (a>b-2 AND a<b+2)`;
-      console.log('WHERE clause:', whereClause);
-
       // First test EXISTS alone
       const existsResult = db.prepare(`
         SELECT a, b FROM t1

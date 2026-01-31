@@ -147,10 +147,24 @@ export function parseTestFile(content: string): ParseResult {
       continue;
     }
 
-    // Handle halt
+    // Handle halt (respect onlyif/skipif conditions)
     if (line === 'halt') {
-      records.push({ type: 'halt', lineNumber });
-      break;
+      // Only halt if conditions are met:
+      // - If onlyif is set, only halt for that db (we run as 'sqlite')
+      // - If skipif is set, don't halt for that db
+      const shouldHalt =
+        (onlyif.length === 0 || onlyif.includes('sqlite')) &&
+        !skipif.includes('sqlite');
+
+      if (shouldHalt) {
+        records.push({ type: 'halt', lineNumber });
+        break;
+      }
+      // Clear conditions and continue
+      skipif = [];
+      onlyif = [];
+      i++;
+      continue;
     }
 
     // Handle hash-threshold

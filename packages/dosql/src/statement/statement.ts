@@ -1851,6 +1851,21 @@ export class InMemoryEngine implements ExecutionEngine {
     const inMatch = this.parseInSubquery(trimmed);
     if (inMatch) {
       const subqueryResult = this.execute(inMatch.subquery, params);
+
+      // Validate that subquery returns exactly one column for scalar IN
+      // Per SQL standard R-35033-20570: "The subquery on the right of an IN or NOT IN
+      // operator must be a scalar subquery if the left expression is not a row value expression."
+      if (subqueryResult.rows.length > 0) {
+        const columnCount = Object.keys(subqueryResult.rows[0]).length;
+        if (columnCount > 1) {
+          throw new StatementError(
+            StatementErrorCode.INVALID_SQL,
+            `sub-select returns ${columnCount} columns - expected 1`,
+            trimmed
+          );
+        }
+      }
+
       const subqueryValues = subqueryResult.rows.map(r => {
         const keys = Object.keys(r);
         return keys.length > 0 ? r[keys[0]] : null;
@@ -1864,6 +1879,28 @@ export class InMemoryEngine implements ExecutionEngine {
 
       const values = new Set(subqueryValues);
       const hasNullInSubquery = subqueryValues.some(v => v === null);
+
+      // Handle literal left operand (e.g., 1 IN (SELECT ...))
+      if (inMatch.isLiteral) {
+        // Parse the literal value
+        let literalVal: SqlValue;
+        const expr = inMatch.column;
+        if (expr.startsWith("'") && expr.endsWith("'")) {
+          literalVal = expr.slice(1, -1);
+        } else {
+          literalVal = parseFloat(expr);
+          if (Number.isInteger(literalVal)) {
+            literalVal = parseInt(expr, 10);
+          }
+        }
+
+        // Check if literal matches any value in subquery
+        const matches = values.has(literalVal);
+        const result = inMatch.isNot ? !matches : matches;
+
+        // For literal IN, the result applies to all rows
+        return result ? rows : [];
+      }
 
       return rows.filter(row => {
         const col = inMatch.column.includes('.')
@@ -2148,41 +2185,155 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   /**
-   * Parse EXISTS condition
+   * Parse EXISTS condition - extracts the subquery with balanced parentheses
    */
   private parseExistsCondition(whereClause: string): { isNot: boolean; subquery: string } | null {
-    // NOT EXISTS
-    const notExistsMatch = whereClause.match(/^\s*NOT\s+EXISTS\s*\(\s*(SELECT[\s\S]+)\s*\)\s*$/i);
-    if (notExistsMatch) {
-      return { isNot: true, subquery: notExistsMatch[1].trim() };
+    const trimmed = whereClause.trim();
+    const upper = trimmed.toUpperCase();
+
+    // Check for NOT EXISTS or EXISTS at the start
+    let isNot = false;
+    let startPos = 0;
+
+    if (upper.startsWith('NOT EXISTS')) {
+      isNot = true;
+      startPos = 'NOT EXISTS'.length;
+    } else if (upper.startsWith('EXISTS')) {
+      isNot = false;
+      startPos = 'EXISTS'.length;
+    } else {
+      return null;
     }
 
-    // EXISTS
-    const existsMatch = whereClause.match(/^\s*EXISTS\s*\(\s*(SELECT[\s\S]+)\s*\)\s*$/i);
-    if (existsMatch) {
-      return { isNot: false, subquery: existsMatch[1].trim() };
+    // Skip whitespace after EXISTS/NOT EXISTS
+    while (startPos < trimmed.length && /\s/.test(trimmed[startPos])) {
+      startPos++;
+    }
+
+    // Must have opening parenthesis
+    if (startPos >= trimmed.length || trimmed[startPos] !== '(') {
+      return null;
+    }
+
+    // Find matching closing parenthesis
+    let depth = 0;
+    let inString = false;
+    let subqueryEnd = -1;
+
+    for (let i = startPos; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+
+      if (ch === "'" && !inString) {
+        inString = true;
+        continue;
+      }
+      if (ch === "'" && inString) {
+        // Check for escaped quote
+        if (trimmed[i + 1] === "'") {
+          i++;
+          continue;
+        }
+        inString = false;
+        continue;
+      }
+      if (inString) continue;
+
+      if (ch === '(') {
+        depth++;
+      } else if (ch === ')') {
+        depth--;
+        if (depth === 0) {
+          subqueryEnd = i;
+          break;
+        }
+      }
+    }
+
+    if (subqueryEnd === -1) {
+      return null;
+    }
+
+    // Check if anything follows after the closing paren (shouldn't for pure EXISTS)
+    const afterExists = trimmed.slice(subqueryEnd + 1).trim();
+    if (afterExists.length > 0) {
+      // There's something after the EXISTS(...) - not a pure EXISTS condition
+      return null;
+    }
+
+    // Extract the subquery (without the outer parentheses)
+    const subquery = trimmed.slice(startPos + 1, subqueryEnd).trim();
+
+    // Verify it starts with SELECT
+    if (!subquery.toUpperCase().startsWith('SELECT')) {
+      return null;
+    }
+
+    return { isNot, subquery };
+  }
+
+  /**
+   * Parse IN with subquery
+   * Supports both column references (col IN (SELECT ...)) and literals (1 IN (SELECT ...))
+   */
+  private parseInSubquery(whereClause: string): { isNot: boolean; column: string; subquery: string; isLiteral: boolean } | null {
+    // Match patterns: expr NOT IN (SELECT ...) or expr IN (SELECT ...)
+    // expr can be: column, table.column, number, or quoted string
+    const exprPattern = /^([\w.]+|'[^']*'|-?\d+(?:\.\d+)?)\s+(NOT\s+)?IN\s*\(\s*(SELECT[\s\S]+)\s*\)$/i;
+
+    const match = whereClause.match(exprPattern);
+    if (match) {
+      const expr = match[1];
+      const isNot = !!match[2];
+      const subquery = match[3].trim();
+
+      // Determine if left side is a literal (number or string) vs column reference
+      const isLiteral = /^(-?\d+(?:\.\d+)?|'[^']*')$/.test(expr);
+
+      return { isNot, column: expr, subquery, isLiteral };
     }
 
     return null;
   }
 
   /**
-   * Parse IN with subquery
+   * Count columns in a SELECT clause (for subquery validation)
    */
-  private parseInSubquery(whereClause: string): { isNot: boolean; column: string; subquery: string } | null {
-    // NOT IN
-    const notInMatch = whereClause.match(/^(\w+(?:\.\w+)?)\s+NOT\s+IN\s*\(\s*(SELECT[\s\S]+)\s*\)$/i);
-    if (notInMatch) {
-      return { isNot: true, column: notInMatch[1], subquery: notInMatch[2].trim() };
+  private countSubqueryColumns(subquery: string): number {
+    // Execute the subquery to get actual column count
+    // This is needed for SELECT * or complex expressions
+    const result = this.execute(subquery, []);
+    if (result.rows.length === 0) {
+      // Empty result, need to parse SELECT clause
+      // For SELECT *, we can't know without schema
+      // For explicit columns, count commas outside parentheses
+      const upperQuery = subquery.toUpperCase();
+      const selectIdx = upperQuery.indexOf('SELECT');
+      const fromIdx = upperQuery.indexOf('FROM');
+
+      if (selectIdx === -1) return 1;
+
+      const endIdx = fromIdx !== -1 ? fromIdx : subquery.length;
+      const selectClause = subquery.slice(selectIdx + 6, endIdx).trim();
+
+      // Check for SELECT *
+      if (selectClause.trim() === '*') {
+        // Need schema info, assume multi-column for safety
+        return 2;
+      }
+
+      // Count columns by splitting on commas outside parentheses
+      let depth = 0;
+      let count = 1;
+      for (const char of selectClause) {
+        if (char === '(') depth++;
+        else if (char === ')') depth--;
+        else if (char === ',' && depth === 0) count++;
+      }
+      return count;
     }
 
-    // IN
-    const inMatch = whereClause.match(/^(\w+(?:\.\w+)?)\s+IN\s*\(\s*(SELECT[\s\S]+)\s*\)$/i);
-    if (inMatch) {
-      return { isNot: false, column: inMatch[1], subquery: inMatch[2].trim() };
-    }
-
-    return null;
+    // Use actual result to count columns
+    return Object.keys(result.rows[0]).length;
   }
 
   /**
