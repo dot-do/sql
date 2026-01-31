@@ -428,6 +428,8 @@ export class DOQueryEngine {
         return this.executeDelete(sql, params);
       case 'CREATE':
         return this.executeCreate(sql);
+      case 'DROP':
+        return this.executeDrop(sql);
       default:
         return { success: false, rowsAffected: 0 };
     }
@@ -720,6 +722,79 @@ export class DOQueryEngine {
     await this.config.storage.put('_meta:schemas', Array.from(this.schemas.values()));
 
     return { success: true, rowsAffected: 0 };
+  }
+
+  /**
+   * Execute a DROP TABLE statement.
+   */
+  private async executeDrop(sql: string): Promise<WriteResult> {
+    // Parse: DROP TABLE [IF EXISTS] tablename
+    const match = sql.match(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i);
+    if (!match) {
+      return { success: false, rowsAffected: 0 };
+    }
+
+    const tableName = match[1];
+    const ifExists = /IF\s+EXISTS/i.test(sql);
+
+    // Check if table exists
+    const schema = this.schemas.get(tableName);
+    if (!schema) {
+      if (ifExists) {
+        // IF EXISTS specified, silently succeed
+        return { success: true, rowsAffected: 0 };
+      }
+      throw new Error(`no such table: ${tableName}`);
+    }
+
+    // Get all keys to delete
+    const tableData = this.tables.get(tableName);
+    const rowCount = tableData ? tableData.size : 0;
+
+    // Delete all rows from storage
+    if (tableData) {
+      const keysToDelete: string[] = [];
+      for (const key of tableData.keys()) {
+        keysToDelete.push(`${tableName}:${key}`);
+      }
+
+      for (const key of keysToDelete) {
+        await this.config.storage.delete(key);
+      }
+    }
+
+    // Remove from in-memory data structures
+    this.tables.delete(tableName);
+    this.schemas.delete(tableName);
+
+    // Persist updated schemas
+    await this.config.storage.put('_meta:schemas', Array.from(this.schemas.values()));
+
+    // Write to WAL if configured
+    if (this.config.wal) {
+      await this.config.wal.append({
+        timestamp: Date.now(),
+        txnId: createTransactionId(`auto_${Date.now()}`),
+        op: 'DELETE',
+        table: tableName,
+        before: new TextEncoder().encode(JSON.stringify({ _dropped: true, rowCount })),
+      });
+      await this.config.wal.flush();
+    }
+
+    // Publish to CDC if configured
+    if (this.config.cdc) {
+      await this.config.cdc.publish({
+        type: 'delete',
+        table: tableName,
+        key: '_schema',
+        before: { _dropped: true, rowCount },
+        timestamp: Date.now(),
+      });
+      await this.config.cdc.flush();
+    }
+
+    return { success: true, rowsAffected: rowCount };
   }
 
   /**

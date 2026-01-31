@@ -304,6 +304,122 @@ describe('DoSQL Full SQL Execution', () => {
     });
   });
 
+  describe('DROP TABLE', () => {
+    it('should drop an existing table', async () => {
+      const stub = getUniqueDoSqlStub();
+
+      // Create table
+      await executeSQL(
+        stub,
+        'CREATE TABLE to_drop (id INTEGER, value TEXT, PRIMARY KEY (id))'
+      );
+      await executeSQL(stub, "INSERT INTO to_drop (id, value) VALUES (1, 'test')");
+
+      // Verify table exists
+      let result = await querySQL(stub, 'SELECT * FROM to_drop');
+      expect(result.success).toBe(true);
+      expect(result.rows).toHaveLength(1);
+
+      // Drop the table
+      const dropResult = await executeSQL(stub, 'DROP TABLE to_drop');
+      expect(dropResult.success).toBe(true);
+
+      // Verify table no longer exists
+      const afterDrop = await querySQL(stub, 'SELECT * FROM to_drop');
+      expect(afterDrop.success).toBe(false);
+    });
+
+    it('should drop table with IF EXISTS when table exists', async () => {
+      const stub = getUniqueDoSqlStub();
+
+      // Create table
+      await executeSQL(
+        stub,
+        'CREATE TABLE drop_if_exists_test (id INTEGER, PRIMARY KEY (id))'
+      );
+
+      // Drop with IF EXISTS
+      const dropResult = await executeSQL(stub, 'DROP TABLE IF EXISTS drop_if_exists_test');
+      expect(dropResult.success).toBe(true);
+
+      // Verify table no longer exists
+      const afterDrop = await querySQL(stub, 'SELECT * FROM drop_if_exists_test');
+      expect(afterDrop.success).toBe(false);
+    });
+
+    it('should succeed silently when dropping non-existent table with IF EXISTS', async () => {
+      const stub = getUniqueDoSqlStub();
+
+      // Drop non-existent table with IF EXISTS should succeed
+      const dropResult = await executeSQL(stub, 'DROP TABLE IF EXISTS nonexistent_table');
+      expect(dropResult.success).toBe(true);
+    });
+
+    it('should fail when dropping non-existent table without IF EXISTS', async () => {
+      const stub = getUniqueDoSqlStub();
+
+      // Drop non-existent table without IF EXISTS should fail
+      const dropResult = await executeSQL(stub, 'DROP TABLE definitely_not_there');
+      expect(dropResult.success).toBe(false);
+      expect(dropResult.error).toContain('no such table');
+    });
+
+    it('should remove table from schema listing after drop', async () => {
+      const stub = getUniqueDoSqlStub();
+
+      // Create multiple tables
+      await executeSQL(
+        stub,
+        'CREATE TABLE keep_this (id INTEGER, PRIMARY KEY (id))'
+      );
+      await executeSQL(
+        stub,
+        'CREATE TABLE drop_this (id INTEGER, PRIMARY KEY (id))'
+      );
+
+      // Drop one table
+      await executeSQL(stub, 'DROP TABLE drop_this');
+
+      // Check table listing
+      const response = await stub.fetch('http://localhost/tables');
+      const body = (await response.json()) as { tables: Array<{ name: string }> };
+
+      expect(body.tables).toHaveLength(1);
+      expect(body.tables[0].name).toBe('keep_this');
+    });
+
+    it('should delete all rows when dropping table', async () => {
+      const stub = getUniqueDoSqlStub();
+
+      // Create table with data
+      await executeSQL(
+        stub,
+        'CREATE TABLE with_data (id INTEGER, value TEXT, PRIMARY KEY (id))'
+      );
+      await executeSQL(stub, "INSERT INTO with_data (id, value) VALUES (1, 'a')");
+      await executeSQL(stub, "INSERT INTO with_data (id, value) VALUES (2, 'b')");
+      await executeSQL(stub, "INSERT INTO with_data (id, value) VALUES (3, 'c')");
+
+      // Verify rows exist
+      let result = await querySQL(stub, 'SELECT * FROM with_data');
+      expect(result.rows).toHaveLength(3);
+
+      // Drop table
+      const dropResult = await executeSQL(stub, 'DROP TABLE with_data');
+      expect(dropResult.success).toBe(true);
+
+      // Recreate same table - should be empty
+      await executeSQL(
+        stub,
+        'CREATE TABLE with_data (id INTEGER, value TEXT, PRIMARY KEY (id))'
+      );
+
+      result = await querySQL(stub, 'SELECT * FROM with_data');
+      expect(result.success).toBe(true);
+      expect(result.rows).toHaveLength(0);
+    });
+  });
+
   describe('Isolation Between DO Instances', () => {
     it('should have isolated data between different named DOs', async () => {
       // Create two different DO instances

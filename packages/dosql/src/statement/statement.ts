@@ -717,17 +717,27 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   private executeInsert(sql: string, params: SqlValue[]): ExecutionResult {
-    // Parse the INSERT statement to extract table name, optional column list, and value tuples
+    // Parse the INSERT statement to extract table name, optional column list, and value tuples or SELECT
     const parsed = this.parseInsertStatement(sql);
     if (!parsed) {
       throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid INSERT syntax', sql);
     }
 
-    const { tableName, columnNames: explicitColumns, valueTuples } = parsed;
+    const { tableName, columnNames: explicitColumns, valueTuples, selectQuery } = parsed;
 
     const table = this.storage.tables.get(tableName);
     if (!table) {
       throw createTableNotFoundError(tableName, sql);
+    }
+
+    // Handle INSERT ... SELECT
+    if (selectQuery) {
+      return this.executeInsertSelect(table, tableName, explicitColumns, selectQuery, params, sql);
+    }
+
+    // Handle INSERT ... VALUES
+    if (!valueTuples) {
+      throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid INSERT syntax', sql);
     }
 
     // Determine column names
@@ -796,15 +806,81 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   /**
+   * Execute INSERT ... SELECT statement
+   * Runs the SELECT query and inserts all result rows into the target table
+   */
+  private executeInsertSelect(
+    table: InMemoryTable,
+    tableName: string,
+    explicitColumns: string[] | null,
+    selectQuery: string,
+    params: SqlValue[],
+    sql: string
+  ): ExecutionResult {
+    // Execute the SELECT query
+    const selectResult = this.executeSelect(selectQuery, params);
+
+    // Determine column names to insert into
+    const columnNames = explicitColumns ?? table.columns.map(c => c.name);
+
+    let totalChanges = 0;
+    const pkCol = this.findPrimaryKeyColumn(table);
+
+    for (const selectRow of selectResult.rows) {
+      // Get values from SELECT result in order
+      const selectKeys = Object.keys(selectRow);
+
+      // Validate column count matches if no explicit column list
+      if (selectKeys.length !== columnNames.length) {
+        throw new StatementError(
+          StatementErrorCode.INVALID_SQL,
+          `INSERT has ${columnNames.length} columns but SELECT returns ${selectKeys.length} values`,
+          sql
+        );
+      }
+
+      // Build row from SELECT result
+      const row: Record<string, SqlValue> = {};
+      for (let i = 0; i < columnNames.length; i++) {
+        const colName = columnNames[i];
+        const selectKey = selectKeys[i];
+        row[colName] = selectRow[selectKey];
+      }
+
+      // Handle auto-increment for INTEGER PRIMARY KEY columns
+      if (pkCol && (row[pkCol] === null || row[pkCol] === undefined)) {
+        row[pkCol] = table.autoIncrement++;
+      }
+
+      // Enforce unique index constraints
+      this.checkUniqueConstraints(tableName, row, sql);
+
+      table.rows.push(row);
+      this.storage.lastInsertRowid = row['id'] ?? row[pkCol ?? ''] ?? table.rows.length;
+      totalChanges++;
+    }
+
+    return {
+      rows: [],
+      columns: [],
+      changes: totalChanges,
+      lastInsertRowid: this.storage.lastInsertRowid,
+    };
+  }
+
+  /**
    * Parse an INSERT statement, supporting:
    * - INSERT INTO t (cols) VALUES (v1), (v2), ...
    * - INSERT INTO t VALUES (v1), (v2), ...
+   * - INSERT INTO t SELECT ...
+   * - INSERT INTO t (cols) SELECT ...
    * - Quoted table names
    */
   private parseInsertStatement(sql: string): {
     tableName: string;
     columnNames: string[] | null;
-    valueTuples: string[][];
+    valueTuples?: string[][];
+    selectQuery?: string;
   } | null {
     // Match: INSERT INTO table_name
     const headerMatch = sql.match(/^INSERT\s+INTO\s+(?:"([^"]+)"|(\w+))\s*/i);
@@ -816,18 +892,42 @@ export class InMemoryEngine implements ExecutionEngine {
     // Check for optional column list
     let columnNames: string[] | null = null;
     if (rest.startsWith('(')) {
-      // Find closing paren for column list (before VALUES keyword)
+      // Find closing paren for column list (before VALUES or SELECT keyword)
       const upperRest = rest.toUpperCase();
       const valuesIdx = upperRest.indexOf('VALUES');
-      if (valuesIdx === -1) return null;
+      const selectIdx = upperRest.indexOf('SELECT');
 
-      const colListStr = rest.slice(0, valuesIdx).trim();
+      // Find which comes first (or use the one that exists)
+      let endIdx = -1;
+      if (valuesIdx !== -1 && selectIdx !== -1) {
+        endIdx = Math.min(valuesIdx, selectIdx);
+      } else if (valuesIdx !== -1) {
+        endIdx = valuesIdx;
+      } else if (selectIdx !== -1) {
+        endIdx = selectIdx;
+      }
+
+      if (endIdx === -1) return null;
+
+      const colListStr = rest.slice(0, endIdx).trim();
       // colListStr should be "(col1, col2, ...)"
       const colMatch = colListStr.match(/^\(([^)]+)\)\s*$/);
       if (colMatch) {
         columnNames = colMatch[1].split(',').map(c => c.trim());
-        rest = rest.slice(valuesIdx);
+        rest = rest.slice(endIdx);
       }
+    }
+
+    // Check for SELECT (INSERT ... SELECT)
+    const selectMatch = rest.match(/^SELECT\s+/i);
+    if (selectMatch) {
+      // Extract the SELECT query (everything after INSERT INTO table)
+      // Remove trailing semicolon if present
+      let selectQuery = rest.trim();
+      if (selectQuery.endsWith(';')) {
+        selectQuery = selectQuery.slice(0, -1).trim();
+      }
+      return { tableName, columnNames, selectQuery };
     }
 
     // Now rest should start with VALUES
@@ -2296,47 +2396,6 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   /**
-   * Count columns in a SELECT clause (for subquery validation)
-   */
-  private countSubqueryColumns(subquery: string): number {
-    // Execute the subquery to get actual column count
-    // This is needed for SELECT * or complex expressions
-    const result = this.execute(subquery, []);
-    if (result.rows.length === 0) {
-      // Empty result, need to parse SELECT clause
-      // For SELECT *, we can't know without schema
-      // For explicit columns, count commas outside parentheses
-      const upperQuery = subquery.toUpperCase();
-      const selectIdx = upperQuery.indexOf('SELECT');
-      const fromIdx = upperQuery.indexOf('FROM');
-
-      if (selectIdx === -1) return 1;
-
-      const endIdx = fromIdx !== -1 ? fromIdx : subquery.length;
-      const selectClause = subquery.slice(selectIdx + 6, endIdx).trim();
-
-      // Check for SELECT *
-      if (selectClause.trim() === '*') {
-        // Need schema info, assume multi-column for safety
-        return 2;
-      }
-
-      // Count columns by splitting on commas outside parentheses
-      let depth = 0;
-      let count = 1;
-      for (const char of selectClause) {
-        if (char === '(') depth++;
-        else if (char === ')') depth--;
-        else if (char === ',' && depth === 0) count++;
-      }
-      return count;
-    }
-
-    // Use actual result to count columns
-    return Object.keys(result.rows[0]).length;
-  }
-
-  /**
    * Parse scalar comparison with subquery: col > (SELECT ...)
    */
   private parseScalarComparison(whereClause: string): { column: string; op: string; subquery: string } | null {
@@ -2547,6 +2606,148 @@ export class InMemoryEngine implements ExecutionEngine {
   }
 
   /**
+   * Parse FROM clause handling both comma-separated tables and JOIN syntax
+   * Supports: CROSS JOIN, INNER JOIN, LEFT [OUTER] JOIN, RIGHT [OUTER] JOIN, FULL [OUTER] JOIN, JOIN
+   */
+  private parseFromClauseWithJoins(fromClause: string): Array<{ tableName: string; alias: string }> {
+    const tableRefs: Array<{ tableName: string; alias: string }> = [];
+
+    // Match pattern for JOIN keywords (order matters - longer matches first)
+    // These patterns match: CROSS JOIN, LEFT OUTER JOIN, LEFT JOIN, etc.
+    const joinPattern = /\b(CROSS\s+JOIN|LEFT\s+OUTER\s+JOIN|RIGHT\s+OUTER\s+JOIN|FULL\s+OUTER\s+JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|FULL\s+JOIN|NATURAL\s+JOIN|JOIN)\b/gi;
+
+    // Split by JOIN keywords but keep track of positions
+    let lastEnd = 0;
+    let match: RegExpExecArray | null;
+    const segments: Array<{ text: string; isJoin: boolean }> = [];
+
+    // Reset lastIndex for regex
+    joinPattern.lastIndex = 0;
+
+    while ((match = joinPattern.exec(fromClause)) !== null) {
+      // Add the text before this JOIN
+      if (match.index > lastEnd) {
+        const beforeText = fromClause.slice(lastEnd, match.index).trim();
+        if (beforeText) {
+          segments.push({ text: beforeText, isJoin: false });
+        }
+      }
+      // Mark that we found a JOIN (the table reference follows)
+      segments.push({ text: match[0], isJoin: true });
+      lastEnd = match.index + match[0].length;
+    }
+
+    // Add remaining text after last JOIN (or the whole string if no JOINs)
+    if (lastEnd < fromClause.length) {
+      const remaining = fromClause.slice(lastEnd).trim();
+      if (remaining) {
+        segments.push({ text: remaining, isJoin: false });
+      }
+    }
+
+    // Now process segments
+    // The first segment (if not a JOIN keyword) should be table references (possibly comma-separated)
+    // After each JOIN keyword, the next segment is a table reference (possibly with ON clause)
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+
+      if (seg.isJoin) {
+        // This is a JOIN keyword, skip it - the next segment has the table
+        continue;
+      }
+
+      // Check if this segment follows a JOIN keyword
+      const prevIsJoin = i > 0 && segments[i - 1].isJoin;
+
+      if (prevIsJoin) {
+        // This is a table reference after a JOIN - extract table part (before ON clause)
+        const onPos = seg.text.toUpperCase().indexOf(' ON ');
+        const tablePart = onPos !== -1 ? seg.text.slice(0, onPos).trim() : seg.text.trim();
+
+        // Handle comma-separated tables after JOIN (rare but possible)
+        const commaParts = this.splitByCommaRespectingParens(tablePart);
+        for (const part of commaParts) {
+          if (part.trim()) {
+            tableRefs.push(this.parseTableReference(part.trim()));
+          }
+        }
+      } else {
+        // This is the initial FROM table(s) - could be comma-separated
+        const commaParts = this.splitByCommaRespectingParens(seg.text);
+        for (const part of commaParts) {
+          if (part.trim()) {
+            tableRefs.push(this.parseTableReference(part.trim()));
+          }
+        }
+      }
+    }
+
+    return tableRefs;
+  }
+
+  /**
+   * Split a string by comma, respecting parentheses (for subqueries)
+   */
+  private splitByCommaRespectingParens(str: string): string[] {
+    const parts: string[] = [];
+    let current = '';
+    let parenDepth = 0;
+    let inQuote = false;
+    let quoteChar = '';
+
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+
+      // Track string literals
+      if (!inQuote && (ch === "'" || ch === '"')) {
+        inQuote = true;
+        quoteChar = ch;
+        current += ch;
+        continue;
+      }
+      if (inQuote) {
+        current += ch;
+        if (ch === quoteChar) {
+          if (i + 1 < str.length && str[i + 1] === quoteChar) {
+            current += str[++i]; // Escaped quote
+          } else {
+            inQuote = false;
+          }
+        }
+        continue;
+      }
+
+      // Track parentheses
+      if (ch === '(') {
+        parenDepth++;
+        current += ch;
+        continue;
+      }
+      if (ch === ')') {
+        parenDepth--;
+        current += ch;
+        continue;
+      }
+
+      // Split on comma only at top level
+      if (ch === ',' && parenDepth === 0) {
+        parts.push(current);
+        current = '';
+        continue;
+      }
+
+      current += ch;
+    }
+
+    if (current.trim()) {
+      parts.push(current);
+    }
+
+    return parts;
+  }
+
+  /**
    * Parse a table reference: table AS alias, table alias, or just table
    * Supports both quoted ("table") and unquoted (table) table names
    */
@@ -2615,7 +2816,15 @@ export class InMemoryEngine implements ExecutionEngine {
     if (!upper.trimStart().startsWith('SELECT')) return null;
 
     // Find SELECT start
-    const selectStart = upper.indexOf('SELECT') + 6;
+    let selectStart = upper.indexOf('SELECT') + 6;
+
+    // Skip over ALL or DISTINCT keywords after SELECT
+    const afterSelectText = upper.slice(selectStart).trimStart();
+    if (afterSelectText.startsWith('ALL ') || afterSelectText.startsWith('ALL\t') || afterSelectText.startsWith('ALL\n')) {
+      selectStart = upper.indexOf('ALL', selectStart) + 3;
+    } else if (afterSelectText.startsWith('DISTINCT ') || afterSelectText.startsWith('DISTINCT\t') || afterSelectText.startsWith('DISTINCT\n')) {
+      selectStart = upper.indexOf('DISTINCT', selectStart) + 8;
+    }
 
     // Find FROM using CASE-aware search
     const fromPos = findKeywordOutsideCaseAndStrings(sql, selectStart, 'FROM');
@@ -2654,15 +2863,8 @@ export class InMemoryEngine implements ExecutionEngine {
 
     const fromClause = sql.slice(afterFromStart, fromClauseEnd).trim();
 
-    // Split by comma to get individual table references
-    const tableRefStrings = fromClause.split(',').map(s => s.trim());
-    const tableRefs: Array<{ tableName: string; alias: string }> = [];
-
-    for (const refStr of tableRefStrings) {
-      if (refStr) {
-        tableRefs.push(this.parseTableReference(refStr));
-      }
-    }
+    // Parse FROM clause handling both comma-separated tables and JOIN syntax
+    const tableRefs = this.parseFromClauseWithJoins(fromClause);
 
     if (tableRefs.length === 0) return null;
 

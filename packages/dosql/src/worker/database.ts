@@ -625,6 +625,11 @@ export class DoSQLDatabase extends DurableObject {
       return this.executeReplace(sql);
     }
 
+    // DROP TABLE
+    if (normalized.startsWith('DROP TABLE')) {
+      return this.executeDropTable(sql);
+    }
+
     throw new Error(`Unsupported SQL: ${sql.substring(0, 50)}...`);
   }
 
@@ -1510,6 +1515,64 @@ export class DoSQLDatabase extends DurableObject {
       : [];
 
     return { rows: resultRows, rowsAffected: insertedRows.length };
+  }
+
+  /**
+   * DROP TABLE implementation
+   */
+  private async executeDropTable(
+    sql: string
+  ): Promise<{ rows: Record<string, unknown>[]; rowsAffected: number }> {
+    // Parse: DROP TABLE [IF EXISTS] tablename
+    const match = sql.match(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i);
+    if (!match) {
+      throw new Error('Invalid DROP TABLE syntax');
+    }
+
+    const tableName = match[1];
+    const ifExists = /IF\s+EXISTS/i.test(sql);
+
+    // Check if table exists
+    const schema = this.tables.get(tableName);
+    if (!schema) {
+      if (ifExists) {
+        // IF EXISTS specified, silently succeed
+        return { rows: [], rowsAffected: 0 };
+      }
+      throw new Error(`no such table: ${tableName}`);
+    }
+
+    // Delete all rows from the B-tree
+    const prefix = `${tableName}:`;
+    const keysToDelete: string[] = [];
+
+    for await (const [key] of this.btree!.range(prefix, prefix + '\uffff')) {
+      keysToDelete.push(key);
+    }
+
+    for (const key of keysToDelete) {
+      await this.btree!.delete(key);
+    }
+
+    // Remove table from schema
+    this.tables.delete(tableName);
+
+    // Persist updated schemas
+    await this.persistSchemas();
+
+    // Write WAL entry for DROP TABLE
+    if (this.wal) {
+      await this.wal.append({
+        timestamp: Date.now(),
+        txnId: `txn_${Date.now()}`,
+        op: 'DELETE', // Use DELETE op to represent table drop
+        table: tableName,
+        before: new TextEncoder().encode(JSON.stringify({ _dropped: true, rowCount: keysToDelete.length })),
+      });
+      await this.wal.flush();
+    }
+
+    return { rows: [], rowsAffected: keysToDelete.length };
   }
 
   /**

@@ -1162,3 +1162,112 @@ describe('Comparison Operators in SELECT (sql-fzxw)', () => {
     });
   });
 });
+
+// =============================================================================
+// INSERT ... SELECT TESTS
+// =============================================================================
+
+describe('INSERT ... SELECT', () => {
+  let engine: InMemoryEngine;
+
+  beforeEach(() => {
+    engine = new InMemoryEngine();
+
+    // Create source table with data
+    engine.execute('CREATE TABLE tab0 (id INTEGER PRIMARY KEY, name TEXT, value INTEGER)', []);
+    engine.execute('INSERT INTO tab0 (id, name, value) VALUES (?, ?, ?)', [1, 'Alice', 100]);
+    engine.execute('INSERT INTO tab0 (id, name, value) VALUES (?, ?, ?)', [2, 'Bob', 200]);
+    engine.execute('INSERT INTO tab0 (id, name, value) VALUES (?, ?, ?)', [3, 'Charlie', 300]);
+
+    // Create target tables
+    engine.execute('CREATE TABLE tab1 (id INTEGER PRIMARY KEY, name TEXT, value INTEGER)', []);
+    engine.execute('CREATE TABLE tab2 (id INTEGER PRIMARY KEY, name TEXT, value INTEGER)', []);
+  });
+
+  it('should insert all rows from SELECT *', () => {
+    const result = engine.execute('INSERT INTO tab1 SELECT * FROM tab0', []);
+
+    expect(result.changes).toBe(3);
+
+    const rows = engine.execute('SELECT * FROM tab1', []).rows;
+    expect(rows).toHaveLength(3);
+    expect(rows.map(r => r.name)).toEqual(['Alice', 'Bob', 'Charlie']);
+    expect(rows.map(r => r.value)).toEqual([100, 200, 300]);
+  });
+
+  it('should insert rows from SELECT with WHERE clause', () => {
+    const result = engine.execute('INSERT INTO tab1 SELECT * FROM tab0 WHERE value > 150', []);
+
+    expect(result.changes).toBe(2);
+
+    const rows = engine.execute('SELECT * FROM tab1', []).rows;
+    expect(rows).toHaveLength(2);
+    expect(rows.map(r => r.name)).toEqual(['Bob', 'Charlie']);
+  });
+
+  it('should insert into table with explicit column list', () => {
+    engine.execute('CREATE TABLE target (a INTEGER, b TEXT)', []);
+
+    const result = engine.execute('INSERT INTO target (a, b) SELECT id, name FROM tab0', []);
+
+    expect(result.changes).toBe(3);
+
+    const rows = engine.execute('SELECT * FROM target', []).rows;
+    expect(rows).toHaveLength(3);
+    expect(rows[0].a).toBe(1);
+    expect(rows[0].b).toBe('Alice');
+  });
+
+  it('should insert into another table of same structure', () => {
+    const result = engine.execute('INSERT INTO tab2 SELECT * FROM tab0', []);
+
+    expect(result.changes).toBe(3);
+
+    const tab2Rows = engine.execute('SELECT * FROM tab2', []).rows;
+    const tab0Rows = engine.execute('SELECT * FROM tab0', []).rows;
+
+    expect(tab2Rows).toEqual(tab0Rows);
+  });
+
+  it('should handle INSERT ... SELECT with ORDER BY', () => {
+    const result = engine.execute('INSERT INTO tab1 SELECT * FROM tab0 ORDER BY value DESC', []);
+
+    expect(result.changes).toBe(3);
+
+    const rows = engine.execute('SELECT * FROM tab1', []).rows;
+    expect(rows).toHaveLength(3);
+    // Order should be preserved from INSERT
+    expect(rows.map(r => r.name)).toEqual(['Charlie', 'Bob', 'Alice']);
+  });
+
+  it('should handle INSERT ... SELECT with LIMIT', () => {
+    const result = engine.execute('INSERT INTO tab1 SELECT * FROM tab0 LIMIT 2', []);
+
+    expect(result.changes).toBe(2);
+
+    const rows = engine.execute('SELECT * FROM tab1', []).rows;
+    expect(rows).toHaveLength(2);
+  });
+
+  it('should handle empty SELECT result', () => {
+    const result = engine.execute('INSERT INTO tab1 SELECT * FROM tab0 WHERE value > 1000', []);
+
+    expect(result.changes).toBe(0);
+
+    const rows = engine.execute('SELECT * FROM tab1', []).rows;
+    expect(rows).toHaveLength(0);
+  });
+
+  it('should work with specific columns selected', () => {
+    engine.execute('CREATE TABLE partial (name TEXT, value INTEGER)', []);
+
+    const result = engine.execute('INSERT INTO partial SELECT name, value FROM tab0', []);
+
+    expect(result.changes).toBe(3);
+
+    const rows = engine.execute('SELECT * FROM partial', []).rows;
+    expect(rows).toHaveLength(3);
+    expect(rows[0].name).toBe('Alice');
+    expect(rows[0].value).toBe(100);
+  });
+});

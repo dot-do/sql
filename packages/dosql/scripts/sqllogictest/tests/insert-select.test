@@ -1,0 +1,89 @@
+# INSERT ... SELECT tests
+
+statement ok
+CREATE TABLE tab0(id INTEGER PRIMARY KEY, name TEXT, value INTEGER)
+
+statement ok
+INSERT INTO tab0(id, name, value) VALUES(1, 'Alice', 100)
+
+statement ok
+INSERT INTO tab0(id, name, value) VALUES(2, 'Bob', 200)
+
+statement ok
+INSERT INTO tab0(id, name, value) VALUES(3, 'Charlie', 300)
+
+# Create destination table
+statement ok
+CREATE TABLE tab1(id INTEGER PRIMARY KEY, name TEXT, value INTEGER)
+
+# Test INSERT ... SELECT (the previously failing case)
+statement ok
+INSERT INTO tab1 SELECT * FROM tab0
+
+# Verify the data was inserted
+query IIT rowsort
+SELECT id, name, value FROM tab1
+----
+1
+Alice
+100
+2
+Bob
+200
+3
+Charlie
+300
+
+# Test INSERT INTO tab2 SELECT * FROM tab0 (another failing case)
+statement ok
+CREATE TABLE tab2(id INTEGER PRIMARY KEY, name TEXT, value INTEGER)
+
+statement ok
+INSERT INTO tab2 SELECT * FROM tab0
+
+query IIT rowsort
+SELECT id, name, value FROM tab2
+----
+1
+Alice
+100
+2
+Bob
+200
+3
+Charlie
+300
+
+# Test INSERT with column list and SELECT
+statement ok
+CREATE TABLE tab3(a INTEGER, b TEXT)
+
+statement ok
+INSERT INTO tab3 (a, b) SELECT id, name FROM tab0
+
+query IT rowsort
+SELECT a, b FROM tab3
+----
+1
+Alice
+2
+Bob
+3
+Charlie
+
+# Test INSERT ... SELECT with WHERE clause
+statement ok
+CREATE TABLE tab4(id INTEGER PRIMARY KEY, name TEXT, value INTEGER)
+
+statement ok
+INSERT INTO tab4 SELECT * FROM tab0 WHERE value > 150
+
+query IIT rowsort
+SELECT id, name, value FROM tab4
+----
+2
+Bob
+200
+3
+Charlie
+300

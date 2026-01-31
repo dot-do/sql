@@ -839,6 +839,77 @@ describe('SQLLogicTest Arithmetic Expressions - RED Phase', () => {
       expect(row1['diff']).toBe(12);
     });
   });
+
+  // ===========================================================================
+  // SELECT ALL / SELECT DISTINCT WITH ARITHMETIC
+  // ===========================================================================
+
+  describe('SELECT ALL/DISTINCT with Arithmetic', () => {
+    beforeEach(() => {
+      db.exec(`
+        CREATE TABLE tab1 (id INTEGER, x INTEGER, y INTEGER, z INTEGER)
+      `);
+      db.exec(`INSERT INTO tab1 (id, x, y, z) VALUES (1, 10, 20, 30)`);
+      db.exec(`INSERT INTO tab1 (id, x, y, z) VALUES (2, 20, 40, 60)`);
+      db.exec(`INSERT INTO tab1 (id, x, y, z) VALUES (3, 30, 60, 90)`);
+    });
+
+    /**
+     * SELECT ALL with unary plus and multiplication
+     *
+     * SQLLogicTest: SELECT ALL ( + 39 ) * 15 FROM tab1
+     * Expected: 585, 585, 585
+     */
+    it('should evaluate SELECT ALL with unary plus in parentheses', () => {
+      const result = db.prepare('SELECT ALL ( + 39 ) * 15 FROM tab1').all();
+
+      expect(result.length).toBe(3);
+      expect((result[0] as Record<string, unknown>)['( + 39 ) * 15']).toBe(585);
+      expect((result[1] as Record<string, unknown>)['( + 39 ) * 15']).toBe(585);
+      expect((result[2] as Record<string, unknown>)['( + 39 ) * 15']).toBe(585);
+    });
+
+    /**
+     * SELECT ALL with simple multiplication and alias
+     *
+     * SQLLogicTest: SELECT ALL 13 * 21 AS col2
+     * Expected: 273
+     */
+    it('should evaluate SELECT ALL with multiplication and alias (no FROM)', () => {
+      const result = db.prepare('SELECT ALL 13 * 21 AS col2').all();
+
+      expect(result.length).toBe(1);
+      expect((result[0] as Record<string, unknown>)['col2']).toBe(273);
+    });
+
+    /**
+     * SELECT ALL with column arithmetic
+     *
+     * SQLLogicTest: SELECT ALL x + y FROM tab1
+     * Expected: 30, 60, 90
+     */
+    it('should evaluate SELECT ALL with column addition', () => {
+      const result = db.prepare('SELECT ALL x + y FROM tab1 ORDER BY id').all();
+
+      expect(result.length).toBe(3);
+      expect((result[0] as Record<string, unknown>)['x + y']).toBe(30);
+      expect((result[1] as Record<string, unknown>)['x + y']).toBe(60);
+      expect((result[2] as Record<string, unknown>)['x + y']).toBe(90);
+    });
+
+    /**
+     * SELECT DISTINCT with arithmetic
+     *
+     * SQLLogicTest: SELECT DISTINCT 1+1
+     * Expected: 2
+     */
+    it('should evaluate SELECT DISTINCT with arithmetic (no FROM)', () => {
+      const result = db.prepare('SELECT DISTINCT 1+1 AS result').all();
+
+      expect(result.length).toBe(1);
+      expect((result[0] as Record<string, unknown>)['result']).toBe(2);
+    });
+  });
 });
 
 // =============================================================================
