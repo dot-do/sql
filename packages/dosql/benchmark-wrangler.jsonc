@@ -1,0 +1,24 @@
+{
+  "name": "dosql-benchmark-compare",
+  "main": "benchmark-worker.ts",
+  "compatibility_date": "2026-01-01",
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "DOSQL_BENCHMARK", "class_name": "DoSQLBenchmarkDO" },
+      { "name": "DOSQLITE_BENCHMARK", "class_name": "DOSqliteBenchmarkDO" }
+    ]
+  },
+
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["DoSQLBenchmarkDO", "DOSqliteBenchmarkDO"] }
+  ],
+
+  "d1_databases": [
+    {
+      "binding": "BENCHMARK_D1",
+      "database_name": "dosql-benchmark",
+      "database_id": "cff4ee70-ea98-4a75-a684-6acb29aaf70f"
+    }
+  ]
+}
