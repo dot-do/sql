@@ -1,0 +1,57 @@
+{
+  "name": "dosql-massive-benchmark",
+  "main": "worker.ts",
+  "compatibility_date": "2024-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Durable Objects for sharded datasets
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "IMDB_SHARD",
+        "class_name": "IMDBShardDO"
+      },
+      {
+        "name": "WIKTIONARY_SHARD",
+        "class_name": "WiktionaryShardDO"
+      },
+      {
+        "name": "CRAWL_GRAPH_SHARD",
+        "class_name": "CrawlGraphShardDO"
+      }
+    ]
+  },
+
+  // R2 bucket for overflow/cold storage
+  "r2_buckets": [
+    {
+      "binding": "BENCHMARK_R2",
+      "bucket_name": "dosql-benchmark-data"
+    }
+  ],
+
+  // Migrations for DO SQLite
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "IMDBShardDO",
+        "WiktionaryShardDO",
+        "CrawlGraphShardDO"
+      ]
+    }
+  ],
+
+  // Production deployment
+  "env": {
+    "production": {
+      "name": "dosql-massive-benchmark-prod",
+      "routes": [
+        {
+          "pattern": "massive-benchmark.dosql.workers.dev/*",
+          "zone_name": "dosql.workers.dev"
+        }
+      ]
+    }
+  }
+}
