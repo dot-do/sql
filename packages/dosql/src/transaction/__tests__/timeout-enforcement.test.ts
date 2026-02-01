@@ -942,6 +942,86 @@ describe('Timeout During Blocking Operations', () => {
   });
 
   /**
+   * Waiting transaction should be notified and acquire lock when holder times out
+   */
+  it('should wake up waiting transaction when lock holder times out', async () => {
+    // This tests the actual notification mechanism where a transaction is
+    // actively waiting for a lock, and when the holder times out, the waiting
+    // transaction is notified (promise resolved) and acquires the lock
+    const walWriter = createMockWALWriter();
+    const manager1 = createTransactionManager({
+      walWriter,
+      lockManager,
+      timeoutConfig: {
+        defaultTimeoutMs: 150,
+        maxTimeoutMs: 60000,
+        gracePeriodMs: 30,
+        warningThresholdMs: 120,
+      },
+    });
+
+    // Transaction 1 acquires an exclusive lock
+    const ctx1 = await manager1.begin({ timeoutMs: 150 });
+    await lockManager.acquire({
+      txnId: ctx1.txnId,
+      resource: 'shared_resource',
+      lockType: LockType.EXCLUSIVE,
+      timestamp: Date.now(),
+    });
+
+    // Create a second transaction that will wait for the lock
+    const waiterTxnId = createTransactionId('waiter_txn');
+
+    // Track when the waiting transaction acquires the lock
+    let lockAcquiredTime: number | null = null;
+    const startWaitTime = Date.now();
+
+    // Start the lock acquisition (this will block until holder times out)
+    const acquirePromise = lockManager.acquire({
+      txnId: waiterTxnId,
+      resource: 'shared_resource',
+      lockType: LockType.EXCLUSIVE,
+      timestamp: Date.now(),
+      timeout: 5000, // Long timeout to ensure it waits for holder to timeout
+    }).then((result) => {
+      lockAcquiredTime = Date.now();
+      return result;
+    });
+
+    // Give time for the waiter to be added to the wait queue
+    await delay(20);
+
+    // Verify the waiter is in the wait queue
+    const lockState = lockManager.getState();
+    const resourceState = lockState.get('shared_resource');
+    expect(resourceState?.waiters).toContain(waiterTxnId);
+
+    // Wait for transaction 1 to time out (auto-rollback releases locks)
+    await delay(200);
+
+    // The waiting transaction should now acquire the lock
+    const result = await acquirePromise;
+
+    // Verify the lock was acquired
+    expect(result.acquired).toBe(true);
+    expect(result.grantedType).toBe(LockType.EXCLUSIVE);
+
+    // Verify the lock was acquired after the holder timed out
+    expect(lockAcquiredTime).not.toBeNull();
+    expect(lockAcquiredTime! - startWaitTime).toBeGreaterThanOrEqual(150);
+
+    // Verify the waiter holds the lock
+    expect(lockManager.getHeldLocks(waiterTxnId)).toHaveLength(1);
+    expect(lockManager.getHeldLocks(waiterTxnId)[0].resource).toBe('shared_resource');
+
+    // Original holder should not have any locks
+    expect(lockManager.getHeldLocks(ctx1.txnId)).toHaveLength(0);
+
+    // Cleanup
+    lockManager.releaseAll(waiterTxnId);
+  });
+
+  /**
    * Timeout should be tracked per-transaction
    */
   it('should track timeout independently for concurrent transactions', async () => {

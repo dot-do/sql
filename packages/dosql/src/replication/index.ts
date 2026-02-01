@@ -141,3 +141,20 @@ export {
   type ExtendedReplicationRouter,
   type LoadBalancingStrategy,
 } from './router.js';
+
+// =============================================================================
+// EMBEDDED REPLICA (Turso-style)
+// =============================================================================
+
+export {
+  createEmbeddedReplica,
+  createEmbeddedReplicaInstance,
+  createClient,
+  type EmbeddedReplicaConfig,
+  DEFAULT_EMBEDDED_CONFIG,
+  type SyncState,
+  type SyncResult,
+  type EmbeddedReplica,
+  type EmbeddedReplicaClient,
+  type CreateEmbeddedReplicaOptions,
+} from './embedded-replica.js';

@@ -35,7 +35,7 @@ import {
 /**
  * Partition buffer for flushing
  */
-export interface PartitionBuffer {
+export interface FlushPartitionBuffer {
   table: string;
   partitionKey: string | null;
   events: CDCEvent[];
@@ -162,7 +162,7 @@ export class FlushManager {
 
     try {
       // Group buffers by table
-      const byTable = new Map<string, PartitionBuffer[]>();
+      const byTable = new Map<string, FlushPartitionBuffer[]>();
       for (const pb of partitionBuffers) {
         let tableBuffers = byTable.get(pb.table);
         if (!tableBuffers) {
@@ -248,7 +248,7 @@ export class FlushManager {
    */
   async flushTable(
     tableName: string,
-    buffers: PartitionBuffer[]
+    buffers: FlushPartitionBuffer[]
   ): Promise<TableFlushResult> {
     const namespace = ['default'];
     const tableId: TableIdentifier = { namespace, name: tableName };
@@ -413,7 +413,7 @@ export async function recoverFromFallback(
     }
 
     for (const [tableName, tableEvents] of byTable) {
-      const buffers: PartitionBuffer[] = [{
+      const buffers: FlushPartitionBuffer[] = [{
         table: tableName,
         partitionKey: null,
         events: tableEvents,
@@ -464,7 +464,7 @@ export function determineOptimalFlushTrigger(
 ): FlushTrigger | null {
   // Check thresholds in order of priority
   if (sizeBytes >= config.flushThresholdBytes) {
-    return 'threshold_bytes';
+    return 'threshold_size';
   }
 
   if (eventCount >= config.flushThresholdEvents) {

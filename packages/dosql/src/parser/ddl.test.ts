@@ -685,6 +685,102 @@ describe('CREATE TABLE', () => {
       expect(result.statement.columns).toHaveLength(0);
     });
   });
+
+  describe('WITH STORAGE clause', () => {
+    it('should parse CREATE TABLE with single storage setting', () => {
+      const sql = "CREATE TABLE users (id INTEGER PRIMARY KEY) WITH STORAGE (rowGroupSize = '4MB')";
+      const result = parseCreateTable(sql);
+
+      expect(isParseSuccess(result)).toBe(true);
+      if (!isParseSuccess(result)) return;
+
+      expect(result.statement.name).toBe('users');
+      expect(result.statement.storageConfig).toBeDefined();
+      expect(result.statement.storageConfig?.rowGroupSize).toBe(4 * 1024 * 1024);
+    });
+
+    it('should parse CREATE TABLE with multiple storage settings', () => {
+      const sql = "CREATE TABLE users (id INTEGER PRIMARY KEY) WITH STORAGE (rowGroupSize = '4MB', parquetFileSize = '256MB')";
+      const result = parseCreateTable(sql);
+
+      expect(isParseSuccess(result)).toBe(true);
+      if (!isParseSuccess(result)) return;
+
+      expect(result.statement.storageConfig).toBeDefined();
+      expect(result.statement.storageConfig?.rowGroupSize).toBe(4 * 1024 * 1024);
+      expect(result.statement.storageConfig?.parquetFileSize).toBe(256 * 1024 * 1024);
+    });
+
+    it('should parse CREATE TABLE with all storage settings', () => {
+      const sql = `CREATE TABLE analytics (id INTEGER PRIMARY KEY, data TEXT) WITH STORAGE (
+        chunkSize = '1MB',
+        maxPageSize = '2MB',
+        rowGroupSize = '4MB',
+        maxRowsPerRowGroup = 32768,
+        hotStorageMaxSize = '200MB',
+        hotDataMaxAge = 7200000,
+        maxHotFileSize = '20MB',
+        parquetFileSize = '1GB'
+      )`;
+      const result = parseCreateTable(sql);
+
+      expect(isParseSuccess(result)).toBe(true);
+      if (!isParseSuccess(result)) return;
+
+      expect(result.statement.storageConfig).toBeDefined();
+      const config = result.statement.storageConfig!;
+      expect(config.chunkSize).toBe(1 * 1024 * 1024);
+      expect(config.maxPageSize).toBe(2 * 1024 * 1024);
+      expect(config.rowGroupSize).toBe(4 * 1024 * 1024);
+      expect(config.maxRowsPerRowGroup).toBe(32768);
+      expect(config.hotStorageMaxSize).toBe(200 * 1024 * 1024);
+      expect(config.hotDataMaxAge).toBe(7200000);
+      expect(config.maxHotFileSize).toBe(20 * 1024 * 1024);
+      expect(config.parquetFileSize).toBe(1 * 1024 * 1024 * 1024);
+    });
+
+    it('should parse CREATE TABLE with WITH STORAGE and other options', () => {
+      const sql = "CREATE TABLE users (id INTEGER PRIMARY KEY) STRICT WITH STORAGE (rowGroupSize = '4MB')";
+      const result = parseCreateTable(sql);
+
+      expect(isParseSuccess(result)).toBe(true);
+      if (!isParseSuccess(result)) return;
+
+      expect(result.statement.strict).toBe(true);
+      expect(result.statement.storageConfig?.rowGroupSize).toBe(4 * 1024 * 1024);
+    });
+
+    it('should parse CREATE TABLE with WITHOUT ROWID and WITH STORAGE', () => {
+      const sql = "CREATE TABLE users (id INTEGER PRIMARY KEY) WITHOUT ROWID WITH STORAGE (chunkSize = '512KB')";
+      const result = parseCreateTable(sql);
+
+      expect(isParseSuccess(result)).toBe(true);
+      if (!isParseSuccess(result)) return;
+
+      expect(result.statement.withoutRowId).toBe(true);
+      expect(result.statement.storageConfig?.chunkSize).toBe(512 * 1024);
+    });
+
+    it('should parse CREATE TABLE without storage config', () => {
+      const sql = 'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)';
+      const result = parseCreateTable(sql);
+
+      expect(isParseSuccess(result)).toBe(true);
+      if (!isParseSuccess(result)) return;
+
+      expect(result.statement.storageConfig).toBeUndefined();
+    });
+
+    it('should parse unquoted storage values', () => {
+      const sql = 'CREATE TABLE users (id INTEGER PRIMARY KEY) WITH STORAGE (maxRowsPerRowGroup = 65536)';
+      const result = parseCreateTable(sql);
+
+      expect(isParseSuccess(result)).toBe(true);
+      if (!isParseSuccess(result)) return;
+
+      expect(result.statement.storageConfig?.maxRowsPerRowGroup).toBe(65536);
+    });
+  });
 });
 
 // =============================================================================

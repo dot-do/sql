@@ -471,7 +471,7 @@ export interface CoordinatorResult {
     shardName: string;
     eventsForwarded: number;
     success: boolean;
-    error?: string;
+    error?: string | undefined;
   }>;
 
   /** Whether we are in single-shard mode */

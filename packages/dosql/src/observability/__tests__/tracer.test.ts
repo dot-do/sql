@@ -234,6 +234,10 @@ describe('TracerImpl - withSpanAsync', () => {
 
     expect(span.status).toBe('ERROR');
     expect(span.statusMessage).toBe('async boom');
+    expect(span.events.length).toBe(1);
+    expect(span.events[0].name).toBe('exception');
+    expect(span.events[0].attributes?.get('exception.type')).toBe('Error');
+    expect(span.events[0].attributes?.get('exception.message')).toBe('async boom');
   });
 });
 

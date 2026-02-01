@@ -338,6 +338,8 @@ export interface CreateTableStatement {
   strict?: boolean;
   /** AS SELECT clause for CREATE TABLE ... AS SELECT */
   asSelect?: string;
+  /** Storage configuration from WITH STORAGE clause */
+  storageConfig?: import('../engine/storage-config.js').TableStorageConfig;
 }
 
 /**

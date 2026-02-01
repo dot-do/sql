@@ -43,6 +43,8 @@ import type {
   ParseError,
 } from './ddl-types.js';
 
+import { parseWithStorageClause, type TableStorageConfig } from '../engine/storage-config.js';
+
 // =============================================================================
 // TOKENIZER
 // =============================================================================
@@ -107,9 +109,11 @@ const KEYWORDS = new Set([
   'ASC',
   'DESC',
   'COLLATE',
+  'WITH',
   'WITHOUT',
   'ROWID',
   'STRICT',
+  'STORAGE',
   'AS',
   'SELECT',
   'FROM',
@@ -1042,6 +1046,7 @@ class Parser {
     // Table options
     let withoutRowId = false;
     let strict = false;
+    let storageConfig: TableStorageConfig | undefined;
 
     while (true) {
       if (this.consumeKeyword('WITHOUT')) {
@@ -1049,6 +1054,35 @@ class Parser {
         withoutRowId = true;
       } else if (this.consumeKeyword('STRICT')) {
         strict = true;
+      } else if (this.consumeKeyword('WITH')) {
+        // Parse WITH STORAGE clause
+        if (this.consumeKeyword('STORAGE')) {
+          // Use the storage config parser which handles the full syntax
+          // We need to reconstruct the WITH STORAGE clause for parsing
+          const storageClauseStart = this.current().position;
+          this.expect('PUNCTUATION', '(');
+
+          // Collect all tokens until the closing paren
+          const parts: string[] = [];
+          let depth = 1;
+          while (depth > 0 && this.current().type !== 'EOF') {
+            const token = this.current();
+            if (token.value === '(') depth++;
+            if (token.value === ')') depth--;
+            if (depth > 0) {
+              parts.push(token.value);
+              this.advance();
+            }
+          }
+          this.expect('PUNCTUATION', ')');
+
+          // Reconstruct the WITH STORAGE clause for the parser
+          const storageClause = `WITH STORAGE (${parts.join(' ')})`;
+          storageConfig = parseWithStorageClause(storageClause) ?? undefined;
+        } else {
+          // Unknown WITH clause, break
+          break;
+        }
       } else {
         break;
       }
@@ -1064,6 +1098,7 @@ class Parser {
       constraints: tableConstraints,
       withoutRowId,
       strict,
+      storageConfig,
     };
   }
 

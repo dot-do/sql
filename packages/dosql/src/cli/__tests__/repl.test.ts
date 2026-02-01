@@ -7,6 +7,8 @@
  * - Multi-line statement detection
  * - History management
  * - Connection modes (local, HTTP, WebSocket)
+ * - Tab completion for SQL keywords, table names, and column names
+ * - Syntax highlighting for SQL
  *
  * @module cli/__tests__/repl.test
  */
@@ -21,9 +23,16 @@ import {
   HistoryManager,
   createHTTPConnection,
   createWebSocketConnection,
+  TabCompleter,
+  SQL_KEYWORDS,
+  DOT_COMMANDS,
+  COLORS,
+  highlightSQL,
+  tokenizeForHighlight,
   type ExecutionResult,
   type CommandResult,
   type REPLConfig,
+  type CompletionResult,
 } from '../repl.js';
 
 // =============================================================================
@@ -1360,6 +1369,508 @@ describe('BunREPL', () => {
       const status = repl.getStatus();
 
       expect(status).toContain('http');
+    });
+  });
+
+  describe('Tab Completion', () => {
+    it('should have tab completer accessible', () => {
+      const repl = new BunREPL({ mode: 'local' });
+
+      expect(repl.completer).toBeDefined();
+    });
+
+    it('should be disabled when completionEnabled is false', () => {
+      const repl = new BunREPL({
+        mode: 'local',
+        completionEnabled: false,
+      });
+
+      const result = repl.getCompletions('SEL');
+
+      expect(result.completions).toHaveLength(0);
+    });
+
+    it('should provide completions through BunREPL', () => {
+      const repl = new BunREPL({ mode: 'local' });
+
+      const result = repl.getCompletions('SEL');
+
+      expect(result.completions).toContain('SELECT');
+    });
+
+    it('should apply completion through BunREPL', () => {
+      const repl = new BunREPL({ mode: 'local' });
+
+      const completed = repl.applyCompletion('SEL');
+
+      expect(completed).toBe('SELECT');
+    });
+  });
+
+  describe('Syntax Highlighting', () => {
+    it('should be enabled by default', () => {
+      const repl = new BunREPL({ mode: 'local' });
+
+      expect(repl.highlightEnabled).toBe(true);
+    });
+
+    it('should be disabled when highlightEnabled is false', () => {
+      const repl = new BunREPL({
+        mode: 'local',
+        highlightEnabled: false,
+      });
+
+      expect(repl.highlightEnabled).toBe(false);
+    });
+
+    it('should highlight SQL through BunREPL', () => {
+      const repl = new BunREPL({ mode: 'local' });
+
+      const highlighted = repl.highlight('SELECT * FROM users');
+
+      // Should contain ANSI codes
+      expect(highlighted).toContain('\x1b[');
+    });
+
+    it('should not highlight when disabled', () => {
+      const repl = new BunREPL({
+        mode: 'local',
+        highlightEnabled: false,
+      });
+
+      const result = repl.highlight('SELECT * FROM users');
+
+      // Should not contain ANSI codes
+      expect(result).not.toContain('\x1b[');
+      expect(result).toBe('SELECT * FROM users');
+    });
+
+    it('should allow toggling highlighting', () => {
+      const repl = new BunREPL({ mode: 'local' });
+
+      expect(repl.highlightEnabled).toBe(true);
+      repl.setHighlightEnabled(false);
+      expect(repl.highlightEnabled).toBe(false);
+    });
+  });
+});
+
+// =============================================================================
+// 7. TAB COMPLETION
+// =============================================================================
+
+describe('Tab Completion', () => {
+  describe('TabCompleter', () => {
+    it('should complete SQL keywords', () => {
+      const completer = new TabCompleter();
+
+      const result = completer.complete('SEL');
+
+      expect(result.completions).toContain('SELECT');
+      expect(result.word).toBe('SEL');
+    });
+
+    it('should be case-insensitive for matching', () => {
+      const completer = new TabCompleter();
+
+      const result = completer.complete('sel');
+
+      expect(result.completions).toContain('SELECT');
+    });
+
+    it('should return multiple matches', () => {
+      const completer = new TabCompleter();
+
+      const result = completer.complete('SUM');
+
+      expect(result.completions).toContain('SUM');
+      // 'SUM' is both a complete keyword, check that it matches
+      expect(result.completions.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should complete dot commands', () => {
+      const completer = new TabCompleter();
+
+      const result = completer.complete('.he');
+
+      expect(result.completions).toContain('.help');
+      expect(result.completions).toContain('.headers');
+    });
+
+    it('should complete table names when schema is set', () => {
+      const completer = new TabCompleter();
+      completer.addTable('users', ['id', 'name', 'email']);
+      completer.addTable('orders', ['id', 'user_id', 'total']);
+
+      const result = completer.complete('SELECT * FROM u');
+
+      expect(result.completions).toContain('users');
+    });
+
+    it('should complete column names after table prefix', () => {
+      const completer = new TabCompleter();
+      completer.addTable('users', ['id', 'name', 'email']);
+
+      const result = completer.complete('SELECT users.');
+
+      expect(result.completions).toContain('id');
+      expect(result.completions).toContain('name');
+      expect(result.completions).toContain('email');
+    });
+
+    it('should return empty completions when disabled', () => {
+      const completer = new TabCompleter();
+      completer.setEnabled(false);
+
+      const result = completer.complete('SEL');
+
+      expect(result.completions).toHaveLength(0);
+    });
+
+    it('should find common prefix for multiple completions', () => {
+      const completer = new TabCompleter();
+
+      // "IN" should match INSERT, INTO, INNER, INT, INTEGER, etc.
+      const completed = completer.getCompletion('IN', undefined, 0);
+
+      // Should get common prefix or first match
+      expect(completed).toBeDefined();
+      expect(completed?.toUpperCase().startsWith('IN')).toBe(true);
+    });
+
+    it('should cycle through completions with index', () => {
+      const completer = new TabCompleter();
+
+      const first = completer.getCompletion('.', undefined, 1);
+      const second = completer.getCompletion('.', undefined, 2);
+
+      expect(first).toBeDefined();
+      expect(second).toBeDefined();
+      expect(first).not.toBe(second);
+    });
+
+    it('should return null for no matches', () => {
+      const completer = new TabCompleter();
+
+      const result = completer.getCompletion('xyz123nonexistent');
+
+      expect(result).toBeNull();
+    });
+
+    it('should clear schema', () => {
+      const completer = new TabCompleter();
+      completer.addTable('users', ['id']);
+
+      completer.clearSchema();
+      const result = completer.complete('SELECT * FROM u');
+
+      expect(result.completions).not.toContain('users');
+    });
+
+    it('should complete after FROM keyword', () => {
+      const completer = new TabCompleter();
+      completer.addTable('users', ['id', 'name']);
+      completer.addTable('products', ['id', 'title']);
+
+      const result = completer.complete('SELECT * FROM ');
+
+      // Should primarily suggest tables after FROM
+      expect(result.completions).toContain('users');
+      expect(result.completions).toContain('products');
+    });
+
+    it('should complete after JOIN keyword', () => {
+      const completer = new TabCompleter();
+      completer.addTable('users', ['id']);
+      completer.addTable('orders', ['id', 'user_id']);
+
+      const result = completer.complete('SELECT * FROM users JOIN o');
+
+      expect(result.completions).toContain('orders');
+    });
+
+    it('should complete after UPDATE keyword', () => {
+      const completer = new TabCompleter();
+      completer.addTable('users', ['id', 'name']);
+
+      const result = completer.complete('UPDATE u');
+
+      expect(result.completions).toContain('users');
+    });
+
+    it('should complete after INSERT INTO keyword', () => {
+      const completer = new TabCompleter();
+      completer.addTable('users', ['id', 'name']);
+
+      const result = completer.complete('INSERT INTO u');
+
+      expect(result.completions).toContain('users');
+    });
+  });
+
+  describe('SQL_KEYWORDS', () => {
+    it('should contain common DML keywords', () => {
+      expect(SQL_KEYWORDS).toContain('SELECT');
+      expect(SQL_KEYWORDS).toContain('FROM');
+      expect(SQL_KEYWORDS).toContain('WHERE');
+      expect(SQL_KEYWORDS).toContain('INSERT');
+      expect(SQL_KEYWORDS).toContain('UPDATE');
+      expect(SQL_KEYWORDS).toContain('DELETE');
+    });
+
+    it('should contain common DDL keywords', () => {
+      expect(SQL_KEYWORDS).toContain('CREATE');
+      expect(SQL_KEYWORDS).toContain('TABLE');
+      expect(SQL_KEYWORDS).toContain('DROP');
+      expect(SQL_KEYWORDS).toContain('ALTER');
+      expect(SQL_KEYWORDS).toContain('INDEX');
+    });
+
+    it('should contain data type keywords', () => {
+      expect(SQL_KEYWORDS).toContain('INTEGER');
+      expect(SQL_KEYWORDS).toContain('TEXT');
+      expect(SQL_KEYWORDS).toContain('BLOB');
+      expect(SQL_KEYWORDS).toContain('REAL');
+    });
+
+    it('should contain window function keywords', () => {
+      expect(SQL_KEYWORDS).toContain('OVER');
+      expect(SQL_KEYWORDS).toContain('PARTITION');
+      expect(SQL_KEYWORDS).toContain('ROW_NUMBER');
+      expect(SQL_KEYWORDS).toContain('RANK');
+    });
+
+    it('should be sorted', () => {
+      const sorted = [...SQL_KEYWORDS].sort();
+      expect(SQL_KEYWORDS).toEqual(sorted);
+    });
+  });
+
+  describe('DOT_COMMANDS', () => {
+    it('should contain expected commands', () => {
+      expect(DOT_COMMANDS).toContain('.help');
+      expect(DOT_COMMANDS).toContain('.quit');
+      expect(DOT_COMMANDS).toContain('.tables');
+      expect(DOT_COMMANDS).toContain('.schema');
+      expect(DOT_COMMANDS).toContain('.mode');
+    });
+
+    it('should be sorted', () => {
+      const sorted = [...DOT_COMMANDS].sort();
+      expect(DOT_COMMANDS).toEqual(sorted);
+    });
+  });
+});
+
+// =============================================================================
+// 8. SYNTAX HIGHLIGHTING
+// =============================================================================
+
+describe('Syntax Highlighting', () => {
+  describe('highlightSQL', () => {
+    it('should highlight keywords', () => {
+      const result = highlightSQL('SELECT');
+
+      expect(result).toContain(COLORS.keyword);
+      expect(result).toContain(COLORS.reset);
+    });
+
+    it('should highlight strings', () => {
+      const result = highlightSQL("'hello world'");
+
+      expect(result).toContain(COLORS.string);
+    });
+
+    it('should highlight numbers', () => {
+      const result = highlightSQL('42');
+
+      expect(result).toContain(COLORS.number);
+    });
+
+    it('should highlight comments', () => {
+      const result = highlightSQL('-- this is a comment');
+
+      expect(result).toContain(COLORS.comment);
+    });
+
+    it('should highlight block comments', () => {
+      const result = highlightSQL('/* block comment */');
+
+      expect(result).toContain(COLORS.comment);
+    });
+
+    it('should highlight operators', () => {
+      const result = highlightSQL('=');
+
+      expect(result).toContain(COLORS.operator);
+    });
+
+    it('should highlight functions', () => {
+      const result = highlightSQL('COUNT(*)');
+
+      expect(result).toContain(COLORS.function);
+    });
+
+    it('should not add colors when useColors is false', () => {
+      const result = highlightSQL('SELECT * FROM users', false);
+
+      expect(result).toBe('SELECT * FROM users');
+      expect(result).not.toContain('\x1b[');
+    });
+
+    it('should handle complex SQL', () => {
+      const sql = `
+        SELECT u.id, u.name, COUNT(o.id) as order_count
+        FROM users u
+        LEFT JOIN orders o ON u.id = o.user_id
+        WHERE u.created_at > '2024-01-01'
+        GROUP BY u.id
+        ORDER BY order_count DESC
+        LIMIT 10;
+      `;
+
+      const result = highlightSQL(sql);
+
+      // Should have multiple keywords highlighted
+      expect((result.match(/\x1b\[1;34m/g) || []).length).toBeGreaterThan(5);
+    });
+
+    it('should preserve whitespace', () => {
+      const sql = 'SELECT  *  FROM  users';
+      const result = highlightSQL(sql);
+
+      // Remove ANSI codes and check whitespace preserved
+      const stripped = result.replace(/\x1b\[[0-9;]*m/g, '');
+      expect(stripped).toBe(sql);
+    });
+
+    it('should handle quoted identifiers', () => {
+      const result = highlightSQL('SELECT "column name" FROM users');
+
+      expect(result).toContain(COLORS.identifier);
+    });
+
+    it('should handle decimal numbers', () => {
+      const result = highlightSQL('3.14159');
+
+      expect(result).toContain(COLORS.number);
+    });
+
+    it('should handle scientific notation', () => {
+      const result = highlightSQL('1.5e10');
+
+      expect(result).toContain(COLORS.number);
+    });
+
+    it('should handle escaped quotes in strings', () => {
+      const result = highlightSQL("'it''s'");
+
+      expect(result).toContain(COLORS.string);
+    });
+
+    it('should handle two-character operators', () => {
+      const sql = 'a <> b AND c >= d';
+      const result = highlightSQL(sql);
+
+      expect(result).toContain(COLORS.operator);
+    });
+  });
+
+  describe('tokenizeForHighlight', () => {
+    it('should tokenize keywords', () => {
+      const tokens = tokenizeForHighlight('SELECT');
+
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0].type).toBe('keyword');
+      expect(tokens[0].value).toBe('SELECT');
+    });
+
+    it('should tokenize identifiers', () => {
+      const tokens = tokenizeForHighlight('my_table');
+
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0].type).toBe('identifier');
+    });
+
+    it('should tokenize strings', () => {
+      const tokens = tokenizeForHighlight("'hello'");
+
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0].type).toBe('string');
+      expect(tokens[0].value).toBe("'hello'");
+    });
+
+    it('should tokenize numbers', () => {
+      const tokens = tokenizeForHighlight('123');
+
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0].type).toBe('number');
+    });
+
+    it('should tokenize operators', () => {
+      const tokens = tokenizeForHighlight('=');
+
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0].type).toBe('operator');
+    });
+
+    it('should tokenize punctuation', () => {
+      const tokens = tokenizeForHighlight('(');
+
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0].type).toBe('punctuation');
+    });
+
+    it('should tokenize whitespace', () => {
+      const tokens = tokenizeForHighlight('SELECT  *');
+
+      expect(tokens).toHaveLength(3);
+      expect(tokens[1].type).toBe('whitespace');
+    });
+
+    it('should tokenize comments', () => {
+      const tokens = tokenizeForHighlight('-- comment');
+
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0].type).toBe('comment');
+    });
+
+    it('should tokenize functions followed by parentheses', () => {
+      const tokens = tokenizeForHighlight('COUNT(*)');
+
+      // Should have: COUNT, (, *, )
+      expect(tokens.length).toBeGreaterThanOrEqual(2);
+      expect(tokens[0].type).toBe('function');
+      expect(tokens[0].value).toBe('COUNT');
+    });
+
+    it('should tokenize standalone aggregate keywords as keywords', () => {
+      const tokens = tokenizeForHighlight('COUNT');
+
+      // Without (), COUNT is a keyword (since it's in both lists)
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0].type).toBe('keyword');
+    });
+  });
+
+  describe('COLORS', () => {
+    it('should have reset code', () => {
+      expect(COLORS.reset).toBe('\x1b[0m');
+    });
+
+    it('should have keyword color', () => {
+      expect(COLORS.keyword).toBeDefined();
+      expect(COLORS.keyword).toContain('\x1b[');
+    });
+
+    it('should have all token type colors', () => {
+      expect(COLORS.string).toBeDefined();
+      expect(COLORS.number).toBeDefined();
+      expect(COLORS.comment).toBeDefined();
+      expect(COLORS.operator).toBeDefined();
+      expect(COLORS.function).toBeDefined();
+      expect(COLORS.identifier).toBeDefined();
+      expect(COLORS.punctuation).toBeDefined();
     });
   });
 });

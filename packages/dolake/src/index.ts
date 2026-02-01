@@ -726,7 +726,7 @@ export {
   determineOptimalFlushTrigger,
   groupEventsByTable,
   groupEventsByPartition,
-  type PartitionBuffer,
+  type FlushPartitionBuffer,
   type TableFlushResult,
   type FlushManagerDeps,
   type FlushManagerConfig,
@@ -777,3 +777,34 @@ export {
   type CoordinatorResult,
   DEFAULT_SHARDED_AGGREGATOR_CONFIG,
 } from './sharded-aggregator.js';
+
+// =============================================================================
+// Vortex Hot Partition Handling
+// =============================================================================
+
+export {
+  // Manager
+  HotPartitionManager,
+
+  // Factory functions
+  createHotPartitionManager,
+  createHighThroughputHotPartitionManager,
+  createLowLatencyHotPartitionManager,
+
+  // Compaction planning
+  planVortexAwareCompaction,
+
+  // Types
+  type HotPartitionConfig,
+  type PartitionTemperature,
+  type PartitionAccessMetrics,
+  type HotPartitionEntry,
+  type HotToParquetConversionResult,
+  type TemperatureAnalysis,
+  type TemperatureRecommendation,
+  type VortexAwareCompactionOptions,
+
+  // Constants
+  DEFAULT_HOT_PARTITION_CONFIG,
+  DEFAULT_VORTEX_COMPACTION_OPTIONS,
+} from './vortex-hot-partition.js';

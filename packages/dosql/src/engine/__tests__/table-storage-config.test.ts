@@ -184,4 +184,75 @@ describe('TableSchema with storageConfig', () => {
     expect(legacySchema).toBeDefined();
     expect(legacySchema?.storageConfig).toBeUndefined();
   });
+
+  it('DOEngine parses WITH STORAGE clause in CREATE TABLE', async () => {
+    // Create table with storage config via SQL
+    await engine.execute(
+      "CREATE TABLE analytics (id INTEGER PRIMARY KEY, data TEXT) WITH STORAGE (rowGroupSize = '4MB', parquetFileSize = '256MB')",
+    );
+
+    // Check schema has storageConfig
+    const schemasKey = '_meta:schemas';
+    const schemas = (await storage.get(schemasKey)) as TableSchema[] | undefined;
+    const analyticsSchema = schemas?.find(s => s.name === 'analytics');
+
+    expect(analyticsSchema).toBeDefined();
+    expect(analyticsSchema?.storageConfig).toBeDefined();
+    expect(analyticsSchema?.storageConfig?.rowGroupSize).toBe(4 * 1024 * 1024);
+    expect(analyticsSchema?.storageConfig?.parquetFileSize).toBe(256 * 1024 * 1024);
+  });
+
+  it('DOEngine parses all storage settings from WITH STORAGE clause', async () => {
+    // Create table with all storage settings
+    await engine.execute(`
+      CREATE TABLE full_config (id INTEGER PRIMARY KEY) WITH STORAGE (
+        chunkSize = '1MB',
+        maxPageSize = '2MB',
+        rowGroupSize = '4MB',
+        maxRowsPerRowGroup = 32768,
+        hotStorageMaxSize = '200MB',
+        hotDataMaxAge = 7200000,
+        maxHotFileSize = '20MB',
+        parquetFileSize = '1GB'
+      )
+    `);
+
+    // Check schema has all storageConfig settings
+    const schemasKey = '_meta:schemas';
+    const schemas = (await storage.get(schemasKey)) as TableSchema[] | undefined;
+    const fullConfigSchema = schemas?.find(s => s.name === 'full_config');
+
+    expect(fullConfigSchema).toBeDefined();
+    const config = fullConfigSchema?.storageConfig;
+    expect(config).toBeDefined();
+    expect(config?.chunkSize).toBe(1 * 1024 * 1024);
+    expect(config?.maxPageSize).toBe(2 * 1024 * 1024);
+    expect(config?.rowGroupSize).toBe(4 * 1024 * 1024);
+    expect(config?.maxRowsPerRowGroup).toBe(32768);
+    expect(config?.hotStorageMaxSize).toBe(200 * 1024 * 1024);
+    expect(config?.hotDataMaxAge).toBe(7200000);
+    expect(config?.maxHotFileSize).toBe(20 * 1024 * 1024);
+    expect(config?.parquetFileSize).toBe(1 * 1024 * 1024 * 1024);
+  });
+
+  it('DOEngine persists storage config across engine instances', async () => {
+    // Create table with storage config
+    await engine.execute(
+      "CREATE TABLE persistent (id INTEGER PRIMARY KEY) WITH STORAGE (rowGroupSize = '8MB')",
+    );
+
+    // Create a new engine instance
+    const engine2 = createDOEngine({ storage });
+
+    // Execute a query to ensure engine is initialized
+    await engine2.execute('SELECT * FROM persistent');
+
+    // Verify the storage config is still present
+    const schemasKey = '_meta:schemas';
+    const schemas = (await storage.get(schemasKey)) as TableSchema[] | undefined;
+    const persistentSchema = schemas?.find(s => s.name === 'persistent');
+
+    expect(persistentSchema?.storageConfig).toBeDefined();
+    expect(persistentSchema?.storageConfig?.rowGroupSize).toBe(8 * 1024 * 1024);
+  });
 });

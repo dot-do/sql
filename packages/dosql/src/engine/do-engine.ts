@@ -834,6 +834,52 @@ export class DOQueryEngine {
       return this.executeCreateTrigger(sql);
     }
 
+    // Use DDL parser for CREATE TABLE to support WITH STORAGE clause
+    const parseResult = parseDDL(sql);
+    if (isDDLParseSuccess(parseResult) && parseResult.statement.type === 'CREATE TABLE') {
+      const stmt = parseResult.statement;
+      const tableName = stmt.name;
+
+      // Parse columns from the AST
+      const columns: { name: string; type: string; nullable: boolean }[] = [];
+      let primaryKey = 'id';
+
+      for (const col of stmt.columns) {
+        const isNotNull = col.constraints.some(c => c.type === 'NOT NULL');
+        const isPk = col.constraints.some(c => c.type === 'PRIMARY KEY');
+        if (isPk) {
+          primaryKey = col.name;
+        }
+        columns.push({
+          name: col.name,
+          type: col.dataType.name,
+          nullable: !isNotNull,
+        });
+      }
+
+      // Check for table-level primary key constraint
+      for (const constraint of stmt.constraints) {
+        if (constraint.type === 'PRIMARY KEY' && constraint.columns.length > 0) {
+          primaryKey = constraint.columns[0].name;
+        }
+      }
+
+      const schema: TableSchema = {
+        name: tableName,
+        columns,
+        primaryKey,
+        storageConfig: stmt.storageConfig,
+      };
+      this.schemas.set(tableName, schema);
+      this.tables.set(tableName, new Map());
+
+      // Persist schemas
+      await this.config.storage.put('_meta:schemas', Array.from(this.schemas.values()));
+
+      return { success: true, rowsAffected: 0 };
+    }
+
+    // Fallback to regex-based parsing for backward compatibility
     const match = sql.match(/CREATE\s+TABLE\s+(\w+)\s*\(([\s\S]+)\)/i);
     if (!match) {
       return { success: false, rowsAffected: 0 };

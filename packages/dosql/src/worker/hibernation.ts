@@ -58,6 +58,8 @@ export interface WebSocketSessionState {
     bytesReceived: number;
     bytesSent: number;
   };
+  /** Custom idle timeout for this connection (ms) */
+  idleTimeout?: number;
 }
 
 /**
@@ -110,6 +112,18 @@ export interface HibernationStats {
 }
 
 /**
+ * Alarm cleanup configuration.
+ */
+export interface AlarmCleanupConfig {
+  /** Default idle timeout for connections (ms) */
+  defaultIdleTimeout: number;
+  /** Default transaction timeout (ms) */
+  defaultTransactionTimeout: number;
+  /** Minimum time between alarm checks (ms) */
+  minAlarmInterval: number;
+}
+
+/**
  * Cloudflare hibernatable WebSocket with attachment API
  */
 interface HibernatableWebSocket extends WebSocket {
@@ -150,6 +164,16 @@ export function HibernationMixin<T extends new (...args: any[]) => DurableObject
 
     /** @internal Track wake reasons */
     private wakeReason: 'message' | 'close' | 'error' | 'alarm' | 'fetch' | null = null;
+
+    /** @internal Alarm cleanup configuration */
+    protected alarmConfig: AlarmCleanupConfig = {
+      defaultIdleTimeout: 30000,
+      defaultTransactionTimeout: 30000,
+      minAlarmInterval: 1000,
+    };
+
+    /** @internal Next scheduled alarm time */
+    private nextAlarmTime: number | null = null;
 
     /**
      * Gets the DurableObjectState for WebSocket management.
@@ -199,6 +223,11 @@ export function HibernationMixin<T extends new (...args: any[]) => DurableObject
 
       // Attach session state (survives hibernation)
       (ws as HibernatableWebSocket).serializeAttachment(sessionState);
+
+      // Schedule cleanup alarm for this connection (async, don't await)
+      this.scheduleCleanupForConnection().catch(e => {
+        logger.error('Failed to schedule cleanup for connection', e instanceof Error ? e : new Error(String(e)));
+      });
     }
 
     /**
@@ -459,6 +488,211 @@ export function HibernationMixin<T extends new (...args: any[]) => DurableObject
       this.hibernationStats.totalSleeps++;
       // DO will hibernate automatically when this function returns
       // and there's no more work to do
+    }
+
+    // =========================================================================
+    // Alarm-based Cleanup
+    // =========================================================================
+
+    /**
+     * Schedules a cleanup alarm for the given time.
+     * Uses alarm coalescing to avoid multiple wakes - only schedules
+     * if this alarm is earlier than any existing alarm.
+     *
+     * @param cleanupTime - When to run cleanup (ms since epoch)
+     */
+    protected async scheduleCleanupAlarm(cleanupTime: number): Promise<void> {
+      const state = this.getState();
+      const now = Date.now();
+
+      // Don't schedule alarms in the past
+      if (cleanupTime <= now) {
+        cleanupTime = now + this.alarmConfig.minAlarmInterval;
+      }
+
+      // Check if we already have an earlier alarm scheduled
+      if (this.nextAlarmTime !== null && this.nextAlarmTime <= cleanupTime) {
+        return; // Existing alarm is earlier, no need to reschedule
+      }
+
+      // Schedule the alarm
+      try {
+        await state.storage.setAlarm(cleanupTime);
+        this.nextAlarmTime = cleanupTime;
+        logger.debug('Scheduled cleanup alarm', { cleanupTime: new Date(cleanupTime).toISOString() });
+      } catch (e) {
+        logger.error('Failed to schedule cleanup alarm', e instanceof Error ? e : new Error(String(e)));
+      }
+    }
+
+    /**
+     * Calculates the next cleanup time based on all active connections.
+     * Returns the earliest of:
+     * - Idle connection timeouts
+     * - Transaction timeouts
+     *
+     * @returns The next cleanup time (ms since epoch) or null if no cleanup needed
+     */
+    protected calculateNextCleanupTime(): number | null {
+      const sockets = this.getWebSockets();
+      if (sockets.length === 0) {
+        return null;
+      }
+
+      let earliestCleanup: number | null = null;
+      const now = Date.now();
+
+      for (const ws of sockets) {
+        const session = this.getSessionState(ws);
+        if (!session) continue;
+
+        // Check idle timeout
+        const idleTimeout = this.getIdleTimeoutForSocket(ws);
+        if (idleTimeout > 0) {
+          const idleExpiry = session.lastActivity + idleTimeout;
+          if (earliestCleanup === null || idleExpiry < earliestCleanup) {
+            earliestCleanup = idleExpiry;
+          }
+        }
+
+        // Check transaction timeout
+        if (session.transaction) {
+          const txExpiry = session.transaction.startedAt + session.transaction.timeout;
+          if (earliestCleanup === null || txExpiry < earliestCleanup) {
+            earliestCleanup = txExpiry;
+          }
+        }
+      }
+
+      return earliestCleanup;
+    }
+
+    /**
+     * Gets the idle timeout for a socket from its session state.
+     *
+     * @param ws - The WebSocket to check
+     * @returns The idle timeout in ms, or the default
+     */
+    private getIdleTimeoutForSocket(ws: WebSocket): number {
+      const session = this.getSessionState(ws);
+      if (session && 'idleTimeout' in session && typeof session.idleTimeout === 'number') {
+        return session.idleTimeout;
+      }
+      return this.alarmConfig.defaultIdleTimeout;
+    }
+
+    /**
+     * Handles alarm wake-up for cleanup tasks.
+     * Override this in subclass for custom cleanup logic.
+     *
+     * Default behavior:
+     * - Closes idle connections
+     * - Aborts expired transactions
+     * - Reschedules next cleanup alarm
+     */
+    async alarm(): Promise<void> {
+      this.wakeReason = 'alarm';
+      this.recordWake();
+      this.nextAlarmTime = null;
+
+      logger.debug('Alarm triggered for cleanup');
+
+      const now = Date.now();
+      const sockets = this.getWebSockets();
+
+      for (const ws of sockets) {
+        const session = this.getSessionState(ws);
+        if (!session) continue;
+
+        // Check for expired transaction
+        if (session.transaction) {
+          const txExpiry = session.transaction.startedAt + session.transaction.timeout;
+          if (now >= txExpiry) {
+            logger.info('Aborting expired transaction', {
+              txId: session.transaction.txId,
+              sessionId: session.sessionId,
+            });
+            await this.handleTransactionTimeout(ws, session);
+          }
+        }
+
+        // Check for idle connection
+        const idleTimeout = this.getIdleTimeoutForSocket(ws);
+        if (idleTimeout > 0) {
+          const idleExpiry = session.lastActivity + idleTimeout;
+          if (now >= idleExpiry) {
+            logger.info('Closing idle connection', {
+              sessionId: session.sessionId,
+              idleDuration: now - session.lastActivity,
+            });
+            await this.handleIdleTimeout(ws, session);
+          }
+        }
+      }
+
+      // Schedule next cleanup alarm
+      const nextCleanup = this.calculateNextCleanupTime();
+      if (nextCleanup !== null) {
+        await this.scheduleCleanupAlarm(nextCleanup);
+      }
+
+      this.scheduleHibernation();
+    }
+
+    /**
+     * Handles transaction timeout. Override in subclass to rollback transactions.
+     *
+     * @param ws - The WebSocket with the expired transaction
+     * @param session - The session state
+     */
+    protected async handleTransactionTimeout(
+      ws: WebSocket,
+      session: WebSocketSessionState
+    ): Promise<void> {
+      // Clear transaction state by getting current state and removing transaction
+      const current = this.getSessionState(ws);
+      if (current) {
+        const { transaction: _, ...rest } = current;
+        (ws as HibernatableWebSocket).serializeAttachment({ ...rest, lastActivity: Date.now() });
+      }
+
+      // Notify client of timeout
+      this.sendResponse(ws, {
+        id: 'system',
+        error: {
+          code: -32000,
+          message: `Transaction ${session.transaction?.txId} timed out`,
+        },
+      });
+    }
+
+    /**
+     * Handles idle connection timeout. Override in subclass for custom behavior.
+     *
+     * @param ws - The idle WebSocket
+     * @param session - The session state
+     */
+    protected async handleIdleTimeout(
+      ws: WebSocket,
+      session: WebSocketSessionState
+    ): Promise<void> {
+      // Close the connection
+      try {
+        ws.close(1000, 'Idle timeout');
+      } catch {
+        // Connection may already be closed
+      }
+    }
+
+    /**
+     * Called after accepting a WebSocket to schedule cleanup if needed.
+     * This ensures alarms are set for new connections.
+     */
+    protected async scheduleCleanupForConnection(): Promise<void> {
+      const nextCleanup = this.calculateNextCleanupTime();
+      if (nextCleanup !== null) {
+        await this.scheduleCleanupAlarm(nextCleanup);
+      }
     }
   };
 }

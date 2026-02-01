@@ -72,7 +72,7 @@ import {
   type StatePersistence,
 } from './state-machine.js';
 import { CatalogRouter, type CatalogRouterDeps } from './catalog-router.js';
-import { FlushManager, recoverFromFallback, type PartitionBuffer } from './flush-manager.js';
+import { FlushManager, recoverFromFallback, type FlushPartitionBuffer } from './flush-manager.js';
 
 // =============================================================================
 // Environment Interface
@@ -468,7 +468,7 @@ export class DoLake implements DurableObject {
       this.stateMachine,
       this.persistence,
       async (tableName, events) => {
-        const buffers: PartitionBuffer[] = [{
+        const buffers: FlushPartitionBuffer[] = [{
           table: tableName,
           partitionKey: null,
           events,
@@ -793,7 +793,7 @@ dolake_peak_connections ${rateLimitMetrics.peakConnections}
       return new Response(JSON.stringify({
         success: true,
         eventsReceived: events.length,
-        eventsAccepted: result.eventsAccepted,
+        eventsAccepted: result.added ? events.length : 0,
         isDuplicate: result.isDuplicate,
       }), {
         headers: { 'Content-Type': 'application/json' },

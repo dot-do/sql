@@ -8,6 +8,8 @@
  * - SQL execution and result formatting
  * - Multi-line statement detection
  * - History management
+ * - Tab completion for SQL keywords, table names, and column names
+ * - Syntax highlighting for SQL
  *
  * @module cli/repl
  */
@@ -33,6 +35,10 @@ export interface REPLConfig {
   output?: (msg: string) => void;
   /** Inject a connection (useful for testing without bun:sqlite) */
   connection?: Connection;
+  /** Enable syntax highlighting (default: true if terminal supports colors) */
+  highlightEnabled?: boolean;
+  /** Enable tab completion (default: true) */
+  completionEnabled?: boolean;
 }
 
 /**
@@ -130,6 +136,680 @@ interface WebSocketLike {
   close(): void;
   addEventListener(event: string, handler: (ev: unknown) => void): void;
   removeEventListener(event: string, handler: (ev: unknown) => void): void;
+}
+
+// =============================================================================
+// SQL KEYWORDS FOR COMPLETION
+// =============================================================================
+
+/**
+ * SQL keywords recognized for tab completion (sorted alphabetically for efficient searching)
+ */
+export const SQL_KEYWORDS: string[] = [
+  // DML
+  'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'BETWEEN', 'LIKE', 'ILIKE',
+  'IS', 'NULL', 'TRUE', 'FALSE', 'AS', 'ON', 'JOIN', 'INNER', 'LEFT', 'RIGHT',
+  'FULL', 'OUTER', 'CROSS', 'GROUP', 'BY', 'HAVING', 'ORDER', 'ASC', 'DESC',
+  'LIMIT', 'OFFSET', 'DISTINCT', 'ALL', 'UNION', 'INTERSECT', 'EXCEPT',
+  'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'NULLS', 'FIRST', 'LAST',
+  'EXISTS', 'ANY', 'SOME', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
+  'WITH', 'RECURSIVE', 'COALESCE', 'NULLIF', 'IIF', 'IF',
+  'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE', 'REPLACE',
+  'RETURNING', 'CONFLICT', 'DO', 'NOTHING',
+
+  // DDL
+  'CREATE', 'TABLE', 'INDEX', 'VIEW', 'DROP', 'ALTER', 'ADD', 'COLUMN', 'RENAME',
+  'TO', 'TEMPORARY', 'TEMP', 'UNIQUE', 'PRIMARY', 'KEY', 'FOREIGN',
+  'REFERENCES', 'CASCADE', 'RESTRICT', 'DEFAULT', 'CHECK', 'CONSTRAINT',
+  'AUTOINCREMENT', 'COLLATE', 'WITHOUT', 'ROWID', 'STRICT', 'GENERATED',
+  'ALWAYS', 'STORED', 'VIRTUAL', 'NO', 'ACTION', 'ABORT', 'FAIL', 'IGNORE',
+  'ROLLBACK', 'MATCH', 'SIMPLE', 'PARTIAL', 'DEFERRABLE', 'INITIALLY',
+  'DEFERRED', 'IMMEDIATE',
+
+  // Data types
+  'INTEGER', 'INT', 'SMALLINT', 'MEDIUMINT', 'BIGINT', 'TINYINT',
+  'REAL', 'DOUBLE', 'PRECISION', 'FLOAT', 'NUMERIC', 'DECIMAL',
+  'TEXT', 'VARCHAR', 'CHAR', 'NCHAR', 'NVARCHAR', 'CLOB',
+  'BLOB', 'NONE', 'DATE', 'DATETIME', 'TIMESTAMP', 'TIME',
+  'BOOLEAN', 'BOOL', 'JSON', 'JSONB', 'UUID',
+
+  // Window functions
+  'OVER', 'PARTITION', 'ROWS', 'RANGE', 'GROUPS', 'UNBOUNDED', 'PRECEDING',
+  'FOLLOWING', 'CURRENT', 'ROW', 'EXCLUDE', 'TIES', 'OTHERS', 'WINDOW',
+  'FILTER', 'WITHIN', 'RESPECT', 'NTILE', 'LAG', 'LEAD', 'FIRST_VALUE',
+  'LAST_VALUE', 'NTH_VALUE', 'ROW_NUMBER', 'RANK', 'DENSE_RANK', 'PERCENT_RANK',
+  'CUME_DIST',
+
+  // Transaction
+  'BEGIN', 'COMMIT', 'TRANSACTION', 'SAVEPOINT', 'RELEASE',
+
+  // Other
+  'PRAGMA', 'EXPLAIN', 'QUERY', 'PLAN', 'ANALYZE', 'ATTACH', 'DETACH', 'VACUUM',
+  'REINDEX', 'GLOB', 'CAST', 'TYPEOF', 'LENGTH', 'SUBSTR', 'UPPER', 'LOWER',
+  'TRIM', 'LTRIM', 'RTRIM', 'REPLACE', 'INSTR', 'PRINTF', 'HEX', 'UNHEX',
+  'ABS', 'ROUND', 'RANDOM', 'RANDOMBLOB', 'ZEROBLOB', 'TOTAL', 'GROUP_CONCAT',
+].sort();
+
+/**
+ * SQL keyword set for fast lookup (lowercase)
+ */
+const SQL_KEYWORD_SET = new Set(SQL_KEYWORDS.map(k => k.toLowerCase()));
+
+/**
+ * REPL dot commands for completion
+ */
+export const DOT_COMMANDS: string[] = [
+  '.help', '.quit', '.exit', '.tables', '.schema', '.mode', '.headers',
+  '.timer', '.databases', '.open', '.read', '.connect', '.disconnect', '.status',
+].sort();
+
+// =============================================================================
+// SYNTAX HIGHLIGHTING
+// =============================================================================
+
+/**
+ * ANSI color codes for syntax highlighting
+ */
+export const COLORS = {
+  reset: '\x1b[0m',
+  // Keywords
+  keyword: '\x1b[1;34m',       // Bold blue
+  // Strings
+  string: '\x1b[32m',          // Green
+  // Numbers
+  number: '\x1b[33m',          // Yellow
+  // Comments
+  comment: '\x1b[2;37m',       // Dim white
+  // Operators
+  operator: '\x1b[36m',        // Cyan
+  // Functions
+  function: '\x1b[35m',        // Magenta
+  // Identifiers
+  identifier: '\x1b[37m',      // White
+  // Punctuation
+  punctuation: '\x1b[37m',     // White
+  // Error
+  error: '\x1b[1;31m',         // Bold red
+  // Table/column names (when known)
+  table: '\x1b[1;33m',         // Bold yellow
+  column: '\x1b[33m',          // Yellow
+} as const;
+
+/**
+ * SQL function names for highlighting
+ */
+const SQL_FUNCTIONS = new Set([
+  'count', 'sum', 'avg', 'min', 'max', 'total', 'group_concat',
+  'abs', 'round', 'random', 'randomblob', 'zeroblob',
+  'length', 'substr', 'upper', 'lower', 'trim', 'ltrim', 'rtrim',
+  'replace', 'instr', 'printf', 'hex', 'unhex',
+  'coalesce', 'nullif', 'iif', 'ifnull', 'typeof', 'cast',
+  'date', 'time', 'datetime', 'julianday', 'strftime',
+  'row_number', 'rank', 'dense_rank', 'percent_rank', 'cume_dist',
+  'ntile', 'lag', 'lead', 'first_value', 'last_value', 'nth_value',
+  'json', 'json_array', 'json_object', 'json_extract', 'json_type',
+  'json_valid', 'json_quote', 'json_group_array', 'json_group_object',
+]);
+
+/**
+ * Token types for syntax highlighting
+ */
+type HighlightTokenType = 'keyword' | 'string' | 'number' | 'comment' | 'operator' | 'function' | 'identifier' | 'punctuation' | 'whitespace';
+
+/**
+ * Token for syntax highlighting
+ */
+interface HighlightToken {
+  type: HighlightTokenType;
+  value: string;
+}
+
+/**
+ * Tokenize SQL for syntax highlighting
+ *
+ * @param sql - SQL string to tokenize
+ * @returns Array of tokens with types
+ */
+export function tokenizeForHighlight(sql: string): HighlightToken[] {
+  const tokens: HighlightToken[] = [];
+  let pos = 0;
+
+  while (pos < sql.length) {
+    const char = sql[pos];
+    const remaining = sql.slice(pos);
+
+    // Whitespace
+    if (/\s/.test(char)) {
+      let value = '';
+      while (pos < sql.length && /\s/.test(sql[pos])) {
+        value += sql[pos++];
+      }
+      tokens.push({ type: 'whitespace', value });
+      continue;
+    }
+
+    // Single-line comment
+    if (char === '-' && sql[pos + 1] === '-') {
+      let value = '--';
+      pos += 2;
+      while (pos < sql.length && sql[pos] !== '\n') {
+        value += sql[pos++];
+      }
+      tokens.push({ type: 'comment', value });
+      continue;
+    }
+
+    // Multi-line comment
+    if (char === '/' && sql[pos + 1] === '*') {
+      let value = '/*';
+      pos += 2;
+      while (pos < sql.length - 1 && !(sql[pos] === '*' && sql[pos + 1] === '/')) {
+        value += sql[pos++];
+      }
+      if (pos < sql.length - 1) {
+        value += '*/';
+        pos += 2;
+      }
+      tokens.push({ type: 'comment', value });
+      continue;
+    }
+
+    // String literal (single quotes)
+    if (char === "'") {
+      let value = "'";
+      pos++;
+      while (pos < sql.length) {
+        if (sql[pos] === "'") {
+          value += "'";
+          pos++;
+          if (sql[pos] === "'") {
+            // Escaped quote
+            value += "'";
+            pos++;
+          } else {
+            break;
+          }
+        } else {
+          value += sql[pos++];
+        }
+      }
+      tokens.push({ type: 'string', value });
+      continue;
+    }
+
+    // Number
+    if (/[0-9]/.test(char) || (char === '.' && /[0-9]/.test(sql[pos + 1] || ''))) {
+      let value = '';
+      // Integer part
+      while (pos < sql.length && /[0-9]/.test(sql[pos])) {
+        value += sql[pos++];
+      }
+      // Decimal part
+      if (sql[pos] === '.' && /[0-9]/.test(sql[pos + 1] || '')) {
+        value += sql[pos++];
+        while (pos < sql.length && /[0-9]/.test(sql[pos])) {
+          value += sql[pos++];
+        }
+      }
+      // Scientific notation
+      if ((sql[pos] || '').toLowerCase() === 'e') {
+        value += sql[pos++];
+        if (sql[pos] === '+' || sql[pos] === '-') {
+          value += sql[pos++];
+        }
+        while (pos < sql.length && /[0-9]/.test(sql[pos])) {
+          value += sql[pos++];
+        }
+      }
+      tokens.push({ type: 'number', value });
+      continue;
+    }
+
+    // Identifier or keyword
+    if (/[a-zA-Z_]/.test(char)) {
+      let value = '';
+      while (pos < sql.length && /[a-zA-Z0-9_]/.test(sql[pos])) {
+        value += sql[pos++];
+      }
+      const lower = value.toLowerCase();
+
+      // Check if followed by '(' to determine if it's a function call
+      // Skip whitespace to find the next non-whitespace character
+      let lookAhead = pos;
+      while (lookAhead < sql.length && /\s/.test(sql[lookAhead])) {
+        lookAhead++;
+      }
+      const isFollowedByParen = sql[lookAhead] === '(';
+
+      // If followed by '(' and is a known function, treat as function
+      if (isFollowedByParen && SQL_FUNCTIONS.has(lower)) {
+        tokens.push({ type: 'function', value });
+      } else if (SQL_KEYWORD_SET.has(lower)) {
+        tokens.push({ type: 'keyword', value });
+      } else if (SQL_FUNCTIONS.has(lower)) {
+        // Function name not followed by ( - still highlight as function
+        tokens.push({ type: 'function', value });
+      } else {
+        tokens.push({ type: 'identifier', value });
+      }
+      continue;
+    }
+
+    // Quoted identifier (double quotes or backticks)
+    if (char === '"' || char === '`') {
+      const quote = char;
+      let value = quote;
+      pos++;
+      while (pos < sql.length && sql[pos] !== quote) {
+        value += sql[pos++];
+      }
+      if (pos < sql.length) {
+        value += sql[pos++];
+      }
+      tokens.push({ type: 'identifier', value });
+      continue;
+    }
+
+    // Square bracket quoted identifier
+    if (char === '[') {
+      let value = '[';
+      pos++;
+      while (pos < sql.length && sql[pos] !== ']') {
+        value += sql[pos++];
+      }
+      if (pos < sql.length) {
+        value += sql[pos++];
+      }
+      tokens.push({ type: 'identifier', value });
+      continue;
+    }
+
+    // Two-character operators
+    const twoChar = char + (sql[pos + 1] || '');
+    if (['<=', '>=', '<>', '!=', '||', '<<', '>>'].includes(twoChar)) {
+      tokens.push({ type: 'operator', value: twoChar });
+      pos += 2;
+      continue;
+    }
+
+    // Single-character operators
+    if ('=<>+-*/%&|~'.includes(char)) {
+      tokens.push({ type: 'operator', value: char });
+      pos++;
+      continue;
+    }
+
+    // Punctuation
+    if ('(),;.?:$'.includes(char)) {
+      tokens.push({ type: 'punctuation', value: char });
+      pos++;
+      continue;
+    }
+
+    // Unknown - treat as identifier
+    tokens.push({ type: 'identifier', value: char });
+    pos++;
+  }
+
+  return tokens;
+}
+
+/**
+ * Apply syntax highlighting to SQL
+ *
+ * @param sql - SQL string to highlight
+ * @param useColors - Whether to apply ANSI colors (default: true)
+ * @returns Highlighted SQL string with ANSI codes
+ */
+export function highlightSQL(sql: string, useColors: boolean = true): string {
+  if (!useColors) {
+    return sql;
+  }
+
+  const tokens = tokenizeForHighlight(sql);
+  let result = '';
+
+  for (const token of tokens) {
+    switch (token.type) {
+      case 'keyword':
+        result += COLORS.keyword + token.value + COLORS.reset;
+        break;
+      case 'string':
+        result += COLORS.string + token.value + COLORS.reset;
+        break;
+      case 'number':
+        result += COLORS.number + token.value + COLORS.reset;
+        break;
+      case 'comment':
+        result += COLORS.comment + token.value + COLORS.reset;
+        break;
+      case 'operator':
+        result += COLORS.operator + token.value + COLORS.reset;
+        break;
+      case 'function':
+        result += COLORS.function + token.value + COLORS.reset;
+        break;
+      case 'identifier':
+        result += COLORS.identifier + token.value + COLORS.reset;
+        break;
+      case 'punctuation':
+        result += COLORS.punctuation + token.value + COLORS.reset;
+        break;
+      case 'whitespace':
+        result += token.value;
+        break;
+    }
+  }
+
+  return result;
+}
+
+// =============================================================================
+// TAB COMPLETION
+// =============================================================================
+
+/**
+ * Completion result
+ */
+export interface CompletionResult {
+  /** Completions that match the current input */
+  completions: string[];
+  /** The word being completed (for replacement) */
+  word: string;
+  /** Start position of the word in the input */
+  start: number;
+  /** End position of the word in the input */
+  end: number;
+}
+
+/**
+ * Schema information for context-aware completion
+ */
+export interface SchemaInfo {
+  tables: string[];
+  columns: Map<string, string[]>; // table -> columns
+}
+
+/**
+ * Tab completer for SQL input
+ */
+export class TabCompleter {
+  private schemaInfo: SchemaInfo = { tables: [], columns: new Map() };
+  private enabled: boolean = true;
+
+  /**
+   * Enable or disable completion
+   */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+  }
+
+  /**
+   * Update schema information for context-aware completion
+   */
+  updateSchema(info: SchemaInfo): void {
+    this.schemaInfo = info;
+  }
+
+  /**
+   * Add a table to schema
+   */
+  addTable(name: string, columns: string[] = []): void {
+    if (!this.schemaInfo.tables.includes(name)) {
+      this.schemaInfo.tables.push(name);
+      this.schemaInfo.tables.sort();
+    }
+    if (columns.length > 0) {
+      this.schemaInfo.columns.set(name, columns.sort());
+    }
+  }
+
+  /**
+   * Clear schema information
+   */
+  clearSchema(): void {
+    this.schemaInfo = { tables: [], columns: new Map() };
+  }
+
+  /**
+   * Get completions for the given input at cursor position
+   *
+   * @param input - Current input line
+   * @param cursorPos - Cursor position in input (defaults to end)
+   * @returns Completion result with matching suggestions
+   */
+  complete(input: string, cursorPos: number = input.length): CompletionResult {
+    if (!this.enabled) {
+      return { completions: [], word: '', start: cursorPos, end: cursorPos };
+    }
+
+    // Find the word being typed at cursor position
+    const beforeCursor = input.slice(0, cursorPos);
+
+    // Check for dot command first (must be at start of line, ignoring whitespace)
+    const dotMatch = beforeCursor.match(/^\s*(\.[a-zA-Z]*)$/);
+    if (dotMatch) {
+      const prefix = dotMatch[1].toLowerCase();
+      const completions = DOT_COMMANDS.filter(cmd =>
+        cmd.toLowerCase().startsWith(prefix)
+      );
+      return {
+        completions,
+        word: dotMatch[1],
+        start: beforeCursor.indexOf(dotMatch[1]),
+        end: cursorPos,
+      };
+    }
+
+    // Check for table.column completion (ends with "table.")
+    const tableColMatch = beforeCursor.match(/(\w+)\.\s*$/);
+    if (tableColMatch) {
+      const tableName = tableColMatch[1].toLowerCase();
+      let completions: string[] = [];
+
+      // Find table (case-insensitive)
+      for (const [table, cols] of this.schemaInfo.columns.entries()) {
+        if (table.toLowerCase() === tableName) {
+          completions = [...cols]; // All columns match (no prefix after .)
+          break;
+        }
+      }
+
+      // Remove duplicates and sort
+      completions = [...new Set(completions)].sort((a, b) =>
+        a.toLowerCase().localeCompare(b.toLowerCase())
+      );
+
+      return {
+        completions,
+        word: '',
+        start: cursorPos,
+        end: cursorPos,
+      };
+    }
+
+    const wordMatch = beforeCursor.match(/([a-zA-Z_][a-zA-Z0-9_]*)$/);
+
+    // Even if there's no word typed, we might offer contextual completions
+    const word = wordMatch ? wordMatch[1] : '';
+    const start = cursorPos - word.length;
+    const prefix = word.toLowerCase();
+
+    // Determine context for smart completion
+    const context = this.getCompletionContext(beforeCursor);
+
+    let completions: string[] = [];
+
+    // Context-specific completions
+    switch (context) {
+      case 'from':
+      case 'join':
+      case 'into':
+      case 'update':
+        // After FROM, JOIN, INTO, UPDATE - suggest tables
+        completions = this.schemaInfo.tables.filter(t =>
+          t.toLowerCase().startsWith(prefix)
+        );
+        break;
+
+      case 'column':
+        // In SELECT, WHERE, etc. - suggest columns and keywords
+        completions = this.getAllColumns().filter(c =>
+          c.toLowerCase().startsWith(prefix)
+        );
+        // Also add keywords
+        completions = completions.concat(
+          SQL_KEYWORDS.filter(k => k.toLowerCase().startsWith(prefix))
+        );
+        break;
+
+      case 'table_column':
+        // After table alias (e.g., "users.col") - suggest columns for that table
+        const tableMatch = beforeCursor.match(/(\w+)\.(\w*)$/);
+        if (tableMatch) {
+          const tableName = tableMatch[1].toLowerCase();
+          const colPrefix = tableMatch[2].toLowerCase();
+          // Find table (case-insensitive)
+          for (const [table, cols] of this.schemaInfo.columns.entries()) {
+            if (table.toLowerCase() === tableName) {
+              completions = cols.filter(c =>
+                c.toLowerCase().startsWith(colPrefix)
+              );
+              break;
+            }
+          }
+        }
+        break;
+
+      default:
+        // General context - suggest keywords and tables
+        if (prefix) {
+          completions = SQL_KEYWORDS.filter(k =>
+            k.toLowerCase().startsWith(prefix)
+          );
+          completions = completions.concat(
+            this.schemaInfo.tables.filter(t =>
+              t.toLowerCase().startsWith(prefix)
+            )
+          );
+        }
+    }
+
+    // Remove duplicates and sort
+    completions = [...new Set(completions)].sort((a, b) =>
+      a.toLowerCase().localeCompare(b.toLowerCase())
+    );
+
+    return { completions, word, start, end: cursorPos };
+  }
+
+  /**
+   * Determine the completion context from the input
+   */
+  private getCompletionContext(input: string): 'from' | 'join' | 'into' | 'update' | 'column' | 'table_column' | 'general' {
+    const lower = input.toLowerCase();
+    const trimmed = lower.trim();
+
+    // Check for table.column context
+    if (/\w+\.\s*$/.test(input)) {
+      return 'table_column';
+    }
+
+    // Check for FROM clause
+    if (/\bfrom\s+\w*$/.test(trimmed) || /\bfrom\s*$/.test(trimmed)) {
+      return 'from';
+    }
+
+    // Check for JOIN clause
+    if (/\bjoin\s+\w*$/.test(trimmed) || /\bjoin\s*$/.test(trimmed)) {
+      return 'join';
+    }
+
+    // Check for INTO clause
+    if (/\binto\s+\w*$/.test(trimmed) || /\binto\s*$/.test(trimmed)) {
+      return 'into';
+    }
+
+    // Check for UPDATE statement
+    if (/\bupdate\s+\w*$/.test(trimmed) || /\bupdate\s*$/.test(trimmed)) {
+      return 'update';
+    }
+
+    // Check for SELECT column context
+    if (/\bselect\s+[\w\s,*]*$/.test(trimmed) && !/\bfrom\b/.test(trimmed)) {
+      return 'column';
+    }
+
+    // Check for WHERE clause
+    if (/\bwhere\s+[\w\s]*$/.test(trimmed)) {
+      return 'column';
+    }
+
+    return 'general';
+  }
+
+  /**
+   * Get all columns from all tables
+   */
+  private getAllColumns(): string[] {
+    const allColumns = new Set<string>();
+    for (const columns of this.schemaInfo.columns.values()) {
+      columns.forEach(c => allColumns.add(c));
+    }
+    return [...allColumns].sort();
+  }
+
+  /**
+   * Get completion for a single word (returns common prefix or cycles through options)
+   *
+   * @param input - Current input
+   * @param cursorPos - Cursor position
+   * @param index - Index for cycling through completions (0 = common prefix or first match)
+   * @returns The completed string, or null if no completions
+   */
+  getCompletion(input: string, cursorPos: number = input.length, index: number = 0): string | null {
+    const result = this.complete(input, cursorPos);
+
+    if (result.completions.length === 0) {
+      return null;
+    }
+
+    // If only one completion, use it
+    if (result.completions.length === 1) {
+      return input.slice(0, result.start) + result.completions[0] + input.slice(result.end);
+    }
+
+    // Multiple completions - if index is 0, find common prefix
+    if (index === 0) {
+      const commonPrefix = this.findCommonPrefix(result.completions);
+      if (commonPrefix.length > result.word.length) {
+        return input.slice(0, result.start) + commonPrefix + input.slice(result.end);
+      }
+    }
+
+    // Cycle through completions
+    const completion = result.completions[index % result.completions.length];
+    return input.slice(0, result.start) + completion + input.slice(result.end);
+  }
+
+  /**
+   * Find common prefix among strings
+   */
+  private findCommonPrefix(strings: string[]): string {
+    if (strings.length === 0) return '';
+    if (strings.length === 1) return strings[0];
+
+    let prefix = strings[0];
+    for (let i = 1; i < strings.length; i++) {
+      while (!strings[i].toLowerCase().startsWith(prefix.toLowerCase())) {
+        prefix = prefix.slice(0, -1);
+        if (prefix.length === 0) return '';
+      }
+      // Preserve case from first match
+      prefix = strings[0].slice(0, prefix.length);
+    }
+    return prefix;
+  }
 }
 
 // =============================================================================
@@ -1157,9 +1837,25 @@ export class BunREPL {
   /** Current connection mode */
   private _connectionMode: 'local' | 'http' | 'websocket';
 
+  /** Tab completer instance */
+  private _completer: TabCompleter;
+
+  /** Whether syntax highlighting is enabled */
+  private _highlightEnabled: boolean;
+
   /** Get current connection mode */
   get connectionMode(): 'local' | 'http' | 'websocket' {
     return this._connectionMode;
+  }
+
+  /** Get the tab completer */
+  get completer(): TabCompleter {
+    return this._completer;
+  }
+
+  /** Get whether highlighting is enabled */
+  get highlightEnabled(): boolean {
+    return this._highlightEnabled;
   }
 
   /** Current prompt string */
@@ -1190,6 +1886,15 @@ export class BunREPL {
       historyFile: config.historyFile,
     });
 
+    // Initialize tab completer
+    this._completer = new TabCompleter();
+    if (config.completionEnabled === false) {
+      this._completer.setEnabled(false);
+    }
+
+    // Initialize highlighting (default to true if not specified)
+    this._highlightEnabled = config.highlightEnabled ?? true;
+
     // Update global state
     replState.format = this.format;
   }
@@ -1200,6 +1905,9 @@ export class BunREPL {
   async start(): Promise<void> {
     // Connect to database
     await this.connect();
+
+    // Refresh schema for tab completion
+    await this.refreshSchema();
 
     // Show welcome message
     this.outputFn('DoSQL CLI REPL');
@@ -1212,6 +1920,85 @@ export class BunREPL {
     }
     this.outputFn('Type .help for available commands');
     this.outputFn('');
+  }
+
+  /**
+   * Refresh schema information for tab completion
+   */
+  async refreshSchema(): Promise<void> {
+    if (!this.connection) {
+      return;
+    }
+
+    try {
+      // Get table names
+      const tablesResult = await this.connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+      );
+
+      this._completer.clearSchema();
+
+      for (const row of tablesResult.rows) {
+        const tableName = row.name as string;
+
+        // Get columns for this table
+        try {
+          const columnsResult = await this.connection.execute(
+            `PRAGMA table_info("${tableName}")`
+          );
+          const columns = columnsResult.rows.map(r => r.name as string);
+          this._completer.addTable(tableName, columns);
+        } catch {
+          // If PRAGMA fails, just add the table without columns
+          this._completer.addTable(tableName);
+        }
+      }
+    } catch {
+      // Silently fail - schema completion is a convenience feature
+    }
+  }
+
+  /**
+   * Enable or disable syntax highlighting
+   */
+  setHighlightEnabled(enabled: boolean): void {
+    this._highlightEnabled = enabled;
+  }
+
+  /**
+   * Get syntax-highlighted version of input
+   *
+   * @param input - SQL input to highlight
+   * @returns Highlighted string with ANSI codes, or original if highlighting disabled
+   */
+  highlight(input: string): string {
+    if (!this._highlightEnabled) {
+      return input;
+    }
+    return highlightSQL(input, true);
+  }
+
+  /**
+   * Get tab completion for current input
+   *
+   * @param input - Current input line
+   * @param cursorPos - Cursor position (defaults to end)
+   * @returns Completion result
+   */
+  getCompletions(input: string, cursorPos?: number): CompletionResult {
+    return this._completer.complete(input, cursorPos);
+  }
+
+  /**
+   * Apply tab completion to input
+   *
+   * @param input - Current input line
+   * @param cursorPos - Cursor position (defaults to end)
+   * @param index - Completion index for cycling (0 = common prefix or first)
+   * @returns Completed string or null if no completions
+   */
+  applyCompletion(input: string, cursorPos?: number, index: number = 0): string | null {
+    return this._completer.getCompletion(input, cursorPos, index);
   }
 
   /**
@@ -1377,6 +2164,13 @@ export class BunREPL {
         throw new Error('Query cancelled');
       }
 
+      // Refresh schema after DDL statements for tab completion
+      const upperSql = sql.toUpperCase().trim();
+      if (upperSql.startsWith('CREATE') || upperSql.startsWith('DROP') || upperSql.startsWith('ALTER')) {
+        // Fire and forget - don't wait for schema refresh
+        this.refreshSchema().catch(() => {});
+      }
+
       return formatResults(result, this.format, { showTiming: replState.showTimer });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : 'Unknown error'}`;
@@ -1426,6 +2220,10 @@ export class BunREPL {
       }
 
       this._remoteUrl = url;
+
+      // Refresh schema for tab completion
+      await this.refreshSchema();
+
       return `Connected to ${url} (${this._connectionMode} mode)`;
     } catch (error) {
       this._connectionMode = 'local';
@@ -1457,6 +2255,10 @@ export class BunREPL {
       this.connection = await createLocalConnection({
         database: this.config.database,
       });
+
+      // Refresh schema for tab completion
+      await this.refreshSchema();
+
       return `Disconnected from ${previousUrl}. Reconnected to local database.`;
     }
 
@@ -1506,10 +2308,3 @@ export class BunREPL {
   }
 }
 
-// =============================================================================
-// EXPORTS
-// =============================================================================
-
-export type {
-  WebSocketLike,
-};

@@ -17,6 +17,7 @@ import {
   type WebSocketAttachment,
   type DoLakeState,
   type RateLimitInfo,
+  type FlushResult,
   isCDCBatchMessage,
   isConnectMessage,
   isHeartbeatMessage,
@@ -61,7 +62,7 @@ export type FlushTriggerCallback = (trigger: string) => Promise<void>;
 /**
  * Interface for flush result callback
  */
-export type FlushCallback = (trigger: string) => Promise<{ success: boolean; [key: string]: unknown }>;
+export type FlushCallback = (trigger: string) => Promise<FlushResult>;
 
 /**
  * WebSocket handler configuration

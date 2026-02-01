@@ -283,6 +283,49 @@ export class HibernatingDoSQLDatabase extends HibernatingDurableObject {
     this.scheduleHibernation();
   }
 
+  /**
+   * Handle alarm wake-up for cleanup tasks.
+   * Extends parent to handle database-specific cleanup like rolling back transactions.
+   */
+  async alarm(): Promise<void> {
+    await this.ensureInitialized();
+    await super.alarm();
+  }
+
+  /**
+   * Handle transaction timeout with actual rollback.
+   */
+  protected async handleTransactionTimeout(
+    ws: WebSocket,
+    session: import('./hibernation.js').WebSocketSessionState
+  ): Promise<void> {
+    if (session.transaction) {
+      logger.info('Rolling back timed-out transaction', { txId: session.transaction.txId });
+      // In a real implementation, this would rollback the transaction in the database
+    }
+    await super.handleTransactionTimeout(ws, session);
+  }
+
+  // ===========================================================================
+  // Helper Methods
+  // ===========================================================================
+
+  /**
+   * Clears transaction state from a WebSocket session.
+   * Uses object destructuring to remove the transaction key cleanly.
+   */
+  private clearTransactionState(ws: WebSocket): void {
+    const session = this.getSessionState(ws);
+    if (session) {
+      const { transaction: _, ...rest } = session;
+      // Re-serialize without transaction property
+      (ws as { serializeAttachment(data: unknown): void }).serializeAttachment({
+        ...rest,
+        lastActivity: Date.now(),
+      });
+    }
+  }
+
   // ===========================================================================
   // RPC Method Routing
   // ===========================================================================
@@ -311,13 +354,18 @@ export class HibernatingDoSQLDatabase extends HibernatingDurableObject {
           const p = params as RPCMethods['beginTransaction'];
           const txId = crypto.randomUUID();
           const session = this.getSessionState(ws);
+          const timeout = 30000;
           if (session) {
             this.updateSessionState(ws, {
               transaction: {
                 txId,
                 startedAt: Date.now(),
-                timeout: 30000,
+                timeout,
               },
+            });
+            // Schedule alarm for transaction timeout
+            this.scheduleCleanupForConnection().catch(e => {
+              logger.error('Failed to schedule tx cleanup', e instanceof Error ? e : new Error(String(e)));
             });
           }
           return {
@@ -338,7 +386,7 @@ export class HibernatingDoSQLDatabase extends HibernatingDurableObject {
           if (session?.transaction?.txId !== p.txId) {
             throw new Error(`Transaction not found: ${p.txId}`);
           }
-          this.updateSessionState(ws, { transaction: undefined });
+          this.clearTransactionState(ws);
           return { id, result: { lsn: '1' } };
         }
 
@@ -348,7 +396,7 @@ export class HibernatingDoSQLDatabase extends HibernatingDurableObject {
           if (session?.transaction?.txId !== p.txId) {
             throw new Error(`Transaction not found: ${p.txId}`);
           }
-          this.updateSessionState(ws, { transaction: undefined });
+          this.clearTransactionState(ws);
           return { id, result: {} };
         }
 

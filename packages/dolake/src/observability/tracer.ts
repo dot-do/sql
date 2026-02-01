@@ -28,13 +28,13 @@ import type {
 class SpanImpl implements Span {
   readonly spanId: string;
   readonly traceId: string;
-  readonly parentSpanId?: string;
+  readonly parentSpanId?: string | undefined;
   readonly name: string;
   readonly kind: SpanKind;
   readonly startTime: number;
-  endTime?: number;
+  endTime?: number | undefined;
   status: SpanStatus = 'UNSET';
-  statusMessage?: string;
+  statusMessage?: string | undefined;
   readonly attributes: Map<string, AttributeValue> = new Map();
   readonly events: SpanEvent[] = [];
 
@@ -272,7 +272,10 @@ export class TracerImpl implements Tracer {
       return null;
     }
 
-    const [version, traceId, spanId, flags] = parts;
+    const version = parts[0]!;
+    const traceId = parts[1]!;
+    const spanId = parts[2]!;
+    const flags = parts[3]!;
 
     if (version !== '00') {
       return null;
