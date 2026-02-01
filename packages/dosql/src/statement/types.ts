@@ -271,6 +271,7 @@ export type TransactionMode = 'deferred' | 'immediate' | 'exclusive';
 /**
  * Transaction function wrapper
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for proper type inference of arbitrary functions
 export interface TransactionFunction<F extends (...args: any[]) => any> {
   /**
    * Execute the function within a transaction
@@ -326,6 +327,92 @@ export interface DatabaseOptions {
    */
   statementCacheSize?: number;
 }
+
+// =============================================================================
+// STATEMENT-BASED RESULT TYPE INFERENCE
+// =============================================================================
+
+/**
+ * SQL statement types for conditional result type inference
+ */
+export type StatementType = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'REPLACE' | 'CREATE' | 'DROP' | 'ALTER' | 'PRAGMA';
+
+/**
+ * Infer statement type from SQL string at compile time
+ *
+ * @example
+ * ```typescript
+ * type T1 = InferStatementType<'SELECT * FROM users'>; // 'SELECT'
+ * type T2 = InferStatementType<'INSERT INTO users VALUES (1)'>;  // 'INSERT'
+ * type T3 = InferStatementType<'UPDATE users SET name = ?'>; // 'UPDATE'
+ * ```
+ */
+export type InferStatementType<SQL extends string> =
+  Uppercase<SQL> extends `SELECT${string}` ? 'SELECT' :
+  Uppercase<SQL> extends `INSERT${string}` ? 'INSERT' :
+  Uppercase<SQL> extends `UPDATE${string}` ? 'UPDATE' :
+  Uppercase<SQL> extends `DELETE${string}` ? 'DELETE' :
+  Uppercase<SQL> extends `REPLACE${string}` ? 'REPLACE' :
+  Uppercase<SQL> extends `CREATE${string}` ? 'CREATE' :
+  Uppercase<SQL> extends `DROP${string}` ? 'DROP' :
+  Uppercase<SQL> extends `ALTER${string}` ? 'ALTER' :
+  Uppercase<SQL> extends `PRAGMA${string}` ? 'PRAGMA' :
+  never;
+
+/**
+ * Query result type based on statement type
+ *
+ * SELECT statements return rows of type T
+ * INSERT/UPDATE/DELETE return RunResult
+ * DDL statements (CREATE/DROP/ALTER) return void
+ *
+ * @example
+ * ```typescript
+ * type R1 = StatementResult<'SELECT', User>; // User[]
+ * type R2 = StatementResult<'INSERT', User>; // RunResult
+ * type R3 = StatementResult<'CREATE', never>; // void
+ * ```
+ */
+export type StatementResult<S extends StatementType, T = unknown> =
+  S extends 'SELECT' ? T[] :
+  S extends 'INSERT' | 'UPDATE' | 'DELETE' | 'REPLACE' ? RunResult :
+  S extends 'CREATE' | 'DROP' | 'ALTER' ? void :
+  S extends 'PRAGMA' ? unknown :
+  never;
+
+/**
+ * Infer the appropriate result type from a SQL string
+ *
+ * Combines InferStatementType and StatementResult for full inference
+ *
+ * @example
+ * ```typescript
+ * type R1 = InferResult<'SELECT * FROM users', User>; // User[]
+ * type R2 = InferResult<'INSERT INTO users VALUES (1)', User>; // RunResult
+ * ```
+ */
+export type InferResult<SQL extends string, T = unknown> =
+  InferStatementType<SQL> extends infer S extends StatementType
+    ? StatementResult<S, T>
+    : never;
+
+/**
+ * Type guard to check if statement type is a read operation
+ */
+export type IsReadStatement<S extends StatementType> =
+  S extends 'SELECT' | 'PRAGMA' ? true : false;
+
+/**
+ * Type guard to check if statement type is a write operation
+ */
+export type IsWriteStatement<S extends StatementType> =
+  S extends 'INSERT' | 'UPDATE' | 'DELETE' | 'REPLACE' ? true : false;
+
+/**
+ * Type guard to check if statement type is a DDL operation
+ */
+export type IsDDLStatement<S extends StatementType> =
+  S extends 'CREATE' | 'DROP' | 'ALTER' ? true : false;
 
 // =============================================================================
 // PRAGMA TYPES
@@ -479,6 +566,7 @@ export interface Database {
    * transfer(1, 2, 100);
    * ```
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for proper type inference of arbitrary functions
   transaction<F extends (...args: any[]) => any>(fn: F): TransactionFunction<F>;
 
   /**

@@ -887,7 +887,7 @@ export interface TransactionTimeoutConfig {
 /**
  * Default timeout configuration
  */
-export const DEFAULT_TIMEOUT_CONFIG: TransactionTimeoutConfig = {
+export const DEFAULT_TIMEOUT_CONFIG: Readonly<TransactionTimeoutConfig> = {
   defaultTimeoutMs: 30000,
   maxTimeoutMs: 120000,
   gracePeriodMs: 5000,

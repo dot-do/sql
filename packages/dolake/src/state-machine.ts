@@ -7,6 +7,9 @@
 
 import type { DoLakeState, CDCEvent, FlushResult } from './types.js';
 import type { CDCBufferManager, BufferSnapshot } from './buffer.js';
+import { createLogger } from './logging.js';
+
+const logger = createLogger({ component: 'state-machine' });
 
 // =============================================================================
 // Types
@@ -67,7 +70,7 @@ export interface StateMachineConfig {
 // Default Configuration
 // =============================================================================
 
-export const DEFAULT_STATE_MACHINE_CONFIG: StateMachineConfig = {
+export const DEFAULT_STATE_MACHINE_CONFIG: Readonly<StateMachineConfig> = {
   flushIntervalMs: 60_000,
   enableFallback: true,
 };
@@ -113,9 +116,11 @@ export class DoLakeStateMachine {
     const validTransitions = DoLakeStateMachine.VALID_TRANSITIONS.get(this.currentState);
 
     if (!validTransitions?.includes(newState)) {
-      console.warn(
-        `Invalid state transition: ${this.currentState} -> ${newState} (trigger: ${trigger})`
-      );
+      logger.warn('Invalid state transition attempted', {
+        currentState: this.currentState,
+        newState,
+        trigger,
+      });
       return false;
     }
 
@@ -190,7 +195,7 @@ export class DoLakeStateMachine {
       try {
         listener(event);
       } catch (error) {
-        console.error('State change listener error:', error);
+        logger.error('State change listener error', error, { event });
       }
     }
   }
@@ -374,7 +379,7 @@ export function createRecoveryHandler(
         tablesProcessed: byTable.size,
       };
     } catch (error) {
-      console.error('Fallback recovery failed:', error);
+      logger.error('Fallback recovery failed', error);
       stateMachine.forceState('idle', 'recovery_failed');
 
       return {

@@ -31,6 +31,14 @@ import type {
 } from './types.js';
 
 import { createVindex, type Vindex } from './vindex.js';
+
+import {
+  StatisticsStore,
+  type TableStatistics,
+  estimateEqualitySelectivity,
+  estimateInSelectivity,
+  estimateBetweenSelectivity,
+} from '../planner/stats.js';
 // Import from the dedicated parser module
 import {
   SQLParser,
@@ -55,8 +63,244 @@ export type { ParsedQuery, TableReference, ColumnReference, WhereClause, WhereCo
 export { SQLParser } from './parser/index.js';
 
 // =============================================================================
+// COST ESTIMATOR
+// =============================================================================
+
+/**
+ * Cost estimation configuration
+ */
+export interface CostEstimatorConfig {
+  /**
+   * Default row count to assume when statistics are unavailable
+   * @default 10000
+   */
+  defaultRowCount: number;
+
+  /**
+   * Base cost per shard for network overhead
+   * @default 1.0
+   */
+  perShardNetworkCost: number;
+
+  /**
+   * Cost multiplier for scatter queries (no shard key)
+   * @default 2.0
+   */
+  scatterCostMultiplier: number;
+
+  /**
+   * Cost per row scanned
+   * @default 0.001
+   */
+  rowScanCost: number;
+
+  /**
+   * Cost per row transferred over network
+   * @default 0.01
+   */
+  rowTransferCost: number;
+}
+
+/**
+ * Default cost estimator configuration
+ */
+export const DEFAULT_COST_ESTIMATOR_CONFIG: CostEstimatorConfig = {
+  defaultRowCount: 10000,
+  perShardNetworkCost: 1.0,
+  scatterCostMultiplier: 2.0,
+  rowScanCost: 0.001,
+  rowTransferCost: 0.01,
+};
+
+/**
+ * Query cost estimator using table statistics for cardinality estimation.
+ *
+ * Computes query costs based on:
+ * - Number of target shards
+ * - Estimated row count from table statistics
+ * - Selectivity of WHERE conditions
+ * - Network and processing overhead
+ */
+export class CostEstimator {
+  private readonly config: CostEstimatorConfig;
+  private readonly statsStore: StatisticsStore;
+
+  constructor(
+    statsStore?: StatisticsStore,
+    config: Partial<CostEstimatorConfig> = {}
+  ) {
+    this.statsStore = statsStore ?? new StatisticsStore();
+    this.config = { ...DEFAULT_COST_ESTIMATOR_CONFIG, ...config };
+  }
+
+  /**
+   * Get the underlying statistics store
+   */
+  getStatisticsStore(): StatisticsStore {
+    return this.statsStore;
+  }
+
+  /**
+   * Set table statistics for cost estimation
+   */
+  setTableStats(stats: TableStatistics): void {
+    this.statsStore.setTableStats(stats);
+  }
+
+  /**
+   * Estimate cost for a single-shard query with equality on shard key
+   */
+  estimateSingleShardEqualityCost(
+    tableName: string,
+    shardKeyColumn: string,
+    value: unknown
+  ): number {
+    const rowCount = this.statsStore.getRowCount(tableName, this.config.defaultRowCount);
+    const selectivity = estimateEqualitySelectivity(
+      this.statsStore,
+      tableName,
+      shardKeyColumn,
+      value as import('../engine/types.js').SqlValue
+    );
+
+    const estimatedRows = Math.max(1, Math.ceil(rowCount * selectivity));
+
+    return (
+      this.config.perShardNetworkCost +
+      estimatedRows * this.config.rowScanCost +
+      estimatedRows * this.config.rowTransferCost
+    );
+  }
+
+  /**
+   * Estimate cost for an IN query targeting multiple shards
+   */
+  estimateInListCost(
+    tableName: string,
+    shardKeyColumn: string,
+    values: unknown[],
+    targetShardCount: number
+  ): number {
+    const rowCount = this.statsStore.getRowCount(tableName, this.config.defaultRowCount);
+    const selectivity = estimateInSelectivity(
+      this.statsStore,
+      tableName,
+      shardKeyColumn,
+      values as import('../engine/types.js').SqlValue[]
+    );
+
+    const estimatedRows = Math.max(1, Math.ceil(rowCount * selectivity));
+
+    return (
+      this.config.perShardNetworkCost * targetShardCount +
+      estimatedRows * this.config.rowScanCost +
+      estimatedRows * this.config.rowTransferCost
+    );
+  }
+
+  /**
+   * Estimate cost for a range query
+   */
+  estimateRangeCost(
+    tableName: string,
+    shardKeyColumn: string,
+    minValue: unknown,
+    maxValue: unknown,
+    targetShardCount: number
+  ): number {
+    const rowCount = this.statsStore.getRowCount(tableName, this.config.defaultRowCount);
+    const selectivity = estimateBetweenSelectivity(
+      this.statsStore,
+      tableName,
+      shardKeyColumn,
+      minValue as import('../engine/types.js').SqlValue,
+      maxValue as import('../engine/types.js').SqlValue
+    );
+
+    const estimatedRows = Math.max(1, Math.ceil(rowCount * selectivity));
+
+    return (
+      this.config.perShardNetworkCost * targetShardCount +
+      estimatedRows * this.config.rowScanCost +
+      estimatedRows * this.config.rowTransferCost
+    );
+  }
+
+  /**
+   * Estimate cost for a scatter query (no shard key in WHERE)
+   *
+   * Uses actual cardinality estimation instead of a simple heuristic multiplier.
+   * The cost is based on:
+   * - Total estimated rows across all shards
+   * - Network overhead per shard
+   * - Additional cost for merging results from multiple shards
+   */
+  estimateScatterCost(
+    tableName: string,
+    totalShardCount: number,
+    selectivity: number = 1.0
+  ): number {
+    const rowCount = this.statsStore.getRowCount(tableName, this.config.defaultRowCount);
+    const estimatedRows = Math.max(1, Math.ceil(rowCount * selectivity));
+
+    // Cost components:
+    // 1. Network overhead for each shard
+    const networkCost = this.config.perShardNetworkCost * totalShardCount;
+
+    // 2. Row scan cost (distributed across shards, but still need to scan all)
+    const scanCost = estimatedRows * this.config.rowScanCost;
+
+    // 3. Row transfer cost (all rows need to come back)
+    const transferCost = estimatedRows * this.config.rowTransferCost;
+
+    // 4. Scatter penalty (merging results from multiple shards)
+    const scatterPenalty = this.config.scatterCostMultiplier * totalShardCount;
+
+    return networkCost + scanCost + transferCost + scatterPenalty;
+  }
+
+  /**
+   * Estimate total row count for a table across all shards
+   */
+  estimateTotalRows(tableName: string): number {
+    return this.statsStore.getRowCount(tableName, this.config.defaultRowCount);
+  }
+
+  /**
+   * Get estimated rows matching a condition
+   */
+  estimateMatchingRows(
+    tableName: string,
+    selectivity: number
+  ): number {
+    const rowCount = this.statsStore.getRowCount(tableName, this.config.defaultRowCount);
+    return Math.max(1, Math.ceil(rowCount * selectivity));
+  }
+}
+
+// =============================================================================
 // QUERY ROUTER
 // =============================================================================
+
+/**
+ * Query router options
+ */
+export interface QueryRouterOptions {
+  /**
+   * Cost estimator for cardinality-based routing decisions
+   */
+  costEstimator?: CostEstimator;
+
+  /**
+   * Statistics store for table cardinality information
+   */
+  statsStore?: StatisticsStore;
+
+  /**
+   * Cost estimator configuration
+   */
+  costConfig?: Partial<CostEstimatorConfig>;
+}
 
 /**
  * Query router - routes SQL queries to appropriate shards
@@ -65,11 +309,19 @@ export class QueryRouter {
   private readonly vschema: VSchema;
   private readonly vindexes: Map<string, Vindex>;
   private readonly parser: SQLParser;
+  private readonly costEstimator: CostEstimator;
 
-  constructor(vschema: VSchema) {
+  constructor(vschema: VSchema, options: QueryRouterOptions = {}) {
     this.vschema = vschema;
     this.parser = new SQLParser();
     this.vindexes = new Map();
+
+    // Create cost estimator
+    if (options.costEstimator) {
+      this.costEstimator = options.costEstimator;
+    } else {
+      this.costEstimator = new CostEstimator(options.statsStore, options.costConfig);
+    }
 
     // Pre-create vindexes for sharded tables
     for (const [tableName, config] of Object.entries(vschema.tables)) {
@@ -192,13 +444,20 @@ export class QueryRouter {
       // Single shard key value - route to single shard
       const targetShard = vindex.getShard(extracted.values[0]);
 
+      // Use cost estimator for cardinality-based cost
+      const costEstimate = this.costEstimator.estimateSingleShardEqualityCost(
+        tableName,
+        config.shardKey,
+        extracted.values[0]
+      );
+
       return {
         queryType: 'single-shard',
         targetShards: [targetShard],
         shardKeyValue: extracted.values[0],
         readPreference,
         canUseReplica,
-        costEstimate: 1,
+        costEstimate,
         reason: `Shard key equality on '${config.shardKey}'`,
       };
     }
@@ -207,13 +466,21 @@ export class QueryRouter {
       // Multiple shard key values - route to subset of shards
       const targetShards = vindex.getShardsForKeys(extracted.values);
 
+      // Use cost estimator for cardinality-based cost
+      const costEstimate = this.costEstimator.estimateInListCost(
+        tableName,
+        config.shardKey,
+        extracted.values,
+        targetShards.length
+      );
+
       return {
         queryType: targetShards.length === 1 ? 'single-shard' : 'scatter-gather',
         targetShards,
         shardKeyValue: extracted.values,
         readPreference,
         canUseReplica,
-        costEstimate: targetShards.length,
+        costEstimate,
         reason: `IN list on shard key '${config.shardKey}' targets ${targetShards.length} shard(s)`,
       };
     }
@@ -225,12 +492,21 @@ export class QueryRouter {
         extracted.values[1]
       );
 
+      // Use cost estimator for cardinality-based cost
+      const costEstimate = this.costEstimator.estimateRangeCost(
+        tableName,
+        config.shardKey,
+        extracted.values[0],
+        extracted.values[1],
+        targetShards.length
+      );
+
       return {
         queryType: targetShards.length === 1 ? 'single-shard' : 'scatter-gather',
         targetShards,
         readPreference,
         canUseReplica,
-        costEstimate: targetShards.length,
+        costEstimate,
         reason: `Range query on shard key '${config.shardKey}' targets ${targetShards.length} shard(s)`,
       };
     }
@@ -238,12 +514,18 @@ export class QueryRouter {
     // No shard key in WHERE - must scatter to all shards
     const allShards = vindex.getAllShards();
 
+    // Use cost estimator with cardinality estimation instead of heuristic
+    const costEstimate = this.costEstimator.estimateScatterCost(
+      tableName,
+      allShards.length
+    );
+
     return {
       queryType: 'scatter',
       targetShards: allShards,
       readPreference,
       canUseReplica,
-      costEstimate: allShards.length * 10, // Higher cost for scatter queries
+      costEstimate,
       reason: 'No shard key in WHERE clause - scatter query required',
     };
   }
@@ -577,6 +859,21 @@ export class QueryRouter {
   getShard(shardId: string): ShardConfig | undefined {
     return this.vschema.shards.find(s => s.id === shardId);
   }
+
+  /**
+   * Get the cost estimator for advanced cost analysis
+   */
+  getCostEstimator(): CostEstimator {
+    return this.costEstimator;
+  }
+
+  /**
+   * Set table statistics for cost estimation.
+   * This enables more accurate cardinality-based routing decisions.
+   */
+  setTableStats(stats: TableStatistics): void {
+    this.costEstimator.setTableStats(stats);
+  }
 }
 
 // =============================================================================
@@ -586,6 +883,6 @@ export class QueryRouter {
 /**
  * Create a query router from a VSchema
  */
-export function createRouter(vschema: VSchema): QueryRouter {
-  return new QueryRouter(vschema);
+export function createRouter(vschema: VSchema, options?: QueryRouterOptions): QueryRouter {
+  return new QueryRouter(vschema, options);
 }

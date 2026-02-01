@@ -33,6 +33,7 @@ import {
   detectR2ErrorType,
 } from './r2-errors.js';
 import { sleep } from '../utils/retry.js';
+import { LRUCache } from '../btree/lru-cache.js';
 
 // =============================================================================
 // R2 Interface Types (Cloudflare Workers Types)
@@ -192,12 +193,36 @@ function isRetryableError(error: unknown): boolean {
 // R2 Backend Implementation
 // =============================================================================
 
+/**
+ * Default cache size: 16MB
+ * This is a reasonable default for typical workloads while preventing unbounded memory growth.
+ */
+export const DEFAULT_READ_CACHE_MAX_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Default maximum number of cache entries: 1000
+ * This provides a fallback limit when entries are very small.
+ */
+export const DEFAULT_READ_CACHE_MAX_ENTRIES = 1000;
+
 export interface R2BackendConfig {
   keyPrefix?: string;
   defaultStorageClass?: 'Standard' | 'InfrequentAccess';
   defaultMetadata?: Record<string, string>;
   maxRetries?: number;
   circuitBreakerThreshold?: number;
+  /**
+   * Maximum size of the read cache in bytes.
+   * When the cache exceeds this size, least recently used entries are evicted.
+   * Default: 16MB (DEFAULT_READ_CACHE_MAX_BYTES)
+   */
+  readCacheMaxBytes?: number;
+  /**
+   * Maximum number of entries in the read cache.
+   * When the cache exceeds this count, least recently used entries are evicted.
+   * Default: 1000 (DEFAULT_READ_CACHE_MAX_ENTRIES)
+   */
+  readCacheMaxEntries?: number;
 }
 
 export interface R2HealthStatus {
@@ -214,7 +239,8 @@ export class R2StorageBackend implements FSXBackendWithMeta {
   private readonly defaultMetadata: Record<string, string>;
   private readonly maxRetries: number;
   private readonly circuitBreaker: CircuitBreaker;
-  private readonly readCache = new Map<string, Uint8Array>();
+  private readonly readCache: LRUCache<string, Uint8Array>;
+  private readonly maxCacheEntries: number;
   private readonly degradedListeners: Array<(entering: boolean) => void> = [];
   private isDegraded = false;
 
@@ -225,6 +251,36 @@ export class R2StorageBackend implements FSXBackendWithMeta {
     this.defaultMetadata = config.defaultMetadata ?? {};
     this.maxRetries = config.maxRetries ?? MAX_RETRIES;
     this.circuitBreaker = new CircuitBreaker(config.circuitBreakerThreshold ?? 5);
+
+    // Initialize LRU cache with configurable size limits
+    const maxBytes = config.readCacheMaxBytes ?? DEFAULT_READ_CACHE_MAX_BYTES;
+    this.maxCacheEntries = config.readCacheMaxEntries ?? DEFAULT_READ_CACHE_MAX_ENTRIES;
+
+    this.readCache = new LRUCache<string, Uint8Array>({
+      maxSize: maxBytes,
+      sizeCalculator: (value: Uint8Array) => value.byteLength,
+    });
+  }
+
+  /**
+   * Set a value in the read cache, enforcing both byte and entry limits.
+   * The LRU cache handles byte-based eviction automatically.
+   * This method additionally enforces the entry count limit.
+   */
+  private setCacheEntry(path: string, data: Uint8Array): void {
+    // First, add the entry (LRU cache handles byte-based eviction)
+    this.readCache.set(path, data);
+
+    // Then, enforce entry count limit by evicting oldest entries
+    while (this.readCache.size > this.maxCacheEntries) {
+      // Get the oldest key (first in iteration order)
+      const oldestKey = this.readCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.readCache.delete(oldestKey);
+      } else {
+        break;
+      }
+    }
   }
 
   // ===========================================================================
@@ -259,7 +315,7 @@ export class R2StorageBackend implements FSXBackendWithMeta {
         const buffer = await obj.arrayBuffer();
         const result = new Uint8Array(buffer);
 
-        this.readCache.set(path, result);
+        this.setCacheEntry(path, result);
         this.circuitBreaker.recordSuccess();
         this.checkDegradedExit();
         return result;
@@ -625,6 +681,42 @@ export class R2StorageBackend implements FSXBackendWithMeta {
       data.byteOffset,
       data.byteOffset + data.byteLength
     ) as ArrayBuffer;
+  }
+
+  // ===========================================================================
+  // Cache Statistics & Management
+  // ===========================================================================
+
+  /**
+   * Get statistics about the read cache for monitoring and debugging.
+   */
+  getReadCacheStats(): {
+    entryCount: number;
+    totalBytes: number;
+    maxBytes: number;
+    maxEntries: number;
+    hitRate: number;
+    hits: number;
+    misses: number;
+    evictions: number;
+  } {
+    return {
+      entryCount: this.readCache.size,
+      totalBytes: this.readCache.currentBytes,
+      maxBytes: this.readCache.maxCacheSize,
+      maxEntries: this.maxCacheEntries,
+      hitRate: this.readCache.hitRate,
+      hits: this.readCache.hits,
+      misses: this.readCache.misses,
+      evictions: this.readCache.evictions,
+    };
+  }
+
+  /**
+   * Clear the read cache.
+   */
+  clearReadCache(): void {
+    this.readCache.clear();
   }
 
   // ===========================================================================

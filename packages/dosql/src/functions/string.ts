@@ -18,6 +18,7 @@
 
 import type { SqlValue } from '../engine/types.js';
 import type { SqlFunction, FunctionSignature } from './registry.js';
+import { safeLikeMatchWithEscape, safeGlobMatch } from '../utils/safe-like.js';
 
 // =============================================================================
 // STRING FUNCTION IMPLEMENTATIONS
@@ -414,6 +415,8 @@ export function unicode(x: SqlValue): SqlValue {
 /**
  * like(x, pattern, escape?) - SQL LIKE pattern matching
  * % matches any sequence, _ matches single character
+ *
+ * SECURITY: Uses ReDoS-safe implementation (sql-axvi)
  */
 export function like(x: SqlValue, pattern: SqlValue, escape?: SqlValue): SqlValue {
   if (x === null || pattern === null) return null;
@@ -422,37 +425,15 @@ export function like(x: SqlValue, pattern: SqlValue, escape?: SqlValue): SqlValu
   const pat = String(pattern);
   const esc = escape !== undefined && escape !== null ? String(escape) : null;
 
-  // Convert LIKE pattern to regex
-  let regexPattern = '';
-  let i = 0;
-
-  while (i < pat.length) {
-    const c = pat[i];
-
-    if (esc && c === esc && i + 1 < pat.length) {
-      // Escape next character
-      const next = pat[i + 1];
-      regexPattern += escapeRegex(next);
-      i += 2;
-    } else if (c === '%') {
-      regexPattern += '.*';
-      i++;
-    } else if (c === '_') {
-      regexPattern += '.';
-      i++;
-    } else {
-      regexPattern += escapeRegex(c);
-      i++;
-    }
-  }
-
-  const regex = new RegExp(`^${regexPattern}$`, 'i');
-  return regex.test(str);
+  // Use ReDoS-safe LIKE matching (sql-axvi security fix)
+  return safeLikeMatchWithEscape(str, pat, esc, true);
 }
 
 /**
  * glob(pattern, x) - Unix glob pattern matching (case-sensitive)
  * * matches any sequence, ? matches single character, [...] matches character class
+ *
+ * SECURITY: Uses ReDoS-safe implementation (sql-axvi)
  */
 export function glob(pattern: SqlValue, x: SqlValue): SqlValue {
   if (x === null || pattern === null) return null;
@@ -460,41 +441,8 @@ export function glob(pattern: SqlValue, x: SqlValue): SqlValue {
   const str = String(x);
   const pat = String(pattern);
 
-  // Convert glob pattern to regex
-  let regexPattern = '';
-  let i = 0;
-
-  while (i < pat.length) {
-    const c = pat[i];
-
-    if (c === '*') {
-      regexPattern += '.*';
-      i++;
-    } else if (c === '?') {
-      regexPattern += '.';
-      i++;
-    } else if (c === '[') {
-      // Find matching ]
-      const end = pat.indexOf(']', i + 1);
-      if (end === -1) {
-        regexPattern += '\\[';
-        i++;
-      } else {
-        regexPattern += pat.slice(i, end + 1);
-        i = end + 1;
-      }
-    } else {
-      regexPattern += escapeRegex(c);
-      i++;
-    }
-  }
-
-  const regex = new RegExp(`^${regexPattern}$`);
-  return regex.test(str);
-}
-
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Use ReDoS-safe glob matching (sql-axvi security fix)
+  return safeGlobMatch(str, pat, false);
 }
 
 // =============================================================================

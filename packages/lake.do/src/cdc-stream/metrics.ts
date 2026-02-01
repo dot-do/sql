@@ -64,13 +64,13 @@ export interface MetricsTrackerOptions {
   /** Maximum queue size for utilization calculation */
   maxDepth: number;
   /** High water mark threshold percentage (0-100) for emitting event */
-  highWaterMark?: number;
+  highWaterMark?: number | undefined;
   /** Low water mark threshold percentage (0-100) for emitting event */
-  lowWaterMark?: number;
+  lowWaterMark?: number | undefined;
   /** Callback when queue reaches high water mark */
-  onHighWaterMark?: (event: WaterMarkEvent) => void;
+  onHighWaterMark?: ((event: WaterMarkEvent) => void) | undefined;
   /** Callback when queue falls below low water mark */
-  onLowWaterMark?: (event: WaterMarkEvent) => void;
+  onLowWaterMark?: ((event: WaterMarkEvent) => void) | undefined;
 }
 
 // =============================================================================

@@ -31,6 +31,7 @@ import {
   isDefaultConstraint,
   createTableConstraints,
 } from './types.js';
+import { sqlLikeMatch } from '../utils/like.js';
 
 // =============================================================================
 // VALIDATION ERROR
@@ -970,23 +971,9 @@ function evaluateComparison(
     case '>=':
       return Number(left) >= Number(right);
     case 'LIKE':
-      if (typeof left === 'string' && typeof right === 'string') {
-        const regex = new RegExp(
-          '^' + right.replace(/%/g, '.*').replace(/_/g, '.') + '$',
-          'i'
-        );
-        return regex.test(left);
-      }
-      return false;
+      return sqlLikeMatch(left, right);
     case 'NOT LIKE':
-      if (typeof left === 'string' && typeof right === 'string') {
-        const regex = new RegExp(
-          '^' + right.replace(/%/g, '.*').replace(/_/g, '.') + '$',
-          'i'
-        );
-        return !regex.test(left);
-      }
-      return true;
+      return !sqlLikeMatch(left, right);
     default:
       return false;
   }

@@ -69,7 +69,7 @@ export interface DedupConfig {
   maxEntries: number;
 }
 
-export const DEFAULT_DEDUP_CONFIG: DedupConfig = {
+export const DEFAULT_DEDUP_CONFIG: Readonly<DedupConfig> = {
   enabled: true,
   windowMs: TIMEOUTS.DEDUPLICATION_WINDOW_MS,
   maxEntries: THRESHOLDS.MAX_DEDUP_ENTRIES,

@@ -112,7 +112,7 @@ export interface WALConfig {
 /**
  * Default WAL configuration
  */
-export const DEFAULT_WAL_CONFIG: WALConfig = {
+export const DEFAULT_WAL_CONFIG: Readonly<WALConfig> = {
   targetSegmentSize: 2 * 1024 * 1024, // 2MB - matches DO storage chunk size
   maxEntriesPerSegment: 10000,
   segmentPrefix: '_wal/segments/',

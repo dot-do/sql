@@ -183,10 +183,10 @@ describe('Server-Side Timeout Enforcement', () => {
     try {
       await manager.commit();
       throw new Error('Should have thrown');
-    } catch (e: any) {
+    } catch (e) {
       expect(e).toBeInstanceOf(TransactionError);
       // Either TXN_TIMEOUT (if caught during commit) or TXN_NO_ACTIVE (if already rolled back)
-      expect(['TXN_TIMEOUT', 'TXN_NO_ACTIVE']).toContain(e.code);
+      expect(['TXN_TIMEOUT', 'TXN_NO_ACTIVE']).toContain((e as TransactionError).code);
     }
   });
 

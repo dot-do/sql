@@ -117,24 +117,37 @@ export interface TransactionManagerOptions {
  * ```
  */
 /**
- * Extended transaction manager interface with timeout support
+ * Timeout-related methods that ExtendedTransactionManager inherits from TransactionTimeoutEnforcer.
+ *
+ * These are the subset of TransactionTimeoutEnforcer methods that are exposed on the manager.
+ * The manager delegates to the internal enforcer for all timeout operations, ensuring
+ * a single source of truth for timeout handling logic.
+ *
+ * This consolidation addresses issue sql-oznl by:
+ * 1. Using Pick<> to derive types from TransactionTimeoutEnforcer rather than duplicating
+ * 2. Maintaining the same public API while reducing code duplication
+ * 3. Ensuring changes to timeout behavior only need to be made in one place (timeout.ts)
  */
-export interface ExtendedTransactionManager extends TransactionManager {
-  /** Handle DO alarm for timeout enforcement */
-  handleAlarm(): Promise<void>;
-  /** Check if DO alarm support is enabled */
-  hasAlarmSupport(): boolean;
-  /** Get timeout configuration */
-  getTimeoutConfig(): TransactionTimeoutConfig;
-  /** Request timeout extension for current transaction */
-  requestExtension(txnId: TransactionId, additionalMs: number): boolean;
-  /** Get remaining time for current transaction */
-  getRemainingTime(txnId: TransactionId): number;
-  /** Get I/O timeout in milliseconds */
-  getIoTimeoutMs(): number;
-  /** Execute operation with I/O timeout */
-  executeWithIoTimeout<T>(operation: () => Promise<T>): Promise<T>;
-}
+export type TimeoutMethods = Pick<
+  TransactionTimeoutEnforcer,
+  | 'handleAlarm'
+  | 'hasAlarmSupport'
+  | 'getTimeoutConfig'
+  | 'requestExtension'
+  | 'getRemainingTime'
+  | 'getIoTimeoutMs'
+  | 'executeWithIoTimeout'
+>;
+
+/**
+ * Extended transaction manager interface with timeout support.
+ *
+ * Combines the base TransactionManager interface with timeout enforcement
+ * capabilities from TransactionTimeoutEnforcer. The timeout methods are
+ * delegated to an internal TimeoutEnforcer instance, consolidating all
+ * timeout handling in a single implementation.
+ */
+export interface ExtendedTransactionManager extends TransactionManager, TimeoutMethods {}
 
 export function createTransactionManager(
   options: TransactionManagerOptions = {}

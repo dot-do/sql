@@ -272,7 +272,7 @@ export interface ObservabilityConfig {
 /**
  * Default configuration
  */
-export const DEFAULT_OBSERVABILITY_CONFIG: ObservabilityConfig = {
+export const DEFAULT_OBSERVABILITY_CONFIG: Readonly<ObservabilityConfig> = {
   tracing: {
     enabled: true,
     serviceName: 'dolake',

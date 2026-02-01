@@ -42,7 +42,7 @@ export interface VFSFallbackConfig {
 /**
  * Default VFS fallback configuration
  */
-export const DEFAULT_VFS_FALLBACK_CONFIG: VFSFallbackConfig = {
+export const DEFAULT_VFS_FALLBACK_CONFIG: Readonly<VFSFallbackConfig> = {
   maxStorageBytes: 10 * 1024 * 1024, // 10MB
   rotationThresholdPercent: 80,
   maxBufferFiles: 10,

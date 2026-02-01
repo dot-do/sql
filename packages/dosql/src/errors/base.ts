@@ -285,14 +285,14 @@ export class AggregateDoSQLError extends DoSQLError {
 // =============================================================================
 
 /** Registry of error constructors for deserialization */
-const errorRegistry = new Map<string, new (...args: any[]) => DoSQLError>();
+const errorRegistry = new Map<string, new (...args: unknown[]) => DoSQLError>();
 
 /**
  * Register an error class for deserialization
  */
 export function registerErrorClass(
   name: string,
-  constructor: new (...args: any[]) => DoSQLError
+  constructor: new (...args: unknown[]) => DoSQLError
 ): void {
   errorRegistry.set(name, constructor);
 }

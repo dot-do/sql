@@ -175,6 +175,190 @@ export type StatementHash = string & { readonly [StatementHashBrand]: never };
  */
 export type ShardId = string & { readonly [ShardIdBrand]: never };
 
+// =============================================================================
+// Generic Branded Type Factory Pattern
+// =============================================================================
+
+/**
+ * Creates a branded type factory function with validation.
+ *
+ * This higher-order function generates type-safe factory functions for creating
+ * branded types. In development mode, the factory validates that the input
+ * is a non-empty string. In production, validation is skipped for performance.
+ *
+ * This is the standard pattern for creating string-based branded types across
+ * all packages in the DoSQL ecosystem.
+ *
+ * @typeParam Brand - The unique symbol type used for branding
+ * @typeParam T - The resulting branded type (string & { readonly [Brand]: never })
+ *
+ * @param typeName - Human-readable name for error messages (e.g., "CDCEventId")
+ * @returns A factory function that converts strings to the branded type
+ *
+ * @example
+ * ```typescript
+ * // Define a branded type
+ * declare const MyIdBrand: unique symbol;
+ * type MyId = string & { readonly [typeof MyIdBrand]: never };
+ *
+ * // Create the factory function
+ * const createMyId = createBrandedTypeFactory<typeof MyIdBrand, MyId>('MyId');
+ *
+ * // Use it
+ * const id = createMyId('my-123'); // Type: MyId
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export function createBrandedTypeFactory<
+  Brand extends symbol,
+  T extends string & { readonly [K in Brand]: never }
+>(typeName: string): (value: string) => T {
+  return (value: string): T => {
+    if (_isDevModeInternal() || _isStrictModeInternal()) {
+      if (typeof value !== 'string') {
+        throw new Error(`${typeName} must be a string`);
+      }
+      if (value.trim().length === 0) {
+        throw new Error(`${typeName} cannot be empty`);
+      }
+    }
+    return value as T;
+  };
+}
+
+/**
+ * Creates a branded type factory for bigint-based branded types with validation.
+ *
+ * Similar to createBrandedTypeFactory but for bigint values instead of strings.
+ * In development mode, validates that the input is a non-negative bigint.
+ *
+ * @typeParam Brand - The unique symbol type used for branding
+ * @typeParam T - The resulting branded type (bigint & { readonly [Brand]: never })
+ *
+ * @param typeName - Human-readable name for error messages (e.g., "SnapshotId")
+ * @param options - Optional configuration for validation
+ * @returns A factory function that converts bigint to the branded type
+ *
+ * @example
+ * ```typescript
+ * // Define a branded type
+ * declare const SnapshotIdBrand: unique symbol;
+ * type SnapshotId = bigint & { readonly [typeof SnapshotIdBrand]: never };
+ *
+ * // Create the factory function
+ * const createSnapshotId = createBrandedBigintFactory<typeof SnapshotIdBrand, SnapshotId>(
+ *   'SnapshotId',
+ *   { allowZero: false } // Snapshot IDs must be positive
+ * );
+ *
+ * // Use it
+ * const id = createSnapshotId(12345n); // Type: SnapshotId
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export function createBrandedBigintFactory<
+  Brand extends symbol,
+  T extends bigint & { readonly [K in Brand]: never }
+>(
+  typeName: string,
+  options: { allowZero?: boolean; allowNegative?: boolean } = {}
+): (value: bigint) => T {
+  const { allowZero = true, allowNegative = false } = options;
+  return (value: bigint): T => {
+    if (_isDevModeInternal() || _isStrictModeInternal()) {
+      if (typeof value !== 'bigint') {
+        throw new Error(`${typeName} must be a bigint`);
+      }
+      if (!allowNegative && value < 0n) {
+        throw new Error(`${typeName} cannot be negative: ${value}`);
+      }
+      if (!allowZero && value === 0n) {
+        throw new Error(`${typeName} cannot be zero`);
+      }
+    }
+    return value as T;
+  };
+}
+
+/**
+ * Creates a type guard function for a string-based branded type.
+ *
+ * Generates a type guard that checks if a value is a valid candidate
+ * for the branded type (i.e., a non-empty string).
+ *
+ * @typeParam T - The branded type to guard for
+ *
+ * @param _typeName - Human-readable name for the type (used for documentation)
+ * @returns A type guard function that narrows unknown to T
+ *
+ * @example
+ * ```typescript
+ * const isMyId = createBrandedTypeGuard<MyId>('MyId');
+ *
+ * const value: unknown = 'my-123';
+ * if (isMyId(value)) {
+ *   // value is narrowed to MyId
+ *   processId(value);
+ * }
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export function createBrandedTypeGuard<T extends string>(
+  _typeName: string
+): (value: unknown) => value is T {
+  return (value: unknown): value is T => {
+    return typeof value === 'string' && value.trim().length > 0;
+  };
+}
+
+/**
+ * Creates a type guard function for a bigint-based branded type.
+ *
+ * Generates a type guard that checks if a value is a valid candidate
+ * for the branded type (i.e., a valid bigint meeting the constraints).
+ *
+ * @typeParam T - The branded type to guard for
+ *
+ * @param _typeName - Human-readable name for the type (used for documentation)
+ * @param options - Optional configuration for validation
+ * @returns A type guard function that narrows unknown to T
+ *
+ * @example
+ * ```typescript
+ * const isSnapshotId = createBrandedBigintGuard<SnapshotId>('SnapshotId', { allowZero: false });
+ *
+ * const value: unknown = 12345n;
+ * if (isSnapshotId(value)) {
+ *   // value is narrowed to SnapshotId
+ *   processSnapshot(value);
+ * }
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export function createBrandedBigintGuard<T extends bigint>(
+  _typeName: string,
+  options: { allowZero?: boolean; allowNegative?: boolean } = {}
+): (value: unknown) => value is T {
+  const { allowZero = true, allowNegative = false } = options;
+  return (value: unknown): value is T => {
+    if (typeof value !== 'bigint') return false;
+    if (!allowNegative && value < 0n) return false;
+    if (!allowZero && value === 0n) return false;
+    return true;
+  };
+}
 
 // =============================================================================
 // Validated Tracking (WeakSet for runtime-created branded types)
@@ -427,39 +611,99 @@ export function createTransactionId(id: string): TransactionId {
 
 /**
  * Create a typed LSN from a bigint.
- * @throws Error if lsn is negative or not a bigint (in dev mode)
+ * @throws Error if lsn is negative (in dev mode)
+ * @public
+ * @stability stable
+ * @overload
+ */
+export function createLSN(lsn: bigint): LSN;
+/**
+ * Create a typed LSN from a number.
+ * The number is converted to bigint. Use for safe integer values.
+ * @throws Error if lsn is negative or not a safe integer (in dev mode)
+ * @public
+ * @stability stable
+ * @overload
+ */
+export function createLSN(lsn: number): LSN;
+/**
+ * Create a typed LSN from a string (e.g., from JSON deserialization).
+ * The string is parsed as a bigint.
+ * @throws Error if string cannot be parsed or lsn is negative (in dev mode)
+ * @public
+ * @stability stable
+ * @overload
+ */
+export function createLSN(lsn: string): LSN;
+/**
+ * Create a typed LSN from a bigint, number, or string.
+ *
+ * @param lsn - The LSN value as bigint, number, or string
+ * @returns A branded LSN value
+ * @throws Error if lsn is negative or invalid (in dev mode)
+ *
+ * @example
+ * ```typescript
+ * // From bigint (preferred)
+ * const lsn1 = createLSN(100n);
+ *
+ * // From number (for safe integers)
+ * const lsn2 = createLSN(100);
+ *
+ * // From string (e.g., from JSON)
+ * const lsn3 = createLSN('100');
+ * ```
+ *
  * @public
  * @stability stable
  */
-export function createLSN(lsn: bigint): LSN {
-  if (_isDevModeInternal() || _isStrictModeInternal()) {
-    if (typeof lsn !== 'bigint') {
-      throw new Error('LSN must be a bigint');
+export function createLSN(lsn: bigint | number | string): LSN;
+export function createLSN(lsn: bigint | number | string): LSN {
+  // Convert to bigint if needed
+  let lsnBigInt: bigint;
+  if (typeof lsn === 'bigint') {
+    lsnBigInt = lsn;
+  } else if (typeof lsn === 'number') {
+    if (_isDevModeInternal() || _isStrictModeInternal()) {
+      if (!Number.isSafeInteger(lsn)) {
+        throw new Error(`LSN number must be a safe integer: ${lsn}`);
+      }
     }
-    if (lsn < 0n) {
-      throw new Error(`LSN cannot be negative: ${lsn}`);
+    lsnBigInt = BigInt(lsn);
+  } else {
+    // string
+    try {
+      lsnBigInt = BigInt(lsn);
+    } catch {
+      throw new Error(`LSN string must be a valid integer: ${lsn}`);
+    }
+  }
+
+  if (_isDevModeInternal() || _isStrictModeInternal()) {
+    if (lsnBigInt < 0n) {
+      throw new Error(`LSN cannot be negative: ${lsnBigInt}`);
     }
   }
 
   // Track as validated (if caching is enabled)
   if (_getWrapperCacheConfigInternal().enabled) {
     // Check if already exists (reuse)
-    const existing = lsnWrappers.get(lsn);
+    const existing = lsnWrappers.get(lsnBigInt);
     if (existing) {
-      touchLsnLru(lsn);
-      return lsn as LSN;
+      touchLsnLru(lsnBigInt);
+      return lsnBigInt as LSN;
     }
 
     // Evict if needed before adding
     evictLsnWrappersIfNeeded();
 
-    const wrapper = { value: lsn };
-    lsnWrappers.set(lsn, wrapper);
+    const wrapper = { value: lsnBigInt };
+    lsnWrappers.set(lsnBigInt, wrapper);
     validatedLSNs.add(wrapper);
-    touchLsnLru(lsn);
+    touchLsnLru(lsnBigInt);
   }
 
-  return lsn as LSN;
+  return lsnBigInt as LSN;
 }
 
 /**
@@ -631,12 +875,49 @@ export function compareLSN(a: LSN, b: LSN): number {
 }
 
 /**
- * Increment an LSN by a given amount (default 1).
+ * Increment an LSN by 1.
+ * @public
+ * @stability stable
+ * @overload
+ */
+export function incrementLSN(lsn: LSN): LSN;
+/**
+ * Increment an LSN by a given bigint amount.
+ * @public
+ * @stability stable
+ * @overload
+ */
+export function incrementLSN(lsn: LSN, amount: bigint): LSN;
+/**
+ * Increment an LSN by a given number amount.
+ * The number must be a safe integer.
+ * @public
+ * @stability stable
+ * @overload
+ */
+export function incrementLSN(lsn: LSN, amount: number): LSN;
+/**
+ * Increment an LSN by a given amount.
+ *
+ * @param lsn - The LSN to increment
+ * @param amount - The amount to add (default: 1)
+ * @returns A new LSN with the incremented value
+ *
+ * @example
+ * ```typescript
+ * const lsn = createLSN(100n);
+ * const next = incrementLSN(lsn);        // 101n
+ * const skip = incrementLSN(lsn, 10n);   // 110n
+ * const skip2 = incrementLSN(lsn, 10);   // 110n (number also works)
+ * ```
+ *
  * @public
  * @stability stable
  */
-export function incrementLSN(lsn: LSN, amount: bigint = 1n): LSN {
-  return createLSN((lsn as bigint) + amount);
+export function incrementLSN(lsn: LSN, amount?: bigint | number): LSN;
+export function incrementLSN(lsn: LSN, amount: bigint | number = 1n): LSN {
+  const amountBigInt = typeof amount === 'number' ? BigInt(amount) : amount;
+  return createLSN((lsn as bigint) + amountBigInt);
 }
 
 /**

@@ -57,7 +57,7 @@ export interface ScalingConfig {
 /**
  * Default scaling configuration
  */
-export const DEFAULT_SCALING_CONFIG: ScalingConfig = {
+export const DEFAULT_SCALING_CONFIG: Readonly<ScalingConfig> = {
   scalingMode: 'single',
   minInstances: 1,
   maxInstances: 16,
@@ -1206,7 +1206,7 @@ export interface AutoScalingConfig extends ScalingConfig {
 /**
  * Default auto-scaling configuration
  */
-export const DEFAULT_AUTO_SCALING_CONFIG: AutoScalingConfig = {
+export const DEFAULT_AUTO_SCALING_CONFIG: Readonly<AutoScalingConfig> = {
   ...DEFAULT_SCALING_CONFIG,
   scaleUpBufferThreshold: 0.8,
   scaleUpLatencyThresholdMs: 5000,

@@ -37,10 +37,10 @@ import { createTransactionId } from './types.js';
 import { QueryMode, ModeEnforcer, isWriteOperation, extractOperation } from './modes.js';
 import type { WALWriter } from '../wal/index.js';
 import type { CDCStream } from '../cdc/index.js';
-import { parseDML } from '../parser/dml.js';
+import { parseDML, parseInsert, parseUpdate, parseDelete } from '../parser/dml.js';
 import { isParseSuccess } from '../parser/dml-types.js';
-import type { ReturningClause } from '../parser/dml-types.js';
-import { evaluateReturning } from '../parser/returning.js';
+import type { ReturningClause, Expression } from '../parser/dml-types.js';
+import { evaluateReturning, evaluateExpression } from '../parser/returning.js';
 import { StatementError, createTransactionStateError } from '../errors/index.js';
 import { StatementErrorCode } from '../errors/codes.js';
 import { parseDDL, isParseSuccess as isDDLParseSuccess } from '../parser/ddl.js';
@@ -528,29 +528,38 @@ export class DOQueryEngine {
 
   /**
    * Execute an INSERT statement.
+   * Uses the proper DML parser instead of regex.
    */
   private async executeInsert(sql: string, params?: SqlValue[]): Promise<WriteResult> {
-    const match = sql.match(/INSERT\s+INTO\s+(\w+)\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
-    if (!match) {
+    const parseResult = parseInsert(sql);
+    if (!isParseSuccess(parseResult)) {
       return { success: false, rowsAffected: 0 };
     }
 
-    const tableName = match[1];
-    const columns = match[2].split(',').map(c => c.trim());
-    const valuePlaceholders = match[3].split(',').map(v => v.trim());
+    const stmt = parseResult.statement;
+    const tableName = stmt.table;
 
-    // Build row from columns and params
+    // Only support VALUES list for now (not INSERT ... SELECT or DEFAULT VALUES)
+    if (stmt.source.type !== 'values_list') {
+      return { success: false, rowsAffected: 0 };
+    }
+
+    // Only support single-row inserts for now
+    const firstRow = stmt.source.rows[0];
+    if (stmt.source.rows.length !== 1 || !firstRow) {
+      return { success: false, rowsAffected: 0 };
+    }
+
+    const columns = stmt.columns ?? [];
+    const valueExprs = firstRow.values;
+
+    // Build row from columns and evaluated expressions
     let row: Row = {};
+    const paramContext = this.createParamContext(params);
     columns.forEach((col, i) => {
-      const placeholder = valuePlaceholders[i];
-      if (placeholder === '?' && params && i < params.length) {
-        row[col] = params[i];
-      } else if (placeholder.startsWith('$') && params) {
-        const paramIndex = parseInt(placeholder.slice(1), 10) - 1;
-        row[col] = params[paramIndex];
-      } else {
-        // Parse literal value
-        row[col] = this.parseLiteral(placeholder);
+      const expr = valueExprs[i];
+      if (expr) {
+        row[col] = this.evaluateExpressionForDML(expr, paramContext);
       }
     });
 
@@ -608,11 +617,10 @@ export class DOQueryEngine {
     // Execute AFTER INSERT triggers (errors are non-fatal)
     await executor.executeAfter(tableName, 'insert', undefined, row);
 
-    // Handle RETURNING clause
-    const returning = this.parseReturningClause(sql);
-    if (returning) {
+    // Handle RETURNING clause from parsed statement
+    if (stmt.returning) {
       const schemaColumns = columns;
-      const returnedRows = this.applyReturning(returning, [row], schemaColumns);
+      const returnedRows = this.applyReturning(stmt.returning, [row], schemaColumns);
       return { success: true, rowsAffected: 1, returning: returnedRows };
     }
 
@@ -621,49 +629,51 @@ export class DOQueryEngine {
 
   /**
    * Execute an UPDATE statement.
+   * Uses the proper DML parser instead of regex.
    */
   private async executeUpdate(sql: string, params?: SqlValue[]): Promise<WriteResult> {
-    // Strip RETURNING clause before regex matching to avoid it being captured
-    const sqlWithoutReturning = sql.replace(/\s+RETURNING\s+.+$/i, '');
-    const match = sqlWithoutReturning.match(/UPDATE\s+(\w+)\s+SET\s+(.+?)\s+WHERE\s+(.+)/i);
-    if (!match) {
+    const parseResult = parseUpdate(sql);
+    if (!isParseSuccess(parseResult)) {
       return { success: false, rowsAffected: 0 };
     }
 
-    const tableName = match[1];
-    const setClause = match[2];
-    const whereClause = match[3];
+    const stmt = parseResult.statement;
+    const tableName = stmt.table;
 
     const tableData = this.tables.get(tableName);
     if (!tableData) {
       return { success: false, rowsAffected: 0 };
     }
 
-    // Parse SET clause
-    const setMatch = setClause.match(/(\w+)\s*=\s*(.+)/);
-    if (!setMatch) {
+    // Extract SET clauses from parsed statement
+    const setClauses = stmt.set;
+    if (setClauses.length === 0) {
       return { success: false, rowsAffected: 0 };
     }
-    const setCol = setMatch[1];
-    const setValueStr = setMatch[2].trim();
 
     let rowsAffected = 0;
     const affectedRows: Row[] = [];
     const executor = this.getTriggerExecutor();
 
     for (const [key, row] of Array.from(tableData)) {
-      if (this.matchesWhere(row, whereClause, params)) {
+      // Create param context for each row (reset index)
+      const paramContext = this.createParamContext(params);
+
+      // Check WHERE clause using parsed expression
+      const matchesRow = stmt.where
+        ? this.evaluateWhereExpression(stmt.where.condition, row, paramContext)
+        : true;
+
+      if (matchesRow) {
         const before = { ...row };
 
-        // Build the proposed new row
+        // Build the proposed new row using parsed SET clauses
         const proposedRow = { ...row };
-        if (setValueStr === '?' && params && params.length > 0) {
-          proposedRow[setCol] = params[0];
-        } else if (setValueStr.startsWith('$') && params) {
-          const paramIndex = parseInt(setValueStr.slice(1), 10) - 1;
-          proposedRow[setCol] = params[paramIndex];
-        } else {
-          proposedRow[setCol] = this.parseLiteral(setValueStr);
+        // Reset param context for SET clause evaluation
+        const setParamContext = this.createParamContext(params);
+        for (const setClause of setClauses) {
+          const newValue = this.evaluateExpressionForDML(setClause.value, setParamContext);
+          proposedRow[setClause.column] = newValue;
         }
 
         // Execute BEFORE UPDATE triggers
@@ -723,12 +733,11 @@ export class DOQueryEngine {
       await this.config.cdc.flush();
     }
 
-    // Handle RETURNING clause
-    const returning = this.parseReturningClause(sql);
-    if (returning) {
+    // Handle RETURNING clause from parsed statement
+    if (stmt.returning) {
       const schema = this.schemas.get(tableName);
       const schemaColumns = schema?.columns.map(c => c.name);
-      const returnedRows = this.applyReturning(returning, affectedRows, schemaColumns);
+      const returnedRows = this.applyReturning(stmt.returning, affectedRows, schemaColumns);
       return { success: true, rowsAffected, returning: returnedRows };
     }
 
@@ -737,17 +746,16 @@ export class DOQueryEngine {
 
   /**
    * Execute a DELETE statement.
+   * Uses the proper DML parser instead of regex.
    */
   private async executeDelete(sql: string, params?: SqlValue[]): Promise<WriteResult> {
-    // Strip RETURNING clause before regex matching
-    const sqlWithoutReturning = sql.replace(/\s+RETURNING\s+.+$/i, '');
-    const match = sqlWithoutReturning.match(/DELETE\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?/i);
-    if (!match) {
+    const parseResult = parseDelete(sql);
+    if (!isParseSuccess(parseResult)) {
       return { success: false, rowsAffected: 0 };
     }
 
-    const tableName = match[1];
-    const whereClause = match[2];
+    const stmt = parseResult.statement;
+    const tableName = stmt.table;
 
     const tableData = this.tables.get(tableName);
     if (!tableData) {
@@ -759,7 +767,15 @@ export class DOQueryEngine {
     const executor = this.getTriggerExecutor();
 
     for (const [key, row] of Array.from(tableData)) {
-      if (this.matchesWhere(row, whereClause, params)) {
+      // Create param context for each row
+      const paramContext = this.createParamContext(params);
+
+      // Check WHERE clause using parsed expression
+      const matchesRow = stmt.where
+        ? this.evaluateWhereExpression(stmt.where.condition, row, paramContext)
+        : true;
+
+      if (matchesRow) {
         keysToDelete.push(key);
         rowsToDelete.push({ ...row });
       }
@@ -813,12 +829,11 @@ export class DOQueryEngine {
       await this.config.cdc.flush();
     }
 
-    // Handle RETURNING clause
-    const returning = this.parseReturningClause(sql);
-    if (returning) {
+    // Handle RETURNING clause from parsed statement
+    if (stmt.returning) {
       const schema = this.schemas.get(tableName);
       const schemaColumns = schema?.columns.map(c => c.name);
-      const returnedRows = this.applyReturning(returning, rowsToDelete, schemaColumns);
+      const returnedRows = this.applyReturning(stmt.returning, rowsToDelete, schemaColumns);
       return { success: true, rowsAffected: keysToDelete.length, returning: returnedRows };
     }
 
@@ -1109,7 +1124,7 @@ export class DOQueryEngine {
     rows: Row[],
     schemaColumns?: string[]
   ): Row[] {
-    return rows.map(row => evaluateReturning(returning, row, schemaColumns));
+    return rows.map(row => evaluateReturning(returning, row, schemaColumns) as Row);
   }
 
   /**
@@ -1143,6 +1158,130 @@ export class DOQueryEngine {
     }
 
     return row[col] === compareValue;
+  }
+
+  /**
+   * Create a parameter context for expression evaluation.
+   * Tracks positional parameter index for ? placeholders.
+   */
+  private createParamContext(params?: SqlValue[]): { params: SqlValue[]; index: number } {
+    return { params: params ?? [], index: 0 };
+  }
+
+  /**
+   * Evaluate a DML expression to a SqlValue.
+   * Handles literals, parameters, NULL, DEFAULT, and column references.
+   */
+  private evaluateExpressionForDML(
+    expr: Expression,
+    paramContext: { params: SqlValue[]; index: number }
+  ): SqlValue {
+    switch (expr.type) {
+      case 'literal':
+        return expr.value as SqlValue;
+
+      case 'null':
+        return null;
+
+      case 'default':
+        return null; // DEFAULT is handled specially by storage layer
+
+      case 'parameter': {
+        // Handle positional (?) and numbered ($n) parameters
+        if (typeof expr.name === 'number') {
+          // For ?, use current index and increment
+          // For $n, use 1-indexed position
+          const isPositional = expr.raw === '?';
+          const idx = isPositional ? paramContext.index++ : expr.name - 1;
+          if (idx >= 0 && idx < paramContext.params.length) {
+            const value = paramContext.params[idx];
+            return value !== undefined ? value : null;
+          }
+          return null;
+        }
+        // Named parameter - look up by name (not supported in basic context)
+        return null;
+      }
+
+      case 'column':
+        // Column references in VALUES aren't typical, but return the name
+        return null;
+
+      case 'function': {
+        // Evaluate function call - use the returning module's evaluateExpression
+        const result = evaluateExpression(expr, {}, {});
+        return result as SqlValue;
+      }
+
+      case 'binary': {
+        // Evaluate binary expression
+        const result = evaluateExpression(expr, {}, {});
+        return result as SqlValue;
+      }
+
+      case 'unary': {
+        // Evaluate unary expression
+        const result = evaluateExpression(expr, {}, {});
+        return result as SqlValue;
+      }
+
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Evaluate a WHERE clause expression against a row.
+   */
+  private evaluateWhereExpression(
+    expr: Expression,
+    row: Row,
+    paramContext: { params: SqlValue[]; index: number }
+  ): boolean {
+    // Special handling for parameter expressions in WHERE clause
+    const resolvedExpr = this.resolveParameters(expr, paramContext);
+    const result = evaluateExpression(resolvedExpr, row as Record<string, unknown>, {});
+    return Boolean(result);
+  }
+
+  /**
+   * Resolve parameter placeholders in an expression by substituting actual values.
+   */
+  private resolveParameters(
+    expr: Expression,
+    paramContext: { params: SqlValue[]; index: number }
+  ): Expression {
+    switch (expr.type) {
+      case 'parameter': {
+        const value = this.evaluateExpressionForDML(expr, paramContext);
+        // Convert to literal expression
+        return {
+          type: 'literal',
+          value: value as string | number | boolean | null,
+          raw: String(value),
+        };
+      }
+
+      case 'binary': {
+        return {
+          type: 'binary',
+          operator: expr.operator,
+          left: this.resolveParameters(expr.left, paramContext),
+          right: this.resolveParameters(expr.right, paramContext),
+        };
+      }
+
+      case 'unary': {
+        return {
+          type: 'unary',
+          operator: expr.operator,
+          operand: this.resolveParameters(expr.operand, paramContext),
+        };
+      }
+
+      default:
+        return expr;
+    }
   }
 
   /**

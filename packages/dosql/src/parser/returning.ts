@@ -28,6 +28,7 @@ import type {
   DeleteStatement,
   ReplaceStatement,
 } from './dml-types.js';
+import { sqlLikeMatch } from '../utils/like.js';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -441,11 +442,7 @@ function evaluateBinaryOp(op: string, left: unknown, right: unknown): unknown {
 
     // LIKE (simplified)
     case 'LIKE':
-      if (typeof left === 'string' && typeof right === 'string') {
-        const pattern = right.replace(/%/g, '.*').replace(/_/g, '.');
-        return new RegExp(`^${pattern}$`, 'i').test(left);
-      }
-      return null;
+      return sqlLikeMatch(left, right);
 
     default:
       return null;

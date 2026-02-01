@@ -21,6 +21,7 @@ import {
   MAX_ROWS_PER_ROW_GROUP,
   TARGET_ROW_GROUP_SIZE,
 } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 import type { TableStorageConfig } from '../engine/storage-config.js';
 
@@ -397,7 +398,7 @@ export class ColumnarWriter {
         break;
 
       default:
-        throw new Error(`Unsupported data type: ${dataType}`);
+        return assertNever(dataType, `Unsupported data type: ${dataType}`);
     }
 
     return {

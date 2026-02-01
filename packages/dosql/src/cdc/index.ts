@@ -118,3 +118,17 @@ export {
   type CaptureState,
   type CaptureResult,
 } from './capture.js';
+
+// Consumer pool module
+export {
+  CDCConsumerPool,
+  createCDCConsumerPool,
+  type CDCPoolConfig,
+  type CDCConsumer,
+  type CDCConsumerOptions,
+  type CDCPoolStats,
+  type CDCPoolHealth,
+  type CDCPoolEventMap,
+  type ConsumerState,
+  DEFAULT_CDC_POOL_CONFIG,
+} from './pool.js';

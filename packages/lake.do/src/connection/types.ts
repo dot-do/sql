@@ -47,7 +47,7 @@ export interface ConnectionConfig {
   /** WebSocket URL (ws:// or wss://) */
   url: string;
   /** Authentication token */
-  token?: string;
+  token?: string | undefined;
   /** Connection timeout in milliseconds */
   timeout: number;
   /** Retry configuration */

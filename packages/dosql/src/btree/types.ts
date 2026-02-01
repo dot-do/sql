@@ -115,7 +115,7 @@ export interface PageCacheConfig {
 /**
  * Default page cache configuration
  */
-export const DEFAULT_PAGE_CACHE_CONFIG: PageCacheConfig = {
+export const DEFAULT_PAGE_CACHE_CONFIG: Readonly<PageCacheConfig> = {
   maxPages: 1000,
 };
 
@@ -189,7 +189,7 @@ export interface BTreeConfig {
  * - Height of 4 can handle ~100M records
  * - Each page uses roughly 100KB-500KB with typical key/value sizes
  */
-export const DEFAULT_BTREE_CONFIG: BTreeConfig = {
+export const DEFAULT_BTREE_CONFIG: Readonly<BTreeConfig> = {
   minKeys: 50,
   maxKeys: 100,
   maxInlineValueSize: 4096,

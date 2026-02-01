@@ -22,7 +22,7 @@ export interface PersistenceManagerConfig {
 /**
  * Default persistence manager configuration
  */
-export const DEFAULT_PERSISTENCE_MANAGER_CONFIG: PersistenceManagerConfig = {
+export const DEFAULT_PERSISTENCE_MANAGER_CONFIG: Readonly<PersistenceManagerConfig> = {
   dlqPathPrefix: 'dlq/',
   vfsPathPrefix: 'vfs/',
 };

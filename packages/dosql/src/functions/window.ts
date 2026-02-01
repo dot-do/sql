@@ -20,6 +20,7 @@
 
 import type { SqlValue } from '../engine/types.js';
 import type { FunctionSignature } from './registry.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // WINDOW FUNCTION TYPES
@@ -107,7 +108,7 @@ export type WindowFunction = (
  * Default frame: RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
  * (Standard SQL default when ORDER BY is specified)
  */
-export const DEFAULT_FRAME_WITH_ORDER: WindowFrame = {
+export const DEFAULT_FRAME_WITH_ORDER: Readonly<WindowFrame> = {
   mode: 'range',
   start: { type: 'unboundedPreceding' },
   end: { type: 'currentRow' },
@@ -117,7 +118,7 @@ export const DEFAULT_FRAME_WITH_ORDER: WindowFrame = {
  * Default frame: RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
  * (When no ORDER BY is specified)
  */
-export const DEFAULT_FRAME_WITHOUT_ORDER: WindowFrame = {
+export const DEFAULT_FRAME_WITHOUT_ORDER: Readonly<WindowFrame> = {
   mode: 'range',
   start: { type: 'unboundedPreceding' },
   end: { type: 'unboundedFollowing' },
@@ -213,7 +214,7 @@ function calculateRowBoundary(
     case 'following':
       return currentIndex + (boundary.offset ?? 0);
     default:
-      return currentIndex;
+      return assertNever(boundary.type, `Unknown frame boundary type: ${boundary.type}`);
   }
 }
 
@@ -254,8 +255,6 @@ function calculateRangeBoundary(
         side
       );
     }
-    default:
-      return currentIndex;
   }
 }
 
@@ -300,7 +299,7 @@ function calculateGroupBoundary(
       return side === 'start' ? groups[currentGroup].start : group.end;
     }
     default:
-      return currentIndex;
+      return assertNever(boundary.type, `Unknown frame boundary type: ${boundary.type}`);
   }
 }
 

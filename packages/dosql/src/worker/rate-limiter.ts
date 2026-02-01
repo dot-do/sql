@@ -16,7 +16,7 @@ export interface RateLimiterConfig {
   burstSize: number;
 }
 
-export const DEFAULT_RATE_LIMIT_CONFIG: RateLimiterConfig = {
+export const DEFAULT_RATE_LIMIT_CONFIG: Readonly<RateLimiterConfig> = {
   requestsPerSecond: 100,
   burstSize: 200,
 };

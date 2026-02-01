@@ -27,6 +27,9 @@ import {
   manifestFilePath,
   partitionToPath,
 } from './iceberg.js';
+import { createLogger } from './logging.js';
+
+const logger = createLogger({ component: 'flush-manager' });
 
 // =============================================================================
 // Types
@@ -199,7 +202,7 @@ export class FlushManager {
         usedFallback: false,
       };
     } catch (error) {
-      console.error('Flush failed:', error);
+      logger.error('Flush failed', error);
 
       // Fall back to local storage
       if (this.deps.config.enableFallback) {
@@ -422,7 +425,7 @@ export async function recoverFromFallback(
       await flushManager.flushTable(tableName, buffers);
     }
   } catch (error) {
-    console.error('Fallback recovery failed:', error);
+    logger.error('Fallback recovery failed', error);
     throw error;
   } finally {
     setState('idle');

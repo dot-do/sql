@@ -451,10 +451,7 @@ describe('LSN Utility Functions', () => {
     expect(compareLSN(a, a)).toBe(0);
   });
 
-  it.fails('should have incrementLSN function', () => {
-    // EXPECTED: incrementLSN(lsn, amount?) returns new LSN
-    // ACTUAL: Function does not exist
-
+  it('should have incrementLSN function', () => {
     expect(typeof incrementLSN).toBe('function');
 
     const lsn = createLSN(100n);
@@ -463,6 +460,22 @@ describe('LSN Utility Functions', () => {
 
     const incrementedBy10 = incrementLSN(lsn, 10n);
     expect(incrementedBy10).toBe(110n);
+  });
+
+  it('should support incrementLSN with number amount (overload)', () => {
+    const lsn = createLSN(100n);
+    const incrementedByNumber = incrementLSN(lsn, 10);
+    expect(incrementedByNumber).toBe(110n);
+  });
+
+  it('should support createLSN from number (overload)', () => {
+    const lsn = createLSN(100);
+    expect(lsn).toBe(100n);
+  });
+
+  it('should support createLSN from string (overload)', () => {
+    const lsn = createLSN('100');
+    expect(lsn).toBe(100n);
   });
 
   it.fails('should have lsnValue function to extract raw bigint', () => {

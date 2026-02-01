@@ -14,6 +14,7 @@ import {
   type SqlValue,
 } from '../types.js';
 import { assertNever } from '../../utils/assert-never.js';
+import { likeMatch } from '../../utils/like.js';
 
 // =============================================================================
 // HELPER FUNCTIONS
@@ -310,27 +311,6 @@ function evaluateFunction(name: string, args: SqlValue[]): SqlValue {
     default:
       throw new Error(`Unknown function: ${name}`);
   }
-}
-
-/**
- * Escape special regex characters
- */
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * SQL LIKE pattern matching
- */
-function likeMatch(value: string, pattern: string): boolean {
-  // Convert SQL LIKE pattern to regex
-  // % matches any sequence, _ matches single character
-  const regexPattern = pattern
-    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // Escape regex special chars
-    .replace(/%/g, '.*')  // % -> .*
-    .replace(/_/g, '.');  // _ -> .
-
-  return new RegExp(`^${regexPattern}$`, 'i').test(value);
 }
 
 // =============================================================================

@@ -164,7 +164,7 @@ export interface BufferConfig {
 /**
  * Default analytics configuration
  */
-export const DEFAULT_ANALYTICS_CONFIG: AnalyticsDurabilityConfig = {
+export const DEFAULT_ANALYTICS_CONFIG: Readonly<AnalyticsDurabilityConfig> = {
   primaryStorage: 'r2',
   fallbackStorage: 'vfs',
   fallbackEnabled: true,

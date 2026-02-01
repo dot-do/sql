@@ -85,7 +85,7 @@ export interface CostModelConfig {
 /**
  * Default cost model configuration
  */
-export const DEFAULT_COST_MODEL: CostModelConfig = {
+export const DEFAULT_COST_MODEL: Readonly<CostModelConfig> = {
   randomIOCost: 4.0,
   sequentialIOCost: 1.0,
   cpuComparisonCost: 0.01,

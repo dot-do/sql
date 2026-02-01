@@ -1,104 +1,41 @@
 /**
  * lake.do - Branded Type Factory Pattern
  *
- * This module provides a generic factory pattern for creating branded types,
- * eliminating repetitive validation logic across multiple branded type factories.
+ * This module re-exports the generic factory pattern from @dotdo/sql-types
+ * and defines lake.do-specific branded types using the standardized pattern.
  *
  * @packageDocumentation
  * @stability stable
  * @since 0.1.0
  */
 
-import { isDevMode } from 'sql.do';
+// =============================================================================
+// Import and Re-export Generic Factory Pattern from sql.do
+// =============================================================================
 
-// =============================================================================
-// Branded Type Factory
-// =============================================================================
+import {
+  createBrandedTypeFactory as _createBrandedTypeFactory,
+  createBrandedBigintFactory as _createBrandedBigintFactory,
+  createBrandedTypeGuard as _createBrandedTypeGuard,
+  createBrandedBigintGuard as _createBrandedBigintGuard,
+} from 'sql.do';
 
 /**
- * Creates a branded type factory function with validation.
+ * Re-exported generic branded type factory functions from `sql.do` (which re-exports from `@dotdo/sql-types`).
  *
- * @description This higher-order function generates type-safe factory functions
- * for branded types. In development mode, the factory validates that the input
- * is a non-empty string. In production, validation is skipped for performance.
+ * These factory functions provide the standardized pattern for creating
+ * branded types across all packages in the DoSQL ecosystem.
  *
- * @typeParam Brand - The unique symbol type used for branding
- * @typeParam T - The resulting branded type (string & { readonly [Brand]: never })
- *
- * @param typeName - Human-readable name for error messages (e.g., "CDCEventId")
- * @returns A factory function that converts strings to the branded type
- *
- * @example
- * ```typescript
- * // Define a branded type
- * declare const MyIdBrand: unique symbol;
- * type MyId = string & { readonly [typeof MyIdBrand]: never };
- *
- * // Create the factory function
- * const createMyId = createBrandedTypeFactory<typeof MyIdBrand, MyId>('MyId');
- *
- * // Use it
- * const id = createMyId('my-123'); // Type: MyId
- * ```
+ * @see {@link https://github.com/dotdo/shared-types | @dotdo/sql-types} for canonical definitions
  *
  * @public
  * @stability stable
- * @since 0.1.0
+ * @since 0.2.0
  */
-export function createBrandedTypeFactory<
-  Brand extends symbol,
-  T extends string & { readonly [K in Brand]: never }
->(typeName: string): (value: string) => T {
-  return (value: string): T => {
-    if (isDevMode()) {
-      if (typeof value !== 'string') {
-        throw new Error(`${typeName} must be a string`);
-      }
-      if (value.trim().length === 0) {
-        throw new Error(`${typeName} cannot be empty`);
-      }
-    }
-    return value as T;
-  };
-}
-
-// =============================================================================
-// Type Guard Factory
-// =============================================================================
-
-/**
- * Creates a type guard function for a branded type.
- *
- * @description Generates a type guard that checks if a value is a valid
- * candidate for the branded type (i.e., a non-empty string).
- *
- * @typeParam T - The branded type to guard for
- *
- * @param typeName - Human-readable name for the type (used for documentation)
- * @returns A type guard function that narrows unknown to T
- *
- * @example
- * ```typescript
- * const isMyId = createBrandedTypeGuard<MyId>('MyId');
- *
- * const value: unknown = 'my-123';
- * if (isMyId(value)) {
- *   // value is narrowed to MyId
- *   processId(value);
- * }
- * ```
- *
- * @public
- * @stability stable
- * @since 0.1.0
- */
-export function createBrandedTypeGuard<T extends string>(
-  _typeName: string
-): (value: unknown) => value is T {
-  return (value: unknown): value is T => {
-    return typeof value === 'string' && value.trim().length > 0;
-  };
-}
+export const createBrandedTypeFactory = _createBrandedTypeFactory;
+export const createBrandedBigintFactory = _createBrandedBigintFactory;
+export const createBrandedTypeGuard = _createBrandedTypeGuard;
+export const createBrandedBigintGuard = _createBrandedBigintGuard;
 
 // =============================================================================
 // Branded Types (Declarations)

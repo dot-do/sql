@@ -124,7 +124,7 @@ export interface HnswConfig {
 /**
  * Default HNSW configuration
  */
-export const DEFAULT_HNSW_CONFIG: HnswConfig = {
+export const DEFAULT_HNSW_CONFIG: Readonly<HnswConfig> = {
   M: 16,
   efConstruction: 200,
   efSearch: 100,

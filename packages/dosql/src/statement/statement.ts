@@ -39,6 +39,7 @@ import {
   type ExprEvalContext,
   type SubqueryEvaluator,
 } from './case-expr.js';
+import { sqlLikeMatch } from '../utils/like.js';
 
 // Re-export StatementError for backwards compatibility
 export { StatementError, StatementErrorCode } from '../errors/index.js';
@@ -3523,13 +3524,7 @@ export class InMemoryEngine implements ExecutionEngine {
             if (val === null && rowVal !== null) return false;
             break;
           case 'LIKE':
-            if (typeof rowVal === 'string' && typeof val === 'string') {
-              const regex = new RegExp(
-                '^' + val.replace(/%/g, '.*').replace(/_/g, '.') + '$',
-                'i'
-              );
-              if (!regex.test(rowVal)) return false;
-            }
+            if (!sqlLikeMatch(rowVal, val)) return false;
             break;
         }
       }

@@ -622,7 +622,7 @@ export interface ReplicationConfig {
 /**
  * Default replication configuration
  */
-export const DEFAULT_REPLICATION_CONFIG: ReplicationConfig = {
+export const DEFAULT_REPLICATION_CONFIG: Readonly<ReplicationConfig> = {
   minReplicas: 1,
   walBatchSize: 100,
   heartbeatIntervalMs: 5000,

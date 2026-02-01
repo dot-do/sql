@@ -49,7 +49,7 @@ export interface ResolverConfig {
 /**
  * Default resolver configuration
  */
-export const DEFAULT_RESOLVER_CONFIG: ResolverConfig = {
+export const DEFAULT_RESOLVER_CONFIG: Readonly<ResolverConfig> = {
   defaultBranch: 'main',
   maxTimestampDrift: 1000, // 1 second
   enableCache: true,

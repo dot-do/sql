@@ -26,7 +26,7 @@ export interface FlushStrategyConfig {
 /**
  * Default flush strategy configuration
  */
-export const DEFAULT_FLUSH_STRATEGY_CONFIG: FlushStrategyConfig = {
+export const DEFAULT_FLUSH_STRATEGY_CONFIG: Readonly<FlushStrategyConfig> = {
   maxP0Retries: 100,
   maxP1Retries: 3,
   baseRetryDelayMs: 100,

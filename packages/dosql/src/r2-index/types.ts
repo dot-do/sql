@@ -53,6 +53,8 @@
  * Offsets are absolute from file start.
  */
 
+import { assertNever } from '../utils/assert-never.js';
+
 // =============================================================================
 // MAGIC & VERSION
 // =============================================================================
@@ -1081,7 +1083,7 @@ export function encodeValue(value: R2IndexValue): Uint8Array {
       return result;
     }
     default:
-      throw new Error(`Unknown value type: ${(value as R2IndexValue).type}`);
+      return assertNever(value, `Unknown value type: ${(value as R2IndexValue).type}`);
   }
 }
 

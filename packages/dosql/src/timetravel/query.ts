@@ -500,7 +500,7 @@ export interface TierResolutionConfig {
 /**
  * Default tier resolution configuration
  */
-export const DEFAULT_TIER_CONFIG: TierResolutionConfig = {
+export const DEFAULT_TIER_CONFIG: Readonly<TierResolutionConfig> = {
   hotTierMaxAge: 60 * 1000, // 1 minute
   warmTierMaxAge: 24 * 60 * 60 * 1000, // 24 hours
 };

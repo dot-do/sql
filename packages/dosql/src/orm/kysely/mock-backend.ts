@@ -8,6 +8,7 @@
 
 import type { DoSQLBackend } from './types.js';
 import type { SqlValue, Row, QueryResult } from '../../engine/types.js';
+import { sqlLikeMatch } from '../../utils/like.js';
 
 // =============================================================================
 // SIMPLE SQL PARSER
@@ -712,9 +713,7 @@ export class MockDoSQLBackend implements DoSQLBackend {
             result = (val as number) >= (target as number);
             break;
           case 'LIKE':
-            // Simple LIKE implementation
-            const pattern = String(target).replace(/%/g, '.*').replace(/_/g, '.');
-            result = new RegExp(`^${pattern}$`, 'i').test(String(val));
+            result = sqlLikeMatch(val, target);
             break;
           default:
             result = true;

@@ -14,15 +14,13 @@ import type {
   PartitionInfo,
   CompactionJob,
   TableMetadata,
+  ParquetFileId,
 } from './types.js';
 import {
   createSnapshotId,
   createPartitionKey,
   createCompactionJobId,
-  isSnapshotId,
-  isPartitionKey,
-  isCompactionJobId,
-} from './branded-types.js';
+} from './types.js';
 
 // =============================================================================
 // Raw Response Types (from RPC)
@@ -211,15 +209,20 @@ export function transformPartitionInfo(raw: RawPartitionInfo): PartitionInfo {
     throw new Error(`Invalid partition key: expected non-empty string, got ${typeof raw.key}`);
   }
 
-  return {
+  const result: PartitionInfo = {
     key: createPartitionKey(raw.key),
     strategy: raw.strategy,
-    range: raw.range,
     fileCount: raw.fileCount,
     rowCount: raw.rowCount,
     sizeBytes: raw.sizeBytes,
     lastModified: new Date(raw.lastModified),
   };
+
+  if (raw.range !== undefined) {
+    result.range = raw.range;
+  }
+
+  return result;
 }
 
 /**
@@ -272,8 +275,8 @@ export function transformCompactionJob(raw: RawCompactionJob): CompactionJob {
     inputFiles: raw.inputFiles as CompactionJob['inputFiles'],
   };
 
-  if (raw.outputFiles) {
-    result.outputFiles = raw.outputFiles as CompactionJob['outputFiles'];
+  if (raw.outputFiles !== undefined && raw.outputFiles.length > 0) {
+    result.outputFiles = raw.outputFiles as ParquetFileId[];
   }
   if (raw.error) {
     result.error = raw.error;

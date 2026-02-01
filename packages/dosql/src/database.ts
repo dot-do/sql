@@ -473,6 +473,7 @@ export class Database implements IDatabase {
    * @param fn - Function to wrap in transaction
    * @returns Transaction-wrapped function
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for proper type inference of arbitrary functions
   transaction<F extends (...args: any[]) => any>(fn: F): TransactionFunction<F> {
     const self = this;
 

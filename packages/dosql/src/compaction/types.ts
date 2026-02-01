@@ -69,7 +69,7 @@ export interface CompactionConfig {
 /**
  * Default compaction configuration
  */
-export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
+export const DEFAULT_COMPACTION_CONFIG: Readonly<CompactionConfig> = {
   rowThreshold: 10000,
   ageThreshold: 60 * 60 * 1000, // 1 hour
   sizeThreshold: 10 * 1024 * 1024, // 10MB

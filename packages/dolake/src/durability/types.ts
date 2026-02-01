@@ -95,7 +95,7 @@ export interface DurabilityConfig {
 /**
  * Default durability configuration
  */
-export const DEFAULT_DURABILITY_CONFIG: DurabilityConfig = {
+export const DEFAULT_DURABILITY_CONFIG: Readonly<DurabilityConfig> = {
   maxP0Retries: 100, // Effectively unlimited
   maxP1Retries: 3,
   baseRetryDelayMs: 100,

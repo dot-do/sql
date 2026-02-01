@@ -5,6 +5,7 @@
 
 import type { SqlValue } from './types.js';
 import { evaluateCaseExpr, containsCaseExpression } from './case-expr.js';
+import { sqlLikeMatch } from '../utils/like.js';
 
 /**
  * Maximum recursion depth for WHERE clause evaluation.
@@ -613,14 +614,7 @@ function compareValues(left: SqlValue, right: SqlValue, op: string, deps: WhereE
       return Number(left) <= Number(right);
     }
     case 'LIKE':
-      if (typeof left === 'string' && typeof right === 'string') {
-        const regex = new RegExp(
-          '^' + right.replace(/%/g, '.*').replace(/_/g, '.') + '$',
-          'i'
-        );
-        return regex.test(left);
-      }
-      return false;
+      return sqlLikeMatch(left, right);
     default: return false;
   }
 }

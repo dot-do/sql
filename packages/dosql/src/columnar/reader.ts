@@ -19,6 +19,7 @@ import {
   type FSXInterface,
   isNumericType,
 } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 import {
   decodeRaw,
@@ -318,7 +319,7 @@ export class ColumnarReader {
         return this.decodeBytesColumn(data, rowCount, nullBitmap);
 
       default:
-        throw new Error(`Unsupported data type: ${dataType}`);
+        return assertNever(dataType, `Unsupported data type: ${dataType}`);
     }
   }
 

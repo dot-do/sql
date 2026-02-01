@@ -27,6 +27,10 @@
  * @packageDocumentation
  */
 
+import { createLogger } from './logging.js';
+
+const logger = createLogger({ component: 'circuit-breaker' });
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -104,7 +108,7 @@ interface DurableObjectStorage {
 /**
  * Default circuit breaker configuration
  */
-export const DEFAULT_CIRCUIT_BREAKER_CONFIG: CircuitBreakerConfig = {
+export const DEFAULT_CIRCUIT_BREAKER_CONFIG: Readonly<CircuitBreakerConfig> = {
   failureThreshold: 5,
   resetTimeoutMs: 30000,
   successThreshold: 1,
@@ -397,7 +401,9 @@ export class R2CircuitBreaker {
       this.checkTimeoutTransition();
     } catch {
       // Handle corrupted state gracefully - keep defaults
-      console.warn(`Failed to restore circuit breaker state for ${this.storageKey}, using defaults`);
+      logger.warn('Failed to restore circuit breaker state, using defaults', {
+        storageKey: this.storageKey,
+      });
     }
   }
 
@@ -435,13 +441,14 @@ export class R2CircuitBreaker {
     errorMessage?: string
   ): void {
     const bucketId = this.config.bucketId ?? 'default';
-    const logMessage = `Circuit breaker [${bucketId}] ${from} -> ${to} (${reason})`;
 
-    if (errorMessage) {
-      console.log(`${logMessage}: ${errorMessage}`);
-    } else {
-      console.log(logMessage);
-    }
+    logger.info('Circuit breaker state transition', {
+      bucketId,
+      from,
+      to,
+      reason,
+      ...(errorMessage && { errorMessage }),
+    });
   }
 }
 

@@ -195,6 +195,11 @@ export {
   createLSN,
   createStatementHash,
   createShardId,
+  // Generic branded type factory pattern
+  createBrandedTypeFactory,
+  createBrandedBigintFactory,
+  createBrandedTypeGuard,
+  createBrandedBigintGuard,
   // LSN utilities
   compareLSN,
   incrementLSN,

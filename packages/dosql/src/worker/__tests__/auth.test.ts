@@ -11,8 +11,11 @@ import {
   checkAuth,
   unauthorizedResponse,
   createDefaultAuthConfig,
+  _internal,
   type AuthConfig,
 } from '../auth.js';
+
+const { timingSafeEqual, timingSafeIncludes } = _internal;
 
 // =============================================================================
 // Helpers
@@ -383,6 +386,147 @@ describe('Auth Module', () => {
       });
       const result = authenticate(req, config);
       expect(result.authenticated).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Timing-safe comparison (security tests)
+  // ---------------------------------------------------------------------------
+  describe('timing-safe comparison', () => {
+    describe('timingSafeEqual', () => {
+      it('should return true for identical strings', () => {
+        expect(timingSafeEqual('secret-token', 'secret-token')).toBe(true);
+        expect(timingSafeEqual('', '')).toBe(true);
+        expect(timingSafeEqual('a', 'a')).toBe(true);
+      });
+
+      it('should return false for different strings', () => {
+        expect(timingSafeEqual('secret-token', 'wrong-token')).toBe(false);
+        expect(timingSafeEqual('abc', 'abd')).toBe(false);
+        expect(timingSafeEqual('abc', 'ab')).toBe(false);
+      });
+
+      it('should return false for strings with different lengths', () => {
+        expect(timingSafeEqual('short', 'longer-string')).toBe(false);
+        expect(timingSafeEqual('longer-string', 'short')).toBe(false);
+        expect(timingSafeEqual('', 'non-empty')).toBe(false);
+      });
+
+      it('should handle unicode strings', () => {
+        expect(timingSafeEqual('hello-world', 'hello-world')).toBe(true);
+        expect(timingSafeEqual('emoji-test', 'emoji-test')).toBe(true);
+        expect(timingSafeEqual('abc-123', 'abc-456')).toBe(false);
+      });
+
+      it('should be case-sensitive', () => {
+        expect(timingSafeEqual('Token', 'token')).toBe(false);
+        expect(timingSafeEqual('ABC', 'abc')).toBe(false);
+      });
+
+      it('should handle prefix/suffix attacks', () => {
+        // These tests verify the comparison catches partial matches
+        expect(timingSafeEqual('secret-token', 'secret-token!')).toBe(false);
+        expect(timingSafeEqual('secret-token', 'secret-toke')).toBe(false);
+        expect(timingSafeEqual('!secret-token', 'secret-token')).toBe(false);
+      });
+    });
+
+    describe('timingSafeIncludes', () => {
+      it('should return true if token is in the list', () => {
+        const tokens = ['token1', 'token2', 'token3'];
+        expect(timingSafeIncludes(tokens, 'token1')).toBe(true);
+        expect(timingSafeIncludes(tokens, 'token2')).toBe(true);
+        expect(timingSafeIncludes(tokens, 'token3')).toBe(true);
+      });
+
+      it('should return false if token is not in the list', () => {
+        const tokens = ['token1', 'token2', 'token3'];
+        expect(timingSafeIncludes(tokens, 'token4')).toBe(false);
+        expect(timingSafeIncludes(tokens, 'invalid')).toBe(false);
+        expect(timingSafeIncludes(tokens, '')).toBe(false);
+      });
+
+      it('should return false for empty token list', () => {
+        expect(timingSafeIncludes([], 'any-token')).toBe(false);
+      });
+
+      it('should handle single-item lists', () => {
+        expect(timingSafeIncludes(['only-one'], 'only-one')).toBe(true);
+        expect(timingSafeIncludes(['only-one'], 'different')).toBe(false);
+      });
+
+      it('should check all tokens to maintain constant time', () => {
+        // This test ensures the implementation doesn't short-circuit
+        // We can't directly test timing, but we can verify correctness
+        const tokens = ['aaa', 'bbb', 'ccc', 'ddd', 'eee'];
+
+        // Should find tokens at any position
+        expect(timingSafeIncludes(tokens, 'aaa')).toBe(true); // first
+        expect(timingSafeIncludes(tokens, 'ccc')).toBe(true); // middle
+        expect(timingSafeIncludes(tokens, 'eee')).toBe(true); // last
+        expect(timingSafeIncludes(tokens, 'zzz')).toBe(false); // not found
+      });
+    });
+
+    describe('timing-safe auth integration', () => {
+      it('should use timing-safe comparison for bearer tokens', () => {
+        const config: AuthConfig = {
+          enabled: true,
+          bearerTokens: ['valid-token-12345'],
+        };
+
+        // Valid token should work
+        const validReq = makeRequest('/query', {
+          Authorization: 'Bearer valid-token-12345',
+        });
+        expect(authenticate(validReq, config).authenticated).toBe(true);
+
+        // Invalid tokens (including near-matches) should fail
+        const invalidTokens = [
+          'valid-token-12346',  // Off by one
+          'valid-token-1234',   // Shorter
+          'valid-token-123456', // Longer
+          'VALID-TOKEN-12345',  // Different case
+          'invalid-token',      // Completely different
+        ];
+
+        for (const token of invalidTokens) {
+          const req = makeRequest('/query', {
+            Authorization: `Bearer ${token}`,
+          });
+          expect(authenticate(req, config).authenticated).toBe(false);
+        }
+      });
+
+      it('should use timing-safe comparison for API keys', () => {
+        const config: AuthConfig = {
+          enabled: true,
+          bearerTokens: [],
+          apiKeys: ['sk_live_abcdef123456'],
+        };
+
+        // Valid key should work
+        const validReq = makeRequest('/query', {
+          'X-API-Key': 'sk_live_abcdef123456',
+        });
+        expect(authenticate(validReq, config).authenticated).toBe(true);
+
+        // Invalid keys (including near-matches) should fail
+        const invalidKeys = [
+          'sk_live_abcdef123457',  // Off by one
+          'sk_live_abcdef12345',   // Shorter
+          'sk_live_abcdef1234567', // Longer
+          'SK_LIVE_ABCDEF123456',  // Different case
+          'sk_test_abcdef123456',  // Different prefix
+        ];
+
+        for (const key of invalidKeys) {
+          const req = makeRequest('/query', {
+            'X-API-Key': key,
+          });
+          expect(authenticate(req, config).authenticated).toBe(false);
+        }
+      });
     });
   });
 });

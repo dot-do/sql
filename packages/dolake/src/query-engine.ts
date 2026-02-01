@@ -193,7 +193,7 @@ export interface QueryEngineConfig {
 /**
  * Default query engine configuration
  */
-export const DEFAULT_QUERY_ENGINE_CONFIG: QueryEngineConfig = {
+export const DEFAULT_QUERY_ENGINE_CONFIG: Readonly<QueryEngineConfig> = {
   enablePartitionPruning: true,
   enableColumnStatsPruning: true,
   enableAggregationPushdown: true,

@@ -19,10 +19,10 @@ export default defineWorkersConfig({
         'src/orm/knex/**',
       ],
       thresholds: {
-        lines: 50,
-        branches: 50,
-        functions: 50,
-        statements: 50,
+        lines: 70,
+        branches: 70,
+        functions: 70,
+        statements: 70,
       },
     },
     // Exclude tests that require Node.js modules not available in Workers

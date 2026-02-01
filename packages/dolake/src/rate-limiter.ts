@@ -80,7 +80,7 @@ export interface RateLimitConfig {
 /**
  * Default rate limit configuration
  */
-export const DEFAULT_RATE_LIMIT_CONFIG: RateLimitConfig = {
+export const DEFAULT_RATE_LIMIT_CONFIG: Readonly<RateLimitConfig> = {
   connectionsPerSecond: RATE_LIMIT.CONNECTIONS_PER_SECOND,
   messagesPerSecond: RATE_LIMIT.MESSAGES_PER_SECOND,
   burstCapacity: RATE_LIMIT.BURST_CAPACITY,

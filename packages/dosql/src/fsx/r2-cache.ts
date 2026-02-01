@@ -74,7 +74,7 @@ export interface CacheConfig {
 /**
  * Default cache configuration
  */
-export const DEFAULT_CACHE_CONFIG: CacheConfig = {
+export const DEFAULT_CACHE_CONFIG: Readonly<CacheConfig> = {
   maxSize: 50 * 1024 * 1024, // 50MB
   maxEntries: 1000,
   ttlMs: 5 * 60 * 1000, // 5 minutes

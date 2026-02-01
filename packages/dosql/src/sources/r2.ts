@@ -23,6 +23,7 @@ import {
   inferSchema,
   isParquet,
 } from './parser.js';
+import { likeMatch } from '../utils/like.js';
 
 // =============================================================================
 // R2 TABLE SOURCE
@@ -350,12 +351,7 @@ function compareValues(
 }
 
 function matchLike(value: string, pattern: string): boolean {
-  const regexPattern = pattern
-    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/%/g, '.*')
-    .replace(/_/g, '.');
-  const regex = new RegExp(`^${regexPattern}$`, 'i');
-  return regex.test(value);
+  return likeMatch(value, pattern);
 }
 
 // =============================================================================

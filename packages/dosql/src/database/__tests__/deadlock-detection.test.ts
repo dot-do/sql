@@ -213,11 +213,11 @@ describe('Simple AB-BA Deadlock Detection', () => {
     try {
       await lockManager.acquire(lockRequest('txn2', 'A', LockType.EXCLUSIVE));
       throw new Error('Should have thrown');
-    } catch (e: any) {
-      expect(e.code).toBe(TransactionErrorCode.DEADLOCK);
+    } catch (e) {
+      expect((e as { code: string }).code).toBe(TransactionErrorCode.DEADLOCK);
       // GAP: victimTxnId property should exist
-      expect(e.victimTxnId).toBeDefined();
-      expect(e.victimTxnId).toBe('txn2');
+      expect((e as { victimTxnId?: string }).victimTxnId).toBeDefined();
+      expect((e as { victimTxnId?: string }).victimTxnId).toBe('txn2');
     }
 
     lockManager.releaseAll('txn1');
@@ -266,14 +266,15 @@ describe('Multi-Way Deadlock Detection', () => {
     try {
       await lockManager.acquire(lockRequest('txn3', 'A', LockType.EXCLUSIVE));
       throw new Error('Should have thrown');
-    } catch (e: any) {
-      expect(e.code).toBe(TransactionErrorCode.DEADLOCK);
+    } catch (e) {
+      const err = e as { code: string; cycle?: string[] };
+      expect(err.code).toBe(TransactionErrorCode.DEADLOCK);
       // GAP: cycle property should show the path
-      expect(e.cycle).toBeDefined();
+      expect(err.cycle).toBeDefined();
       // The cycle may start from any point but should contain all participants
-      expect(e.cycle.length).toBe(4);
-      expect(e.cycle[0]).toBe(e.cycle[e.cycle.length - 1]); // Cycle closes
-      expect(new Set(e.cycle.slice(0, -1))).toEqual(new Set(['txn1', 'txn2', 'txn3']));
+      expect(err.cycle!.length).toBe(4);
+      expect(err.cycle![0]).toBe(err.cycle![err.cycle!.length - 1]); // Cycle closes
+      expect(new Set(err.cycle!.slice(0, -1))).toEqual(new Set(['txn1', 'txn2', 'txn3']));
     }
 
     lockManager.releaseAll('txn1');
@@ -296,11 +297,12 @@ describe('Multi-Way Deadlock Detection', () => {
     try {
       await lockManager.acquire(lockRequest('txn2', 'A', LockType.EXCLUSIVE));
       throw new Error('Should have thrown');
-    } catch (e: any) {
+    } catch (e) {
+      const err = e as { resources?: string[] };
       // GAP: resources property should list involved resources
-      expect(e.resources).toBeDefined();
-      expect(e.resources).toContain('A');
-      expect(e.resources).toContain('B');
+      expect(err.resources).toBeDefined();
+      expect(err.resources).toContain('A');
+      expect(err.resources).toContain('B');
     }
 
     lockManager.releaseAll('txn1');
@@ -504,10 +506,11 @@ describe('Victim Selection Policies', () => {
     try {
       await lockManager.acquire(lockRequest('txn2', 'A', LockType.EXCLUSIVE));
       throw new Error('Should have thrown');
-    } catch (e: any) {
-      expect(e.code).toBe(TransactionErrorCode.DEADLOCK);
+    } catch (e) {
+      const err = e as { code: string; victimTxnId?: string };
+      expect(err.code).toBe(TransactionErrorCode.DEADLOCK);
       // GAP: victimTxnId should be txn2 (younger)
-      expect(e.victimTxnId).toBe('txn2');
+      expect(err.victimTxnId).toBe('txn2');
     }
 
     lockManager.releaseAll('txn1');
@@ -538,9 +541,9 @@ describe('Victim Selection Policies', () => {
     try {
       await lockManager.acquire(lockRequest('txn2', 'A', LockType.EXCLUSIVE));
       throw new Error('Should have thrown');
-    } catch (e: any) {
+    } catch (e) {
       // txn2 has less work, should be victim
-      expect(e.victimTxnId).toBe('txn2');
+      expect((e as { victimTxnId?: string }).victimTxnId).toBe('txn2');
     }
 
     lockManager.releaseAll('txn1');
@@ -570,8 +573,8 @@ describe('Victim Selection Policies', () => {
 
       try {
         await lockManager.acquire(lockRequest('txn2', 'A', LockType.EXCLUSIVE));
-      } catch (e: any) {
-        victims.push(e.victimTxnId);
+      } catch (e) {
+        victims.push((e as { victimTxnId?: string }).victimTxnId);
       }
 
       // Wait for p1 to complete (should succeed after victim releases)
@@ -615,9 +618,9 @@ describe('Victim Selection Policies', () => {
     try {
       await lockManager.acquire(lockRequest('txn2', 'A', LockType.SHARED));
       throw new Error('Should have thrown');
-    } catch (e: any) {
+    } catch (e) {
       // txn2 (read-only) should be victim
-      expect(e.victimTxnId).toBe('txn2');
+      expect((e as { victimTxnId?: string }).victimTxnId).toBe('txn2');
     }
 
     lockManager.releaseAll('txn1');
@@ -1049,10 +1052,11 @@ describe('Deadlock Reporting and Logging', () => {
     try {
       await lockManager.acquire(lockRequest('txn2', 'A', LockType.EXCLUSIVE));
       throw new Error('Should have thrown');
-    } catch (e: any) {
+    } catch (e) {
+      const err = e as { waitTimes?: { txn1: number } };
       // GAP: waitTimes property should exist
-      expect(e.waitTimes).toBeDefined();
-      expect(e.waitTimes.txn1).toBeGreaterThanOrEqual(90);
+      expect(err.waitTimes).toBeDefined();
+      expect(err.waitTimes!.txn1).toBeGreaterThanOrEqual(90);
     }
 
     lockManager.releaseAll('txn1');
@@ -1083,14 +1087,15 @@ describe('Deadlock Reporting and Logging', () => {
     try {
       await lockManager.acquire(lockRequest('txn3', 'A', LockType.EXCLUSIVE));
       throw new Error('Should have thrown');
-    } catch (e: any) {
+    } catch (e) {
+      const err = e as { graphDot?: string };
       // GAP: graphDot property for Graphviz visualization
-      expect(e.graphDot).toBeDefined();
-      expect(e.graphDot).toContain('digraph');
+      expect(err.graphDot).toBeDefined();
+      expect(err.graphDot).toContain('digraph');
       // DOT format uses quoted node names
-      expect(e.graphDot).toContain('"txn1" -> "txn2"');
-      expect(e.graphDot).toContain('"txn2" -> "txn3"');
-      expect(e.graphDot).toContain('"txn3" -> "txn1"');
+      expect(err.graphDot).toContain('"txn1" -> "txn2"');
+      expect(err.graphDot).toContain('"txn2" -> "txn3"');
+      expect(err.graphDot).toContain('"txn3" -> "txn1"');
     }
 
     lockManager.releaseAll('txn1');
@@ -1217,11 +1222,12 @@ describe('Transaction Manager Deadlock Integration', () => {
           isolationLevel: ctx.isolationLevel,
         }
       );
-    } catch (e: any) {
+    } catch (e) {
+      const err = e as { operationCount?: number; isolationLevel?: IsolationLevel };
       // operationCount is included
-      expect(e.operationCount).toBe(1);
+      expect(err.operationCount).toBe(1);
       // isolationLevel is included
-      expect(e.isolationLevel).toBe(IsolationLevel.SERIALIZABLE);
+      expect(err.isolationLevel).toBe(IsolationLevel.SERIALIZABLE);
     }
 
     await txnManager.rollback();
@@ -1389,7 +1395,7 @@ describe('Deadlock Edge Cases', () => {
 
             await lockMgr.acquire(lockRequest(txnB, resA, LockType.EXCLUSIVE));
             results.push({ pair: i });
-          } catch (e: any) {
+          } catch (e) {
             results.push({ pair: i, error: e });
           } finally {
             lockMgr.releaseAll(txnA);

@@ -283,16 +283,32 @@ export async function verifyStripeSignature(
 }
 
 /**
- * Constant-time string comparison to prevent timing attacks
+ * Constant-time string comparison to prevent timing attacks.
+ *
+ * Uses constant-time comparison that doesn't short-circuit on mismatches
+ * or reveal length information through timing differences.
  */
 function constantTimeCompare(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
+  // Convert strings to Uint8Arrays for comparison
+  const encoder = new TextEncoder();
+  const bufA = encoder.encode(a);
+  const bufB = encoder.encode(b);
 
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  // If lengths differ, we still need to do a constant-time comparison
+  // to avoid leaking length information through timing.
+  // Pad shorter buffer to match longer buffer's length.
+  const maxLen = Math.max(bufA.length, bufB.length);
+  const paddedA = new Uint8Array(maxLen);
+  const paddedB = new Uint8Array(maxLen);
+  paddedA.set(bufA);
+  paddedB.set(bufB);
+
+  // XOR all bytes and accumulate result
+  // Length difference is factored into result to ensure mismatch
+  let result = bufA.length ^ bufB.length;
+  for (let i = 0; i < maxLen; i++) {
+    // Using non-null assertion since we know paddedA and paddedB are maxLen bytes
+    result |= (paddedA[i] ?? 0) ^ (paddedB[i] ?? 0);
   }
 
   return result === 0;

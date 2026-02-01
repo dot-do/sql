@@ -9,6 +9,8 @@
  * Follows SQL standard CASE expression semantics.
  */
 
+import { likeMatch } from '../utils/like.js';
+
 // =============================================================================
 // AST TYPES
 // =============================================================================
@@ -1456,11 +1458,7 @@ function evaluateBinaryOp(op: string, left: SqlValue, right: SqlValue): SqlValue
     case 'or': return isTruthy(left) || isTruthy(right);
     case 'like':
       if (typeof left === 'string' && typeof right === 'string') {
-        const pattern = right
-          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-          .replace(/%/g, '.*')
-          .replace(/_/g, '.');
-        return new RegExp(`^${pattern}$`, 'i').test(left);
+        return likeMatch(left, right);
       }
       return false;
     default:

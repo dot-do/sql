@@ -242,6 +242,22 @@ export class InMemoryTransactionLog implements DistributedTransactionLog {
 // =============================================================================
 
 /**
+ * Circuit breaker configuration for participant communication
+ */
+export interface CircuitBreakerConfig {
+  /** Enable circuit breaker (default: true) */
+  enabled?: boolean;
+  /** Number of failures before opening the circuit (default: 5) */
+  failureThreshold?: number;
+  /** Time in ms before attempting recovery after opening (default: 30000) */
+  resetTimeoutMs?: number;
+  /** Number of successful probe calls to close circuit (default: 2) */
+  successThreshold?: number;
+  /** Time window for failure counting in ms (default: 60000) */
+  failureWindowMs?: number;
+}
+
+/**
  * Configuration for the distributed transaction coordinator
  */
 export interface CoordinatorConfig {
@@ -259,6 +275,8 @@ export interface CoordinatorConfig {
   retryDelayMs?: number;
   /** Default isolation level */
   defaultIsolationLevel?: IsolationLevel;
+  /** Circuit breaker configuration */
+  circuitBreaker?: CircuitBreakerConfig;
 }
 
 /**

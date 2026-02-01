@@ -151,7 +151,7 @@ export interface TailWorkerConfig {
 /**
  * Default tail worker configuration
  */
-export const DEFAULT_TAIL_WORKER_CONFIG: TailWorkerConfig = {
+export const DEFAULT_TAIL_WORKER_CONFIG: Readonly<TailWorkerConfig> = {
   defaultNamespace: 'default',
   shardCount: 8,
   maxBatchSize: 100,

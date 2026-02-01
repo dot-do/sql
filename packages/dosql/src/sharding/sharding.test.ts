@@ -875,3 +875,270 @@ describe('Type-Level Query Detection', () => {
     expect(true).toBe(true);
   });
 });
+
+// =============================================================================
+// COST ESTIMATOR TESTS
+// =============================================================================
+
+import {
+  CostEstimator,
+  DEFAULT_COST_ESTIMATOR_CONFIG,
+  type CostEstimatorConfig,
+} from './index.js';
+import {
+  StatisticsStore,
+  TableStatisticsBuilder,
+  ColumnStatisticsBuilder,
+} from '../planner/stats.js';
+
+describe('CostEstimator', () => {
+  describe('with default configuration', () => {
+    it('uses default row count when no statistics are available', () => {
+      const estimator = new CostEstimator();
+
+      const cost = estimator.estimateScatterCost('unknown_table', 4);
+
+      // With default config: 10000 rows, 4 shards
+      // Cost = 4 * 1.0 (network) + 10000 * 0.001 (scan) + 10000 * 0.01 (transfer) + 4 * 2.0 (scatter)
+      // Cost = 4 + 10 + 100 + 8 = 122
+      expect(cost).toBe(122);
+    });
+
+    it('estimates single shard equality cost', () => {
+      const estimator = new CostEstimator();
+
+      const cost = estimator.estimateSingleShardEqualityCost('users', 'tenant_id', 123);
+
+      // With default selectivity (0.01 for equality) and 10000 rows
+      // Estimated rows = 10000 * 0.01 = 100
+      // Cost = 1.0 (network) + 100 * 0.001 (scan) + 100 * 0.01 (transfer)
+      // Cost = 1 + 0.1 + 1 = 2.1
+      expect(cost).toBeGreaterThan(1);
+      expect(cost).toBeLessThan(10);
+    });
+
+    it('estimates IN list cost', () => {
+      const estimator = new CostEstimator();
+
+      const cost = estimator.estimateInListCost('users', 'tenant_id', [1, 2, 3], 2);
+
+      // 2 shards, IN list with 3 values
+      expect(cost).toBeGreaterThan(2); // At least network cost for 2 shards
+    });
+
+    it('estimates range cost', () => {
+      const estimator = new CostEstimator();
+
+      const cost = estimator.estimateRangeCost('orders', 'created_at', 100, 200, 3);
+
+      // 3 shards, range query
+      expect(cost).toBeGreaterThan(3); // At least network cost for 3 shards
+    });
+  });
+
+  describe('with table statistics', () => {
+    it('uses actual row count from statistics', () => {
+      const statsStore = new StatisticsStore();
+      statsStore.setTableStats(
+        new TableStatisticsBuilder('users')
+          .setRowCount(1000000)
+          .build()
+      );
+
+      const estimator = new CostEstimator(statsStore);
+
+      const costWithStats = estimator.estimateScatterCost('users', 4);
+
+      // With 1M rows instead of default 10K
+      // Cost should be much higher
+      expect(costWithStats).toBeGreaterThan(1000);
+    });
+
+    it('uses column cardinality for selectivity', () => {
+      const statsStore = new StatisticsStore();
+      const tableStats = new TableStatisticsBuilder('users')
+        .setRowCount(100000)
+        .addColumn(
+          new ColumnStatisticsBuilder('tenant_id')
+            .setDistinctCount(1000) // 1000 distinct tenants
+            .setNullFraction(0)
+            .build()
+        )
+        .build();
+      statsStore.setTableStats(tableStats);
+
+      const estimator = new CostEstimator(statsStore);
+
+      // With 1000 distinct tenants, selectivity = 1/1000 = 0.001
+      // Expected rows = 100000 * 0.001 = 100
+      const cost = estimator.estimateSingleShardEqualityCost('users', 'tenant_id', 123);
+
+      // Should reflect ~100 rows worth of cost
+      expect(cost).toBeGreaterThan(1);
+      expect(cost).toBeLessThan(10);
+    });
+
+    it('cost scales with estimated cardinality', () => {
+      const smallTableStats = new StatisticsStore();
+      smallTableStats.setTableStats(
+        new TableStatisticsBuilder('users').setRowCount(100).build()
+      );
+
+      const largeTableStats = new StatisticsStore();
+      largeTableStats.setTableStats(
+        new TableStatisticsBuilder('users').setRowCount(1000000).build()
+      );
+
+      const smallEstimator = new CostEstimator(smallTableStats);
+      const largeEstimator = new CostEstimator(largeTableStats);
+
+      const smallCost = smallEstimator.estimateScatterCost('users', 4);
+      const largeCost = largeEstimator.estimateScatterCost('users', 4);
+
+      // Large table should have significantly higher cost
+      expect(largeCost).toBeGreaterThan(smallCost * 100);
+    });
+  });
+
+  describe('with custom configuration', () => {
+    it('respects custom cost multipliers', () => {
+      const customConfig: Partial<CostEstimatorConfig> = {
+        perShardNetworkCost: 10.0, // 10x default
+        scatterCostMultiplier: 5.0, // 2.5x default
+      };
+
+      const defaultEstimator = new CostEstimator();
+      const customEstimator = new CostEstimator(undefined, customConfig);
+
+      const defaultCost = defaultEstimator.estimateScatterCost('users', 4);
+      const customCost = customEstimator.estimateScatterCost('users', 4);
+
+      // Custom should be higher due to higher network and scatter costs
+      expect(customCost).toBeGreaterThan(defaultCost);
+    });
+
+    it('respects custom default row count', () => {
+      const estimator = new CostEstimator(undefined, {
+        defaultRowCount: 1000000,
+      });
+
+      const cost = estimator.estimateScatterCost('unknown_table', 4);
+
+      // With 1M rows default
+      expect(cost).toBeGreaterThan(10000);
+    });
+  });
+});
+
+describe('QueryRouter with Cost Estimation', () => {
+  const shards: ShardConfig[] = [
+    shard('shard-1', 'do-ns-1'),
+    shard('shard-2', 'do-ns-2'),
+    shard('shard-3', 'do-ns-3'),
+  ];
+
+  describe('cost estimates in routing decisions', () => {
+    it('provides cost estimates for single-shard queries', () => {
+      const vschema = createVSchema({
+        users: shardedTable('tenant_id', hashVindex()),
+      }, shards);
+
+      const router = createRouter(vschema);
+      const routing = router.route('SELECT * FROM users WHERE tenant_id = 123');
+
+      expect(routing.queryType).toBe('single-shard');
+      expect(routing.costEstimate).toBeGreaterThan(0);
+      expect(routing.costEstimate).toBeLessThan(100); // Single shard should be cheap
+    });
+
+    it('provides higher cost for scatter queries', () => {
+      const vschema = createVSchema({
+        users: shardedTable('tenant_id', hashVindex()),
+      }, shards);
+
+      const router = createRouter(vschema);
+
+      const singleShardRouting = router.route('SELECT * FROM users WHERE tenant_id = 123');
+      const scatterRouting = router.route('SELECT * FROM users WHERE status = \'active\'');
+
+      expect(scatterRouting.costEstimate).toBeGreaterThan(singleShardRouting.costEstimate);
+    });
+
+    it('uses provided statistics for cost estimation', () => {
+      const statsStore = new StatisticsStore();
+      statsStore.setTableStats(
+        new TableStatisticsBuilder('users')
+          .setRowCount(1000000)
+          .addColumn(
+            new ColumnStatisticsBuilder('tenant_id')
+              .setDistinctCount(10000)
+              .build()
+          )
+          .build()
+      );
+
+      const vschema = createVSchema({
+        users: shardedTable('tenant_id', hashVindex()),
+      }, shards);
+
+      const routerWithStats = createRouter(vschema, { statsStore });
+      const routerWithoutStats = createRouter(vschema);
+
+      const costWithStats = routerWithStats.route('SELECT * FROM users').costEstimate;
+      const costWithoutStats = routerWithoutStats.route('SELECT * FROM users').costEstimate;
+
+      // Router with 1M row stats should have higher scatter cost
+      expect(costWithStats).toBeGreaterThan(costWithoutStats);
+    });
+
+    it('allows setting table statistics after creation', () => {
+      const vschema = createVSchema({
+        users: shardedTable('tenant_id', hashVindex()),
+      }, shards);
+
+      const router = createRouter(vschema);
+
+      const costBefore = router.route('SELECT * FROM users').costEstimate;
+
+      // Set statistics with higher row count
+      router.setTableStats(
+        new TableStatisticsBuilder('users')
+          .setRowCount(500000)
+          .build()
+      );
+
+      const costAfter = router.route('SELECT * FROM users').costEstimate;
+
+      expect(costAfter).toBeGreaterThan(costBefore);
+    });
+
+    it('provides access to cost estimator for advanced use', () => {
+      const vschema = createVSchema({
+        users: shardedTable('tenant_id', hashVindex()),
+      }, shards);
+
+      const router = createRouter(vschema);
+      const estimator = router.getCostEstimator();
+
+      expect(estimator).toBeInstanceOf(CostEstimator);
+
+      // Can use estimator directly for cost analysis
+      const totalRows = estimator.estimateTotalRows('users');
+      expect(totalRows).toBe(DEFAULT_COST_ESTIMATOR_CONFIG.defaultRowCount);
+    });
+
+    it('IN list cost reflects number of target shards', () => {
+      const vschema = createVSchema({
+        users: shardedTable('tenant_id', hashVindex()),
+      }, shards);
+
+      const router = createRouter(vschema);
+
+      // IN list with values that may hit multiple shards
+      const routing = router.route('SELECT * FROM users WHERE tenant_id IN (1, 2, 3, 4, 5)');
+
+      expect(routing.queryType === 'scatter-gather' || routing.queryType === 'single-shard').toBe(true);
+      expect(routing.costEstimate).toBeGreaterThan(0);
+    });
+  });
+});

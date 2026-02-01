@@ -444,7 +444,7 @@ export interface DoLakeConfig {
 /**
  * Default DoLake configuration
  */
-export const DEFAULT_DOLAKE_CONFIG: DoLakeConfig = {
+export const DEFAULT_DOLAKE_CONFIG: Readonly<DoLakeConfig> = {
   r2BucketName: 'lakehouse-data',
   r2BasePath: 'warehouse',
   flushThresholdEvents: THRESHOLDS.FLUSH_THRESHOLD_EVENTS,

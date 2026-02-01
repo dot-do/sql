@@ -12,6 +12,12 @@ import type { ShardId } from '../sharding/types.js';
 import { IsolationLevel } from '../transaction/types.js';
 import { DistributedTransactionError, DistributedTransactionErrorCode } from './errors.js';
 import { withRetry as sharedWithRetry } from '../utils/retry.js';
+import {
+  createCircuitBreaker,
+  CircuitBreakerOpenError,
+  type CircuitBreaker,
+  type CircuitBreakerMetrics,
+} from './circuit-breaker.js';
 import type {
   DistributedTransactionState,
   ParticipantVote,
@@ -57,6 +63,12 @@ export interface DistributedTransactionCoordinator {
 
   /** Recover in-flight transactions after restart */
   recover(): Promise<void>;
+
+  /** Get circuit breaker metrics for all participants */
+  getCircuitBreakerMetrics(): CircuitBreakerMetrics[];
+
+  /** Get circuit breaker instance for advanced operations */
+  getCircuitBreaker(): CircuitBreaker | null;
 }
 
 // =============================================================================
@@ -79,11 +91,31 @@ export function createDistributedTransactionCoordinator(
     maxRetries = 3,
     retryDelayMs = 100,
     defaultIsolationLevel = IsolationLevel.SERIALIZABLE,
+    circuitBreaker: circuitBreakerConfig,
   } = config;
 
   let currentContext: DistributedTransactionContext | null = null;
   let participantStates: Map<string, ParticipantState> = new Map();
   let lastCompletedState: DistributedTransactionState | null = null;
+
+  // Initialize circuit breaker if enabled (default: enabled)
+  const circuitBreakerEnabled = circuitBreakerConfig?.enabled !== false;
+  const circuitBreaker = circuitBreakerEnabled
+    ? createCircuitBreaker({
+        failureThreshold: circuitBreakerConfig?.failureThreshold ?? 5,
+        resetTimeoutMs: circuitBreakerConfig?.resetTimeoutMs ?? 30000,
+        successThreshold: circuitBreakerConfig?.successThreshold ?? 2,
+        failureWindowMs: circuitBreakerConfig?.failureWindowMs ?? 60000,
+        onStateChange: (participantId, oldState, newState) => {
+          logger.warn('Circuit breaker state change', {
+            participantId,
+            oldState,
+            newState,
+            txnId: currentContext?.txnId,
+          });
+        },
+      })
+    : null;
 
   /**
    * Generate unique transaction ID
@@ -106,7 +138,17 @@ export function createDistributedTransactionCoordinator(
   }
 
   /**
-   * Execute with retry using shared retry utility
+   * Check if circuit breaker allows request to participant
+   */
+  function checkCircuitBreaker(shardId: string): void {
+    if (circuitBreaker && !circuitBreaker.canExecute(shardId)) {
+      const state = circuitBreaker.getState(shardId);
+      throw new CircuitBreakerOpenError(shardId, state);
+    }
+  }
+
+  /**
+   * Execute with retry using shared retry utility and circuit breaker protection
    */
   async function withRetry<T>(
     fn: () => Promise<T>,
@@ -114,6 +156,9 @@ export function createDistributedTransactionCoordinator(
     operation: string
   ): Promise<T> {
     const state = participantStates.get(shardId);
+
+    // Check circuit breaker before attempting
+    checkCircuitBreaker(shardId);
 
     try {
       const result = await sharedWithRetry(fn, {
@@ -125,6 +170,17 @@ export function createDistributedTransactionCoordinator(
             state.retryCount++;
           }
         },
+        // Don't retry if circuit breaker is open
+        isRetryable: (error) => {
+          if (error instanceof CircuitBreakerOpenError) {
+            return false;
+          }
+          // Check circuit breaker state before retry
+          if (circuitBreaker && !circuitBreaker.canExecute(shardId)) {
+            return false;
+          }
+          return true;
+        },
       });
 
       // Update lastSeen on success
@@ -132,15 +188,30 @@ export function createDistributedTransactionCoordinator(
         state.lastSeen = Date.now();
       }
 
+      // Record success with circuit breaker
+      if (circuitBreaker) {
+        circuitBreaker.recordSuccess(shardId);
+      }
+
       return result;
     } catch (error) {
+      // Record failure with circuit breaker (unless it's already a circuit breaker error)
+      if (circuitBreaker && !(error instanceof CircuitBreakerOpenError)) {
+        circuitBreaker.recordFailure(shardId);
+      }
+
       // Wrap in DistributedTransactionError for consistent error handling
       const message = error instanceof Error ? error.message : String(error);
+      const isCircuitOpen = error instanceof CircuitBreakerOpenError;
       throw new DistributedTransactionError(
-        DistributedTransactionErrorCode.PARTICIPANT_FAILURE,
-        `Failed to ${operation} on shard ${shardId} after ${maxRetries} retries: ${message}`,
+        isCircuitOpen
+          ? DistributedTransactionErrorCode.PARTICIPANT_UNAVAILABLE
+          : DistributedTransactionErrorCode.PARTICIPANT_FAILURE,
+        isCircuitOpen
+          ? `Circuit breaker open for shard ${shardId}: ${message}`
+          : `Failed to ${operation} on shard ${shardId} after ${maxRetries} retries: ${message}`,
         currentContext?.txnId,
-        { shardId }
+        { shardId, circuitOpen: isCircuitOpen }
       );
     }
   }
@@ -635,6 +706,17 @@ export function createDistributedTransactionCoordinator(
             break;
         }
       }
+    },
+
+    getCircuitBreakerMetrics(): CircuitBreakerMetrics[] {
+      if (!circuitBreaker) {
+        return [];
+      }
+      return circuitBreaker.getAllMetrics();
+    },
+
+    getCircuitBreaker(): CircuitBreaker | null {
+      return circuitBreaker;
     },
   };
 

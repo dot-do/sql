@@ -30,6 +30,8 @@ export enum DistributedTransactionErrorCode {
   TIMEOUT = 'DTX_TIMEOUT',
   /** Participant failure */
   PARTICIPANT_FAILURE = 'DTX_PARTICIPANT_FAILURE',
+  /** Participant unavailable (circuit breaker open) */
+  PARTICIPANT_UNAVAILABLE = 'DTX_PARTICIPANT_UNAVAILABLE',
   /** Coordinator failure */
   COORDINATOR_FAILURE = 'DTX_COORDINATOR_FAILURE',
   /** Lock acquisition failed */

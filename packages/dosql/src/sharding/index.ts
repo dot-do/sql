@@ -775,15 +775,52 @@ export {
    * Factory function to create a query router.
    *
    * @param vschema - VSchema configuration
+   * @param options - Optional router configuration including cost estimator
    * @returns QueryRouter instance
    *
    * @example
    * ```typescript
    * const router = createRouter(vschema);
    * const plan = router.createExecutionPlan('SELECT * FROM users WHERE id = 1');
+   *
+   * // With custom cost estimator configuration
+   * const routerWithStats = createRouter(vschema, {
+   *   costConfig: { defaultRowCount: 100000 },
+   * });
    * ```
    */
   createRouter,
+
+  /**
+   * Configuration options for the query router.
+   */
+  type QueryRouterOptions,
+
+  /**
+   * Query cost estimator using table statistics for cardinality estimation.
+   *
+   * @example
+   * ```typescript
+   * const estimator = new CostEstimator(statsStore, {
+   *   defaultRowCount: 100000,
+   *   scatterCostMultiplier: 3.0,
+   * });
+   *
+   * // Estimate scatter query cost
+   * const cost = estimator.estimateScatterCost('users', 4);
+   * ```
+   */
+  CostEstimator,
+
+  /**
+   * Configuration for the cost estimator.
+   */
+  type CostEstimatorConfig,
+
+  /**
+   * Default cost estimator configuration values.
+   */
+  DEFAULT_COST_ESTIMATOR_CONFIG,
 } from './router.js';
 
 // =============================================================================

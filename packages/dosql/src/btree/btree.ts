@@ -528,12 +528,210 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
 
     this.metadata.entryCount--;
 
-    // Handle underflow (simplified - no rebalancing/merging for now)
-    // A full implementation would merge or redistribute with siblings
-    // when a leaf has fewer than minKeys entries
+    // Handle underflow - rebalance or merge when node has fewer than minKeys entries
+    // Root is allowed to have fewer than minKeys entries
+    if (leaf.id !== this.metadata.rootPageId && leaf.keys.length < this.config.minKeys) {
+      await this.handleUnderflow(path, path.length - 1);
+    }
 
     await this.flush();
     return true;
+  }
+
+  /**
+   * Handle underflow in a node by redistributing or merging with siblings
+   */
+  private async handleUnderflow(path: Page[], nodeIndex: number): Promise<void> {
+    if (!this.metadata) throw new Error('B-tree not initialized');
+
+    const node = path[nodeIndex];
+
+    // Root doesn't need to meet minimum key requirement
+    if (node.id === this.metadata.rootPageId) {
+      // If root is internal and has only one child, shrink the tree
+      if (node.type === PageType.INTERNAL && node.keys.length === 0 && node.children.length === 1) {
+        this.metadata.rootPageId = node.children[0];
+        this.metadata.height--;
+        // The old root page can be freed (in a full impl, we'd add to free list)
+      }
+      return;
+    }
+
+    const parent = path[nodeIndex - 1];
+    const childIndexInParent = this.findChildIndex(parent, node.id);
+
+    // Try to borrow from left sibling first
+    if (childIndexInParent > 0) {
+      const leftSiblingId = parent.children[childIndexInParent - 1];
+      const leftSibling = await this.readPage(leftSiblingId);
+
+      if (leftSibling.keys.length > this.config.minKeys) {
+        await this.redistributeFromLeft(parent, leftSibling, node, childIndexInParent);
+        return;
+      }
+    }
+
+    // Try to borrow from right sibling
+    if (childIndexInParent < parent.children.length - 1) {
+      const rightSiblingId = parent.children[childIndexInParent + 1];
+      const rightSibling = await this.readPage(rightSiblingId);
+
+      if (rightSibling.keys.length > this.config.minKeys) {
+        await this.redistributeFromRight(parent, node, rightSibling, childIndexInParent);
+        return;
+      }
+    }
+
+    // Neither sibling can donate, so merge
+    if (childIndexInParent > 0) {
+      // Merge with left sibling (current node merges into left)
+      const leftSiblingId = parent.children[childIndexInParent - 1];
+      const leftSibling = await this.readPage(leftSiblingId);
+      await this.mergeNodes(parent, leftSibling, node, childIndexInParent - 1);
+    } else {
+      // Merge with right sibling (right merges into current)
+      const rightSiblingId = parent.children[childIndexInParent + 1];
+      const rightSibling = await this.readPage(rightSiblingId);
+      await this.mergeNodes(parent, node, rightSibling, childIndexInParent);
+    }
+
+    // After merge, parent might underflow - handle recursively
+    if (parent.id !== this.metadata.rootPageId && parent.keys.length < this.config.minKeys) {
+      await this.handleUnderflow(path, nodeIndex - 1);
+    } else if (parent.id === this.metadata.rootPageId && parent.keys.length === 0) {
+      // Root has become empty after merge - shrink tree
+      if (parent.type === PageType.INTERNAL && parent.children.length === 1) {
+        this.metadata.rootPageId = parent.children[0];
+        this.metadata.height--;
+      }
+    }
+  }
+
+  /**
+   * Find the index of a child page within a parent's children array
+   */
+  private findChildIndex(parent: Page, childId: number): number {
+    for (let i = 0; i < parent.children.length; i++) {
+      if (parent.children[i] === childId) {
+        return i;
+      }
+    }
+    throw new Error(`Child ${childId} not found in parent ${parent.id}`);
+  }
+
+  /**
+   * Redistribute keys from left sibling to underflowing node
+   */
+  private async redistributeFromLeft(
+    parent: Page,
+    leftSibling: Page,
+    node: Page,
+    nodeChildIndex: number
+  ): Promise<void> {
+    const separatorKeyIndex = nodeChildIndex - 1;
+
+    if (node.type === PageType.LEAF) {
+      // For leaf nodes:
+      // 1. Move the last key-value from left sibling to beginning of node
+      const borrowedKey = leftSibling.keys.pop()!;
+      const borrowedValue = leftSibling.values.pop()!;
+      node.keys.unshift(borrowedKey);
+      node.values.unshift(borrowedValue);
+
+      // 2. Update parent separator to be the new first key of node
+      parent.keys[separatorKeyIndex] = node.keys[0];
+    } else {
+      // For internal nodes:
+      // 1. Move separator key from parent down to beginning of node
+      node.keys.unshift(parent.keys[separatorKeyIndex]);
+
+      // 2. Move last key from left sibling up to parent as new separator
+      parent.keys[separatorKeyIndex] = leftSibling.keys.pop()!;
+
+      // 3. Move the last child pointer from left sibling to beginning of node
+      node.children.unshift(leftSibling.children.pop()!);
+    }
+
+    this.markDirty(parent);
+    this.markDirty(leftSibling);
+    this.markDirty(node);
+  }
+
+  /**
+   * Redistribute keys from right sibling to underflowing node
+   */
+  private async redistributeFromRight(
+    parent: Page,
+    node: Page,
+    rightSibling: Page,
+    nodeChildIndex: number
+  ): Promise<void> {
+    const separatorKeyIndex = nodeChildIndex;
+
+    if (node.type === PageType.LEAF) {
+      // For leaf nodes:
+      // 1. Move the first key-value from right sibling to end of node
+      const borrowedKey = rightSibling.keys.shift()!;
+      const borrowedValue = rightSibling.values.shift()!;
+      node.keys.push(borrowedKey);
+      node.values.push(borrowedValue);
+
+      // 2. Update parent separator to be the new first key of right sibling
+      parent.keys[separatorKeyIndex] = rightSibling.keys[0];
+    } else {
+      // For internal nodes:
+      // 1. Move separator key from parent down to end of node
+      node.keys.push(parent.keys[separatorKeyIndex]);
+
+      // 2. Move first key from right sibling up to parent as new separator
+      parent.keys[separatorKeyIndex] = rightSibling.keys.shift()!;
+
+      // 3. Move the first child pointer from right sibling to end of node
+      node.children.push(rightSibling.children.shift()!);
+    }
+
+    this.markDirty(parent);
+    this.markDirty(node);
+    this.markDirty(rightSibling);
+  }
+
+  /**
+   * Merge right node into left node, removing separator key from parent
+   */
+  private async mergeNodes(
+    parent: Page,
+    leftNode: Page,
+    rightNode: Page,
+    separatorKeyIndex: number
+  ): Promise<void> {
+    if (leftNode.type === PageType.LEAF) {
+      // For leaf nodes: just concatenate keys and values
+      leftNode.keys.push(...rightNode.keys);
+      leftNode.values.push(...rightNode.values);
+
+      // Update leaf chain: left.next = right.next
+      leftNode.nextLeaf = rightNode.nextLeaf;
+
+      // Update the next leaf's prev pointer if it exists
+      if (rightNode.nextLeaf !== -1) {
+        const nextLeaf = await this.readPage(rightNode.nextLeaf);
+        nextLeaf.prevLeaf = leftNode.id;
+        this.markDirty(nextLeaf);
+      }
+    } else {
+      // For internal nodes: bring separator down and concatenate
+      leftNode.keys.push(parent.keys[separatorKeyIndex]);
+      leftNode.keys.push(...rightNode.keys);
+      leftNode.children.push(...rightNode.children);
+    }
+
+    // Remove separator key and right child pointer from parent
+    parent.keys.splice(separatorKeyIndex, 1);
+    parent.children.splice(separatorKeyIndex + 1, 1);
+
+    this.markDirty(parent);
+    this.markDirty(leftNode);
+    // Note: rightNode is now orphaned and could be freed
   }
 
   /**

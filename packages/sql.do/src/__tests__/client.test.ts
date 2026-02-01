@@ -791,11 +791,12 @@ describe('Transaction Management', () => {
           message: 'Transaction conflict detected',
         });
       });
-    } catch (error: any) {
+    } catch (error) {
+      const err = error as { conflictingTransaction?: string; conflictingTable?: string; conflictingRow?: unknown };
       // GAP: Conflict details should be exposed
-      expect(error.conflictingTransaction).toBeDefined();
-      expect(error.conflictingTable).toBe('accounts');
-      expect(error.conflictingRow).toBeDefined();
+      expect(err.conflictingTransaction).toBeDefined();
+      expect(err.conflictingTable).toBe('accounts');
+      expect(err.conflictingRow).toBeDefined();
     }
   });
 
@@ -1270,11 +1271,12 @@ describe('Network Error Handling', () => {
 
     try {
       await client.query('INVALID SQL');
-    } catch (error: any) {
+    } catch (error) {
+      const err = error as { request?: { sql: string; method: string } };
       // GAP: Request context should be included
-      expect(error.request).toBeDefined();
-      expect(error.request.sql).toBe('INVALID SQL');
-      expect(error.request.method).toBe('query');
+      expect(err.request).toBeDefined();
+      expect(err.request!.sql).toBe('INVALID SQL');
+      expect(err.request!.method).toBe('query');
     }
   });
 

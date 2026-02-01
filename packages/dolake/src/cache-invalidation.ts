@@ -46,7 +46,7 @@ export interface CacheInvalidationConfig {
 /**
  * Default cache invalidation configuration
  */
-export const DEFAULT_CACHE_INVALIDATION_CONFIG: CacheInvalidationConfig = {
+export const DEFAULT_CACHE_INVALIDATION_CONFIG: Readonly<CacheInvalidationConfig> = {
   enabled: true,
   batchSize: 100,
   batchDelayMs: 50,

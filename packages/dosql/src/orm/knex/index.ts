@@ -47,6 +47,7 @@ import knex, { Knex } from 'knex';
 import { DoSQLKnexClient, DoSQLConnection } from './client.js';
 import type { DoSQLKnexConfig, DoSQLBackend, DoSQLQueryResult } from './types.js';
 import type { SqlValue, Row } from '../../engine/types.js';
+import { sqlLikeMatch } from '../../utils/like.js';
 
 // =============================================================================
 // FACTORY FUNCTION
@@ -375,11 +376,7 @@ export function createInMemoryBackend(): DoSQLBackend {
           case '!=':
             return rowValue !== value;
           case 'LIKE':
-            if (typeof rowValue === 'string' && typeof value === 'string') {
-              const pattern = value.replace(/%/g, '.*').replace(/_/g, '.');
-              return new RegExp(`^${pattern}$`, 'i').test(rowValue);
-            }
-            return false;
+            return sqlLikeMatch(rowValue, value);
           default:
             return true;
         }

@@ -21,6 +21,7 @@ import {
   DEFAULT_HNSW_CONFIG,
 } from './types.js';
 import { getDistanceFunction, distanceToScore, type DistanceFunction } from './distance.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // PRIORITY QUEUE IMPLEMENTATIONS
@@ -223,7 +224,7 @@ function metricToByte(metric: DistanceMetric): number {
     case DistanceMetric.L2: return 1;
     case DistanceMetric.Dot: return 2;
     case DistanceMetric.Hamming: return 3;
-    default: return 0;
+    default: return assertNever(metric, `Unknown distance metric: ${metric}`);
   }
 }
 

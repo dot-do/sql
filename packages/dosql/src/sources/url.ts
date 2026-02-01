@@ -21,6 +21,7 @@ import {
   createFormatIterator,
   inferSchema,
 } from './parser.js';
+import { likeMatch } from '../utils/like.js';
 
 // =============================================================================
 // URL TABLE SOURCE
@@ -327,14 +328,7 @@ function compareValues(
  * Match SQL LIKE pattern
  */
 function matchLike(value: string, pattern: string): boolean {
-  // Convert SQL LIKE pattern to regex
-  // % matches any sequence, _ matches single character
-  const regexPattern = pattern
-    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // Escape regex special chars
-    .replace(/%/g, '.*')
-    .replace(/_/g, '.');
-  const regex = new RegExp(`^${regexPattern}$`, 'i');
-  return regex.test(value);
+  return likeMatch(value, pattern);
 }
 
 // =============================================================================

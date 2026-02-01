@@ -28,6 +28,7 @@ import {
   type CsvParseOptions,
 } from '../sources/parser.js';
 import type { Expression } from '../sources/types.js';
+import { likeMatch } from '../utils/like.js';
 
 // =============================================================================
 // URL PARSING
@@ -647,12 +648,7 @@ function compareValues(
  * Match SQL LIKE pattern
  */
 function matchLike(value: string, pattern: string): boolean {
-  const regexPattern = pattern
-    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/%/g, '.*')
-    .replace(/_/g, '.');
-  const regex = new RegExp(`^${regexPattern}$`, 'i');
-  return regex.test(value);
+  return likeMatch(value, pattern);
 }
 
 // =============================================================================

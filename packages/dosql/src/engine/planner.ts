@@ -2,10 +2,13 @@
  * DoSQL Query Planner
  *
  * Transforms SQL queries into execution plans.
- * - Parses SQL into an AST
+ * - Uses unified parser to parse SQL into an AST
  * - Converts AST to logical plan
  * - Optimizes and converts to physical plan
  * - Decides between B-tree (OLTP) and Columnar (OLAP) execution paths
+ *
+ * Note: Parser code was consolidated into parser/subquery.ts per issue sql-0zgg.
+ * The planner now uses SubqueryParser for parsing SQL into AST.
  */
 
 import {
@@ -36,667 +39,46 @@ import {
   lit,
 } from './types.js';
 import { assertNever } from '../utils/assert-never.js';
-import { ParserError, PlannerError, SQLSyntaxError } from '../errors/index.js';
-import { ParserErrorCode, PlannerErrorCode, SyntaxErrorCode } from '../errors/codes.js';
+import { PlannerError } from '../errors/index.js';
+import { PlannerErrorCode } from '../errors/codes.js';
+
+// Import unified parser types from parser/subquery.ts
+import {
+  SubqueryParser,
+  type ParsedSelect,
+  type ParsedColumn,
+  type ParsedFrom,
+  type ParsedJoin,
+  type ParsedOrderBy,
+  type ParsedExpr,
+  type SubqueryNode,
+} from '../parser/subquery.js';
 
 // =============================================================================
-// SQL PARSING (Simplified AST)
+// PARSER ADAPTER
 // =============================================================================
 
 /**
- * Parsed SELECT statement
- */
-export interface ParsedSelect {
-  type: 'select';
-  columns: ParsedColumn[];
-  from: ParsedFrom;
-  joins?: ParsedJoin[];
-  where?: ParsedExpr;
-  groupBy?: ParsedExpr[];
-  having?: ParsedExpr;
-  orderBy?: ParsedOrderBy[];
-  limit?: number;
-  offset?: number;
-  distinct?: boolean;
-}
-
-/**
- * Parsed column in SELECT
- */
-export interface ParsedColumn {
-  expr: ParsedExpr;
-  alias?: string;
-}
-
-/**
- * Parsed FROM clause
- */
-export interface ParsedFrom {
-  table: string;
-  alias?: string;
-}
-
-/**
- * Parsed JOIN clause
- */
-export interface ParsedJoin {
-  type: 'inner' | 'left' | 'right' | 'full' | 'cross';
-  table: string;
-  alias?: string;
-  on?: ParsedExpr;
-}
-
-/**
- * Parsed ORDER BY item
- */
-export interface ParsedOrderBy {
-  expr: ParsedExpr;
-  direction: 'asc' | 'desc';
-  nullsFirst?: boolean;
-}
-
-/**
- * Parsed expression types
- */
-export type ParsedExpr =
-  | { type: 'column'; name: string; table?: string }
-  | { type: 'literal'; value: string | number | boolean | null }
-  | { type: 'binary'; op: string; left: ParsedExpr; right: ParsedExpr }
-  | { type: 'unary'; op: string; operand: ParsedExpr }
-  | { type: 'function'; name: string; args: ParsedExpr[] }
-  | { type: 'aggregate'; name: string; arg: ParsedExpr | '*'; distinct?: boolean }
-  | { type: 'between'; expr: ParsedExpr; low: ParsedExpr; high: ParsedExpr }
-  | { type: 'in'; expr: ParsedExpr; values: ParsedExpr[] }
-  | { type: 'isNull'; expr: ParsedExpr; isNot: boolean }
-  | { type: 'star' };
-
-// =============================================================================
-// SQL TOKENIZER
-// =============================================================================
-
-type TokenType =
-  | 'keyword'
-  | 'identifier'
-  | 'number'
-  | 'string'
-  | 'operator'
-  | 'punctuation'
-  | 'parameter'
-  | 'eof';
-
-interface Token {
-  type: TokenType;
-  value: string;
-  position: number;
-}
-
-const KEYWORDS = new Set([
-  'select', 'from', 'where', 'and', 'or', 'not', 'in', 'between', 'like',
-  'is', 'null', 'true', 'false', 'as', 'on', 'join', 'inner', 'left', 'right',
-  'full', 'outer', 'cross', 'group', 'by', 'having', 'order', 'asc', 'desc',
-  'limit', 'offset', 'distinct', 'all', 'union', 'intersect', 'except',
-  'count', 'sum', 'avg', 'min', 'max', 'nulls', 'first', 'last',
-]);
-
-function tokenize(sql: string): Token[] {
-  const tokens: Token[] = [];
-  let pos = 0;
-
-  while (pos < sql.length) {
-    // Skip whitespace
-    while (pos < sql.length && /\s/.test(sql[pos])) pos++;
-    if (pos >= sql.length) break;
-
-    const start = pos;
-    const char = sql[pos];
-
-    // String literal
-    if (char === "'" || char === '"') {
-      const quote = char;
-      pos++;
-      while (pos < sql.length && sql[pos] !== quote) {
-        if (sql[pos] === '\\') pos++; // Escape
-        pos++;
-      }
-      pos++; // closing quote
-      tokens.push({ type: 'string', value: sql.slice(start + 1, pos - 1), position: start });
-      continue;
-    }
-
-    // Number
-    if (/[0-9]/.test(char) || (char === '.' && /[0-9]/.test(sql[pos + 1] || ''))) {
-      while (pos < sql.length && /[0-9.]/.test(sql[pos])) pos++;
-      tokens.push({ type: 'number', value: sql.slice(start, pos), position: start });
-      continue;
-    }
-
-    // Parameter ($1, $2, etc.)
-    if (char === '$') {
-      pos++;
-      while (pos < sql.length && /[0-9]/.test(sql[pos])) pos++;
-      tokens.push({ type: 'parameter', value: sql.slice(start, pos), position: start });
-      continue;
-    }
-
-    // Identifier or keyword
-    if (/[a-zA-Z_]/.test(char)) {
-      while (pos < sql.length && /[a-zA-Z0-9_]/.test(sql[pos])) pos++;
-      const value = sql.slice(start, pos);
-      const lower = value.toLowerCase();
-      if (KEYWORDS.has(lower)) {
-        tokens.push({ type: 'keyword', value: lower, position: start });
-      } else {
-        tokens.push({ type: 'identifier', value, position: start });
-      }
-      continue;
-    }
-
-    // Operators (multi-char)
-    if (sql.slice(pos, pos + 2) === '<=' || sql.slice(pos, pos + 2) === '>=' ||
-        sql.slice(pos, pos + 2) === '<>' || sql.slice(pos, pos + 2) === '!=') {
-      tokens.push({ type: 'operator', value: sql.slice(pos, pos + 2), position: start });
-      pos += 2;
-      continue;
-    }
-
-    // Single char operators and punctuation
-    if ('=<>+-*/%'.includes(char)) {
-      tokens.push({ type: 'operator', value: char, position: start });
-      pos++;
-      continue;
-    }
-
-    if ('(),;.'.includes(char)) {
-      tokens.push({ type: 'punctuation', value: char, position: start });
-      pos++;
-      continue;
-    }
-
-    // Unknown - skip
-    pos++;
-  }
-
-  tokens.push({ type: 'eof', value: '', position: pos });
-  return tokens;
-}
-
-// =============================================================================
-// SQL PARSER
-// =============================================================================
-
-class Parser {
-  private tokens: Token[];
-  private pos = 0;
-
-  constructor(sql: string) {
-    this.tokens = tokenize(sql);
-  }
-
-  private current(): Token {
-    return this.tokens[this.pos] || { type: 'eof', value: '', position: -1 };
-  }
-
-  private peek(offset = 0): Token {
-    return this.tokens[this.pos + offset] || { type: 'eof', value: '', position: -1 };
-  }
-
-  private advance(): Token {
-    return this.tokens[this.pos++] || { type: 'eof', value: '', position: -1 };
-  }
-
-  private expect(type: TokenType, value?: string): Token {
-    const token = this.current();
-    if (token.type !== type || (value !== undefined && token.value.toLowerCase() !== value.toLowerCase())) {
-      throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, `Expected ${type}${value ? ` '${value}'` : ''}, got ${token.type} '${token.value}'`);
-    }
-    return this.advance();
-  }
-
-  private match(type: TokenType, value?: string): boolean {
-    const token = this.current();
-    return token.type === type && (value === undefined || token.value.toLowerCase() === value.toLowerCase());
-  }
-
-  private matchKeyword(...keywords: string[]): boolean {
-    const token = this.current();
-    return token.type === 'keyword' && keywords.includes(token.value.toLowerCase());
-  }
-
-  parse(): ParsedSelect {
-    return this.parseSelect();
-  }
-
-  private parseSelect(): ParsedSelect {
-    this.expect('keyword', 'select');
-
-    // DISTINCT
-    const distinct = this.matchKeyword('distinct');
-    if (distinct) this.advance();
-
-    // Columns
-    const columns = this.parseSelectList();
-
-    // FROM
-    this.expect('keyword', 'from');
-    const from = this.parseTableRef();
-
-    // JOINs
-    const joins: ParsedJoin[] = [];
-    while (this.matchKeyword('join', 'inner', 'left', 'right', 'full', 'cross')) {
-      joins.push(this.parseJoin());
-    }
-
-    // WHERE
-    let where: ParsedExpr | undefined;
-    if (this.matchKeyword('where')) {
-      this.advance();
-      where = this.parseExpression();
-    }
-
-    // GROUP BY
-    let groupBy: ParsedExpr[] | undefined;
-    if (this.matchKeyword('group')) {
-      this.advance();
-      this.expect('keyword', 'by');
-      groupBy = [this.parseExpression()];
-      while (this.match('punctuation', ',')) {
-        this.advance();
-        groupBy.push(this.parseExpression());
-      }
-    }
-
-    // HAVING
-    let having: ParsedExpr | undefined;
-    if (this.matchKeyword('having')) {
-      this.advance();
-      having = this.parseExpression();
-    }
-
-    // ORDER BY
-    let orderBy: ParsedOrderBy[] | undefined;
-    if (this.matchKeyword('order')) {
-      this.advance();
-      this.expect('keyword', 'by');
-      orderBy = [this.parseOrderByItem()];
-      while (this.match('punctuation', ',')) {
-        this.advance();
-        orderBy.push(this.parseOrderByItem());
-      }
-    }
-
-    // LIMIT
-    let limit: number | undefined;
-    if (this.matchKeyword('limit')) {
-      this.advance();
-      limit = parseInt(this.expect('number').value, 10);
-    }
-
-    // OFFSET
-    let offset: number | undefined;
-    if (this.matchKeyword('offset')) {
-      this.advance();
-      offset = parseInt(this.expect('number').value, 10);
-    }
-
-    return { type: 'select', columns, from, joins: joins.length > 0 ? joins : undefined, where, groupBy, having, orderBy, limit, offset, distinct };
-  }
-
-  private parseSelectList(): ParsedColumn[] {
-    const columns: ParsedColumn[] = [];
-    columns.push(this.parseSelectColumn());
-    while (this.match('punctuation', ',')) {
-      this.advance();
-      columns.push(this.parseSelectColumn());
-    }
-    return columns;
-  }
-
-  private parseSelectColumn(): ParsedColumn {
-    // Handle *
-    if (this.match('operator', '*')) {
-      this.advance();
-      return { expr: { type: 'star' } };
-    }
-
-    const expr = this.parseExpression();
-
-    // AS alias
-    let alias: string | undefined;
-    if (this.matchKeyword('as')) {
-      this.advance();
-      alias = this.expect('identifier').value;
-    } else if (this.match('identifier')) {
-      // Implicit alias (no AS keyword)
-      alias = this.advance().value;
-    }
-
-    return { expr, alias };
-  }
-
-  private parseTableRef(): ParsedFrom {
-    const table = this.expect('identifier').value;
-    let alias: string | undefined;
-    if (this.matchKeyword('as')) {
-      this.advance();
-      alias = this.expect('identifier').value;
-    } else if (this.match('identifier') && !this.matchKeyword('join', 'inner', 'left', 'right', 'full', 'cross', 'where', 'group', 'having', 'order', 'limit', 'offset')) {
-      alias = this.advance().value;
-    }
-    return { table, alias };
-  }
-
-  private parseJoin(): ParsedJoin {
-    let type: ParsedJoin['type'] = 'inner';
-
-    if (this.matchKeyword('left')) {
-      type = 'left';
-      this.advance();
-      if (this.matchKeyword('outer')) this.advance();
-    } else if (this.matchKeyword('right')) {
-      type = 'right';
-      this.advance();
-      if (this.matchKeyword('outer')) this.advance();
-    } else if (this.matchKeyword('full')) {
-      type = 'full';
-      this.advance();
-      if (this.matchKeyword('outer')) this.advance();
-    } else if (this.matchKeyword('cross')) {
-      type = 'cross';
-      this.advance();
-    } else if (this.matchKeyword('inner')) {
-      this.advance();
-    }
-
-    this.expect('keyword', 'join');
-    const { table, alias } = this.parseTableRef();
-
-    let on: ParsedExpr | undefined;
-    if (this.matchKeyword('on')) {
-      this.advance();
-      on = this.parseExpression();
-    }
-
-    return { type, table, alias, on };
-  }
-
-  private parseOrderByItem(): ParsedOrderBy {
-    const expr = this.parseExpression();
-    let direction: 'asc' | 'desc' = 'asc';
-    let nullsFirst: boolean | undefined;
-
-    if (this.matchKeyword('asc')) {
-      this.advance();
-    } else if (this.matchKeyword('desc')) {
-      direction = 'desc';
-      this.advance();
-    }
-
-    if (this.matchKeyword('nulls')) {
-      this.advance();
-      if (this.matchKeyword('first')) {
-        nullsFirst = true;
-        this.advance();
-      } else if (this.matchKeyword('last')) {
-        nullsFirst = false;
-        this.advance();
-      }
-    }
-
-    return { expr, direction, nullsFirst };
-  }
-
-  private parseExpression(): ParsedExpr {
-    return this.parseOr();
-  }
-
-  private parseOr(): ParsedExpr {
-    let left = this.parseAnd();
-    while (this.matchKeyword('or')) {
-      this.advance();
-      const right = this.parseAnd();
-      left = { type: 'binary', op: 'or', left, right };
-    }
-    return left;
-  }
-
-  private parseAnd(): ParsedExpr {
-    let left = this.parseNot();
-    while (this.matchKeyword('and')) {
-      this.advance();
-      const right = this.parseNot();
-      left = { type: 'binary', op: 'and', left, right };
-    }
-    return left;
-  }
-
-  private parseNot(): ParsedExpr {
-    if (this.matchKeyword('not')) {
-      this.advance();
-      return { type: 'unary', op: 'not', operand: this.parseNot() };
-    }
-    return this.parseComparison();
-  }
-
-  private parseComparison(): ParsedExpr {
-    let left = this.parseAddSub();
-
-    // IS NULL / IS NOT NULL
-    if (this.matchKeyword('is')) {
-      this.advance();
-      const isNot = this.matchKeyword('not');
-      if (isNot) this.advance();
-      this.expect('keyword', 'null');
-      return { type: 'isNull', expr: left, isNot };
-    }
-
-    // BETWEEN
-    if (this.matchKeyword('between')) {
-      this.advance();
-      const low = this.parseAddSub();
-      this.expect('keyword', 'and');
-      const high = this.parseAddSub();
-      return { type: 'between', expr: left, low, high };
-    }
-
-    // IN
-    if (this.matchKeyword('in')) {
-      this.advance();
-      this.expect('punctuation', '(');
-      // SQLite allows empty IN lists (extension to SQL standard)
-      const values: ParsedExpr[] = [];
-      if (!this.match('punctuation', ')')) {
-        values.push(this.parseExpression());
-        while (this.match('punctuation', ',')) {
-          this.advance();
-          values.push(this.parseExpression());
-        }
-      }
-      this.expect('punctuation', ')');
-      return { type: 'in', expr: left, values };
-    }
-
-    // NOT IN / NOT BETWEEN
-    if (this.matchKeyword('not')) {
-      this.advance();
-      if (this.matchKeyword('in')) {
-        this.advance();
-        this.expect('punctuation', '(');
-        // SQLite allows empty IN lists (extension to SQL standard)
-        const values: ParsedExpr[] = [];
-        if (!this.match('punctuation', ')')) {
-          values.push(this.parseExpression());
-          while (this.match('punctuation', ',')) {
-            this.advance();
-            values.push(this.parseExpression());
-          }
-        }
-        this.expect('punctuation', ')');
-        return { type: 'unary', op: 'not', operand: { type: 'in', expr: left, values } };
-      }
-      if (this.matchKeyword('between')) {
-        this.advance();
-        const low = this.parseAddSub();
-        this.expect('keyword', 'and');
-        const high = this.parseAddSub();
-        return { type: 'unary', op: 'not', operand: { type: 'between', expr: left, low, high } };
-      }
-    }
-
-    // Comparison operators
-    const opMap: Record<string, string> = {
-      '=': 'eq', '<>': 'ne', '!=': 'ne', '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge',
-    };
-    if (this.current().type === 'operator' && opMap[this.current().value]) {
-      const op = opMap[this.advance().value];
-      const right = this.parseAddSub();
-      return { type: 'binary', op, left, right };
-    }
-
-    // LIKE
-    if (this.matchKeyword('like')) {
-      this.advance();
-      const right = this.parseAddSub();
-      return { type: 'binary', op: 'like', left, right };
-    }
-
-    return left;
-  }
-
-  private parseAddSub(): ParsedExpr {
-    let left = this.parseMulDiv();
-    while (this.match('operator', '+') || this.match('operator', '-')) {
-      const op = this.advance().value === '+' ? 'add' : 'sub';
-      const right = this.parseMulDiv();
-      left = { type: 'binary', op, left, right };
-    }
-    return left;
-  }
-
-  private parseMulDiv(): ParsedExpr {
-    let left = this.parseUnary();
-    while (this.match('operator', '*') || this.match('operator', '/') || this.match('operator', '%')) {
-      const opChar = this.advance().value;
-      const op = opChar === '*' ? 'mul' : opChar === '/' ? 'div' : 'mod';
-      const right = this.parseUnary();
-      left = { type: 'binary', op, left, right };
-    }
-    return left;
-  }
-
-  private parseUnary(): ParsedExpr {
-    if (this.match('operator', '-')) {
-      this.advance();
-      return { type: 'unary', op: 'neg', operand: this.parseUnary() };
-    }
-    return this.parsePrimary();
-  }
-
-  private parsePrimary(): ParsedExpr {
-    const token = this.current();
-
-    // Parenthesized expression
-    if (this.match('punctuation', '(')) {
-      this.advance();
-      const expr = this.parseExpression();
-      this.expect('punctuation', ')');
-      return expr;
-    }
-
-    // Aggregate functions
-    if (this.matchKeyword('count', 'sum', 'avg', 'min', 'max')) {
-      const name = this.advance().value.toLowerCase();
-      this.expect('punctuation', '(');
-
-      let distinct = false;
-      if (this.matchKeyword('distinct')) {
-        distinct = true;
-        this.advance();
-      }
-
-      let arg: ParsedExpr | '*';
-      if (this.match('operator', '*')) {
-        this.advance();
-        arg = '*';
-      } else {
-        arg = this.parseExpression();
-      }
-
-      this.expect('punctuation', ')');
-      return { type: 'aggregate', name, arg, distinct };
-    }
-
-    // Function call or column
-    if (this.match('identifier')) {
-      const name = this.advance().value;
-
-      // Function call
-      if (this.match('punctuation', '(')) {
-        this.advance();
-        const args: ParsedExpr[] = [];
-        if (!this.match('punctuation', ')')) {
-          args.push(this.parseExpression());
-          while (this.match('punctuation', ',')) {
-            this.advance();
-            args.push(this.parseExpression());
-          }
-        }
-        this.expect('punctuation', ')');
-        return { type: 'function', name, args };
-      }
-
-      // Table.column
-      if (this.match('punctuation', '.')) {
-        this.advance();
-        const column = this.expect('identifier').value;
-        return { type: 'column', name: column, table: name };
-      }
-
-      return { type: 'column', name };
-    }
-
-    // Number literal
-    if (this.match('number')) {
-      const value = this.advance().value;
-      return { type: 'literal', value: value.includes('.') ? parseFloat(value) : parseInt(value, 10) };
-    }
-
-    // String literal
-    if (this.match('string')) {
-      return { type: 'literal', value: this.advance().value };
-    }
-
-    // Boolean literals
-    if (this.matchKeyword('true')) {
-      this.advance();
-      return { type: 'literal', value: true };
-    }
-    if (this.matchKeyword('false')) {
-      this.advance();
-      return { type: 'literal', value: false };
-    }
-
-    // NULL
-    if (this.matchKeyword('null')) {
-      this.advance();
-      return { type: 'literal', value: null };
-    }
-
-    // Parameter
-    if (this.match('parameter')) {
-      const param = this.advance().value;
-      return { type: 'column', name: param }; // Treat as column ref, resolve later
-    }
-
-    throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, `Unexpected token: ${token.type} '${token.value}'`);
-  }
-}
-
-/**
- * Parse a SQL query string into an AST
+ * Parse a SQL query string into an AST using the unified parser
+ *
+ * This function wraps SubqueryParser to provide a simple interface for parsing
+ * SELECT statements. The unified parser in parser/subquery.ts supports:
+ * - CTEs (WITH clause)
+ * - Subqueries (scalar, IN, EXISTS, derived tables)
+ * - CASE expressions
+ * - Set operations (UNION/INTERSECT/EXCEPT)
+ * - Full source location tracking
+ *
+ * @param sql - The SQL SELECT statement to parse
+ * @returns The parsed SELECT statement AST
  */
 export function parseSQL(sql: string): ParsedSelect {
-  return new Parser(sql).parse();
+  const parser = new SubqueryParser();
+  return parser.parse(sql);
 }
+
+// Re-export types for backward compatibility
+export type { ParsedSelect, ParsedColumn, ParsedFrom, ParsedJoin, ParsedOrderBy, ParsedExpr };
 
 // =============================================================================
 // PLAN BUILDER
@@ -704,18 +86,31 @@ export function parseSQL(sql: string): ParsedSelect {
 
 /**
  * Convert parsed expression to plan expression
+ *
+ * Handles all expression types from the unified parser including:
+ * - Basic types: column, literal, star
+ * - Binary/unary expressions
+ * - Functions and aggregates
+ * - CASE expressions (simple and searched)
+ * - Subqueries (scalar, EXISTS)
  */
 function toExpression(parsed: ParsedExpr): Expression {
   switch (parsed.type) {
-    case 'column':
-      return { type: 'columnRef', column: parsed.name, table: parsed.table };
+    case 'column': {
+      // Handle optional table property with exactOptionalPropertyTypes
+      const colRef: ColumnRef = { type: 'columnRef', column: parsed.name };
+      if (parsed.table) {
+        colRef.table = parsed.table;
+      }
+      return colRef;
+    }
     case 'literal':
       return lit(parsed.value);
     case 'star':
       return { type: 'columnRef', column: '*' };
     case 'binary': {
       const opMap: Record<string, ComparisonOp | 'add' | 'sub' | 'mul' | 'div' | 'mod' | 'and' | 'or'> = {
-        eq: 'eq', ne: 'ne', lt: 'lt', le: 'le', gt: 'gt', ge: 'ge', like: 'like',
+        eq: 'eq', ne: 'ne', lt: 'lt', le: 'le', gt: 'gt', ge: 'ge', like: 'like', ilike: 'like',
         add: 'add', sub: 'sub', mul: 'mul', div: 'div', mod: 'mod',
         and: 'and', or: 'or',
       };
@@ -742,25 +137,66 @@ function toExpression(parsed: ParsedExpr): Expression {
       const fnMap: Record<string, AggregateFunction> = {
         count: 'count', sum: 'sum', avg: 'avg', min: 'min', max: 'max',
       };
-      return {
+      const aggExpr: AggregateExpr = {
         type: 'aggregate',
         function: fnMap[parsed.name] || 'count',
         arg: parsed.arg === '*' ? '*' : toExpression(parsed.arg),
-        distinct: parsed.distinct,
       };
+      if (parsed.distinct) {
+        aggExpr.distinct = parsed.distinct;
+      }
+      return aggExpr;
     }
+    case 'case': {
+      // Convert CASE expression to CaseExpr
+      const whenClauses: Array<{ condition: Expression; result: Expression } | { value: Expression; result: Expression }> = [];
+      for (const when of parsed.whens) {
+        whenClauses.push({
+          condition: toExpression(when.condition),
+          result: toExpression(when.result),
+        });
+      }
+      const caseExpr: import('./types.js').CaseExpr = {
+        type: 'case',
+        when: whenClauses,
+      };
+      if (parsed.operand) {
+        caseExpr.operand = toExpression(parsed.operand);
+      }
+      if (parsed.else_) {
+        caseExpr.else = toExpression(parsed.else_);
+      }
+      return caseExpr;
+    }
+    case 'subquery':
+    case 'exists':
+      // Subqueries require plan building - for now, throw an error
+      // Full subquery support would require recursive planning
+      throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `Subquery expressions require recursive planning`);
+    case 'comparison':
+      // Quantified comparison (ANY/ALL/SOME) - not yet supported
+      throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `Quantified comparisons (ANY/ALL/SOME) not yet supported`);
+    case 'tuple':
+      // Tuple expressions (for row value expressions) - not yet supported in plan expressions
+      throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `Tuple expressions not yet supported in plans`);
     case 'between':
     case 'in':
     case 'isNull':
       // These are converted to predicates, not expressions
       throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `${parsed.type} should be converted to predicate`);
-    default:
-      return assertNever(parsed, `Unknown expression type: ${(parsed as unknown as { type: string }).type}`);
+    default: {
+      // Handle any other types gracefully
+      const exprType = (parsed as { type: string }).type;
+      throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `Unknown expression type: ${exprType}`);
+    }
   }
 }
 
 /**
  * Convert parsed expression to predicate
+ *
+ * Handles predicate-style expressions from the unified parser.
+ * Note: IN with subquery values requires special handling.
  */
 function toPredicate(parsed: ParsedExpr): Predicate {
   switch (parsed.type) {
@@ -772,11 +208,11 @@ function toPredicate(parsed: ParsedExpr): Predicate {
           operands: [toPredicate(parsed.left), toPredicate(parsed.right)],
         };
       }
-      const compOps = ['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'like'];
+      const compOps = ['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'like', 'ilike'];
       if (compOps.includes(parsed.op)) {
         return {
           type: 'comparison',
-          op: parsed.op as ComparisonOp,
+          op: (parsed.op === 'ilike' ? 'like' : parsed.op) as ComparisonOp,
           left: toExpression(parsed.left),
           right: toExpression(parsed.right),
         };
@@ -800,21 +236,78 @@ function toPredicate(parsed: ParsedExpr): Predicate {
         low: toExpression(parsed.low),
         high: toExpression(parsed.high),
       };
-    case 'in':
-      return {
-        type: 'in',
-        expr: toExpression(parsed.expr),
-        values: parsed.values.map(toExpression),
-      };
+    case 'in': {
+      // IN clause can have either a list of values or a subquery
+      // Check if values is an array (value list) or SubqueryNode
+      if (Array.isArray(parsed.values)) {
+        return {
+          type: 'in',
+          expr: toExpression(parsed.expr),
+          values: parsed.values.map(toExpression),
+        };
+      } else {
+        // IN with subquery - not yet fully supported
+        throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `IN with subquery requires recursive planning`);
+      }
+    }
     case 'isNull':
       return {
         type: 'isNull',
         expr: toExpression(parsed.expr),
         isNot: parsed.isNot,
       };
+    case 'exists':
+      // EXISTS requires subquery planning
+      throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `EXISTS predicate requires recursive planning`);
+    case 'comparison':
+      // Quantified comparison (ANY/ALL/SOME)
+      throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `Quantified comparisons (ANY/ALL/SOME) not yet supported`);
     default:
       throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `Cannot convert to predicate: ${parsed.type}`);
   }
+}
+
+// =============================================================================
+// HELPER FUNCTIONS FOR PARSED FROM/JOIN TYPES
+// =============================================================================
+
+/**
+ * Extract table name from ParsedFrom (handles both table and derived table types)
+ */
+function getTableName(from: ParsedFrom): string {
+  if (from.type === 'table') {
+    return from.table;
+  }
+  // Derived table - use alias as the "table name"
+  return from.alias;
+}
+
+/**
+ * Extract alias from ParsedFrom
+ */
+function getTableAlias(from: ParsedFrom): string | undefined {
+  if (from.type === 'table') {
+    return from.alias;
+  }
+  return from.alias;
+}
+
+/**
+ * Extract table name from ParsedJoin's table (which is a ParsedFrom)
+ */
+function getJoinTableName(join: ParsedJoin): string {
+  return getTableName(join.table);
+}
+
+/**
+ * Extract alias from ParsedJoin
+ */
+function getJoinAlias(join: ParsedJoin): string | undefined {
+  // Use explicit alias if provided, otherwise derive from table
+  if (join.alias) {
+    return join.alias;
+  }
+  return getTableAlias(join.table);
 }
 
 /**
@@ -939,8 +432,22 @@ export class QueryPlanner {
    * Build scan plan
    */
   private buildScan(parsed: ParsedSelect): QueryPlan {
+    // Handle optional FROM clause (e.g., SELECT 1)
+    if (!parsed.from) {
+      // Return a simple scan with no table (values-only query)
+      return {
+        id: nextPlanId(),
+        type: 'scan',
+        table: '',
+        source: 'btree',
+        columns: [],
+      };
+    }
+
     const source = this.decideDataSource(parsed);
-    const tableSchema = this.schema.tables.get(parsed.from.table);
+    const tableName = getTableName(parsed.from);
+    const tableAlias = getTableAlias(parsed.from);
+    const tableSchema = this.schema.tables.get(tableName);
     const columns = tableSchema
       ? tableSchema.columns.map(c => c.name)
       : ['*'];
@@ -957,15 +464,20 @@ export class QueryPlanner {
       predicate = toPredicate(parsed.where);
     }
 
+    // Build scan with exactOptionalPropertyTypes compliance
     const scan: ScanPlan = {
       id: nextPlanId(),
       type: 'scan',
-      table: parsed.from.table,
-      alias: parsed.from.alias,
+      table: tableName,
       source,
       columns,
-      predicate,
     };
+    if (tableAlias) {
+      scan.alias = tableAlias;
+    }
+    if (predicate) {
+      scan.predicate = predicate;
+    }
 
     return scan;
   }
@@ -974,9 +486,11 @@ export class QueryPlanner {
    * Try to use index lookup
    */
   private tryIndexLookup(parsed: ParsedSelect): IndexLookupPlan | null {
-    if (!parsed.where) return null;
+    if (!parsed.where || !parsed.from) return null;
 
-    const tableSchema = this.schema.tables.get(parsed.from.table);
+    const tableName = getTableName(parsed.from);
+    const tableAlias = getTableAlias(parsed.from);
+    const tableSchema = this.schema.tables.get(tableName);
     if (!tableSchema?.primaryKey) return null;
 
     // Check if WHERE is a simple equality on primary key
@@ -985,15 +499,18 @@ export class QueryPlanner {
       const right = parsed.where.right;
 
       if (left.type === 'column' && tableSchema.primaryKey.includes(left.name)) {
-        return {
+        const indexPlan: IndexLookupPlan = {
           id: nextPlanId(),
           type: 'indexLookup',
-          table: parsed.from.table,
-          alias: parsed.from.alias,
+          table: tableName,
           index: 'primary',
           lookupKey: [toExpression(right)],
           columns: tableSchema.columns.map(c => c.name),
         };
+        if (tableAlias) {
+          indexPlan.alias = tableAlias;
+        }
+        return indexPlan;
       }
     }
 
@@ -1007,14 +524,19 @@ export class QueryPlanner {
     let result = plan;
 
     for (const join of parsed.joins!) {
+      const joinTableName = getJoinTableName(join);
+      const joinAlias = getJoinAlias(join);
+
       const rightScan: ScanPlan = {
         id: nextPlanId(),
         type: 'scan',
-        table: join.table,
-        alias: join.alias,
+        table: joinTableName,
         source: 'btree', // Default to B-tree for joins
-        columns: this.getTableColumns(join.table),
+        columns: this.getTableColumns(joinTableName),
       };
+      if (joinAlias) {
+        rightScan.alias = joinAlias;
+      }
 
       const joinPlan: JoinPlan = {
         id: nextPlanId(),
@@ -1022,9 +544,11 @@ export class QueryPlanner {
         joinType: join.type as JoinType,
         left: result,
         right: rightScan,
-        condition: join.on ? toPredicate(join.on) : undefined,
         algorithm: 'hash', // Default to hash join
       };
+      if (join.on) {
+        joinPlan.condition = toPredicate(join.on);
+      }
 
       result = joinPlan;
     }
@@ -1061,26 +585,32 @@ export class QueryPlanner {
         const fnMap: Record<string, AggregateFunction> = {
           count: 'count', sum: 'sum', avg: 'avg', min: 'min', max: 'max',
         };
+        const aggExpr: AggregateExpr = {
+          type: 'aggregate',
+          function: fnMap[col.expr.name] || 'count',
+          arg: col.expr.arg === '*' ? '*' : toExpression(col.expr.arg),
+        };
+        if (col.expr.distinct) {
+          aggExpr.distinct = col.expr.distinct;
+        }
         aggregates.push({
-          expr: {
-            type: 'aggregate',
-            function: fnMap[col.expr.name] || 'count',
-            arg: col.expr.arg === '*' ? '*' : toExpression(col.expr.arg),
-            distinct: col.expr.distinct,
-          },
+          expr: aggExpr,
           alias: col.alias || col.expr.name,
         });
       }
     }
 
-    return {
+    const aggPlan: AggregatePlan = {
       id: nextPlanId(),
       type: 'aggregate',
       input: plan,
       groupBy,
       aggregates,
-      having: parsed.having ? toPredicate(parsed.having) : undefined,
     };
+    if (parsed.having) {
+      aggPlan.having = toPredicate(parsed.having);
+    }
+    return aggPlan;
   }
 
   /**
@@ -1106,15 +636,22 @@ export class QueryPlanner {
    * Build sort (ORDER BY)
    */
   private buildSort(plan: QueryPlan, orderBy: ParsedOrderBy[]): QueryPlan {
+    const sortSpecs: SortSpec[] = orderBy.map(o => {
+      const spec: SortSpec = {
+        expr: toExpression(o.expr),
+        direction: o.direction,
+      };
+      if (o.nullsFirst !== undefined) {
+        spec.nullsFirst = o.nullsFirst;
+      }
+      return spec;
+    });
+
     return {
       id: nextPlanId(),
       type: 'sort',
       input: plan,
-      orderBy: orderBy.map(o => ({
-        expr: toExpression(o.expr),
-        direction: o.direction,
-        nullsFirst: o.nullsFirst,
-      })),
+      orderBy: sortSpecs,
     };
   }
 
@@ -1122,13 +659,16 @@ export class QueryPlanner {
    * Build limit/offset
    */
   private buildLimit(plan: QueryPlan, limit?: number, offset?: number): QueryPlan {
-    return {
+    const limitPlan: LimitPlan = {
       id: nextPlanId(),
       type: 'limit',
       input: plan,
       limit: limit ?? Infinity,
-      offset,
     };
+    if (offset !== undefined) {
+      limitPlan.offset = offset;
+    }
+    return limitPlan;
   }
 
   // =============================================================================
@@ -1140,12 +680,14 @@ export class QueryPlanner {
   }
 
   private isSelectStar(columns: ParsedColumn[]): boolean {
-    return columns.length === 1 && columns[0].expr.type === 'star';
+    const firstCol = columns[0];
+    return columns.length === 1 && firstCol !== undefined && firstCol.expr.type === 'star';
   }
 
   private isPrimaryKeyLookup(parsed: ParsedSelect): boolean {
-    if (!parsed.where) return false;
-    const tableSchema = this.schema.tables.get(parsed.from.table);
+    if (!parsed.where || !parsed.from) return false;
+    const tableName = getTableName(parsed.from);
+    const tableSchema = this.schema.tables.get(tableName);
     if (!tableSchema?.primaryKey) return false;
 
     // Simple check: is WHERE an equality on primary key?

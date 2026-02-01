@@ -18,6 +18,7 @@ import type {
   RangeBoundary,
   ShardConfig,
 } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // HASH FUNCTIONS
@@ -454,7 +455,7 @@ export function createVindex(shards: ShardConfig[], config: VindexConfig): Vinde
     case 'range':
       return new RangeVindex(shards, config);
     default:
-      throw new Error(`Unknown vindex type: ${(config as VindexConfig).type}`);
+      return assertNever(config, `Unknown vindex type: ${(config as VindexConfig).type}`);
   }
 }
 

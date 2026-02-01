@@ -35,7 +35,7 @@ export interface ParquetWriteConfig {
   enableStatistics: boolean;
 }
 
-export const DEFAULT_PARQUET_CONFIG: ParquetWriteConfig = {
+export const DEFAULT_PARQUET_CONFIG: Readonly<ParquetWriteConfig> = {
   rowGroupSize: 100_000,
   compression: 'snappy',
   dictionaryEncoding: true,

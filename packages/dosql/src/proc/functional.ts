@@ -105,6 +105,7 @@ type ExtractParams<F> = F extends (ctx: FunctionalContext<any>) => any
 /**
  * Extracts the return type from a procedure function.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for proper type inference of arbitrary functions
 type ExtractReturn<F> = F extends (...args: any[]) => infer R
   ? R extends Promise<infer T> ? T : R
   : never;
@@ -129,9 +130,10 @@ export type InferProcedureCall<P, DB extends DatabaseSchema = DatabaseSchema> =
 /**
  * Type for procedure definitions map.
  */
-export type ProcedureDefinitions<DB extends DatabaseSchema = DatabaseSchema> = {
-  [name: string]: ProcedureDef<any[], any, DB>;
-};
+export type ProcedureDefinitions<DB extends DatabaseSchema = DatabaseSchema> = Record<
+  string,
+  ProcedureDef<any[], any, DB>
+>;
 
 /**
  * Converts procedure definitions to callable procedures.

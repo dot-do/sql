@@ -311,6 +311,48 @@ export {
   createCompactionJobId,
 } from './types.js';
 
+/**
+ * Generic branded type factory functions - stable.
+ *
+ * These factory functions provide the standardized pattern for creating
+ * branded types across all packages in the DoSQL ecosystem. Use these
+ * to create your own custom branded types with validation.
+ *
+ * @see {@link createBrandedTypeFactory} - Create string-based branded type factory
+ * @see {@link createBrandedBigintFactory} - Create bigint-based branded type factory
+ * @see {@link createBrandedTypeGuard} - Create type guard for string branded types
+ * @see {@link createBrandedBigintGuard} - Create type guard for bigint branded types
+ *
+ * @example
+ * ```typescript
+ * import { createBrandedTypeFactory, createBrandedTypeGuard } from 'lake.do';
+ *
+ * // Define a custom branded type
+ * declare const CustomIdBrand: unique symbol;
+ * type CustomId = string & { readonly [typeof CustomIdBrand]: never };
+ *
+ * // Create factory and guard
+ * const createCustomId = createBrandedTypeFactory<typeof CustomIdBrand, CustomId>('CustomId');
+ * const isCustomId = createBrandedTypeGuard<CustomId>('CustomId');
+ *
+ * // Use them
+ * const id = createCustomId('custom-123');
+ * if (isCustomId(someValue)) {
+ *   // someValue is narrowed to CustomId
+ * }
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export {
+  createBrandedTypeFactory,
+  createBrandedBigintFactory,
+  createBrandedTypeGuard,
+  createBrandedBigintGuard,
+} from './branded-types.js';
+
 // =============================================================================
 // Re-exported Types from sql.do
 // =============================================================================

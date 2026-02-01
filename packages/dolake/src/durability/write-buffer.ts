@@ -30,7 +30,7 @@ export interface WriteBufferConfig {
 /**
  * Default write buffer configuration
  */
-export const DEFAULT_WRITE_BUFFER_CONFIG: WriteBufferConfig = {
+export const DEFAULT_WRITE_BUFFER_CONFIG: Readonly<WriteBufferConfig> = {
   maxBufferSize: 10000,
   maxBufferAgeMs: 30000,
 };

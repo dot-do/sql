@@ -8,8 +8,64 @@
  * Authentication is optional and disabled by default for backward compatibility.
  * Enable by providing an AuthConfig with at least one valid credential.
  *
+ * SECURITY: Token comparison uses timing-safe comparison to prevent timing attacks.
+ *
  * @packageDocumentation
  */
+
+// =============================================================================
+// Timing-Safe Comparison
+// =============================================================================
+
+/**
+ * Timing-safe string comparison to prevent timing attacks.
+ *
+ * Uses constant-time comparison that doesn't short-circuit on mismatches.
+ * This prevents attackers from determining valid tokens by measuring response times.
+ *
+ * Note: The length check still leaks length information, but for fixed-length
+ * tokens (like UUIDs or hashes), this is acceptable. For variable-length secrets,
+ * consider hashing both values first.
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+  // Convert strings to Uint8Arrays for comparison
+  const encoder = new TextEncoder();
+  const bufA = encoder.encode(a);
+  const bufB = encoder.encode(b);
+
+  // If lengths differ, we still need to do a constant-time comparison
+  // to avoid leaking length information through timing.
+  // Pad shorter buffer to match longer buffer's length.
+  const maxLen = Math.max(bufA.length, bufB.length);
+  const paddedA = new Uint8Array(maxLen);
+  const paddedB = new Uint8Array(maxLen);
+  paddedA.set(bufA);
+  paddedB.set(bufB);
+
+  // XOR all bytes and accumulate result
+  let result = bufA.length ^ bufB.length; // Will be 0 if lengths match
+  for (let i = 0; i < maxLen; i++) {
+    result |= paddedA[i] ^ paddedB[i];
+  }
+
+  return result === 0;
+}
+
+/**
+ * Check if any token in the array matches the provided token using timing-safe comparison.
+ * Always iterates through all tokens to prevent timing-based enumeration.
+ */
+function timingSafeIncludes(tokens: string[], token: string): boolean {
+  let found = false;
+  for (const validToken of tokens) {
+    // Always compare every token to maintain constant time
+    if (timingSafeEqual(validToken, token)) {
+      found = true;
+      // Don't break early - continue comparing to maintain constant time
+    }
+  }
+  return found;
+}
 
 // =============================================================================
 // Types
@@ -100,7 +156,8 @@ export function authenticate(request: Request, config: AuthConfig): AuthResult {
     if (bearerMatch) {
       const token = bearerMatch[1];
       if (config.bearerTokens && config.bearerTokens.length > 0) {
-        if (config.bearerTokens.includes(token)) {
+        // Use timing-safe comparison to prevent timing attacks
+        if (timingSafeIncludes(config.bearerTokens, token)) {
           return { authenticated: true, method: 'bearer' };
         }
         return {
@@ -115,7 +172,8 @@ export function authenticate(request: Request, config: AuthConfig): AuthResult {
   const apiKey = request.headers.get(API_KEY_HEADER);
   if (apiKey) {
     if (config.apiKeys && config.apiKeys.length > 0) {
-      if (config.apiKeys.includes(apiKey)) {
+      // Use timing-safe comparison to prevent timing attacks
+      if (timingSafeIncludes(config.apiKeys, apiKey)) {
         return { authenticated: true, method: 'api-key' };
       }
       return {
@@ -162,3 +220,16 @@ export function checkAuth(request: Request, config: AuthConfig): Response | null
   }
   return null;
 }
+
+// =============================================================================
+// Internal Exports (for testing)
+// =============================================================================
+
+/**
+ * @internal Exported for testing purposes only.
+ * Timing-safe string comparison function.
+ */
+export const _internal = {
+  timingSafeEqual,
+  timingSafeIncludes,
+};

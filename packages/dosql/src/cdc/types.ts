@@ -200,6 +200,138 @@ export interface TransactionEvent {
 export type CDCEvent<T = unknown> = ChangeEvent<T> | TransactionEvent;
 
 // =============================================================================
+// CDC OPERATION-BASED TYPE INFERENCE
+// =============================================================================
+
+/**
+ * CDC operation types
+ */
+export type CDCOperationType = 'insert' | 'update' | 'delete';
+
+/**
+ * Transaction event types
+ */
+export type TransactionEventType = 'begin' | 'commit' | 'rollback';
+
+/**
+ * Insert event - has data (after), no oldData
+ */
+export interface InsertChangeEvent<T = unknown> extends Omit<ChangeEvent<T>, 'type' | 'oldData'> {
+  type: 'insert';
+  data: T;
+}
+
+/**
+ * Update event - has both data (after) and oldData (before)
+ */
+export interface UpdateChangeEvent<T = unknown> extends Omit<ChangeEvent<T>, 'type'> {
+  type: 'update';
+  data: T;
+  oldData: T;
+}
+
+/**
+ * Delete event - has oldData (before), no data
+ */
+export interface DeleteChangeEvent<T = unknown> extends Omit<ChangeEvent<T>, 'type' | 'data'> {
+  type: 'delete';
+  oldData: T;
+}
+
+/**
+ * Get the typed change event based on operation type
+ *
+ * @example
+ * ```typescript
+ * type InsertEvt = TypedChangeEvent<'insert', User>; // InsertChangeEvent<User>
+ * type UpdateEvt = TypedChangeEvent<'update', User>; // UpdateChangeEvent<User>
+ * type DeleteEvt = TypedChangeEvent<'delete', User>; // DeleteChangeEvent<User>
+ * ```
+ */
+export type TypedChangeEvent<Op extends CDCOperationType, T = unknown> =
+  Op extends 'insert' ? InsertChangeEvent<T> :
+  Op extends 'update' ? UpdateChangeEvent<T> :
+  Op extends 'delete' ? DeleteChangeEvent<T> :
+  never;
+
+/**
+ * Extract the 'data' field type based on operation
+ *
+ * @example
+ * ```typescript
+ * type D1 = CDCEventData<'insert', User>; // User (required)
+ * type D2 = CDCEventData<'update', User>; // User (required)
+ * type D3 = CDCEventData<'delete', User>; // undefined (no data on delete)
+ * ```
+ */
+export type CDCEventData<Op extends CDCOperationType, T = unknown> =
+  Op extends 'insert' | 'update' ? T :
+  Op extends 'delete' ? undefined :
+  never;
+
+/**
+ * Extract the 'oldData' field type based on operation
+ *
+ * @example
+ * ```typescript
+ * type O1 = CDCEventOldData<'insert', User>; // undefined (no oldData on insert)
+ * type O2 = CDCEventOldData<'update', User>; // User (required)
+ * type O3 = CDCEventOldData<'delete', User>; // User (required)
+ * ```
+ */
+export type CDCEventOldData<Op extends CDCOperationType, T = unknown> =
+  Op extends 'insert' ? undefined :
+  Op extends 'update' | 'delete' ? T :
+  never;
+
+/**
+ * Type guard to check if a CDC operation has 'data' field
+ */
+export type HasData<Op extends CDCOperationType> =
+  Op extends 'insert' | 'update' ? true : false;
+
+/**
+ * Type guard to check if a CDC operation has 'oldData' field
+ */
+export type HasOldData<Op extends CDCOperationType> =
+  Op extends 'update' | 'delete' ? true : false;
+
+/**
+ * Type guard to narrow CDC event by operation type
+ */
+export function isInsertEvent<T>(event: ChangeEvent<T>): event is InsertChangeEvent<T> {
+  return event.type === 'insert';
+}
+
+/**
+ * Type guard to narrow CDC event by operation type
+ */
+export function isUpdateEvent<T>(event: ChangeEvent<T>): event is UpdateChangeEvent<T> {
+  return event.type === 'update';
+}
+
+/**
+ * Type guard to narrow CDC event by operation type
+ */
+export function isDeleteEvent<T>(event: ChangeEvent<T>): event is DeleteChangeEvent<T> {
+  return event.type === 'delete';
+}
+
+/**
+ * Type guard to check if event is a transaction event
+ */
+export function isTransactionEvent(event: CDCEvent): event is TransactionEvent {
+  return event.type === 'begin' || event.type === 'commit' || event.type === 'rollback';
+}
+
+/**
+ * Type guard to check if event is a change event
+ */
+export function isChangeEvent<T>(event: CDCEvent<T>): event is ChangeEvent<T> {
+  return event.type === 'insert' || event.type === 'update' || event.type === 'delete';
+}
+
+// =============================================================================
 // CDC Subscription Interface
 // =============================================================================
 
@@ -375,6 +507,14 @@ export enum CDCErrorCode {
   BUFFER_OVERFLOW = 'CDC_BUFFER_OVERFLOW',
   /** Decoder error */
   DECODE_ERROR = 'CDC_DECODE_ERROR',
+  /** Consumer pool exhausted */
+  POOL_EXHAUSTED = 'CDC_POOL_EXHAUSTED',
+  /** Consumer pool timeout */
+  POOL_TIMEOUT = 'CDC_POOL_TIMEOUT',
+  /** Consumer not found */
+  CONSUMER_NOT_FOUND = 'CDC_CONSUMER_NOT_FOUND',
+  /** Backpressure limit exceeded */
+  BACKPRESSURE_LIMIT = 'CDC_BACKPRESSURE_LIMIT',
 }
 
 /**
@@ -444,15 +584,20 @@ export class CDCError extends DoSQLError {
     switch (this.code) {
       case CDCErrorCode.LSN_NOT_FOUND:
       case CDCErrorCode.SLOT_NOT_FOUND:
+      case CDCErrorCode.CONSUMER_NOT_FOUND:
         return ErrorCategory.RESOURCE;
       case CDCErrorCode.SLOT_EXISTS:
         return ErrorCategory.CONFLICT;
       case CDCErrorCode.BUFFER_OVERFLOW:
+      case CDCErrorCode.POOL_EXHAUSTED:
+      case CDCErrorCode.BACKPRESSURE_LIMIT:
         return ErrorCategory.RESOURCE;
       case CDCErrorCode.DECODE_ERROR:
         return ErrorCategory.VALIDATION;
       case CDCErrorCode.SUBSCRIPTION_FAILED:
         return ErrorCategory.CONNECTION;
+      case CDCErrorCode.POOL_TIMEOUT:
+        return ErrorCategory.TIMEOUT;
       default:
         return ErrorCategory.EXECUTION;
     }
@@ -478,6 +623,18 @@ export class CDCError extends DoSQLError {
       case CDCErrorCode.DECODE_ERROR:
         this.recoveryHint = 'Check event format and decoder compatibility. Verify schema matches expected format.';
         break;
+      case CDCErrorCode.POOL_EXHAUSTED:
+        this.recoveryHint = 'Consumer pool is at capacity. Wait for consumers to disconnect or increase pool size.';
+        break;
+      case CDCErrorCode.POOL_TIMEOUT:
+        this.recoveryHint = 'Timed out waiting for a slot in the consumer pool. Retry later or reduce concurrent consumers.';
+        break;
+      case CDCErrorCode.CONSUMER_NOT_FOUND:
+        this.recoveryHint = 'The specified consumer does not exist. It may have been disconnected or never registered.';
+        break;
+      case CDCErrorCode.BACKPRESSURE_LIMIT:
+        this.recoveryHint = 'Too many consumers are experiencing backpressure. Slow down event production or scale consumers.';
+        break;
     }
   }
 
@@ -488,6 +645,8 @@ export class CDCError extends DoSQLError {
     return [
       CDCErrorCode.SUBSCRIPTION_FAILED,
       CDCErrorCode.BUFFER_OVERFLOW,
+      CDCErrorCode.POOL_TIMEOUT,
+      CDCErrorCode.BACKPRESSURE_LIMIT,
     ].includes(this.code);
   }
 
@@ -508,6 +667,14 @@ export class CDCError extends DoSQLError {
         return 'CDC buffer is full. Please slow down or increase buffer capacity.';
       case CDCErrorCode.DECODE_ERROR:
         return 'Failed to decode CDC event data.';
+      case CDCErrorCode.POOL_EXHAUSTED:
+        return 'CDC consumer pool is at maximum capacity.';
+      case CDCErrorCode.POOL_TIMEOUT:
+        return 'Timed out waiting for a slot in the CDC consumer pool.';
+      case CDCErrorCode.CONSUMER_NOT_FOUND:
+        return 'The specified CDC consumer was not found.';
+      case CDCErrorCode.BACKPRESSURE_LIMIT:
+        return 'CDC backpressure limit exceeded. Please slow down.';
       default:
         return this.message;
     }
@@ -561,7 +728,7 @@ export interface LakehouseStreamConfig {
 /**
  * Default lakehouse stream configuration
  */
-export const DEFAULT_LAKEHOUSE_CONFIG: LakehouseStreamConfig = {
+export const DEFAULT_LAKEHOUSE_CONFIG: Readonly<LakehouseStreamConfig> = {
   lakehouseUrl: '',
   sourceDoId: '',
   maxBatchSize: 1000,

@@ -104,7 +104,7 @@ export interface ChunkConfig {
 /**
  * Default chunk configuration aligned with DO storage limits
  */
-export const DEFAULT_CHUNK_CONFIG: ChunkConfig = {
+export const DEFAULT_CHUNK_CONFIG: Readonly<ChunkConfig> = {
   maxChunkSize: 2 * 1024 * 1024, // 2MB - DO storage limit
   chunkPrefix: '_chunks/',
 };
@@ -134,7 +134,7 @@ export interface TieredStorageConfig {
 /**
  * Default tiered storage configuration
  */
-export const DEFAULT_TIERED_CONFIG: TieredStorageConfig = {
+export const DEFAULT_TIERED_CONFIG: Readonly<TieredStorageConfig> = {
   hotDataMaxAge: 60 * 60 * 1000, // 1 hour
   hotStorageMaxSize: 100 * 1024 * 1024, // 100MB
   autoMigrate: true,
@@ -241,3 +241,92 @@ export interface MigrationResult {
   /** Total bytes migrated */
   bytesTransferred: number;
 }
+
+// =============================================================================
+// STORAGE OPERATION-BASED TYPE INFERENCE
+// =============================================================================
+
+/**
+ * Storage operation types
+ */
+export type StorageOperation = 'read' | 'write' | 'delete' | 'list' | 'exists' | 'metadata';
+
+/**
+ * Infer the return type of a storage operation
+ *
+ * @example
+ * ```typescript
+ * type ReadResult = StorageOperationResult<'read'>; // Uint8Array | null
+ * type WriteResult = StorageOperationResult<'write'>; // void
+ * type ListResult = StorageOperationResult<'list'>; // string[]
+ * type ExistsResult = StorageOperationResult<'exists'>; // boolean
+ * ```
+ */
+export type StorageOperationResult<Op extends StorageOperation> =
+  Op extends 'read' ? Uint8Array | null :
+  Op extends 'write' ? void :
+  Op extends 'delete' ? void :
+  Op extends 'list' ? string[] :
+  Op extends 'exists' ? boolean :
+  Op extends 'metadata' ? FSXMetadata | null :
+  never;
+
+/**
+ * Infer the input type for a storage operation
+ *
+ * @example
+ * ```typescript
+ * type ReadInput = StorageOperationInput<'read'>; // { path: string; range?: ByteRange }
+ * type WriteInput = StorageOperationInput<'write'>; // { path: string; data: Uint8Array }
+ * ```
+ */
+export type StorageOperationInput<Op extends StorageOperation> =
+  Op extends 'read' ? { path: string; range?: ByteRange } :
+  Op extends 'write' ? { path: string; data: Uint8Array } :
+  Op extends 'delete' ? { path: string } :
+  Op extends 'list' ? { prefix: string } :
+  Op extends 'exists' ? { path: string } :
+  Op extends 'metadata' ? { path: string } :
+  never;
+
+/**
+ * Check if an operation is a read operation (no side effects)
+ */
+export type IsReadOnlyOperation<Op extends StorageOperation> =
+  Op extends 'read' | 'list' | 'exists' | 'metadata' ? true : false;
+
+/**
+ * Check if an operation is a write operation (has side effects)
+ */
+export type IsWriteOperation<Op extends StorageOperation> =
+  Op extends 'write' | 'delete' ? true : false;
+
+/**
+ * Typed storage operation for type-safe backend calls
+ */
+export interface TypedStorageOperation<Op extends StorageOperation> {
+  operation: Op;
+  input: StorageOperationInput<Op>;
+  result: StorageOperationResult<Op>;
+}
+
+/**
+ * Storage tier response type based on tier
+ *
+ * @example
+ * ```typescript
+ * type HotResponse = TierOperationResult<'hot', 'read'>; // Uint8Array | null
+ * type ColdResponse = TierOperationResult<'cold', 'read'>; // Uint8Array | null
+ * type BothResponse = TierOperationResult<'both', 'read'>; // { hot?: Uint8Array | null; cold?: Uint8Array | null }
+ * ```
+ */
+export type TierOperationResult<
+  Tier extends StorageTier,
+  Op extends StorageOperation
+> =
+  Tier extends StorageTier.BOTH
+    ? {
+        hot?: StorageOperationResult<Op>;
+        cold?: StorageOperationResult<Op>;
+      }
+    : StorageOperationResult<Op>;

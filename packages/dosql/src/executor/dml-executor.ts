@@ -36,6 +36,8 @@ import {
   hasReturningClause,
   expandWildcard,
 } from '../parser/returning.js';
+import { sqlLikeMatch } from '../utils/like.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // TYPES
@@ -165,7 +167,7 @@ export class DMLExecutor {
       case 'replace':
         return this.executeReplace<T>(statement, options);
       default:
-        throw new ExecutorError(ExecutorErrorCode.UNKNOWN_PLAN_TYPE, `Unknown statement type: ${(statement as unknown as { type: string }).type}`);
+        return assertNever(statement, `Unknown statement type: ${(statement as unknown as { type: string }).type}`);
     }
   }
 
@@ -626,11 +628,7 @@ export class DMLExecutor {
         case 'IS NOT':
           return left !== right;
         case 'LIKE':
-          if (typeof left === 'string' && typeof right === 'string') {
-            const pattern = right.replace(/%/g, '.*').replace(/_/g, '.');
-            return new RegExp(`^${pattern}$`, 'i').test(left);
-          }
-          return false;
+          return sqlLikeMatch(left, right);
         case 'AND':
           return this.evaluateCondition(expr.left, row, params, paramIndex) &&
                  this.evaluateCondition(expr.right, row, params, paramIndex);

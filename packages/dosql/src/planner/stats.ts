@@ -848,7 +848,7 @@ export interface StatsCacheConfig {
 /**
  * Default statistics cache configuration
  */
-export const DEFAULT_STATS_CACHE_CONFIG: StatsCacheConfig = {
+export const DEFAULT_STATS_CACHE_CONFIG: Readonly<StatsCacheConfig> = {
   ttlMs: 5000,
   maxTableEntries: 1000,
   maxIndexEntries: 2000,

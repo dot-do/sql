@@ -61,7 +61,7 @@ export interface HotPartitionConfig {
 /**
  * Default hot partition configuration
  */
-export const DEFAULT_HOT_PARTITION_CONFIG: HotPartitionConfig = {
+export const DEFAULT_HOT_PARTITION_CONFIG: Readonly<HotPartitionConfig> = {
   hotThresholdMs: 60 * 60 * 1000, // 1 hour
   warmThresholdMs: 24 * 60 * 60 * 1000, // 24 hours
   hotAccessCountThreshold: 100,
@@ -813,7 +813,7 @@ export interface VortexAwareCompactionOptions {
 /**
  * Default Vortex-aware compaction options
  */
-export const DEFAULT_VORTEX_COMPACTION_OPTIONS: VortexAwareCompactionOptions = {
+export const DEFAULT_VORTEX_COMPACTION_OPTIONS: Readonly<VortexAwareCompactionOptions> = {
   coldOnly: false,
   convertWarmPartitions: true,
   minPartitionAgeMs: 60 * 60 * 1000, // 1 hour

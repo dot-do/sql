@@ -28,6 +28,9 @@ import {
   addSnapshot,
   addSchema,
 } from './iceberg.js';
+import { createLogger } from './logging.js';
+
+const logger = createLogger({ component: 'catalog' });
 
 // =============================================================================
 // REST Catalog Types
@@ -295,7 +298,7 @@ export class RestCatalogHandler {
         const code = this.errorToStatusCode(error);
         return this.errorResponse(code, error.code, error.message);
       }
-      console.error('Unhandled error:', error);
+      logger.error('Unhandled error in catalog request', error, { method, path });
       return this.errorResponse(500, 'InternalError', String(error));
     }
   }

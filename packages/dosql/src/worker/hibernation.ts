@@ -148,6 +148,7 @@ interface HibernatableWebSocket extends WebSocket {
  * @param Base - The base Durable Object class to extend
  * @returns A class with hibernation support
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- TypeScript mixin pattern requires any[] for constructor parameters
 export function HibernationMixin<T extends new (...args: any[]) => DurableObject>(Base: T) {
   return class extends Base {
     /** @internal Hibernation statistics */

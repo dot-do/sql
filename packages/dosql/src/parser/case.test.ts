@@ -1090,9 +1090,10 @@ describe('DoSQL CASE Expression Parser', () => {
       try {
         parser.parse(sql);
         expect.fail('Should have thrown');
-      } catch (e: any) {
-        expect(e.location).toBeDefined();
-        expect(e.location.line).toBeGreaterThan(1);
+      } catch (e) {
+        const err = e as { location?: { line: number } };
+        expect(err.location).toBeDefined();
+        expect(err.location!.line).toBeGreaterThan(1);
       }
     });
 

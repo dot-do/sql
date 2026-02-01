@@ -62,42 +62,135 @@ export const ICEBERG_BIGINT_FIELDS = new Set([
 // Branded Types
 // =============================================================================
 
+import {
+  createBrandedBigintFactory,
+  createBrandedBigintGuard,
+} from 'lake.do';
+
+/** Brand symbol for Snapshot ID */
+declare const SnapshotIdBrand: unique symbol;
+/** Brand symbol for Sequence Number */
+declare const SequenceNumberBrand: unique symbol;
+/** Brand symbol for Timestamp in milliseconds */
+declare const TimestampMsBrand: unique symbol;
+
 /**
  * Branded type for snapshot IDs.
  * Helps ensure type safety when working with snapshot identifiers.
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
  */
-export type SnapshotId = bigint & { readonly __brand: 'SnapshotId' };
+export type SnapshotId = bigint & { readonly [SnapshotIdBrand]: never };
 
 /**
  * Branded type for sequence numbers.
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
  */
-export type SequenceNumber = bigint & { readonly __brand: 'SequenceNumber' };
+export type SequenceNumber = bigint & { readonly [SequenceNumberBrand]: never };
 
 /**
  * Branded type for timestamps in milliseconds.
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
  */
-export type TimestampMs = bigint & { readonly __brand: 'TimestampMs' };
+export type TimestampMs = bigint & { readonly [TimestampMsBrand]: never };
 
 /**
  * Create a branded SnapshotId from a bigint.
+ *
+ * In development mode, validates that the value is a positive bigint.
+ *
+ * @param value - The bigint value to brand
+ * @returns A branded SnapshotId
+ * @throws {Error} In dev mode: if value is not a bigint or is not positive
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
  */
-export function snapshotId(value: bigint): SnapshotId {
-  return value as SnapshotId;
-}
+export const snapshotId = createBrandedBigintFactory<typeof SnapshotIdBrand, SnapshotId>(
+  'SnapshotId',
+  { allowZero: false } // Snapshot IDs must be positive
+);
 
 /**
  * Create a branded SequenceNumber from a bigint.
+ *
+ * In development mode, validates that the value is a non-negative bigint.
+ *
+ * @param value - The bigint value to brand
+ * @returns A branded SequenceNumber
+ * @throws {Error} In dev mode: if value is not a bigint or is negative
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
  */
-export function sequenceNumber(value: bigint): SequenceNumber {
-  return value as SequenceNumber;
-}
+export const sequenceNumber = createBrandedBigintFactory<typeof SequenceNumberBrand, SequenceNumber>(
+  'SequenceNumber',
+  { allowZero: true } // Sequence numbers can be 0
+);
 
 /**
  * Create a branded TimestampMs from a bigint.
+ *
+ * In development mode, validates that the value is a positive bigint.
+ *
+ * @param value - The bigint value to brand
+ * @returns A branded TimestampMs
+ * @throws {Error} In dev mode: if value is not a bigint or is not positive
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
  */
-export function timestampMs(value: bigint): TimestampMs {
-  return value as TimestampMs;
-}
+export const timestampMs = createBrandedBigintFactory<typeof TimestampMsBrand, TimestampMs>(
+  'TimestampMs',
+  { allowZero: false } // Timestamps must be positive
+);
+
+/**
+ * Type guard for SnapshotId - checks if value is a valid positive bigint.
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export const isSnapshotIdCandidate = createBrandedBigintGuard<SnapshotId>(
+  'SnapshotId',
+  { allowZero: false }
+);
+
+/**
+ * Type guard for SequenceNumber - checks if value is a valid non-negative bigint.
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export const isSequenceNumberCandidate = createBrandedBigintGuard<SequenceNumber>(
+  'SequenceNumber',
+  { allowZero: true }
+);
+
+/**
+ * Type guard for TimestampMs - checks if value is a valid positive bigint.
+ *
+ * @public
+ * @stability stable
+ * @since 0.2.0
+ */
+export const isTimestampMsCandidate = createBrandedBigintGuard<TimestampMs>(
+  'TimestampMs',
+  { allowZero: false }
+);
 
 // =============================================================================
 // Type Guards

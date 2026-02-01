@@ -50,7 +50,7 @@ export interface LocalTimeTravelConfig {
 /**
  * Default local time travel configuration
  */
-export const DEFAULT_LOCAL_CONFIG: LocalTimeTravelConfig = {
+export const DEFAULT_LOCAL_CONFIG: Readonly<LocalTimeTravelConfig> = {
   maxWALReplay: 10000,
   enableStateCache: true,
   stateCacheLimit: 100,

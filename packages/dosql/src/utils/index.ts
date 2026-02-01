@@ -104,3 +104,10 @@ export {
   // Exhaustiveness checking
   assertNever,
 } from './assert-never.js';
+
+export {
+  // Safe LIKE/GLOB pattern matching (ReDoS-safe)
+  safeLikeMatch,
+  safeLikeMatchWithEscape,
+  safeGlobMatch,
+} from './safe-like.js';

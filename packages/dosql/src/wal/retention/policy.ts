@@ -21,7 +21,7 @@ import type {
 /**
  * Default retention policy
  */
-export const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
+export const DEFAULT_RETENTION_POLICY: Readonly<RetentionPolicy> = {
   minSegmentCount: 2,
   maxSegmentAge: 24 * 60 * 60 * 1000, // 24 hours
   respectSlotPositions: true,

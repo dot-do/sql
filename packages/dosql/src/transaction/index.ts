@@ -91,6 +91,7 @@ export {
   type TransactionManagerOptions,
   type TransactionResult,
   type ExtendedTransactionManager,
+  type TimeoutMethods,
 } from './manager.js';
 
 // Isolation

@@ -6,7 +6,11 @@
  *
  * SECURITY: Uses a safe recursive descent parser instead of new Function()
  * to prevent arbitrary code execution.
+ *
+ * SECURITY: LIKE pattern matching uses a ReDoS-safe implementation (sql-axvi)
  */
+
+import { safeLikeMatch } from './safe-like.js';
 
 // =============================================================================
 // SAFE EXPRESSION TOKENIZER
@@ -543,15 +547,8 @@ class SafeExpressionEvaluator {
     const strValue = String(value);
     const strPattern = String(pattern);
 
-    // Convert SQL LIKE pattern to regex
-    // % matches any sequence, _ matches any single character
-    const regexPattern = strPattern
-      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // Escape regex special chars
-      .replace(/%/g, '.*')  // % -> .*
-      .replace(/_/g, '.');  // _ -> .
-
-    const regex = new RegExp(`^${regexPattern}$`, 'i');
-    return regex.test(strValue);
+    // Use ReDoS-safe LIKE matching (sql-axvi security fix)
+    return safeLikeMatch(strValue, strPattern, true);
   }
 }
 
@@ -663,19 +660,15 @@ export function sqlEquals(a: unknown, b: unknown): boolean {
 /**
  * Evaluate a LIKE pattern match.
  *
+ * SECURITY: Uses ReDoS-safe implementation (sql-axvi)
+ *
  * @param value - The value to test
  * @param pattern - The SQL LIKE pattern (using % and _ wildcards)
  * @returns true if the value matches the pattern
  */
 export function sqlLike(value: string, pattern: string): boolean {
-  // Convert SQL LIKE pattern to regex
-  const regexPattern = pattern
-    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // Escape regex chars
-    .replace(/%/g, '.*') // % matches any sequence
-    .replace(/_/g, '.'); // _ matches any single char
-
-  const regex = new RegExp(`^${regexPattern}$`, 'i');
-  return regex.test(value);
+  // Use ReDoS-safe LIKE matching (sql-axvi security fix)
+  return safeLikeMatch(value, pattern, true);
 }
 
 /**

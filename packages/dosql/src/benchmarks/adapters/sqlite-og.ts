@@ -20,8 +20,8 @@ import type {
 } from '../types.js';
 
 // Detect Workers runtime
+// Note: navigator.userAgent exists in Cloudflare Workers runtime
 const isWorkersRuntime = typeof globalThis.navigator !== 'undefined' &&
-  // @ts-ignore - navigator.userAgent exists in Workers
   globalThis.navigator.userAgent?.includes('Cloudflare-Workers');
 
 // =============================================================================

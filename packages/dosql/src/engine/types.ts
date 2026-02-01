@@ -746,15 +746,83 @@ export interface Engine {
 // =============================================================================
 
 /**
- * Create a column reference expression
+ * Create a column reference expression for a column without a table qualifier.
+ * @overload
  */
+export function col(column: string): ColumnRef & { table: undefined };
+/**
+ * Create a column reference expression with a table qualifier.
+ * @overload
+ */
+export function col(column: string, table: string): ColumnRef & { table: string };
+/**
+ * Create a column reference expression.
+ *
+ * @param column - The column name
+ * @param table - Optional table name qualifier
+ * @returns A ColumnRef expression
+ *
+ * @example
+ * ```typescript
+ * const c1 = col('id');           // { type: 'columnRef', column: 'id', table: undefined }
+ * const c2 = col('id', 'users');  // { type: 'columnRef', column: 'id', table: 'users' }
+ * ```
+ */
+export function col(column: string, table?: string): ColumnRef;
 export function col(column: string, table?: string): ColumnRef {
   return { type: 'columnRef', column, table };
 }
 
 /**
- * Create a literal expression
+ * Create a literal expression from a null value.
+ * @overload
  */
+export function lit(value: null): Literal & { dataType: 'null' };
+/**
+ * Create a literal expression from a string value.
+ * @overload
+ */
+export function lit(value: string): Literal & { dataType: 'string' };
+/**
+ * Create a literal expression from a number value.
+ * @overload
+ */
+export function lit(value: number): Literal & { dataType: 'number' };
+/**
+ * Create a literal expression from a bigint value.
+ * @overload
+ */
+export function lit(value: bigint): Literal & { dataType: 'bigint' };
+/**
+ * Create a literal expression from a boolean value.
+ * @overload
+ */
+export function lit(value: boolean): Literal & { dataType: 'boolean' };
+/**
+ * Create a literal expression from a Date value.
+ * @overload
+ */
+export function lit(value: Date): Literal & { dataType: 'date' };
+/**
+ * Create a literal expression from a Uint8Array value.
+ * @overload
+ */
+export function lit(value: Uint8Array): Literal & { dataType: 'bytes' };
+/**
+ * Create a literal expression from any SQL value.
+ *
+ * @param value - The value to create a literal from
+ * @returns A Literal expression with the inferred dataType
+ *
+ * @example
+ * ```typescript
+ * const strLit = lit('hello');     // Literal & { dataType: 'string' }
+ * const numLit = lit(42);          // Literal & { dataType: 'number' }
+ * const nullLit = lit(null);       // Literal & { dataType: 'null' }
+ * const dateLit = lit(new Date()); // Literal & { dataType: 'date' }
+ * ```
+ */
+export function lit(value: SqlValue): Literal;
 export function lit(value: SqlValue): Literal {
   const dataType =
     value === null ? 'null' :

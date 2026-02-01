@@ -42,7 +42,7 @@ export interface CompactionConfig {
 /**
  * Default compaction configuration
  */
-export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
+export const DEFAULT_COMPACTION_CONFIG: Readonly<CompactionConfig> = {
   minFileSizeBytes: 8 * 1024 * 1024, // 8MB
   targetFileSizeBytes: 128 * 1024 * 1024, // 128MB
   maxFilesToCompact: 100,

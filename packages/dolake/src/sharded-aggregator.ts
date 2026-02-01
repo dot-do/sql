@@ -75,7 +75,7 @@ export interface ShardedAggregatorConfig {
  * Default sharded aggregator configuration.
  * shardCount=1 maintains full backward compatibility with single-DO deployments.
  */
-export const DEFAULT_SHARDED_AGGREGATOR_CONFIG: ShardedAggregatorConfig = {
+export const DEFAULT_SHARDED_AGGREGATOR_CONFIG: Readonly<ShardedAggregatorConfig> = {
   shardCount: 1,
   maxShards: 32,
   tablePinning: {},

@@ -375,8 +375,8 @@ describe('assertValidSchema', () => {
       assertValidSchema({
         users: {},
       });
-    } catch (e: any) {
-      expect(e.message).toContain(ErrorCodes.EMPTY_TABLE);
+    } catch (e) {
+      expect((e as Error).message).toContain(ErrorCodes.EMPTY_TABLE);
     }
   });
 });

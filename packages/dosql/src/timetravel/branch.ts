@@ -48,7 +48,7 @@ export interface BranchHistoryConfig {
 /**
  * Default branch history configuration
  */
-export const DEFAULT_BRANCH_HISTORY_CONFIG: BranchHistoryConfig = {
+export const DEFAULT_BRANCH_HISTORY_CONFIG: Readonly<BranchHistoryConfig> = {
   maxHistoryDepth: 100,
   enableCache: true,
   cacheTTL: 300000, // 5 minutes

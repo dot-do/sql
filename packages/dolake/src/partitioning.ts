@@ -634,7 +634,7 @@ export interface PartitionManagerConfig {
 /**
  * Default partition manager configuration
  */
-export const DEFAULT_PARTITION_MANAGER_CONFIG: PartitionManagerConfig = {
+export const DEFAULT_PARTITION_MANAGER_CONFIG: Readonly<PartitionManagerConfig> = {
   maxPartitionsPerTable: 100000,
   partitionCacheTTLMs: 60000, // 1 minute
   enableMetadataCaching: true,

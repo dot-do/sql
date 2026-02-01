@@ -39,6 +39,9 @@ import {
 } from './schemas.js';
 import { CDCBufferManager, type BufferSnapshot } from './buffer.js';
 import { serialize, bigintReviver } from './serialization.js';
+import { createLogger } from './logging.js';
+
+const logger = createLogger({ component: 'websocket-handler' });
 
 // =============================================================================
 // Types
@@ -498,7 +501,7 @@ export class WebSocketHandler {
    * Handle errors that occur during message parsing or validation.
    */
   private handleMessageParseError(ws: WebSocket, error: unknown): void {
-    console.error('Error handling message:', error);
+    logger.error('Error handling WebSocket message', error);
     const errorMessage = error instanceof MessageValidationError
       ? error.getErrorDetails()
       : String(error);
@@ -555,9 +558,12 @@ export class WebSocketHandler {
         attachment.clientIp
       );
 
-      console.log(
-        `Source ${attachment.sourceDoId} disconnected: code=${code}, reason=${reason}, clean=${wasClean}`
-      );
+      logger.info('Source disconnected', {
+        sourceDoId: attachment.sourceDoId,
+        code,
+        reason,
+        wasClean,
+      });
     }
 
     // Flush if no more connections
@@ -583,7 +589,7 @@ export class WebSocketHandler {
    * ```
    */
   async handleError(ws: WebSocket, error: unknown): Promise<void> {
-    console.error('WebSocket error:', error);
+    logger.error('WebSocket error', error);
     const attachment = this.deserializeAttachment(ws) as ExtendedWebSocketAttachment | null;
     if (attachment) {
       this.deps.buffer.unregisterSourceWebSocket(attachment.sourceDoId);
