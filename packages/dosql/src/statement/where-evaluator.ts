@@ -6,6 +6,17 @@
 import type { SqlValue } from './types.js';
 import { evaluateCaseExpr, containsCaseExpression } from './case-expr.js';
 
+/**
+ * Maximum recursion depth for WHERE clause evaluation.
+ * Prevents stack overflow on deeply nested expressions.
+ */
+export const MAX_WHERE_DEPTH = 100;
+
+/**
+ * Maximum recursion depth for simple expression evaluation.
+ */
+export const MAX_EXPR_DEPTH = 100;
+
 type ParseValueListFn = (valueList: string, params: SqlValue[], startParamIndex: number) => { values: SqlValue[]; paramIndex: number };
 type ValuesEqualFn = (a: SqlValue, b: SqlValue) => boolean;
 type GetColumnValueFn = (row: Record<string, SqlValue>, colRef: string) => SqlValue;
@@ -24,30 +35,35 @@ export function evaluateWhereCondition(
   row: Record<string, SqlValue>,
   params: SqlValue[],
   pIdx: { value: number },
-  deps: WhereEvaluatorDeps
+  deps: WhereEvaluatorDeps,
+  _depth: number = 0
 ): boolean {
+  if (_depth > MAX_WHERE_DEPTH) {
+    throw new Error(`WHERE clause exceeds maximum nesting depth of ${MAX_WHERE_DEPTH}`);
+  }
+
   const trimmed = condition.trim();
 
   // Handle parenthesized expression: NOT (...)
   const notParenMatch = trimmed.match(/^NOT\s*\((.+)\)$/is);
   if (notParenMatch) {
-    return !evaluateWhereCondition(notParenMatch[1], row, params, pIdx, deps);
+    return !evaluateWhereCondition(notParenMatch[1], row, params, pIdx, deps, _depth + 1);
   }
 
   // Handle parenthesized expression: (...)
   if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
-    let depth = 0;
+    let parenDepth = 0;
     let isBalanced = true;
     for (let i = 0; i < trimmed.length; i++) {
-      if (trimmed[i] === '(') depth++;
-      else if (trimmed[i] === ')') depth--;
-      if (depth === 0 && i < trimmed.length - 1) {
+      if (trimmed[i] === '(') parenDepth++;
+      else if (trimmed[i] === ')') parenDepth--;
+      if (parenDepth === 0 && i < trimmed.length - 1) {
         isBalanced = false;
         break;
       }
     }
     if (isBalanced) {
-      return evaluateWhereCondition(trimmed.slice(1, -1), row, params, pIdx, deps);
+      return evaluateWhereCondition(trimmed.slice(1, -1), row, params, pIdx, deps, _depth + 1);
     }
   }
 
@@ -55,7 +71,7 @@ export function evaluateWhereCondition(
   const orSplit = splitByLogicalOp(trimmed, 'OR');
   if (orSplit.length > 1) {
     for (const part of orSplit) {
-      if (evaluateWhereCondition(part, row, params, pIdx, deps)) {
+      if (evaluateWhereCondition(part, row, params, pIdx, deps, _depth + 1)) {
         return true;
       }
     }
@@ -66,7 +82,7 @@ export function evaluateWhereCondition(
   const andSplit = splitByLogicalOpNotBetween(trimmed, 'AND');
   if (andSplit.length > 1) {
     for (const part of andSplit) {
-      if (!evaluateWhereCondition(part, row, params, pIdx, deps)) {
+      if (!evaluateWhereCondition(part, row, params, pIdx, deps, _depth + 1)) {
         return false;
       }
     }
@@ -475,8 +491,13 @@ function evaluateSimpleExpr(
   row: Record<string, SqlValue>,
   params: SqlValue[],
   pIdx: { value: number },
-  deps: WhereEvaluatorDeps
+  deps: WhereEvaluatorDeps,
+  _depth: number = 0
 ): SqlValue {
+  if (_depth > MAX_EXPR_DEPTH) {
+    throw new Error(`Expression exceeds maximum nesting depth of ${MAX_EXPR_DEPTH}`);
+  }
+
   const trimmed = str.trim();
 
   // Parameter
@@ -507,8 +528,8 @@ function evaluateSimpleExpr(
   // Handle addition: left + right
   const addMatch = trimmed.match(/^(.+?)\s*\+\s*(.+)$/);
   if (addMatch) {
-    const leftVal = evaluateSimpleExpr(addMatch[1], row, params, pIdx, deps);
-    const rightVal = evaluateSimpleExpr(addMatch[2], row, params, pIdx, deps);
+    const leftVal = evaluateSimpleExpr(addMatch[1], row, params, pIdx, deps, _depth + 1);
+    const rightVal = evaluateSimpleExpr(addMatch[2], row, params, pIdx, deps, _depth + 1);
     if (leftVal === null || rightVal === null) return null;
     return Number(leftVal) + Number(rightVal);
   }
@@ -517,8 +538,8 @@ function evaluateSimpleExpr(
   // Match from the end to handle cases like "col-2" vs "-2"
   const subMatch = trimmed.match(/^(.+?)\s*-\s*(\d+(?:\.\d+)?|\w+(?:\.\w+)?)$/);
   if (subMatch) {
-    const leftVal = evaluateSimpleExpr(subMatch[1], row, params, pIdx, deps);
-    const rightVal = evaluateSimpleExpr(subMatch[2], row, params, pIdx, deps);
+    const leftVal = evaluateSimpleExpr(subMatch[1], row, params, pIdx, deps, _depth + 1);
+    const rightVal = evaluateSimpleExpr(subMatch[2], row, params, pIdx, deps, _depth + 1);
     if (leftVal === null || rightVal === null) return null;
     return Number(leftVal) - Number(rightVal);
   }
@@ -526,8 +547,8 @@ function evaluateSimpleExpr(
   // Handle multiplication: left * right
   const mulMatch = trimmed.match(/^(.+?)\s*\*\s*(.+)$/);
   if (mulMatch) {
-    const leftVal = evaluateSimpleExpr(mulMatch[1], row, params, pIdx, deps);
-    const rightVal = evaluateSimpleExpr(mulMatch[2], row, params, pIdx, deps);
+    const leftVal = evaluateSimpleExpr(mulMatch[1], row, params, pIdx, deps, _depth + 1);
+    const rightVal = evaluateSimpleExpr(mulMatch[2], row, params, pIdx, deps, _depth + 1);
     if (leftVal === null || rightVal === null) return null;
     return Number(leftVal) * Number(rightVal);
   }
@@ -535,8 +556,8 @@ function evaluateSimpleExpr(
   // Handle division: left / right
   const divMatch = trimmed.match(/^(.+?)\s*\/\s*(.+)$/);
   if (divMatch) {
-    const leftVal = evaluateSimpleExpr(divMatch[1], row, params, pIdx, deps);
-    const rightVal = evaluateSimpleExpr(divMatch[2], row, params, pIdx, deps);
+    const leftVal = evaluateSimpleExpr(divMatch[1], row, params, pIdx, deps, _depth + 1);
+    const rightVal = evaluateSimpleExpr(divMatch[2], row, params, pIdx, deps, _depth + 1);
     if (leftVal === null || rightVal === null) return null;
     const rightNum = Number(rightVal);
     if (rightNum === 0) return null;
@@ -545,7 +566,7 @@ function evaluateSimpleExpr(
 
   // Parenthesized expression
   if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
-    return evaluateSimpleExpr(trimmed.slice(1, -1), row, params, pIdx, deps);
+    return evaluateSimpleExpr(trimmed.slice(1, -1), row, params, pIdx, deps, _depth + 1);
   }
 
   // Fallback: try as column reference or literal

@@ -544,7 +544,7 @@ export function readColumnarChunk(
     const chunk = rowGroup.columns.get(name);
     if (!chunk) continue;
 
-    const values = (reader as any).decodeColumn(chunk);
+    const values = (reader as unknown as { decodeColumn(chunk: ColumnChunk): unknown[] }).decodeColumn(chunk);
     result.set(name, values);
   }
 

@@ -11,7 +11,7 @@
  */
 
 import type { WALEntry, WALWriter, WALReader } from '../wal/types.js';
-import type { LSN, TransactionId } from '../engine/types.js';
+import { createTransactionId, type LSN, type TransactionId } from '../engine/types.js';
 import {
   DoSQLError,
   ErrorCategory,
@@ -593,6 +593,8 @@ export class TransactionError extends DoSQLError {
   readonly operationCount?: number;
   /** Isolation level of the transaction when the error occurred */
   readonly isolationLevel?: IsolationLevel;
+  /** Target transaction to wound (used by wound-wait deadlock prevention) */
+  woundTarget?: TransactionId | string;
 
   constructor(
     code: TransactionErrorCode,
@@ -747,7 +749,7 @@ export class TransactionError extends DoSQLError {
       json.message,
       {
         context: json.context,
-        txnId: json.context?.transactionId as TransactionId | undefined,
+        txnId: typeof json.context?.transactionId === 'string' ? createTransactionId(json.context.transactionId) : undefined,
       }
     );
   }

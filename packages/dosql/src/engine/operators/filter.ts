@@ -13,6 +13,7 @@ import {
   type Expression,
   type SqlValue,
 } from '../types.js';
+import { assertNever } from '../../utils/assert-never.js';
 
 // =============================================================================
 // HELPER FUNCTIONS
@@ -65,29 +66,31 @@ export function evaluateExpression(expr: Expression, row: Row): SqlValue {
       const right = evaluateExpression(expr.right, row);
 
       // Arithmetic operators (support both named and symbol forms)
-      switch (expr.op) {
+      // Normalize symbol ops to named ops for the switch
+      const op = expr.op as string;
+      switch (op) {
         case 'add':
-        case '+' as any:
+        case '+':
           if (typeof left === 'number' && typeof right === 'number') return left + right;
           if (typeof left === 'bigint' && typeof right === 'bigint') return left + right;
           return null;
         case 'sub':
-        case '-' as any:
+        case '-':
           if (typeof left === 'number' && typeof right === 'number') return left - right;
           if (typeof left === 'bigint' && typeof right === 'bigint') return left - right;
           return null;
         case 'mul':
-        case '*' as any:
+        case '*':
           if (typeof left === 'number' && typeof right === 'number') return left * right;
           if (typeof left === 'bigint' && typeof right === 'bigint') return left * right;
           return null;
         case 'div':
-        case '/' as any:
+        case '/':
           if (typeof left === 'number' && typeof right === 'number' && right !== 0) return left / right;
           if (typeof left === 'bigint' && typeof right === 'bigint' && right !== 0n) return left / right;
           return null;
         case 'mod':
-        case '%' as any:
+        case '%':
           if (typeof left === 'number' && typeof right === 'number' && right !== 0) return left % right;
           if (typeof left === 'bigint' && typeof right === 'bigint' && right !== 0n) return left % right;
           return null;
@@ -198,7 +201,7 @@ export function evaluateExpression(expr: Expression, row: Row): SqlValue {
       throw new Error('Subquery evaluation not supported in expression context');
 
     default:
-      return null;
+      return assertNever(expr, `Unknown expression type: ${(expr as unknown as { type: string }).type}`);
   }
 }
 
@@ -440,7 +443,7 @@ export function evaluatePredicate(predicate: Predicate, row: Row): boolean {
     }
 
     default:
-      return false;
+      return assertNever(predicate, `Unknown predicate type: ${(predicate as unknown as { type: string }).type}`);
   }
 }
 

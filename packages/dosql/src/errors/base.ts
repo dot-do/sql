@@ -303,7 +303,7 @@ export function registerErrorClass(
  */
 export function deserializeError(json: SerializedError): DoSQLError {
   // Try to get the registered constructor
-  const ErrorClass = errorRegistry.get(json.name) as any;
+  const ErrorClass = errorRegistry.get(json.name) as (new (...args: unknown[]) => DoSQLError) & { fromJSON?: (json: SerializedError) => DoSQLError } | undefined;
 
   if (ErrorClass && typeof ErrorClass.fromJSON === 'function') {
     // Use the static fromJSON method if available

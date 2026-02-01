@@ -66,10 +66,12 @@ export type StatementType =
   | 'CREATE_TABLE'
   | 'CREATE_INDEX'
   | 'CREATE_VIEW'
+  | 'CREATE_TRIGGER'
   | 'ALTER_TABLE'
   | 'DROP_TABLE'
   | 'DROP_INDEX'
   | 'DROP_VIEW'
+  | 'DROP_TRIGGER'
   | 'EXPLAIN'
   | 'UNKNOWN';
 
@@ -237,6 +239,9 @@ export function detectStatementType(sql: string): StatementType {
 
   // CREATE statements
   if (upper.startsWith('CREATE ')) {
+    if (upper.includes(' TRIGGER ') || upper.match(/^CREATE\s+(TEMP(ORARY)?\s+)?TRIGGER\s/)) {
+      return 'CREATE_TRIGGER';
+    }
     if (upper.includes(' TABLE ') || upper.match(/^CREATE\s+(TEMP|TEMPORARY\s+)?TABLE\s/)) {
       return 'CREATE_TABLE';
     }
@@ -257,6 +262,9 @@ export function detectStatementType(sql: string): StatementType {
 
   // DROP statements
   if (upper.startsWith('DROP ')) {
+    if (upper.includes(' TRIGGER ')) {
+      return 'DROP_TRIGGER';
+    }
     if (upper.includes(' TABLE ')) {
       return 'DROP_TABLE';
     }
@@ -385,6 +393,10 @@ function parseDDLStatement(sql: string, statementType: StatementType, options: U
         break;
       case 'CREATE_VIEW':
         result = parseCreateView(sql);
+        break;
+      case 'CREATE_TRIGGER':
+      case 'DROP_TRIGGER':
+        result = parseDDL(sql);
         break;
       case 'ALTER_TABLE':
         result = parseAlterTable(sql);
@@ -543,10 +555,12 @@ function defaultParse(sql: string, options: UnifiedParseOptions = {}): ParseResu
     case 'CREATE_TABLE':
     case 'CREATE_INDEX':
     case 'CREATE_VIEW':
+    case 'CREATE_TRIGGER':
     case 'ALTER_TABLE':
     case 'DROP_TABLE':
     case 'DROP_INDEX':
     case 'DROP_VIEW':
+    case 'DROP_TRIGGER':
       return parseDDLStatement(trimmed, statementType, options);
 
     case 'UNKNOWN':
@@ -624,10 +638,12 @@ export function isDDLStatement(ast: UnifiedAST): ast is DDLStatement & { locatio
     'CREATE TABLE',
     'CREATE INDEX',
     'CREATE VIEW',
+    'CREATE TRIGGER',
     'ALTER TABLE',
     'DROP TABLE',
     'DROP INDEX',
     'DROP VIEW',
+    'DROP TRIGGER',
   ];
   return ddlTypes.includes(ast.type as string);
 }

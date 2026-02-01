@@ -13,7 +13,9 @@ import {
   type QueryResult,
   type ExecutionStats,
   type SqlValue,
+  type Expression,
 } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 import { ScanOperator } from './operators/scan.js';
 import { FilterOperator } from './operators/filter.js';
@@ -105,7 +107,7 @@ export function createOperator(plan: QueryPlan, ctx: ExecutionContext): Operator
       );
 
     default:
-      throw new Error(`Unknown plan type: ${(plan as any).type}`);
+      return assertNever(plan, `Unknown plan type: ${(plan as unknown as { type: string }).type}`);
   }
 }
 
@@ -193,7 +195,7 @@ class MergeOperator implements Operator {
   private outputColumns: string[] = [];
 
   constructor(
-    private plan: { orderBy?: { expr: any; direction: 'asc' | 'desc' }[] },
+    private plan: { orderBy?: { expr: Expression; direction: 'asc' | 'desc' }[] },
     inputs: Operator[],
     private ctx: ExecutionContext
   ) {

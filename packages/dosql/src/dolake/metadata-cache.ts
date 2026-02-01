@@ -1361,8 +1361,8 @@ export class CacheCoherenceManager extends EventEmitter {
       const stats = cache.getStats();
       // This is a simplified conflict detection - in real implementation
       // we'd track actual version vectors
-      for (const [_tableId, _entry] of (cache as any).cache.entries()) {
-        const entry = _entry as MetadataCacheEntry;
+      for (const [_tableId, _entry] of (cache as unknown as { cache: Map<string, MetadataCacheEntry> }).cache.entries()) {
+        const entry = _entry;
         let tableMap = tableVersions.get(_tableId);
         if (!tableMap) {
           tableMap = new Map();

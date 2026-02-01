@@ -759,3 +759,21 @@ export {
   type TableParquetConfig,
   type TableStorageOverrides,
 } from './storage-config-bridge.js';
+
+// =============================================================================
+// Sharded Aggregator
+// =============================================================================
+
+export {
+  ShardedAggregatorRouter,
+  ShardedCDCCoordinator,
+  fnv1aHash,
+  tableToShardIndex,
+  type ShardedAggregatorConfig,
+  type ShardInfo,
+  type ShardRoutingResult,
+  type AggregatedShardStatus,
+  type ShardForwardFn,
+  type CoordinatorResult,
+  DEFAULT_SHARDED_AGGREGATOR_CONFIG,
+} from './sharded-aggregator.js';

@@ -898,7 +898,7 @@ export class R2IndexReader {
    * Search B-tree for exact key match
    */
   private async searchBTree(index: R2BTreeIndex, key: Uint8Array): Promise<bigint[]> {
-    if (index.pageCount === 0) {
+    if (index.pageCount === 0 || index.pageDirectory.length === 0) {
       return [];
     }
 
@@ -1000,7 +1000,7 @@ export class R2IndexReader {
     key: Uint8Array | undefined,
     reverse?: boolean
   ): Promise<number> {
-    if (index.pageCount === 0) {
+    if (index.pageCount === 0 || index.pageDirectory.length === 0) {
       return -1;
     }
 

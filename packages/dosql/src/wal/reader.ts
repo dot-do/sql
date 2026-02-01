@@ -486,6 +486,7 @@ export async function reconstructTransactions(
   const transactions: ReconstructedTransaction[] = [];
 
   for (const [txnId, txn] of txnMap) {
+    if (txn.entries.length === 0) continue;
     transactions.push({
       txnId,
       status: txn.status,

@@ -12,6 +12,7 @@
 
 import type { SnapshotId, Snapshot, Branch } from '../fsx/cow-types.js';
 import type { WALEntry, Checkpoint } from '../wal/types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // Time Point Types
@@ -537,10 +538,7 @@ export function deserializeTimePoint(data: SerializedTimePoint): TimePoint {
         versionOffset: data.versionOffset,
       };
     default:
-      throw new TimeTravelError(
-        TimeTravelErrorCode.INVALID_SYNTAX,
-        `Unknown time point type: ${(data as { type: string }).type}`
-      );
+      return assertNever(data, `Unknown time point type: ${(data as { type: string }).type}`);
   }
 }
 

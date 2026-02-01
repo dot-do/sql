@@ -947,7 +947,7 @@ export class QueryOptimizer {
       default:
         // For other plan types, just recurse
         if ('input' in plan) {
-          return this.estimateCost((plan as any).input);
+          return this.estimateCost((plan as unknown as { input: QueryPlan }).input);
         }
         return {
           ioOps: 1,

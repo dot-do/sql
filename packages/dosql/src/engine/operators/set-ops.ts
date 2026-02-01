@@ -20,6 +20,7 @@ import {
   type BasePlanNode,
   type SortSpec,
 } from '../types.js';
+import { assertNever } from '../../utils/assert-never.js';
 
 // =============================================================================
 // PLAN NODE TYPES
@@ -372,7 +373,7 @@ export function createSetOperationOperator(
     case 'EXCEPT':
       return new ExceptOperator(left, right, all);
     default:
-      throw new Error(`Unknown set operation: ${operator}`);
+      return assertNever(operator, `Unknown set operation: ${operator}`);
   }
 }
 
@@ -508,15 +509,15 @@ export class CompoundSelectOperator implements Operator {
 /**
  * Check if a plan is a set operation
  */
-export function isSetOperationPlan(plan: QueryPlan): plan is SetOperationPlan {
-  return (plan as any).type === 'setOperation';
+export function isSetOperationPlan(plan: QueryPlan | SetOperationPlan | CompoundSelectPlan): plan is SetOperationPlan {
+  return (plan as { type: string }).type === 'setOperation';
 }
 
 /**
  * Check if a plan is a compound select
  */
-export function isCompoundSelectPlan(plan: QueryPlan): plan is CompoundSelectPlan {
-  return (plan as any).type === 'compoundSelect';
+export function isCompoundSelectPlan(plan: QueryPlan | SetOperationPlan | CompoundSelectPlan): plan is CompoundSelectPlan {
+  return (plan as { type: string }).type === 'compoundSelect';
 }
 
 /**
@@ -531,7 +532,7 @@ export function getSetOperationPrecedence(op: SetOperationType): number {
     case 'EXCEPT':
       return 1;
     default:
-      return 0;
+      return assertNever(op, `Unknown set operation: ${op}`);
   }
 }
 

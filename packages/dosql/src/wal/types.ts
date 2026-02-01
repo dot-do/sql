@@ -6,7 +6,7 @@
  */
 
 import type { FSXBackend } from '../fsx/types.js';
-import type { LSN, TransactionId } from '../engine/types.js';
+import { createLSN, type LSN, type TransactionId } from '../engine/types.js';
 import type { HLCTimestamp } from '../hlc.js';
 import {
   DoSQLError,
@@ -105,6 +105,8 @@ export interface WALConfig {
   autoArchive: boolean;
   /** Archive path prefix (for cold storage) */
   archivePrefix: string;
+  /** Maximum pending entries before backpressure is applied (default: 50000) */
+  maxPendingEntries: number;
 }
 
 /**
@@ -118,6 +120,7 @@ export const DEFAULT_WAL_CONFIG: WALConfig = {
   verifyChecksums: true,
   autoArchive: true,
   archivePrefix: '_wal/archive/',
+  maxPendingEntries: 50000,
 };
 
 // =============================================================================
@@ -573,7 +576,7 @@ export class WALError extends DoSQLError {
       json.message,
       {
         context: json.context,
-        lsn: json.context?.metadata?.lsn as LSN | undefined,
+        lsn: json.context?.metadata?.lsn != null ? createLSN(BigInt(json.context.metadata.lsn)) : undefined,
         segmentId: json.context?.metadata?.segmentId as string | undefined,
       }
     );

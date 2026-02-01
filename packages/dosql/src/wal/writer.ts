@@ -35,6 +35,23 @@ import { exactBase64Length } from '../utils/encoding.js';
 export { crc32 } from '../utils/crypto.js';
 
 // =============================================================================
+// Serialization Types
+// =============================================================================
+
+/** JSON-serialized form of a WAL entry */
+interface SerializedWALEntry {
+  lsn: string;
+  timestamp: number;
+  txnId: string;
+  op: string;
+  table: string;
+  key?: string;
+  before?: string;
+  after?: string;
+  hlc?: { physicalTime: number; logicalCounter: number; nodeId: string };
+}
+
+// =============================================================================
 // WAL Encoder Implementation
 // =============================================================================
 
@@ -119,7 +136,7 @@ export class DefaultWALEncoder implements WALEncoder {
       id: obj.id,
       startLSN: BigInt(obj.startLSN),
       endLSN: BigInt(obj.endLSN),
-      entries: obj.entries.map((e: any) => ({
+      entries: obj.entries.map((e: SerializedWALEntry) => ({
         lsn: BigInt(e.lsn),
         timestamp: e.timestamp,
         txnId: e.txnId,
@@ -350,6 +367,14 @@ export function createWALWriter(
         throw new WALError(
           WALErrorCode.FLUSH_FAILED,
           'Writer has been closed'
+        );
+      }
+
+      // Backpressure: reject if pending entries have reached the limit
+      if (pendingEntries.length >= fullConfig.maxPendingEntries) {
+        throw new WALError(
+          WALErrorCode.FLUSH_FAILED,
+          `WAL backpressure: pending entries limit reached (${fullConfig.maxPendingEntries}). Flush or increase maxPendingEntries.`
         );
       }
 

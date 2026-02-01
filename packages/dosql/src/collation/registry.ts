@@ -29,6 +29,8 @@ import {
   isBuiltinCollation,
   createUnicodeCollation,
 } from './builtin.js';
+import { ParserError } from '../errors/index.js';
+import { ParserErrorCode } from '../errors/codes.js';
 
 /**
  * Collation registry interface
@@ -261,7 +263,7 @@ export function parseCreateCollation(sql: string): CreateCollationStatement {
   const nameMatch = sql.match(/^\s*CREATE\s+COLLATION\s+([a-zA-Z_][a-zA-Z0-9_]*|"[^"]+"|'[^']+')/i);
 
   if (!nameMatch) {
-    throw new Error('Invalid CREATE COLLATION syntax');
+    throw new ParserError(ParserErrorCode.INVALID_STATEMENT, 'Invalid CREATE COLLATION syntax', { context: { sql } });
   }
 
   const name = stripQuotes(nameMatch[1]);
@@ -330,7 +332,7 @@ export function parseDropCollation(sql: string): DropCollationStatement {
   const nameMatch = sql.match(/DROP\s+COLLATION\s+(?:IF\s+EXISTS\s+)?([a-zA-Z_][a-zA-Z0-9_]*|"[^"]+"|'[^']+')/i);
 
   if (!nameMatch) {
-    throw new Error('Invalid DROP COLLATION syntax');
+    throw new ParserError(ParserErrorCode.INVALID_STATEMENT, 'Invalid DROP COLLATION syntax', { context: { sql } });
   }
 
   return {

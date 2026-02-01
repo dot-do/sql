@@ -22,6 +22,7 @@ import type {
   PlanCost,
 } from './types.js';
 import type { Expression, Predicate } from '../engine/types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // EXPLAIN OUTPUT TYPES
@@ -620,7 +621,7 @@ function formatPredicate(pred: Predicate): string {
       return `${formatExpression(pred.expr)} IS ${pred.isNot ? 'NOT ' : ''}NULL`;
 
     default:
-      return 'unknown';
+      return assertNever(pred, `Unknown predicate type: ${(pred as unknown as { type: string }).type}`);
   }
 }
 
@@ -668,7 +669,7 @@ function formatExpression(expr: Expression): string {
       return '(subquery)';
 
     default:
-      return 'unknown';
+      return assertNever(expr, `Unknown expression type: ${(expr as unknown as { type: string }).type}`);
   }
 }
 

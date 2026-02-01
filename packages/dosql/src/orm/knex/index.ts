@@ -75,8 +75,9 @@ export function createKnex(config: DoSQLKnexConfig): Knex {
 
   // Create Knex with a custom client class that doesn't require native sqlite3
   // We use a minimal custom client that wraps our DoSQL backend
-  const CustomClient = class extends (knex.Client as any) {
-    constructor(cfg: any) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Knex.Client is not properly typed for extension
+  const CustomClient = class extends (knex.Client as unknown as new (cfg: unknown) => Record<string, unknown>) {
+    constructor(cfg: unknown) {
       super(cfg);
       this._driver = () => ({});
       this.dialect = 'sqlite3';
@@ -107,7 +108,7 @@ export function createKnex(config: DoSQLKnexConfig): Knex {
   // Create Knex with our custom client
   const instance = knex({
     // Use our custom client
-    client: CustomClient as any,
+    client: CustomClient as unknown as string,
 
     // Empty connection (handled by DoSQL backend)
     connection: {},

@@ -7,6 +7,8 @@
  * @module dosql/vector/types
  */
 
+import { assertNever } from '../utils/assert-never.js';
+
 // =============================================================================
 // VECTOR DATA TYPES
 // =============================================================================
@@ -273,7 +275,7 @@ export function vectorTypeByteSize(type: VectorType): number {
     case VectorType.F1BIT:
       return 0.125; // 1 bit = 1/8 byte
     default:
-      throw new Error(`Unknown vector type: ${type}`);
+      return assertNever(type, `Unknown vector type: ${type}`);
   }
 }
 

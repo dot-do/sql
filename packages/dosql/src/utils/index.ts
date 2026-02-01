@@ -99,3 +99,8 @@ export {
   sqlLike,
   sqlTruthy,
 } from './sql-eval.js';
+
+export {
+  // Exhaustiveness checking
+  assertNever,
+} from './assert-never.js';

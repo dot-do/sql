@@ -363,6 +363,9 @@ export class RangeVindex<T> implements Vindex {
 
     // If no boundary matches, use the last boundary (unbounded)
     // This handles values beyond all defined ranges
+    if (this.boundaries.length === 0) {
+      throw new Error('Range vindex has no boundaries configured');
+    }
     return this.boundaries[this.boundaries.length - 1].shard;
   }
 

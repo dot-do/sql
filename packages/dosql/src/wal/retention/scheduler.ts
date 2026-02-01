@@ -332,14 +332,8 @@ export async function throttledProcess<T>(
   return processed;
 }
 
-/**
- * Sleep for specified milliseconds
- *
- * @param ms - Milliseconds to sleep
- */
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// Re-export sleep from shared utility for backward compatibility
+export { sleep } from '../../utils/retry.js';
 
 // =============================================================================
 // Cron Scheduler

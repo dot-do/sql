@@ -32,6 +32,7 @@ import {
   createPartialWriteError,
   detectR2ErrorType,
 } from './r2-errors.js';
+import { sleep } from '../utils/retry.js';
 
 // =============================================================================
 // R2 Interface Types (Cloudflare Workers Types)
@@ -165,17 +166,11 @@ class CircuitBreaker {
 }
 
 // =============================================================================
-// Retry Helper
+// Retry Helper (uses shared sleep from utils/retry.ts)
 // =============================================================================
 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 100;
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise<void>((resolve) => {
-    setTimeout(() => resolve(), ms);
-  });
-}
 
 function computeDelay(attempt: number): number {
   const base = BASE_DELAY_MS * Math.pow(2, attempt);

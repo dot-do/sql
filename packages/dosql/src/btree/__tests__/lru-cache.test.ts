@@ -571,4 +571,112 @@ describe('LRUCache', () => {
       expect(dirtyKeys.sort()).toEqual([1, 3]);
     });
   });
+
+  describe('async onEvict race condition', () => {
+    it('should await async onEvict before completing set', async () => {
+      const writeLog: string[] = [];
+      let resolveWrite: (() => void) | null = null;
+
+      const cache = new LRUCache<number, Page>({
+        maxSize: 2,
+        onEvict: async (key, _value, dirty) => {
+          writeLog.push(`evict-start:${key}:dirty=${dirty}`);
+          if (dirty) {
+            // Simulate an async storage write that takes time
+            await new Promise<void>((resolve) => {
+              resolveWrite = resolve;
+            });
+          }
+          writeLog.push(`evict-end:${key}`);
+        },
+      });
+
+      cache.set(1, createMockPage(1), { dirty: true });
+      cache.set(2, createMockPage(2));
+
+      // This set triggers eviction of page 1 (dirty). The async onEvict
+      // must complete before set returns, so the dirty page is persisted.
+      const setPromise = cache.setAsync(3, createMockPage(3));
+
+      // The eviction should have started
+      expect(writeLog).toContain('evict-start:1:dirty=true');
+
+      // But it should NOT have completed yet (async write still pending)
+      expect(writeLog).not.toContain('evict-end:1');
+
+      // Resolve the simulated write
+      expect(resolveWrite).not.toBeNull();
+      resolveWrite!();
+
+      // Now await the set to complete
+      await setPromise;
+
+      // After set completes, eviction should be fully done
+      expect(writeLog).toContain('evict-end:1');
+    });
+
+    it('should not lose dirty page data during concurrent eviction and read', async () => {
+      // This test simulates the actual race: a dirty page is evicted while
+      // something else tries to read it. The eviction write must complete
+      // before the page is removed from cache.
+      const storage = new Map<number, string>();
+      let writeDelay: Promise<void> | null = null;
+      let resolveWriteDelay: (() => void) | null = null;
+
+      const cache = new LRUCache<number, string>({
+        maxSize: 2,
+        onEvict: async (key, value, dirty) => {
+          if (dirty) {
+            // Simulate slow storage write
+            writeDelay = new Promise<void>((resolve) => {
+              resolveWriteDelay = resolve;
+            });
+            await writeDelay;
+            storage.set(key, value);
+          }
+        },
+      });
+
+      cache.set(1, 'original-value-1', { dirty: true });
+      cache.set(2, 'value-2');
+
+      // Trigger eviction of key 1 (dirty)
+      const setPromise = cache.setAsync(3, 'value-3');
+
+      // Key 1 is being evicted but write hasn't completed yet
+      // In the buggy version, the page would already be gone from cache
+      // but not yet written to storage
+
+      // Resolve the write
+      resolveWriteDelay!();
+      await setPromise;
+
+      // The dirty value should have been persisted to storage
+      expect(storage.get(1)).toBe('original-value-1');
+    });
+
+    it('should await async onEvict during clear with evictOnClear', async () => {
+      const completedEvictions: number[] = [];
+
+      const cache = new LRUCache<number, Page>({
+        maxSize: 10,
+        onEvict: async (key, _value, dirty) => {
+          // Simulate async work
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          completedEvictions.push(key);
+        },
+        evictOnClear: true,
+      });
+
+      cache.set(1, createMockPage(1), { dirty: true });
+      cache.set(2, createMockPage(2), { dirty: true });
+      cache.set(3, createMockPage(3), { dirty: true });
+
+      await cache.clearAsync();
+
+      // All evictions should have completed
+      expect(completedEvictions.sort()).toEqual([1, 2, 3]);
+      expect(cache.size).toBe(0);
+    });
+  });
 });

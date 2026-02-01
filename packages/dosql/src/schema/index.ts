@@ -63,7 +63,10 @@
  */
 
 // Import types for local use in function signatures
+import { createLogger } from '../logging/index.js';
 import type { SchemaDefinition, TableDefinition } from './types.js';
+
+const logger = createLogger({ defaultContext: { module: 'schema' } });
 
 // =============================================================================
 // RE-EXPORTS: TYPES
@@ -366,12 +369,11 @@ export function defineSchema<S extends SchemaDefinition>(schema: S): S {
 
     // Log warnings in development
     if (result.warnings.length > 0) {
-      console.warn(
-        'Schema warnings:',
-        result.warnings.map((w: { path: string[]; message: string }) =>
+      logger.warn('Schema warnings', {
+        warnings: result.warnings.map((w: { path: string[]; message: string }) =>
           `${w.path.join('.')}: ${w.message}`
-        )
-      );
+        ),
+      });
     }
   }
 

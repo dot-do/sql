@@ -258,13 +258,14 @@ export class Database implements IDatabase {
    * @param sql - SQL string (may contain multiple statements)
    * @returns Result array for PRAGMA queries, or this for chaining
    */
-  exec(sql: string): any {
+  exec(sql: string): this {
     this.checkOpen();
 
     // Check for PRAGMA query plan cache commands
     const pragmaResult = this.handlePlanCachePragma(sql);
     if (pragmaResult !== undefined) {
-      return pragmaResult;
+      // PRAGMA results are returned as arrays - cast needed since the interface declares `this` return type
+      return pragmaResult as unknown as this;
     }
 
     // Use state-aware tokenizer to properly split statements
@@ -414,7 +415,7 @@ export class Database implements IDatabase {
       const newMaxSize = parseInt(maxSizeMatch[1], 10);
       // Recreate the cache with new max size is complex, so we update the config
       // by clearing and re-creating. For simplicity, expose via a setter approach.
-      (this.planCache as any).config.maxSize = newMaxSize;
+      (this.planCache as unknown as { config: { maxSize: number } }).config.maxSize = newMaxSize;
       return [];
     }
 
@@ -422,7 +423,7 @@ export class Database implements IDatabase {
     const enabledMatch = trimmed.match(/PRAGMA\s+query_plan_cache_enabled\s*=\s*(true|false)/i);
     if (enabledMatch) {
       this.planCacheEnabled = enabledMatch[1].toLowerCase() === 'true';
-      (this.planCache as any).config.enabled = this.planCacheEnabled;
+      (this.planCache as unknown as { config: { enabled: boolean } }).config.enabled = this.planCacheEnabled;
       return [];
     }
 

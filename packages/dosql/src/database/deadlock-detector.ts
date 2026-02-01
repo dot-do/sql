@@ -532,6 +532,9 @@ export class WaitForGraph {
       case 'priority':
         return this.selectPriorityVictim(participants);
       default:
+        if (participants.length === 0) {
+          throw new Error('Cannot select victim from empty participant list');
+        }
         return participants[participants.length - 1]; // Default: last in cycle
     }
   }
@@ -1043,7 +1046,7 @@ export class DeadlockDetector {
             `Wound-wait: older transaction ${waitingTxn} wounds younger holder ${holderTxn}`,
             holderTxn
           );
-          (error as any).woundTarget = holderTxn;
+          error.woundTarget = holderTxn;
           return error;
         }
         break;

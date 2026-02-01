@@ -37,6 +37,19 @@ import { createTransactionId } from './types.js';
 import { QueryMode, ModeEnforcer, isWriteOperation, extractOperation } from './modes.js';
 import type { WALWriter } from '../wal/index.js';
 import type { CDCStream } from '../cdc/index.js';
+import { parseDML } from '../parser/dml.js';
+import { isParseSuccess } from '../parser/dml-types.js';
+import type { ReturningClause } from '../parser/dml-types.js';
+import { evaluateReturning } from '../parser/returning.js';
+import { StatementError, createTransactionStateError } from '../errors/index.js';
+import { StatementErrorCode } from '../errors/codes.js';
+import { parseDDL, isParseSuccess as isDDLParseSuccess } from '../parser/ddl.js';
+import type { CreateTriggerStatement, DropTriggerStatement } from '../parser/ddl-types.js';
+import { createTriggerRegistry } from '../triggers/registry.js';
+import type { TriggerRegistry } from '../triggers/types.js';
+import { createSQLTriggerExecutor, type SQLTriggerExecutor } from '../triggers/sql-trigger-executor.js';
+import { parseTrigger, isCreateTrigger, isDropTrigger, parseDropTrigger as parseDropTriggerSQL } from '../triggers/parser.js';
+import type { DatabaseContext, DatabaseSchema } from '../proc/types.js';
 
 // =============================================================================
 // TYPES
@@ -220,6 +233,12 @@ export class DOQueryEngine {
   /** Whether the engine has been initialized */
   private initialized = false;
 
+  /** Trigger registry for SQL triggers */
+  private triggerRegistry: TriggerRegistry = createTriggerRegistry();
+
+  /** SQL trigger executor (lazy-initialized) */
+  private triggerExecutor: SQLTriggerExecutor | null = null;
+
   /**
    * Create a new DOQueryEngine.
    *
@@ -227,6 +246,42 @@ export class DOQueryEngine {
    */
   constructor(config: DOEngineConfig) {
     this.config = config;
+  }
+
+  /**
+   * Get the trigger registry.
+   */
+  getTriggerRegistry(): TriggerRegistry {
+    return this.triggerRegistry;
+  }
+
+  /**
+   * Get or create the SQL trigger executor.
+   * Lazily initialized to avoid circular dependencies during construction.
+   */
+  private getTriggerExecutor(): SQLTriggerExecutor {
+    if (!this.triggerExecutor) {
+      // Create a minimal DatabaseContext stub for trigger execution.
+      // SQL triggers use sqlExecutor, JS triggers use the db context.
+      const self = this;
+      // Minimal stub - SQL triggers only need the registry, not full db context.
+      // Cast to any to satisfy the interface without pulling in all proc dependencies.
+      const minimalDb = {
+        tables: {},
+        sql: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+          const sql = strings.reduce((acc, str, i) => acc + str + (values[i] !== undefined ? '?' : ''), '');
+          const result = await self.execute(sql);
+          return result.rows;
+        },
+        transaction: async (fn: (ctx: unknown) => unknown) => self.transaction(fn),
+      } as unknown as DatabaseContext;
+
+      this.triggerExecutor = createSQLTriggerExecutor({
+        registry: this.triggerRegistry,
+        db: minimalDb,
+      });
+    }
+    return this.triggerExecutor;
   }
 
   /**
@@ -255,6 +310,19 @@ export class DOQueryEngine {
     for (const [tableName] of Array.from(this.schemas)) {
       const tableData = await this.config.storage.list<Row>({ prefix: `${tableName}:` });
       this.tables.set(tableName, tableData);
+    }
+
+    // Load triggers from storage
+    const triggersData = await this.config.storage.get<Array<{ sql: string }>>('_meta:triggers');
+    if (triggersData) {
+      for (const triggerData of triggersData) {
+        try {
+          const parsed = parseTrigger(triggerData.sql);
+          this.triggerRegistry.register(parsed);
+        } catch {
+          // Skip invalid triggers on load
+        }
+      }
     }
 
     this.initialized = true;
@@ -472,7 +540,7 @@ export class DOQueryEngine {
     const valuePlaceholders = match[3].split(',').map(v => v.trim());
 
     // Build row from columns and params
-    const row: Row = {};
+    let row: Row = {};
     columns.forEach((col, i) => {
       const placeholder = valuePlaceholders[i];
       if (placeholder === '?' && params && i < params.length) {
@@ -485,6 +553,18 @@ export class DOQueryEngine {
         row[col] = this.parseLiteral(placeholder);
       }
     });
+
+    // Execute BEFORE INSERT triggers
+    const executor = this.getTriggerExecutor();
+    const beforeResult = await executor.executeBefore(tableName, 'insert', undefined, row);
+    if (!beforeResult.proceed) {
+      const errorMsg = beforeResult.error?.message ?? 'BEFORE INSERT trigger rejected operation';
+      throw new Error(errorMsg);
+    }
+    // Use potentially modified row from BEFORE trigger
+    if (beforeResult.row) {
+      row = beforeResult.row as Row;
+    }
 
     // Get or create table
     let tableData = this.tables.get(tableName);
@@ -525,6 +605,17 @@ export class DOQueryEngine {
       });
     }
 
+    // Execute AFTER INSERT triggers (errors are non-fatal)
+    await executor.executeAfter(tableName, 'insert', undefined, row);
+
+    // Handle RETURNING clause
+    const returning = this.parseReturningClause(sql);
+    if (returning) {
+      const schemaColumns = columns;
+      const returnedRows = this.applyReturning(returning, [row], schemaColumns);
+      return { success: true, rowsAffected: 1, returning: returnedRows };
+    }
+
     return { success: true, rowsAffected: 1 };
   }
 
@@ -532,7 +623,9 @@ export class DOQueryEngine {
    * Execute an UPDATE statement.
    */
   private async executeUpdate(sql: string, params?: SqlValue[]): Promise<WriteResult> {
-    const match = sql.match(/UPDATE\s+(\w+)\s+SET\s+(.+?)\s+WHERE\s+(.+)/i);
+    // Strip RETURNING clause before regex matching to avoid it being captured
+    const sqlWithoutReturning = sql.replace(/\s+RETURNING\s+.+$/i, '');
+    const match = sqlWithoutReturning.match(/UPDATE\s+(\w+)\s+SET\s+(.+?)\s+WHERE\s+(.+)/i);
     if (!match) {
       return { success: false, rowsAffected: 0 };
     }
@@ -555,19 +648,36 @@ export class DOQueryEngine {
     const setValueStr = setMatch[2].trim();
 
     let rowsAffected = 0;
+    const affectedRows: Row[] = [];
+    const executor = this.getTriggerExecutor();
 
     for (const [key, row] of Array.from(tableData)) {
       if (this.matchesWhere(row, whereClause, params)) {
         const before = { ...row };
 
-        // Update the column
+        // Build the proposed new row
+        const proposedRow = { ...row };
         if (setValueStr === '?' && params && params.length > 0) {
-          row[setCol] = params[0];
+          proposedRow[setCol] = params[0];
         } else if (setValueStr.startsWith('$') && params) {
           const paramIndex = parseInt(setValueStr.slice(1), 10) - 1;
-          row[setCol] = params[paramIndex];
+          proposedRow[setCol] = params[paramIndex];
         } else {
-          row[setCol] = this.parseLiteral(setValueStr);
+          proposedRow[setCol] = this.parseLiteral(setValueStr);
+        }
+
+        // Execute BEFORE UPDATE triggers
+        const beforeResult = await executor.executeBefore(tableName, 'update', before, proposedRow);
+        if (!beforeResult.proceed) {
+          const errorMsg = beforeResult.error?.message ?? 'BEFORE UPDATE trigger rejected operation';
+          throw new Error(errorMsg);
+        }
+        // Use potentially modified row from BEFORE trigger
+        const finalRow = (beforeResult.row ?? proposedRow) as Row;
+
+        // Apply the final row values
+        for (const col of Object.keys(finalRow)) {
+          row[col] = finalRow[col];
         }
 
         // Write to storage
@@ -597,6 +707,10 @@ export class DOQueryEngine {
           });
         }
 
+        // Execute AFTER UPDATE triggers (errors are non-fatal)
+        await executor.executeAfter(tableName, 'update', before, row);
+
+        affectedRows.push({ ...row });
         rowsAffected++;
       }
     }
@@ -609,6 +723,15 @@ export class DOQueryEngine {
       await this.config.cdc.flush();
     }
 
+    // Handle RETURNING clause
+    const returning = this.parseReturningClause(sql);
+    if (returning) {
+      const schema = this.schemas.get(tableName);
+      const schemaColumns = schema?.columns.map(c => c.name);
+      const returnedRows = this.applyReturning(returning, affectedRows, schemaColumns);
+      return { success: true, rowsAffected, returning: returnedRows };
+    }
+
     return { success: true, rowsAffected };
   }
 
@@ -616,7 +739,9 @@ export class DOQueryEngine {
    * Execute a DELETE statement.
    */
   private async executeDelete(sql: string, params?: SqlValue[]): Promise<WriteResult> {
-    const match = sql.match(/DELETE\s+FROM\s+(\w+)\s+WHERE\s+(.+)/i);
+    // Strip RETURNING clause before regex matching
+    const sqlWithoutReturning = sql.replace(/\s+RETURNING\s+.+$/i, '');
+    const match = sqlWithoutReturning.match(/DELETE\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?/i);
     if (!match) {
       return { success: false, rowsAffected: 0 };
     }
@@ -631,17 +756,25 @@ export class DOQueryEngine {
 
     const keysToDelete: string[] = [];
     const rowsToDelete: Row[] = [];
+    const executor = this.getTriggerExecutor();
 
     for (const [key, row] of Array.from(tableData)) {
       if (this.matchesWhere(row, whereClause, params)) {
         keysToDelete.push(key);
-        rowsToDelete.push(row);
+        rowsToDelete.push({ ...row });
       }
     }
 
     for (let i = 0; i < keysToDelete.length; i++) {
       const key = keysToDelete[i];
       const row = rowsToDelete[i];
+
+      // Execute BEFORE DELETE triggers
+      const beforeResult = await executor.executeBefore(tableName, 'delete', row, undefined);
+      if (!beforeResult.proceed) {
+        const errorMsg = beforeResult.error?.message ?? 'BEFORE DELETE trigger rejected operation';
+        throw new Error(errorMsg);
+      }
 
       await this.config.storage.delete(`${tableName}:${key}`);
       tableData.delete(key);
@@ -667,6 +800,9 @@ export class DOQueryEngine {
           timestamp: Date.now(),
         });
       }
+
+      // Execute AFTER DELETE triggers (errors are non-fatal)
+      await executor.executeAfter(tableName, 'delete', row, undefined);
     }
 
     if (this.config.wal) {
@@ -677,13 +813,27 @@ export class DOQueryEngine {
       await this.config.cdc.flush();
     }
 
+    // Handle RETURNING clause
+    const returning = this.parseReturningClause(sql);
+    if (returning) {
+      const schema = this.schemas.get(tableName);
+      const schemaColumns = schema?.columns.map(c => c.name);
+      const returnedRows = this.applyReturning(returning, rowsToDelete, schemaColumns);
+      return { success: true, rowsAffected: keysToDelete.length, returning: returnedRows };
+    }
+
     return { success: true, rowsAffected: keysToDelete.length };
   }
 
   /**
-   * Execute a CREATE TABLE statement.
+   * Execute a CREATE statement (TABLE or TRIGGER).
    */
   private async executeCreate(sql: string): Promise<WriteResult> {
+    // Check for CREATE TRIGGER
+    if (isCreateTrigger(sql)) {
+      return this.executeCreateTrigger(sql);
+    }
+
     const match = sql.match(/CREATE\s+TABLE\s+(\w+)\s*\(([\s\S]+)\)/i);
     if (!match) {
       return { success: false, rowsAffected: 0 };
@@ -725,9 +875,104 @@ export class DOQueryEngine {
   }
 
   /**
-   * Execute a DROP TABLE statement.
+   * Execute a CREATE TRIGGER statement.
+   */
+  private async executeCreateTrigger(sql: string): Promise<WriteResult> {
+    try {
+      const parsed = parseTrigger(sql);
+
+      // Check IF NOT EXISTS
+      if (parsed.ifNotExists && this.triggerRegistry.get(parsed.name)) {
+        return { success: true, rowsAffected: 0 };
+      }
+
+      // Check for duplicate
+      const existing = this.triggerRegistry.get(parsed.name);
+      if (existing) {
+        throw new Error(`trigger ${parsed.name} already exists`);
+      }
+
+      // Register the trigger
+      this.triggerRegistry.register(parsed);
+
+      // Persist triggers to storage
+      await this.persistTriggers(sql);
+
+      return { success: true, rowsAffected: 0 };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('already exists')) {
+        throw error;
+      }
+      throw new Error(`Failed to create trigger: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Execute a DROP TRIGGER statement.
+   */
+  private async executeDropTrigger(sql: string): Promise<WriteResult> {
+    try {
+      const parsed = parseDropTriggerSQL(sql);
+
+      // Check if trigger exists
+      const existing = this.triggerRegistry.get(parsed.name);
+      if (!existing) {
+        if (parsed.ifExists) {
+          return { success: true, rowsAffected: 0 };
+        }
+        throw new Error(`no such trigger: ${parsed.name}`);
+      }
+
+      // Remove from registry
+      this.triggerRegistry.remove(parsed.name);
+
+      // Persist updated triggers to storage
+      await this.persistTriggersAfterDrop(parsed.name);
+
+      return { success: true, rowsAffected: 0 };
+    } catch (error) {
+      if (error instanceof Error && (error.message.includes('no such trigger') || error.message.includes('already exists'))) {
+        throw error;
+      }
+      throw new Error(`Failed to drop trigger: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Persist trigger SQL to storage.
+   */
+  private async persistTriggers(newTriggerSql: string): Promise<void> {
+    const existing = await this.config.storage.get<Array<{ sql: string }>>('_meta:triggers') || [];
+    existing.push({ sql: newTriggerSql });
+    await this.config.storage.put('_meta:triggers', existing);
+  }
+
+  /**
+   * Persist triggers after dropping one.
+   */
+  private async persistTriggersAfterDrop(triggerName: string): Promise<void> {
+    const existing = await this.config.storage.get<Array<{ sql: string }>>('_meta:triggers') || [];
+    // Filter out the dropped trigger by re-parsing each to find it by name
+    const remaining = existing.filter(entry => {
+      try {
+        const parsed = parseTrigger(entry.sql);
+        return parsed.name !== triggerName;
+      } catch {
+        return true; // Keep entries we can't parse
+      }
+    });
+    await this.config.storage.put('_meta:triggers', remaining);
+  }
+
+  /**
+   * Execute a DROP statement (TABLE or TRIGGER).
    */
   private async executeDrop(sql: string): Promise<WriteResult> {
+    // Check for DROP TRIGGER
+    if (isDropTrigger(sql)) {
+      return this.executeDropTrigger(sql);
+    }
+
     // Parse: DROP TABLE [IF EXISTS] tablename
     const match = sql.match(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i);
     if (!match) {
@@ -744,7 +989,7 @@ export class DOQueryEngine {
         // IF EXISTS specified, silently succeed
         return { success: true, rowsAffected: 0 };
       }
-      throw new Error(`no such table: ${tableName}`);
+      throw new StatementError(StatementErrorCode.TABLE_NOT_FOUND, `no such table: ${tableName}`, undefined, { context: { table: tableName } });
     }
 
     // Get all keys to delete
@@ -798,6 +1043,30 @@ export class DOQueryEngine {
   }
 
   /**
+   * Extract the RETURNING clause from a DML SQL statement using the parser.
+   * Returns the parsed ReturningClause or undefined if not present.
+   */
+  private parseReturningClause(sql: string): ReturningClause | undefined {
+    const parseResult = parseDML(sql);
+    if (isParseSuccess(parseResult) && parseResult.statement.returning) {
+      return parseResult.statement.returning;
+    }
+    return undefined;
+  }
+
+  /**
+   * Apply a RETURNING clause to a set of affected rows.
+   * Returns the projected rows based on the RETURNING columns.
+   */
+  private applyReturning(
+    returning: ReturningClause,
+    rows: Row[],
+    schemaColumns?: string[]
+  ): Row[] {
+    return rows.map(row => evaluateReturning(returning, row, schemaColumns));
+  }
+
+  /**
    * Match a row against a WHERE clause.
    */
   private matchesWhere(row: Row, whereClause: string | undefined, params?: SqlValue[]): boolean {
@@ -819,6 +1088,9 @@ export class DOQueryEngine {
       compareValue = params[params.length - 1]; // Use last param for WHERE
     } else if (valueStr.startsWith('$') && params) {
       const paramIndex = parseInt(valueStr.slice(1), 10) - 1;
+      if (paramIndex < 0 || paramIndex >= params.length) {
+        throw new Error(`Parameter index $${paramIndex + 1} out of bounds (${params.length} params provided)`);
+      }
       compareValue = params[paramIndex];
     } else {
       compareValue = this.parseLiteral(valueStr);
@@ -926,10 +1198,10 @@ class TransactionImpl implements Transaction {
 
   private ensureActive(): void {
     if (this.committed) {
-      throw new Error(`Transaction ${this.id} has already been committed`);
+      throw createTransactionStateError(this.id, 'committed');
     }
     if (this.rolledBack) {
-      throw new Error(`Transaction ${this.id} has been rolled back`);
+      throw createTransactionStateError(this.id, 'rolled_back');
     }
   }
 }

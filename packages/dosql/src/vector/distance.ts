@@ -11,6 +11,7 @@
  */
 
 import { DistanceMetric, type Vector } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // DISTANCE FUNCTIONS
@@ -319,7 +320,7 @@ export function getDistanceFunction(metric: DistanceMetric): DistanceFunction {
     case DistanceMetric.Hamming:
       return vector_distance_hamming;
     default:
-      throw new Error(`Unknown distance metric: ${metric}`);
+      return assertNever(metric, `Unknown distance metric: ${metric}`);
   }
 }
 
@@ -346,6 +347,6 @@ export function distanceToScore(distance: number, metric: DistanceMetric): numbe
       // Hamming distance is [0, dimensions], normalize
       return 1 / (1 + distance);
     default:
-      return 1 / (1 + distance);
+      return assertNever(metric, `Unknown distance metric: ${metric}`);
   }
 }

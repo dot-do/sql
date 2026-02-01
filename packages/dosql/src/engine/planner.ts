@@ -35,6 +35,9 @@ import {
   col,
   lit,
 } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
+import { ParserError, PlannerError, SQLSyntaxError } from '../errors/index.js';
+import { ParserErrorCode, PlannerErrorCode, SyntaxErrorCode } from '../errors/codes.js';
 
 // =============================================================================
 // SQL PARSING (Simplified AST)
@@ -244,7 +247,7 @@ class Parser {
   private expect(type: TokenType, value?: string): Token {
     const token = this.current();
     if (token.type !== type || (value !== undefined && token.value.toLowerCase() !== value.toLowerCase())) {
-      throw new Error(`Expected ${type}${value ? ` '${value}'` : ''}, got ${token.type} '${token.value}'`);
+      throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, `Expected ${type}${value ? ` '${value}'` : ''}, got ${token.type} '${token.value}'`);
     }
     return this.advance();
   }
@@ -684,7 +687,7 @@ class Parser {
       return { type: 'column', name: param }; // Treat as column ref, resolve later
     }
 
-    throw new Error(`Unexpected token: ${token.type} '${token.value}'`);
+    throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, `Unexpected token: ${token.type} '${token.value}'`);
   }
 }
 
@@ -718,7 +721,7 @@ function toExpression(parsed: ParsedExpr): Expression {
       };
       return {
         type: 'binary',
-        op: opMap[parsed.op] || (parsed.op as any),
+        op: opMap[parsed.op] || (parsed.op as BinaryExpr['op']),
         left: toExpression(parsed.left),
         right: toExpression(parsed.right),
       };
@@ -750,9 +753,9 @@ function toExpression(parsed: ParsedExpr): Expression {
     case 'in':
     case 'isNull':
       // These are converted to predicates, not expressions
-      throw new Error(`${parsed.type} should be converted to predicate`);
+      throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `${parsed.type} should be converted to predicate`);
     default:
-      throw new Error(`Unknown expression type: ${(parsed as any).type}`);
+      return assertNever(parsed, `Unknown expression type: ${(parsed as unknown as { type: string }).type}`);
   }
 }
 
@@ -779,7 +782,7 @@ function toPredicate(parsed: ParsedExpr): Predicate {
         };
       }
       // Arithmetic comparison
-      throw new Error(`Cannot convert arithmetic to predicate: ${parsed.op}`);
+      throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `Cannot convert arithmetic to predicate: ${parsed.op}`);
     }
     case 'unary':
       if (parsed.op === 'not') {
@@ -789,7 +792,7 @@ function toPredicate(parsed: ParsedExpr): Predicate {
           operands: [toPredicate(parsed.operand)],
         };
       }
-      throw new Error(`Unsupported unary predicate: ${parsed.op}`);
+      throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `Unsupported unary predicate: ${parsed.op}`);
     case 'between':
       return {
         type: 'between',
@@ -810,7 +813,7 @@ function toPredicate(parsed: ParsedExpr): Predicate {
         isNot: parsed.isNot,
       };
     default:
-      throw new Error(`Cannot convert to predicate: ${parsed.type}`);
+      throw new PlannerError(PlannerErrorCode.INVALID_PLAN, `Cannot convert to predicate: ${parsed.type}`);
   }
 }
 
@@ -1239,7 +1242,7 @@ export function formatPlan(plan: QueryPlan, indent = 0): string {
       result = `${pad}Merge\n${plan.inputs.map(i => formatPlan(i, indent + 1)).join('\n')}`;
       break;
     default:
-      result = `${pad}Unknown`;
+      return assertNever(plan, `Unknown plan type: ${(plan as unknown as { type: string }).type}`);
   }
 
   return result;

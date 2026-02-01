@@ -11,9 +11,12 @@
  */
 
 import { DurableObject } from 'cloudflare:workers';
+import { createLogger } from '../logging/index.js';
 import { createBTree, StringKeyCodec, JsonValueCodec, type BTree } from '../btree/index.js';
 import { createDOBackend, type DOStorageBackend } from '../fsx/index.js';
 import { createWALWriter, type WALWriter } from '../wal/index.js';
+
+const logger = createLogger({ defaultContext: { module: 'hibernating-database' } });
 import {
   HibernatingDurableObject,
   type WebSocketSessionState,
@@ -238,7 +241,7 @@ export class HibernatingDoSQLDatabase extends HibernatingDurableObject {
         });
       } catch {
         // Can't parse message, just log
-        console.error('[HibernatingDoSQL] Message handling error:', errorMessage);
+        logger.error('Message handling error', new Error(errorMessage));
       }
     }
 
@@ -262,10 +265,10 @@ export class HibernatingDoSQLDatabase extends HibernatingDurableObject {
     if (session?.transaction) {
       // Rollback any active transaction
       try {
-        console.log(`[HibernatingDoSQL] Rolling back orphaned transaction: ${session.transaction.txId}`);
+        logger.info('Rolling back orphaned transaction', { txId: session.transaction.txId });
         // In a real implementation, this would rollback the transaction
       } catch (e) {
-        console.error('[HibernatingDoSQL] Error rolling back transaction:', e);
+        logger.error('Error rolling back transaction', e instanceof Error ? e : new Error(String(e)));
       }
     }
 

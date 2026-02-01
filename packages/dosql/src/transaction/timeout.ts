@@ -10,6 +10,7 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '../logging/index.js';
 import {
   type TransactionId,
   type TransactionContext,
@@ -19,11 +20,14 @@ import {
   type WarningLevel,
   type HeldLock,
   type TransactionLogEntry,
+  type TransactionLogOperation,
   TransactionState,
   TransactionError,
   TransactionErrorCode,
   DEFAULT_TIMEOUT_CONFIG,
 } from './types.js';
+
+const logger = createLogger({ defaultContext: { module: 'transaction-timeout' } });
 
 // =============================================================================
 // Timeout Enforcer Types
@@ -229,7 +233,7 @@ export function createTimeoutEnforcer(
         operationCount: state.operations?.length ?? 0,
         warningLevel,
         operations: state.operations?.map((op) => ({
-          op: op.op as any,
+          op: op.op as TransactionLogOperation,
           table: op.table,
           timestamp: op.timestamp,
         })),
@@ -271,7 +275,7 @@ export function createTimeoutEnforcer(
         await rollbackFn(txnId);
       } catch (error) {
         // Log but don't throw - timeout handling should not fail
-        console.error(`Failed to rollback timed-out transaction ${txnId}:`, error);
+        logger.error('Failed to rollback timed-out transaction', error instanceof Error ? error : new Error(String(error)), { txnId });
       }
     }
 

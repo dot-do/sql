@@ -20,7 +20,10 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '../../logging/index.js';
 import type { FSXBackend } from '../../fsx/types.js';
+
+const logger = createLogger({ defaultContext: { module: 'wal-retention' } });
 import type { WALReader, WALConfig, WALWriter, Checkpoint } from '../types.js';
 import type { MetricsReporter, RetentionMetric } from '../retention-types.js';
 import { DEFAULT_WAL_CONFIG } from '../types.js';
@@ -274,7 +277,7 @@ export function createSizeBasedCheckpointTrigger(
         return true;
       } catch (error) {
         // Log but don't throw - checkpoint failure shouldn't crash the trigger
-        console.error('Size-based checkpoint trigger failed:', error);
+        logger.error('Size-based checkpoint trigger failed', error instanceof Error ? error : new Error(String(error)));
       }
     }
 

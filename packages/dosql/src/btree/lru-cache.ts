@@ -26,11 +26,12 @@ export interface LRUCacheOptions<K, V> {
 
   /**
    * Callback invoked when an entry is evicted due to capacity.
+   * Can be async - use setAsync()/clearAsync() to properly await async callbacks.
    * @param key - The key being evicted
    * @param value - The value being evicted
    * @param dirty - Whether the entry was marked as dirty
    */
-  onEvict?: (key: K, value: V, dirty: boolean) => void;
+  onEvict?: (key: K, value: V, dirty: boolean) => void | Promise<void>;
 
   /**
    * If true, call onEvict for each entry when clear() is called.
@@ -76,7 +77,7 @@ interface LRUNode<K, V> {
 export class LRUCache<K, V> {
   private readonly maxSize: number;
   private readonly sizeCalculator?: (value: V, key: K) => number;
-  private readonly onEvict?: (key: K, value: V, dirty: boolean) => void;
+  private readonly onEvict?: (key: K, value: V, dirty: boolean) => void | Promise<void>;
   private readonly evictOnClear: boolean;
 
   private readonly map = new Map<K, LRUNode<K, V>>();
@@ -236,6 +237,51 @@ export class LRUCache<K, V> {
   }
 
   /**
+   * Set a value in the cache, awaiting any async onEvict callbacks.
+   * Use this instead of set() when onEvict is async to avoid race conditions
+   * where dirty pages are evicted before their write completes.
+   * @param key - The key
+   * @param value - The value
+   * @param options - Optional settings (e.g., dirty flag)
+   */
+  async setAsync(key: K, value: V, options: SetOptions = {}): Promise<void> {
+    // Handle zero max size
+    if (this.maxSize <= 0) return;
+
+    const newSize = this.sizeCalculator ? this.sizeCalculator(value, key) : 1;
+
+    // Check if key already exists
+    const existingNode = this.map.get(key);
+    if (existingNode) {
+      // Update existing entry
+      const oldSize = existingNode.size;
+      existingNode.value = value;
+      existingNode.size = newSize;
+      existingNode.dirty = options.dirty ?? existingNode.dirty;
+      this._currentBytes += newSize - oldSize;
+      this.moveToTail(existingNode);
+    } else {
+      // Create new entry
+      const node: LRUNode<K, V> = {
+        key,
+        value,
+        size: newSize,
+        dirty: options.dirty ?? false,
+        prev: null,
+        next: null,
+      };
+
+      // Evict if necessary before adding - await async callbacks
+      await this.evictToFitAsync(newSize);
+
+      // Add to map and tail
+      this.map.set(key, node);
+      this.addToTail(node);
+      this._currentBytes += newSize;
+    }
+  }
+
+  /**
    * Delete a value from the cache
    * @param key - The key to delete
    * @returns true if the key existed
@@ -267,6 +313,26 @@ export class LRUCache<K, V> {
       for (const node of this.map.values()) {
         this.onEvict(node.key, node.value, node.dirty);
       }
+    }
+
+    this.map.clear();
+    this.head = null;
+    this.tail = null;
+    this._currentBytes = 0;
+  }
+
+  /**
+   * Clear all entries from the cache, awaiting any async onEvict callbacks.
+   * Use this instead of clear() when onEvict is async.
+   */
+  async clearAsync(): Promise<void> {
+    if (this.evictOnClear && this.onEvict) {
+      // Call onEvict for each entry and await async callbacks
+      const promises: Array<void | Promise<void>> = [];
+      for (const node of this.map.values()) {
+        promises.push(this.onEvict(node.key, node.value, node.dirty));
+      }
+      await Promise.all(promises);
     }
 
     this.map.clear();
@@ -432,5 +498,41 @@ export class LRUCache<K, V> {
 
     this.removeNode(node);
     this.addToTail(node);
+  }
+
+  /**
+   * Evict entries until there's room, awaiting async onEvict callbacks
+   */
+  private async evictToFitAsync(newSize: number): Promise<void> {
+    if (this.sizeCalculator) {
+      // Byte-based eviction
+      while (this.head && this._currentBytes + newSize > this.maxSize) {
+        await this.evictHeadAsync();
+      }
+    } else {
+      // Entry count-based eviction
+      while (this.head && this.map.size >= this.maxSize) {
+        await this.evictHeadAsync();
+      }
+    }
+  }
+
+  /**
+   * Evict the head entry, awaiting async onEvict callback
+   */
+  private async evictHeadAsync(): Promise<void> {
+    if (!this.head) return;
+
+    const node = this.head;
+    this.removeNode(node);
+    this.map.delete(node.key);
+    this._currentBytes -= node.size;
+
+    // Track eviction
+    this._evictions++;
+
+    if (this.onEvict) {
+      await this.onEvict(node.key, node.value, node.dirty);
+    }
   }
 }

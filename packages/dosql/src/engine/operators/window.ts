@@ -16,8 +16,17 @@ import {
   type SqlValue,
   type BasePlanNode,
   type Expression,
+  type BinaryExpr,
+  type UnaryExpr,
+  type CaseExpr,
+  type FunctionCall,
   type SortSpec,
 } from '../types.js';
+
+/** FunctionCall extended with window OVER clause */
+interface WindowFunctionExpr extends FunctionCall {
+  over?: WindowSpec | string;
+}
 import { evaluateExpression } from './filter.js';
 import {
   type WindowSpec,
@@ -66,7 +75,7 @@ export interface WindowFunctionDef {
  */
 export interface WindowPlan extends BasePlanNode {
   type: 'window';
-  input: any; // QueryPlan (avoid circular import)
+  input: BasePlanNode; // QueryPlan (avoid circular import)
   /** Window functions to evaluate */
   windowFunctions: WindowFunctionDef[];
 }
@@ -545,7 +554,7 @@ export function createWindowOperator(
  */
 export function containsWindowFunction(expr: Expression): boolean {
   if (expr.type === 'function') {
-    const fnExpr = expr as any;
+    const fnExpr = expr as WindowFunctionExpr;
     if (fnExpr.over !== undefined) {
       return true;
     }
@@ -554,17 +563,18 @@ export function containsWindowFunction(expr: Expression): boolean {
   // Check children
   switch (expr.type) {
     case 'binary': {
-      const binExpr = expr as any;
+      const binExpr = expr as BinaryExpr;
       return containsWindowFunction(binExpr.left) || containsWindowFunction(binExpr.right);
     }
     case 'unary': {
-      const unaryExpr = expr as any;
+      const unaryExpr = expr as UnaryExpr;
       return containsWindowFunction(unaryExpr.operand);
     }
     case 'case': {
-      const caseExpr = expr as any;
-      for (const { condition, result } of caseExpr.when || []) {
-        if (containsWindowFunction(condition) || containsWindowFunction(result)) {
+      const caseExpr = expr as CaseExpr;
+      for (const whenClause of caseExpr.when || []) {
+        const condition = 'condition' in whenClause ? whenClause.condition : whenClause.value;
+        if (containsWindowFunction(condition) || containsWindowFunction(whenClause.result)) {
           return true;
         }
       }
@@ -588,7 +598,7 @@ export function extractWindowFunctions(
 
   for (const { expr, alias } of expressions) {
     if (expr.type === 'function') {
-      const fnExpr = expr as any;
+      const fnExpr = expr as WindowFunctionExpr;
       if (fnExpr.over !== undefined) {
         windowFunctions.push({
           name: fnExpr.name,

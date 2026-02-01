@@ -693,9 +693,9 @@ export class HnswIndex {
     }
 
     const index = new HnswIndex(data.config);
-    (index as any).dimensions = data.dimensions;
-    (index as any).maxLevel = data.maxLevel;
-    (index as any).entryPointId = data.entryPointId ? BigInt(data.entryPointId) : null;
+    index.dimensions = data.dimensions;
+    index.maxLevel = data.maxLevel;
+    index.entryPointId = data.entryPointId ? BigInt(data.entryPointId) : null;
 
     for (const nodeData of data.nodes) {
       const node: HnswNode = {
@@ -706,7 +706,7 @@ export class HnswIndex {
           level.map((id: string) => BigInt(id)),
         ),
       };
-      (index as any).nodes.set(node.id, node);
+      index.nodes.set(node.id, node);
     }
 
     return index;
@@ -742,9 +742,9 @@ export class HnswIndex {
       efSearch,
       distanceMetric: byteToMetric(metricByte),
     });
-    (index as any).dimensions = dimensions;
-    (index as any).maxLevel = maxLevel;
-    (index as any).entryPointId = entryPointId === 0n ? null : entryPointId;
+    index.dimensions = dimensions;
+    index.maxLevel = maxLevel;
+    index.entryPointId = entryPointId === 0n ? null : entryPointId;
 
     // Read nodes
     for (let n = 0; n < nodeCount; n++) {
@@ -771,7 +771,7 @@ export class HnswIndex {
       }
 
       const node: HnswNode = { id, vector, level, neighbors };
-      (index as any).nodes.set(id, node);
+      index.nodes.set(id, node);
     }
 
     return index;

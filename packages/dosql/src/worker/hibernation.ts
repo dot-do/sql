@@ -16,6 +16,9 @@
  */
 
 import { DurableObject } from 'cloudflare:workers';
+import { createLogger } from '../logging/index.js';
+
+const logger = createLogger({ defaultContext: { module: 'hibernation' } });
 
 // =============================================================================
 // Types
@@ -106,6 +109,14 @@ export interface HibernationStats {
   cpuTimeSaved: number;
 }
 
+/**
+ * Cloudflare hibernatable WebSocket with attachment API
+ */
+interface HibernatableWebSocket extends WebSocket {
+  serializeAttachment(data: unknown): void;
+  deserializeAttachment(): unknown;
+}
+
 // =============================================================================
 // Hibernation Mixin
 // =============================================================================
@@ -145,7 +156,7 @@ export function HibernationMixin<T extends new (...args: any[]) => DurableObject
      * Override in subclass if state is stored differently.
      */
     protected getState(): DurableObjectState {
-      return (this as any).ctx;
+      return (this as unknown as { ctx: DurableObjectState }).ctx;
     }
 
     /**
@@ -187,7 +198,7 @@ export function HibernationMixin<T extends new (...args: any[]) => DurableObject
       state.acceptWebSocket(ws, allTags);
 
       // Attach session state (survives hibernation)
-      (ws as any).serializeAttachment(sessionState);
+      (ws as HibernatableWebSocket).serializeAttachment(sessionState);
     }
 
     /**
@@ -208,7 +219,7 @@ export function HibernationMixin<T extends new (...args: any[]) => DurableObject
      * @returns The session state or undefined if not found
      */
     protected getSessionState(ws: WebSocket): WebSocketSessionState | undefined {
-      return (ws as any).deserializeAttachment() as WebSocketSessionState | undefined;
+      return (ws as HibernatableWebSocket).deserializeAttachment() as WebSocketSessionState | undefined;
     }
 
     /**
@@ -224,7 +235,7 @@ export function HibernationMixin<T extends new (...args: any[]) => DurableObject
       const current = this.getSessionState(ws);
       if (current) {
         const newState = { ...current, ...updates, lastActivity: Date.now() };
-        (ws as any).serializeAttachment(newState);
+        (ws as HibernatableWebSocket).serializeAttachment(newState);
       }
     }
 
@@ -254,7 +265,7 @@ export function HibernationMixin<T extends new (...args: any[]) => DurableObject
       }
 
       // Default: echo back (override in subclass for real handling)
-      console.log('[Hibernation] WebSocket message received:', typeof message === 'string' ? message.slice(0, 100) : `[binary ${message.byteLength} bytes]`);
+      logger.debug('WebSocket message received', { type: typeof message === 'string' ? 'text' : 'binary', preview: typeof message === 'string' ? message.slice(0, 100) : `${message.byteLength} bytes` });
     }
 
     /**
@@ -278,11 +289,11 @@ export function HibernationMixin<T extends new (...args: any[]) => DurableObject
 
       const session = this.getSessionState(ws);
       if (session) {
-        console.log(`[Hibernation] WebSocket closed: session=${session.sessionId}, code=${code}, reason=${reason}, clean=${wasClean}`);
+        logger.info('WebSocket closed', { sessionId: session.sessionId, code, reason, clean: wasClean });
 
         // Clean up any active transaction
         if (session.transaction) {
-          console.log(`[Hibernation] Cleaning up transaction: ${session.transaction.txId}`);
+          logger.info('Cleaning up transaction', { txId: session.transaction.txId });
           // Override in subclass to actually rollback the transaction
         }
       }
@@ -302,7 +313,7 @@ export function HibernationMixin<T extends new (...args: any[]) => DurableObject
 
       const session = this.getSessionState(ws);
       if (session) {
-        console.error(`[Hibernation] WebSocket error: session=${session.sessionId}`, error);
+        logger.error('WebSocket error', error instanceof Error ? error : new Error(String(error)), { sessionId: session.sessionId });
 
         // Update error metrics
         this.updateSessionState(ws, {
@@ -368,7 +379,7 @@ export function HibernationMixin<T extends new (...args: any[]) => DurableObject
           }
         } catch (e) {
           // Connection may have closed
-          console.error('[Hibernation] Broadcast error:', e);
+          logger.error('Broadcast error', e instanceof Error ? e : new Error(String(e)));
         }
       }
     }
@@ -479,6 +490,6 @@ export class HibernatingDurableObject extends HibernationMixin(DurableObject) {
   }
 
   protected getState(): DurableObjectState {
-    return (this as any).ctx;
+    return (this as unknown as { ctx: DurableObjectState }).ctx;
   }
 }

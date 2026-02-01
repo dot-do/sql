@@ -137,9 +137,9 @@ export function createSimpleTriggerExecutor(
           },
         },
       ])
-    ) as any,
+    ) as unknown as Record<string, unknown>,
     sql: async () => [],
-    transaction: async (fn: any) => fn({ tables: db.tables, sql: db.sql, commit: async () => {}, rollback: async () => {} }),
+    transaction: async (fn: (ctx: Record<string, unknown>) => unknown) => fn({ tables: db.tables, sql: db.sql, commit: async () => {}, rollback: async () => {} }),
   };
 
   return createSQLTriggerExecutor({ registry, db });

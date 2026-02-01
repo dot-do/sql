@@ -7,6 +7,7 @@
  * @module migrations/runner
  */
 
+import { createLogger } from '../logging/index.js';
 import {
   type Migration,
   type AppliedMigration,
@@ -34,11 +35,13 @@ const noopLogger: MigrationLogger = {
   debug: () => {},
 };
 
+const _logger = createLogger({ defaultContext: { module: 'migrations' } });
+
 const consoleLogger: MigrationLogger = {
-  info: (msg, ...args) => console.log(`[migrations] ${msg}`, ...args),
-  warn: (msg, ...args) => console.warn(`[migrations] ${msg}`, ...args),
-  error: (msg, ...args) => console.error(`[migrations] ${msg}`, ...args),
-  debug: (msg, ...args) => console.debug(`[migrations] ${msg}`, ...args),
+  info: (msg, ...args) => _logger.info(msg, { args }),
+  warn: (msg, ...args) => _logger.warn(msg, { args }),
+  error: (msg, ...args) => _logger.error(msg, undefined, { args }),
+  debug: (msg, ...args) => _logger.debug(msg, { args }),
 };
 
 // =============================================================================

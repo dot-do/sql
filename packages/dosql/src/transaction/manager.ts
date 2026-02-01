@@ -923,7 +923,7 @@ export async function executeWithSavepoint<T>(
     try {
       await manager.rollbackTo(name);
     } catch (rollbackError) {
-      console.error('Rollback to savepoint failed:', rollbackError);
+      moduleLogger.error('Rollback to savepoint failed', rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError)));
     }
 
     return {

@@ -1250,7 +1250,7 @@ export class CaseExpressionParser {
 
     if (literalTypes.size === 1) {
       const type = Array.from(literalTypes)[0];
-      caseExpr.inferredType = type as any;
+      caseExpr.inferredType = type as typeof caseExpr.inferredType;
     }
   }
 

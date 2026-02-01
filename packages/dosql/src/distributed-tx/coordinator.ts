@@ -7,9 +7,11 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '../logging/index.js';
 import type { ShardId } from '../sharding/types.js';
 import { IsolationLevel } from '../transaction/types.js';
 import { DistributedTransactionError, DistributedTransactionErrorCode } from './errors.js';
+import { withRetry as sharedWithRetry } from '../utils/retry.js';
 import type {
   DistributedTransactionState,
   ParticipantVote,
@@ -21,6 +23,8 @@ import type {
   CoordinatorConfig,
   DistributedTransactionOptions,
 } from './types.js';
+
+const logger = createLogger({ defaultContext: { module: 'distributed-tx' } });
 
 // =============================================================================
 // DISTRIBUTED TRANSACTION COORDINATOR INTERFACE
@@ -102,48 +106,43 @@ export function createDistributedTransactionCoordinator(
   }
 
   /**
-   * Sleep helper for retries
-   */
-  function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Execute with retry
+   * Execute with retry using shared retry utility
    */
   async function withRetry<T>(
     fn: () => Promise<T>,
     shardId: string,
     operation: string
   ): Promise<T> {
-    let lastError: Error | undefined;
     const state = participantStates.get(shardId);
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        const result = await fn();
-        if (state) {
-          state.lastSeen = Date.now();
-        }
-        return result;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        if (state) {
-          state.retryCount++;
-        }
+    try {
+      const result = await sharedWithRetry(fn, {
+        maxAttempts: maxRetries,
+        initialDelayMs: retryDelayMs,
+        backoffMultiplier: 2,
+        onRetry: () => {
+          if (state) {
+            state.retryCount++;
+          }
+        },
+      });
 
-        if (attempt < maxRetries - 1) {
-          await sleep(retryDelayMs * Math.pow(2, attempt));
-        }
+      // Update lastSeen on success
+      if (state) {
+        state.lastSeen = Date.now();
       }
-    }
 
-    throw new DistributedTransactionError(
-      DistributedTransactionErrorCode.PARTICIPANT_FAILURE,
-      `Failed to ${operation} on shard ${shardId} after ${maxRetries} retries: ${lastError?.message}`,
-      currentContext?.txnId,
-      { shardId }
-    );
+      return result;
+    } catch (error) {
+      // Wrap in DistributedTransactionError for consistent error handling
+      const message = error instanceof Error ? error.message : String(error);
+      throw new DistributedTransactionError(
+        DistributedTransactionErrorCode.PARTICIPANT_FAILURE,
+        `Failed to ${operation} on shard ${shardId} after ${maxRetries} retries: ${message}`,
+        currentContext?.txnId,
+        { shardId }
+      );
+    }
   }
 
   const coordinator: DistributedTransactionCoordinator = {
@@ -468,9 +467,7 @@ export function createDistributedTransactionCoordinator(
             } catch (error) {
               // For commit phase, we must keep retrying indefinitely
               // The decision is already logged, participant must eventually commit
-              console.error(
-                `Failed to commit on shard ${shardId}, will retry: ${error}`
-              );
+              logger.error('Failed to commit on shard, will retry', error instanceof Error ? error : new Error(String(error)), { shardId });
             }
           })()
         );
@@ -550,7 +547,7 @@ export function createDistributedTransactionCoordinator(
               currentContext!.lockedRows.delete(shardId);
             } catch (error) {
               // Best effort for abort
-              console.error(`Failed to abort on shard ${shardId}: ${error}`);
+              logger.error('Failed to abort on shard', error instanceof Error ? error : new Error(String(error)), { shardId });
             }
           })()
         );

@@ -127,7 +127,7 @@ export class WebSocketHandler {
    *     getState: () => this.state,
    *     setState: (s) => { this.state = s; },
    *     getCircuitBreakerState: () => 'closed',
-   *     scheduleFlush: async (trigger) => { /* schedule */ },
+   *     scheduleFlush: async (trigger) => { },
    *     flush: async (trigger) => ({ success: true }),
    *   },
    *   { rateLimitConfig: { maxMessagesPerSecond: 100, maxPayloadSize: 1024 * 1024 } }

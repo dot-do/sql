@@ -411,8 +411,8 @@ class Logger implements StructuredLogger {
         name: error.name,
         message: error.message,
       };
-      if ((error as any).code) {
-        entry.error.code = (error as any).code;
+      if ('code' in error && typeof (error as Record<string, unknown>).code === 'string') {
+        entry.error.code = (error as Record<string, unknown>).code as string;
       }
       if (this.includeStackTraces && error.stack) {
         entry.error.stack = error.stack;
@@ -1120,9 +1120,9 @@ export async function runLoggerBenchmark(
 
   // Calculate statistics
   latencies.sort((a, b) => a - b);
-  const avgLatencyMs = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+  const avgLatencyMs = latencies.length > 0 ? latencies.reduce((a, b) => a + b, 0) / latencies.length : 0;
   const p99Index = Math.floor(latencies.length * 0.99);
-  const p99LatencyMs = latencies[p99Index] ?? latencies[latencies.length - 1];
+  const p99LatencyMs = latencies[p99Index] ?? latencies[latencies.length - 1] ?? 0;
   const throughputPerSecond = iterations / (totalTime / 1000);
 
   // Estimate memory usage (rough estimate)

@@ -28,6 +28,8 @@ import type {
   WhereClause,
 } from '../parser/dml-types.js';
 import { isParseSuccess } from '../parser/dml-types.js';
+import { ParserError, ExecutorError } from '../errors/index.js';
+import { ParserErrorCode, ExecutorErrorCode } from '../errors/codes.js';
 import {
   evaluateReturning,
   evaluateExpression,
@@ -140,7 +142,7 @@ export class DMLExecutor {
     const parseResult = parseDML(sql);
 
     if (!isParseSuccess(parseResult)) {
-      throw new Error(`Parse error: ${parseResult.error}`);
+      throw new ParserError(ParserErrorCode.INVALID_STATEMENT, `Parse error: ${parseResult.error}`, { context: { sql } });
     }
 
     return this.executeStatement<T>(parseResult.statement, options);
@@ -163,7 +165,7 @@ export class DMLExecutor {
       case 'replace':
         return this.executeReplace<T>(statement, options);
       default:
-        throw new Error(`Unknown statement type: ${(statement as any).type}`);
+        throw new ExecutorError(ExecutorErrorCode.UNKNOWN_PLAN_TYPE, `Unknown statement type: ${(statement as unknown as { type: string }).type}`);
     }
   }
 
@@ -208,7 +210,7 @@ export class DMLExecutor {
       insertedRows.push(inserted);
     } else if (source.type === 'insert_select') {
       // INSERT ... SELECT - would need SELECT executor integration
-      throw new Error('INSERT ... SELECT not yet supported');
+      throw new ExecutorError(ExecutorErrorCode.OPERATOR_ERROR, 'INSERT ... SELECT not yet supported');
     }
 
     // Handle RETURNING clause

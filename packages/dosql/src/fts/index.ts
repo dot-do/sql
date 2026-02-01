@@ -23,6 +23,8 @@ import { createTokenizer, type Tokenizer, type Token } from './tokenizer.js';
 import { parseMatchQuery, extractTerms } from './query.js';
 import { calculateBM25, DocumentScorer, DEFAULT_BM25_PARAMS } from './ranking.js';
 import { highlight, snippet } from './auxiliary.js';
+import { StatementError } from '../errors/index.js';
+import { StatementErrorCode } from '../errors/codes.js';
 
 // Re-export types and functions
 export * from './types.js';
@@ -253,7 +255,7 @@ class FTSIndexImpl implements FTSIndex {
       case 'column': {
         const colIdx = this.columns.indexOf(query.column);
         if (colIdx === -1) {
-          throw new Error(`Unknown column: ${query.column}`);
+          throw new StatementError(StatementErrorCode.COLUMN_NOT_FOUND, `Unknown column: ${query.column}`);
         }
         return this.executeQuery(query.query, colIdx);
       }

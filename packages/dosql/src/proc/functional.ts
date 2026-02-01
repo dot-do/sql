@@ -29,6 +29,7 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '../logging/index.js';
 import type {
   DatabaseSchema,
   DatabaseContext,
@@ -39,6 +40,9 @@ import type {
   ProcedureRegistry,
   Procedure,
 } from './types.js';
+import { withRetry as sharedWithRetry, type RetryOptions as SharedRetryOptions } from '../utils/retry.js';
+
+const logger = createLogger({ defaultContext: { module: 'proc-functional' } });
 
 // =============================================================================
 // PROCEDURE CONTEXT TYPES
@@ -233,7 +237,7 @@ export function defineProcedures<
           description: `Functional procedure: ${name}`,
         },
       }).catch(err => {
-        console.warn(`Failed to register procedure '${name}':`, err);
+        logger.warn('Failed to register procedure', { name, error: String(err) });
       });
     }
   }
@@ -311,7 +315,7 @@ export function defineProcedure<DB extends DatabaseSchema>() {
           description: `Functional procedure: ${name}`,
         },
       }).catch(err => {
-        console.warn(`Failed to register procedure '${name}':`, err);
+        logger.warn('Failed to register procedure', { name, error: String(err) });
       });
     }
 
@@ -558,6 +562,9 @@ export function withValidation<
 ): Proc<Args, R, DB> {
   return (async (...args: [...Args, FunctionalContext<DB>]) => {
     // Extract context (last arg) and actual args
+    if (args.length === 0) {
+      throw new Error('Procedure must be called with at least a context argument');
+    }
     const ctx = args[args.length - 1] as FunctionalContext<DB>;
     const actualArgs = args.slice(0, -1) as unknown[];
 
@@ -594,6 +601,8 @@ export interface RetryOptions {
 /**
  * Wrap a procedure with retry logic.
  *
+ * Delegates to the shared withRetry utility from utils/retry.ts.
+ *
  * @example
  * ```typescript
  * const reliableTransfer = withRetry(
@@ -621,26 +630,14 @@ export function withRetry<
   } = options;
 
   return (async (...args: [...Args, FunctionalContext<DB>]) => {
-    let lastError: unknown;
-    let currentDelay = delayMs;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        // handler expects [...Args, FunctionalContext<DB>] which matches args
-        return await handler(...args);
-      } catch (error) {
-        lastError = error;
-
-        if (attempt === maxAttempts || !isRetryable(error)) {
-          throw error;
-        }
-
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, currentDelay));
-        currentDelay *= backoffMultiplier;
+    return sharedWithRetry(
+      () => handler(...args),
+      {
+        maxAttempts,
+        initialDelayMs: delayMs,
+        backoffMultiplier,
+        isRetryable,
       }
-    }
-
-    throw lastError;
+    );
   }) as Proc<Args, R, DB>;
 }

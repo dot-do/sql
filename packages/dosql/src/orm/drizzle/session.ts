@@ -40,11 +40,12 @@ type PreparedQueryConfig = Omit<PreparedQueryConfigBase, 'statement' | 'run'>;
  */
 function getFieldName(field: unknown): string {
   if (field && typeof field === 'object') {
-    if ('name' in field && typeof (field as any).name === 'string') {
-      return (field as any).name;
+    const f = field as Record<string, unknown>;
+    if ('name' in field && typeof f.name === 'string') {
+      return f.name;
     }
-    if ('fieldAlias' in field && typeof (field as any).fieldAlias === 'string') {
-      return (field as any).fieldAlias;
+    if ('fieldAlias' in field && typeof f.fieldAlias === 'string') {
+      return f.fieldAlias;
     }
   }
   return 'unknown';
@@ -173,7 +174,7 @@ export class DoSQLTransaction<
     schema: RelationalSchemaConfig<TSchema> | undefined,
     nestedIndex?: number,
   ) {
-    super(resultType, dialect, session, schema as any, nestedIndex);
+    super(resultType, dialect, session, schema as never, nestedIndex);
     this._dialectRef = dialect;
     this._sessionRef = session;
     this._schemaRef = schema;
@@ -235,7 +236,7 @@ export class DoSQLPreparedQuery<
   async run(placeholderValues?: Record<string, unknown>): Promise<DoSQLRunResult> {
     const params = fillPlaceholders(this.query.params, placeholderValues ?? {});
     this.logger.logQuery(this.query.sql, params);
-    return this.client.run(this.query.sql, params as any[]);
+    return this.client.run(this.query.sql, params as unknown[]);
   }
 
   /**
@@ -254,7 +255,7 @@ export class DoSQLPreparedQuery<
     if (!fields && !customResultMapper) {
       const params = fillPlaceholders(query.params, placeholderValues ?? {});
       logger.logQuery(query.sql, params);
-      return client.all(query.sql, params as any[]) as Promise<T['all']>;
+      return client.all(query.sql, params as unknown[]) as Promise<T['all']>;
     }
 
     const rows = await this.values(placeholderValues);
@@ -277,7 +278,7 @@ export class DoSQLPreparedQuery<
     if (!fields && !customResultMapper) {
       const params = fillPlaceholders(query.params, placeholderValues ?? {});
       logger.logQuery(query.sql, params);
-      return client.get(query.sql, params as any[]) as Promise<T['get']>;
+      return client.get(query.sql, params as unknown[]) as Promise<T['get']>;
     }
 
     const rows = await this.values(placeholderValues) as unknown[][];
@@ -300,7 +301,7 @@ export class DoSQLPreparedQuery<
   async values(placeholderValues?: Record<string, unknown>): Promise<T['values']> {
     const params = fillPlaceholders(this.query.params, placeholderValues ?? {});
     this.logger.logQuery(this.query.sql, params);
-    return this.client.values(this.query.sql, params as any[]) as Promise<T['values']>;
+    return this.client.values(this.query.sql, params as unknown[]) as Promise<T['values']>;
   }
 
   /** @internal */

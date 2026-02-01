@@ -223,6 +223,9 @@ function setAtPath(
     }
   }
 
+  if (pathSegments.length === 0) {
+    return root;
+  }
   const lastSegment = pathSegments[pathSegments.length - 1];
   if (typeof lastSegment === 'number') {
     if (Array.isArray(current)) {

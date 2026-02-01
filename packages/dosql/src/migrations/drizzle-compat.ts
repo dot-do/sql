@@ -7,6 +7,7 @@
  * @module migrations/drizzle-compat
  */
 
+import { createLogger } from '../logging/index.js';
 import {
   type Migration,
   type MigrationSnapshot,
@@ -16,6 +17,8 @@ import {
   calculateChecksumSync,
   compareMigrationIds,
 } from './types.js';
+
+const logger = createLogger({ defaultContext: { module: 'drizzle-compat' } });
 
 // =============================================================================
 // FILE SYSTEM INTERFACE
@@ -204,7 +207,7 @@ async function loadV2Migrations(
     try {
       sql = await fs.readFile(sqlPath);
     } catch {
-      console.warn(`Migration file not found: ${sqlPath}`);
+      logger.warn('Migration file not found', { sqlPath });
       continue;
     }
 
@@ -282,7 +285,7 @@ async function loadV3Migrations(
     try {
       sql = await fs.readFile(sqlPath);
     } catch {
-      console.warn(`Migration file not found: ${sqlPath}`);
+      logger.warn('Migration file not found', { sqlPath });
       continue;
     }
 

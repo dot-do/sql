@@ -10,6 +10,7 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '../logging/index.js';
 import type {
   ShardConfig,
   ReplicaConfig,
@@ -19,6 +20,8 @@ import type {
   ShardHealth,
   ClusterHealth,
 } from './types.js';
+
+const logger = createLogger({ defaultContext: { module: 'sharding-replica' } });
 
 // =============================================================================
 // HEALTH TRACKING
@@ -498,7 +501,7 @@ export class HealthChecker {
     if (this.intervalHandle) return;
 
     this.intervalHandle = setInterval(() => {
-      this.checkAll().catch(console.error);
+      this.checkAll().catch((err: unknown) => logger.error('Health check failed', err instanceof Error ? err : new Error(String(err))));
     }, this.intervalMs);
 
     // Run initial check

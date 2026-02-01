@@ -6,6 +6,7 @@
  * execution engine.
  */
 
+import { createLogger } from '../../logging/index.js';
 import type {
   Driver,
   DatabaseConnection,
@@ -13,6 +14,8 @@ import type {
   QueryResult,
   TransactionSettings,
 } from 'kysely';
+
+const logger = createLogger({ defaultContext: { module: 'kysely-driver' } });
 
 import type {
   DoSQLBackend,
@@ -295,7 +298,7 @@ class DoSQLConnection implements DatabaseConnection {
     if (typeof this.config.log === 'function') {
       this.config.log(sql, parameters);
     } else {
-      console.log('[DoSQL Kysely]', sql, parameters);
+      logger.debug('Query', { sql, parameters });
     }
   }
 }

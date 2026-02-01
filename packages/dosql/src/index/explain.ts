@@ -201,7 +201,7 @@ function buildExplainTree(
     default:
       return {
         nodeType: 'Unknown',
-        operation: `Unknown plan type: ${(plan as any).type}`,
+        operation: `Unknown plan type: ${(plan as unknown as { type: string }).type}`,
       };
   }
 }

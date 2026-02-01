@@ -7,7 +7,10 @@
  * - Pause during high load
  */
 
+import { createLogger } from '../logging/index.js';
 import type { BTree, KeyCodec, ValueCodec } from '../btree/types.js';
+
+const logger = createLogger({ defaultContext: { module: 'compaction-scheduler' } });
 import type { FSXBackend } from '../fsx/types.js';
 import type { ColumnarTableSchema, RowGroup } from '../columnar/types.js';
 import type {
@@ -589,7 +592,7 @@ export class CompactorImpl<K, V> implements Compactor {
         }
       } catch (error) {
         // Log error but continue
-        console.error('Compaction error:', error);
+        logger.error('Compaction error', error instanceof Error ? error : new Error(String(error)));
       }
     };
 

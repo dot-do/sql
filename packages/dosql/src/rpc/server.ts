@@ -15,7 +15,10 @@ import {
   type RpcSessionOptions,
 } from 'capnweb';
 
+import { createLogger } from '../logging/index.js';
 import { TIMEOUTS, SIZE_LIMITS, CDC, STREAMS } from '../constants.js';
+
+const logger = createLogger({ defaultContext: { module: 'rpc-server' } });
 
 import type {
   DoSQLAPI,
@@ -1167,7 +1170,7 @@ export async function handleDoSQLRequest(
 ): Promise<Response> {
   const sessionOptions: RpcSessionOptions = {
     onSendError: (error: Error) => {
-      console.error('[DoSQL RPC] Error:', error);
+      logger.error('RPC error', error instanceof Error ? error : new Error(String(error)));
       // Redact stack traces in production
       const redactedError = new Error(error.message);
       redactedError.name = error.name;

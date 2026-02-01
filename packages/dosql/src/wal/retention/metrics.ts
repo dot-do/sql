@@ -7,7 +7,10 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '../../logging/index.js';
 import type { WALReader } from '../types.js';
+
+const logger = createLogger({ defaultContext: { module: 'wal-retention-metrics' } });
 import type { ReplicationSlotManager } from '../../cdc/types.js';
 import type {
   RetentionPolicy,
@@ -509,9 +512,13 @@ export function createConsoleMetricsReporter(prefix: string = '[WAL Retention]')
             .map(([k, v]) => `${k}=${v}`)
             .join(',')
         : '';
-      console.log(
-        `${prefix} ${metric.type}=${metric.value}${labels ? ` {${labels}}` : ''} @${new Date(metric.timestamp).toISOString()}`
-      );
+      logger.info('Retention metric', {
+        prefix,
+        type: metric.type,
+        value: metric.value,
+        labels: metric.labels,
+        timestamp: new Date(metric.timestamp).toISOString(),
+      });
     },
   };
 }

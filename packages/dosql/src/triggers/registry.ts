@@ -14,6 +14,7 @@ import type {
   TriggerRegistry,
   TriggerTiming,
   TriggerEvent,
+  TriggerHandler,
   RegisterTriggerOptions,
   ListTriggersOptions,
   SQLTriggerDefinition,
@@ -152,11 +153,13 @@ export function createTriggerRegistry(options: TriggerRegistryOptions = {}): Tri
   /**
    * Check if trigger is a SQL trigger (ParsedSQLTrigger)
    */
-  function isSQLTrigger(trigger: any): trigger is ParsedSQLTrigger {
+  function isSQLTrigger(trigger: unknown): trigger is ParsedSQLTrigger {
+    if (!trigger || typeof trigger !== 'object') return false;
+    const t = trigger as Record<string, unknown>;
     return (
-      trigger.timing &&
-      ['BEFORE', 'AFTER', 'INSTEAD OF'].includes(trigger.timing) &&
-      trigger.body !== undefined
+      typeof t.timing === 'string' &&
+      ['BEFORE', 'AFTER', 'INSTEAD OF'].includes(t.timing) &&
+      t.body !== undefined
     );
   }
 
@@ -300,7 +303,7 @@ export function createTriggerRegistry(options: TriggerRegistryOptions = {}): Tri
           table: trigger.table,
           timing: normalizeTiming(trigger.timing),
           events: trigger.events.map(normalizeEvent),
-          handler: (() => {}) as any, // Placeholder handler for SQL triggers
+          handler: (() => {}) as TriggerHandler<T>, // Placeholder handler for SQL triggers
           priority: defaultPriority,
           enabled: enabledByDefault,
           version: existing ? existing.version + 1 : 1,
@@ -312,7 +315,7 @@ export function createTriggerRegistry(options: TriggerRegistryOptions = {}): Tri
           condition: trigger.whenClause,
           description: `SQL Trigger: ${trigger.timing} ${trigger.event} ON ${trigger.table}`,
           // Store the full SQL trigger definition for execution
-          ...(trigger as any),
+          ...(trigger as unknown as Record<string, unknown>),
         } as TriggerConfig<T>;
 
         // Remove old index if replacing
@@ -380,10 +383,10 @@ export function createTriggerRegistry(options: TriggerRegistryOptions = {}): Tri
           const triggerTiming = t.timing.toLowerCase();
           // Handle INSTEAD OF mapping to before
           if (normalizedTiming === 'instead of' || normalizedTiming === 'instead_of') {
-            return triggerTiming === 'before' && (t as any).timing === 'INSTEAD OF';
+            return triggerTiming === 'before' && (t as unknown as Record<string, unknown>).timing === 'INSTEAD OF';
           }
           return triggerTiming === normalizedTiming ||
-            (t as any).timing?.toUpperCase() === options.timing?.toUpperCase();
+            t.timing?.toUpperCase() === options.timing?.toUpperCase();
         });
       }
 
@@ -519,7 +522,7 @@ export function createTriggerRegistry(options: TriggerRegistryOptions = {}): Tri
  * Create a trigger registry pre-populated with triggers
  */
 export function createRegistryWithTriggers(
-  triggers: Array<TriggerDefinition<any>>,
+  triggers: Array<TriggerDefinition<Record<string, unknown>>>,
   options: TriggerRegistryOptions = {}
 ): TriggerRegistry {
   const registry = createTriggerRegistry(options);
@@ -551,7 +554,7 @@ export function mergeRegistries(
 /**
  * Export triggers from a registry as definitions
  */
-export function exportTriggers(registry: TriggerRegistry): TriggerDefinition<any>[] {
+export function exportTriggers(registry: TriggerRegistry): TriggerDefinition<Record<string, unknown>>[] {
   return registry.list().map(config => ({
     name: config.name,
     table: config.table,

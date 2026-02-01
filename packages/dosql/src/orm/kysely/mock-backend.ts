@@ -530,7 +530,7 @@ export class MockDoSQLBackend implements DoSQLBackend {
     }
     // Snapshot current state
     this.transactionSnapshot = new Map();
-    for (const [name, table] of (this.storage as any).tables) {
+    for (const [name, table] of (this.storage as unknown as { tables: Map<string, { rows: unknown[] }> }).tables) {
       this.transactionSnapshot.set(name, [...table.rows]);
     }
     this.inTransaction = true;

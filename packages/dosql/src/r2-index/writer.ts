@@ -394,8 +394,8 @@ export class BTreePageBuilder {
         offset,
         size: serialized.length,
         type: page.type,
-        firstKey: page.keys[0],
-        lastKey: page.keys[page.keys.length - 1],
+        firstKey: page.keys.length > 0 ? page.keys[0] : new Uint8Array(0),
+        lastKey: page.keys.length > 0 ? page.keys[page.keys.length - 1] : new Uint8Array(0),
       };
       offset += serialized.length;
       return info;

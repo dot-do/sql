@@ -20,6 +20,7 @@ import type {
   TriggerExecution,
   SQLTriggerDefinition,
   SQLTriggerEvent,
+  SQLTriggerTiming,
   RaiseType,
   RaiseResult,
   ParsedSQLTrigger,
@@ -284,8 +285,8 @@ export function createSQLTriggerExecutor<DB extends DatabaseSchema = DatabaseSch
       // Also get SQL triggers (BEFORE timing)
       const sqlTriggers = registry.list({
         table,
-        timing: 'BEFORE' as any,
-        event: event.toUpperCase() as any,
+        timing: 'BEFORE' as SQLTriggerTiming,
+        event: event.toUpperCase() as SQLTriggerEvent,
         enabled: skipDisabled ? true : undefined,
       });
 
@@ -402,8 +403,8 @@ export function createSQLTriggerExecutor<DB extends DatabaseSchema = DatabaseSch
       // Get SQL triggers (AFTER timing)
       const sqlTriggers = registry.list({
         table,
-        timing: 'AFTER' as any,
-        event: event.toUpperCase() as any,
+        timing: 'AFTER' as SQLTriggerTiming,
+        event: event.toUpperCase() as SQLTriggerEvent,
         enabled: skipDisabled ? true : undefined,
       });
 

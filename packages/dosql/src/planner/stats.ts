@@ -828,6 +828,402 @@ export class IndexStatisticsBuilder {
 }
 
 // =============================================================================
+// CACHED STATISTICS STORE
+// =============================================================================
+
+/**
+ * Configuration for statistics caching
+ */
+export interface StatsCacheConfig {
+  /** Time-to-live in milliseconds for cached statistics (default: 5000ms) */
+  ttlMs: number;
+
+  /** Maximum number of table entries to cache (default: 1000) */
+  maxTableEntries: number;
+
+  /** Maximum number of index entries to cache (default: 2000) */
+  maxIndexEntries: number;
+}
+
+/**
+ * Default statistics cache configuration
+ */
+export const DEFAULT_STATS_CACHE_CONFIG: StatsCacheConfig = {
+  ttlMs: 5000,
+  maxTableEntries: 1000,
+  maxIndexEntries: 2000,
+};
+
+/**
+ * Internal cache entry with timestamp for TTL tracking
+ */
+interface CacheEntry<T> {
+  value: T;
+  cachedAt: number;
+}
+
+/**
+ * Statistics cache diagnostic information
+ */
+export interface StatsCacheDiagnostics {
+  /** Number of cached table statistics entries */
+  tableEntries: number;
+
+  /** Number of cached index statistics entries */
+  indexEntries: number;
+
+  /** Total cache hits */
+  hits: number;
+
+  /** Total cache misses */
+  misses: number;
+
+  /** Hit rate percentage (0-100) */
+  hitRate: number;
+
+  /** TTL in milliseconds */
+  ttlMs: number;
+}
+
+/**
+ * A statistics store wrapper that adds TTL-based caching and DDL invalidation.
+ *
+ * This reduces planning overhead by caching table row counts, column statistics,
+ * and index cardinality with a configurable TTL. DDL operations (ALTER TABLE,
+ * CREATE INDEX, DROP TABLE, DROP INDEX) invalidate the relevant cache entries.
+ *
+ * The cache wraps an underlying StatisticsStore, intercepting read operations
+ * with cached results and passing through write operations to the backing store
+ * (while also updating the cache).
+ */
+export class CachedStatisticsStore extends StatisticsStore {
+  private readonly tableCache = new Map<string, CacheEntry<TableStatistics>>();
+  private readonly indexCache = new Map<string, CacheEntry<IndexStatistics>>();
+  private readonly config: StatsCacheConfig;
+  private cacheHits = 0;
+  private cacheMisses = 0;
+
+  /**
+   * A function that provides fresh statistics from the backing store.
+   * If not set, the store uses its own internal data (inherited from StatisticsStore).
+   */
+  private tableStatsProvider?: (tableName: string) => TableStatistics | undefined;
+  private indexStatsProvider?: (indexName: string) => IndexStatistics | undefined;
+
+  constructor(config: Partial<StatsCacheConfig> = {}) {
+    super();
+    this.config = { ...DEFAULT_STATS_CACHE_CONFIG, ...config };
+  }
+
+  /**
+   * Set a provider function for fetching fresh table statistics.
+   * When set, cache misses will call this provider instead of using inherited data.
+   */
+  setTableStatsProvider(provider: (tableName: string) => TableStatistics | undefined): void {
+    this.tableStatsProvider = provider;
+  }
+
+  /**
+   * Set a provider function for fetching fresh index statistics.
+   * When set, cache misses will call this provider instead of using inherited data.
+   */
+  setIndexStatsProvider(provider: (indexName: string) => IndexStatistics | undefined): void {
+    this.indexStatsProvider = provider;
+  }
+
+  /**
+   * Get statistics for a table, using the cache when available.
+   * Returns cached entry if within TTL, otherwise fetches fresh stats.
+   */
+  override getTableStats(tableName: string): TableStatistics | undefined {
+    const now = Date.now();
+    const cached = this.tableCache.get(tableName);
+
+    if (cached && (now - cached.cachedAt) < this.config.ttlMs) {
+      this.cacheHits++;
+      return cached.value;
+    }
+
+    this.cacheMisses++;
+
+    // Fetch fresh stats
+    const fresh = this.tableStatsProvider
+      ? this.tableStatsProvider(tableName)
+      : super.getTableStats(tableName);
+
+    if (fresh) {
+      this.putTableCache(tableName, fresh, now);
+    } else {
+      // Remove stale cache entry
+      this.tableCache.delete(tableName);
+    }
+
+    return fresh;
+  }
+
+  /**
+   * Get statistics for an index, using the cache when available.
+   */
+  override getIndexStats(indexName: string): IndexStatistics | undefined {
+    const now = Date.now();
+    const cached = this.indexCache.get(indexName);
+
+    if (cached && (now - cached.cachedAt) < this.config.ttlMs) {
+      this.cacheHits++;
+      return cached.value;
+    }
+
+    this.cacheMisses++;
+
+    const fresh = this.indexStatsProvider
+      ? this.indexStatsProvider(indexName)
+      : super.getIndexStats(indexName);
+
+    if (fresh) {
+      this.putIndexCache(indexName, fresh, now);
+    } else {
+      this.indexCache.delete(indexName);
+    }
+
+    return fresh;
+  }
+
+  /**
+   * Set table statistics, updating both the backing store and cache.
+   */
+  override setTableStats(stats: TableStatistics): void {
+    super.setTableStats(stats);
+    this.putTableCache(stats.tableName, stats, Date.now());
+  }
+
+  /**
+   * Set index statistics, updating both the backing store and cache.
+   */
+  override setIndexStats(stats: IndexStatistics): void {
+    super.setIndexStats(stats);
+    this.putIndexCache(stats.indexName, stats, Date.now());
+  }
+
+  /**
+   * Check if statistics exist for a table (checks both cache and backing store).
+   */
+  override hasTableStats(tableName: string): boolean {
+    const now = Date.now();
+    const cached = this.tableCache.get(tableName);
+    if (cached && (now - cached.cachedAt) < this.config.ttlMs) {
+      return true;
+    }
+    return super.hasTableStats(tableName);
+  }
+
+  /**
+   * Check if statistics exist for an index (checks both cache and backing store).
+   */
+  override hasIndexStats(indexName: string): boolean {
+    const now = Date.now();
+    const cached = this.indexCache.get(indexName);
+    if (cached && (now - cached.cachedAt) < this.config.ttlMs) {
+      return true;
+    }
+    return super.hasIndexStats(indexName);
+  }
+
+  /**
+   * Get row count for a table (with caching).
+   */
+  override getRowCount(tableName: string, defaultCount = 1000): number {
+    return this.getTableStats(tableName)?.rowCount ?? defaultCount;
+  }
+
+  /**
+   * Get distinct count for a column (with caching).
+   */
+  override getDistinctCount(tableName: string, columnName: string, defaultCount?: number): number {
+    const tableStats = this.getTableStats(tableName);
+    if (!tableStats) {
+      return defaultCount ?? Math.round(this.getRowCount(tableName) * 0.1);
+    }
+
+    const colStats = tableStats.columns.get(columnName);
+    if (!colStats) {
+      return defaultCount ?? Math.round(tableStats.rowCount * 0.1);
+    }
+
+    return colStats.distinctCount;
+  }
+
+  /**
+   * Get null fraction for a column (with caching).
+   */
+  override getNullFraction(tableName: string, columnName: string): number {
+    const tableStats = this.getTableStats(tableName);
+    if (!tableStats) return 0;
+
+    const colStats = tableStats.columns.get(columnName);
+    return colStats?.nullFraction ?? 0;
+  }
+
+  /**
+   * Get histogram for a column (with caching).
+   */
+  override getHistogram(tableName: string, columnName: string): HistogramBucket[] | undefined {
+    const tableStats = this.getTableStats(tableName);
+    if (!tableStats) return undefined;
+
+    const colStats = tableStats.columns.get(columnName);
+    return colStats?.histogram;
+  }
+
+  /**
+   * Get most common values for a column (with caching).
+   */
+  override getMostCommonValues(tableName: string, columnName: string): MostCommonValue[] | undefined {
+    const tableStats = this.getTableStats(tableName);
+    if (!tableStats) return undefined;
+
+    const colStats = tableStats.columns.get(columnName);
+    return colStats?.mostCommonValues;
+  }
+
+  /**
+   * Invalidate cached statistics for a specific table.
+   * Should be called on DDL operations like ALTER TABLE, DROP TABLE.
+   */
+  invalidateTable(tableName: string): void {
+    this.tableCache.delete(tableName);
+
+    // Also invalidate any index stats for this table
+    for (const [indexName, entry] of this.indexCache) {
+      if (entry.value.tableName === tableName) {
+        this.indexCache.delete(indexName);
+      }
+    }
+  }
+
+  /**
+   * Invalidate cached statistics for a specific index.
+   * Should be called on CREATE INDEX, DROP INDEX.
+   */
+  invalidateIndex(indexName: string): void {
+    this.indexCache.delete(indexName);
+  }
+
+  /**
+   * Invalidate all cached statistics for a table and its indexes.
+   * Convenience method for DDL operations.
+   */
+  invalidateForDDL(ddlSql: string): void {
+    const alterMatch = ddlSql.match(/ALTER\s+TABLE\s+(\w+)/i);
+    const dropTableMatch = ddlSql.match(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i);
+    const createIndexMatch = ddlSql.match(
+      /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s+ON\s+(\w+)/i
+    );
+    const dropIndexMatch = ddlSql.match(/DROP\s+INDEX\s+(?:IF\s+EXISTS\s+)?(\w+)(?:\s+ON\s+(\w+))?/i);
+
+    if (alterMatch) {
+      this.invalidateTable(alterMatch[1]);
+    }
+    if (dropTableMatch) {
+      this.invalidateTable(dropTableMatch[1]);
+    }
+    if (createIndexMatch) {
+      this.invalidateIndex(createIndexMatch[1]);
+      this.invalidateTable(createIndexMatch[2]);
+    }
+    if (dropIndexMatch) {
+      this.invalidateIndex(dropIndexMatch[1]);
+      if (dropIndexMatch[2]) {
+        this.invalidateTable(dropIndexMatch[2]);
+      }
+    }
+  }
+
+  /**
+   * Clear all cached statistics (but not the backing store).
+   */
+  clearCache(): void {
+    this.tableCache.clear();
+    this.indexCache.clear();
+    this.cacheHits = 0;
+    this.cacheMisses = 0;
+  }
+
+  /**
+   * Clear everything (cache and backing store).
+   */
+  override clear(): void {
+    super.clear();
+    this.clearCache();
+  }
+
+  /**
+   * Get cache diagnostics for monitoring.
+   */
+  getDiagnostics(): StatsCacheDiagnostics {
+    const total = this.cacheHits + this.cacheMisses;
+    return {
+      tableEntries: this.tableCache.size,
+      indexEntries: this.indexCache.size,
+      hits: this.cacheHits,
+      misses: this.cacheMisses,
+      hitRate: total > 0 ? (this.cacheHits / total) * 100 : 0,
+      ttlMs: this.config.ttlMs,
+    };
+  }
+
+  // ============================================================================
+  // PRIVATE METHODS
+  // ============================================================================
+
+  private putTableCache(tableName: string, stats: TableStatistics, now: number): void {
+    // Evict if at capacity
+    if (this.tableCache.size >= this.config.maxTableEntries && !this.tableCache.has(tableName)) {
+      this.evictOldestTableEntry();
+    }
+    this.tableCache.set(tableName, { value: stats, cachedAt: now });
+  }
+
+  private putIndexCache(indexName: string, stats: IndexStatistics, now: number): void {
+    if (this.indexCache.size >= this.config.maxIndexEntries && !this.indexCache.has(indexName)) {
+      this.evictOldestIndexEntry();
+    }
+    this.indexCache.set(indexName, { value: stats, cachedAt: now });
+  }
+
+  private evictOldestTableEntry(): void {
+    let oldestKey: string | undefined;
+    let oldestTime = Infinity;
+
+    for (const [key, entry] of this.tableCache) {
+      if (entry.cachedAt < oldestTime) {
+        oldestTime = entry.cachedAt;
+        oldestKey = key;
+      }
+    }
+
+    if (oldestKey) {
+      this.tableCache.delete(oldestKey);
+    }
+  }
+
+  private evictOldestIndexEntry(): void {
+    let oldestKey: string | undefined;
+    let oldestTime = Infinity;
+
+    for (const [key, entry] of this.indexCache) {
+      if (entry.cachedAt < oldestTime) {
+        oldestTime = entry.cachedAt;
+        oldestKey = key;
+      }
+    }
+
+    if (oldestKey) {
+      this.indexCache.delete(oldestKey);
+    }
+  }
+}
+
+// =============================================================================
 // FACTORY FUNCTIONS
 // =============================================================================
 
@@ -836,6 +1232,13 @@ export class IndexStatisticsBuilder {
  */
 export function createStatisticsStore(): StatisticsStore {
   return new StatisticsStore();
+}
+
+/**
+ * Create a new cached statistics store with TTL-based caching
+ */
+export function createCachedStatisticsStore(config?: Partial<StatsCacheConfig>): CachedStatisticsStore {
+  return new CachedStatisticsStore(config);
 }
 
 /**
@@ -875,12 +1278,14 @@ export function buildHistogram(
     const bucketValues = sortedValues.slice(i, Math.min(i + bucketSize, sortedValues.length));
     const distinctValues = new Set(bucketValues.map(v => JSON.stringify(v)));
 
-    buckets.push({
-      low: bucketValues[0],
-      high: bucketValues[bucketValues.length - 1],
-      count: bucketValues.length,
-      distinctCount: distinctValues.size,
-    });
+    if (bucketValues.length > 0) {
+      buckets.push({
+        low: bucketValues[0],
+        high: bucketValues[bucketValues.length - 1],
+        count: bucketValues.length,
+        distinctCount: distinctValues.size,
+      });
+    }
   }
 
   return buckets;

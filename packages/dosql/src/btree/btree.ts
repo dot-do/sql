@@ -154,7 +154,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     }
 
     page = deserializePage(data);
-    this.pageCache.set(pageId, page);
+    // Use setAsync to ensure any evicted dirty pages are written before continuing
+    await this.pageCache.setAsync(pageId, page);
     return page;
   }
 
@@ -165,7 +166,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     const data = serializePage(page);
     await this.fsx.write(this.pageKey(page.id), data);
     // Add to cache as clean (not dirty since we just wrote it)
-    this.pageCache.set(page.id, page, { dirty: false });
+    // Use setAsync to ensure any evicted dirty pages are written before continuing
+    await this.pageCache.setAsync(page.id, page, { dirty: false });
   }
 
   /**
@@ -278,6 +280,9 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
 
     // Find path to leaf
     const path = await this.findPath(serializedKey);
+    if (path.length === 0) {
+      throw new Error('B-tree findPath returned empty path');
+    }
     const leafPage = path[path.length - 1];
 
     // Check if key already exists
@@ -503,6 +508,9 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
 
     const serializedKey = this.keyCodec.encode(key);
     const path = await this.findPath(serializedKey);
+    if (path.length === 0) {
+      throw new Error('B-tree findPath returned empty path');
+    }
     const leaf = path[path.length - 1];
 
     const { found, index } = binarySearch(leaf.keys, serializedKey, (a, b) =>

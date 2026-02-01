@@ -39,6 +39,8 @@
 import type { R2Bucket } from '../r2-index/types.js';
 import type { QueryResult, Row, SqlValue, ExecutionStats } from './types.js';
 import { QueryMode, ModeEnforcer, ReadOnlyError, isWriteOperation } from './modes.js';
+import { DatabaseError, StatementError } from '../errors/index.js';
+import { DatabaseErrorCode, StatementErrorCode } from '../errors/codes.js';
 
 // =============================================================================
 // TYPES
@@ -247,7 +249,8 @@ export class WorkerQueryEngine {
    */
   async write(sql: string, params?: SqlValue[]): Promise<WriteResult> {
     if (!this.config.doStub) {
-      throw new Error(
+      throw new DatabaseError(
+        DatabaseErrorCode.CONFIG_ERROR,
         'No Durable Object stub configured for writes. ' +
         'Either configure a DO stub or execute writes directly on the Durable Object.'
       );
@@ -255,8 +258,10 @@ export class WorkerQueryEngine {
 
     // Validate that this is actually a write operation
     if (!isWriteOperation(sql)) {
-      throw new Error(
-        `Expected a write operation but got: ${sql.substring(0, 50)}...`
+      throw new StatementError(
+        StatementErrorCode.UNSUPPORTED,
+        `Expected a write operation but got: ${sql.substring(0, 50)}...`,
+        sql
       );
     }
 

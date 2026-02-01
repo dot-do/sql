@@ -11,7 +11,10 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '../logging/index.js';
 import type { FSXBackend } from '../fsx/types.js';
+
+const logger = createLogger({ defaultContext: { module: 'replication-replica' } });
 import type { WALEntry, WALWriter } from '../wal/types.js';
 import { crc32 } from '../wal/writer.js';
 import {
@@ -148,7 +151,7 @@ export function createReplicaDO(
       try {
         await pullAndApplyWAL();
       } catch (error) {
-        console.error('WAL streaming error:', error);
+        logger.error('WAL streaming error', error instanceof Error ? error : new Error(String(error)));
         state!.info.status = 'lagging';
       }
     }, fullConfig.heartbeatIntervalMs);
@@ -571,7 +574,7 @@ export function createReplicaDO(
   }
 
   // Load state on creation
-  loadState().catch(console.error);
+  loadState().catch((err: unknown) => logger.error('Failed to load replica state', err instanceof Error ? err : new Error(String(err))));
 
   // Return interface
   return {

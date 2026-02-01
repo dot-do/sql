@@ -440,12 +440,12 @@ export function createReplicationRouter(
     updateReplicaStatus,
     getMetrics,
     // Extended methods accessible via casting
-    setCurrentRegion: setCurrentRegion as any,
-    registerReplica: registerReplica as any,
-    deregisterReplica: deregisterReplica as any,
-    getReplicas: getReplicas as any,
-    getPrimary: getPrimary as any,
-    recordLatency: recordLatency as any,
+    setCurrentRegion,
+    registerReplica,
+    deregisterReplica,
+    getReplicas,
+    getPrimary,
+    recordLatency,
   } as ReplicationRouter;
 }
 

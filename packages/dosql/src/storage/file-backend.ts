@@ -13,6 +13,8 @@ import * as path from 'node:path';
 import BetterSqlite3, { type Database as BetterSqlite3Database } from 'better-sqlite3';
 import { Database } from '../database.js';
 import type { SqlValue, BindParameters, Statement, RunResult } from '../statement/types.js';
+import { StorageError, DatabaseError, StatementError } from '../errors/index.js';
+import { StorageErrorCode, DatabaseErrorCode, StatementErrorCode } from '../errors/codes.js';
 
 // =============================================================================
 // TYPES
@@ -27,6 +29,18 @@ export type JournalMode = 'delete' | 'truncate' | 'persist' | 'memory' | 'wal' |
  * Synchronous modes supported by SQLite
  */
 export type SynchronousMode = 'off' | 'normal' | 'full' | 'extra';
+
+/**
+ * Column info returned by SQLite PRAGMA table_info
+ */
+interface SQLiteColumnInfo {
+  cid: number;
+  name: string;
+  type: string;
+  notnull: number;
+  dflt_value: string | null;
+  pk: number;
+}
 
 /**
  * Checkpoint modes for WAL
@@ -171,7 +185,7 @@ export class FileBackedDatabase extends Database {
       // Handle file existence check
       const fileExists = fs.existsSync(options.filename);
       if (!fileExists && options.create === false) {
-        throw new Error(`SQLITE_CANTOPEN: unable to open database file - ${options.filename} not found`);
+        throw new StorageError(StorageErrorCode.READ_FAILED, `SQLITE_CANTOPEN: unable to open database file - ${options.filename} not found`);
       }
 
       // Validate file is a valid SQLite database if it exists
@@ -182,7 +196,7 @@ export class FileBackedDatabase extends Database {
         fs.closeSync(fd);
         const header = buffer.toString('utf8', 0, 15);
         if (header !== 'SQLite format 3') {
-          throw new Error('SQLITE_NOTADB: file is not a database');
+          throw new StorageError(StorageErrorCode.CORRUPTION, 'SQLITE_NOTADB: file is not a database');
         }
       }
 
@@ -256,7 +270,7 @@ export class FileBackedDatabase extends Database {
       if (!tableInfo || !Array.isArray(tableInfo) || tableInfo.length === 0) continue;
 
       // Build CREATE TABLE statement
-      const columns = tableInfo.map((col: any) => {
+      const columns = tableInfo.map((col: SQLiteColumnInfo) => {
         let def = `${col.name} ${col.type || 'TEXT'}`;
         if (col.pk) def += ' PRIMARY KEY';
         if (col.notnull) def += ' NOT NULL';
@@ -269,13 +283,13 @@ export class FileBackedDatabase extends Database {
       // Copy data
       const rows = this.nativeDb.prepare(`SELECT * FROM "${tableName}"`).all();
       if (rows.length > 0) {
-        const columnNames = tableInfo.map((col: any) => col.name);
+        const columnNames = tableInfo.map((col: SQLiteColumnInfo) => col.name);
         const placeholders = columnNames.map(() => '?').join(', ');
         const insertSql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders})`;
         const insertStmt = super.prepare(insertSql);
         for (const row of rows) {
           const values = columnNames.map((col: string) => {
-            const val = (row as any)[col];
+            const val = (row as Record<string, unknown>)[col];
             // Convert Buffer to Uint8Array for DoSQL
             if (Buffer.isBuffer(val)) {
               return new Uint8Array(val);
@@ -327,7 +341,7 @@ export class FileBackedDatabase extends Database {
 
       // Build CREATE TABLE statement
       // Note: Use unquoted column names for compatibility with DoSQL parser
-      const columns = tableInfo.map((col: any) => {
+      const columns = tableInfo.map((col: SQLiteColumnInfo) => {
         let def = `${col.name} ${col.type || 'TEXT'}`;
         if (col.pk) def += ' PRIMARY KEY';
         if (col.notnull) def += ' NOT NULL';
@@ -340,12 +354,12 @@ export class FileBackedDatabase extends Database {
       // Copy data
       const rows = source.prepare(`SELECT * FROM ${tableName}`).all();
       if (rows.length > 0) {
-        const columnNames = tableInfo.map((col: any) => col.name);
+        const columnNames = tableInfo.map((col: SQLiteColumnInfo) => col.name);
         const placeholders = columnNames.map(() => '?').join(', ');
         const insertSql = `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders})`;
         const insertStmt = this.prepare(insertSql);
         for (const row of rows) {
-          const values = columnNames.map((col: string) => (row as any)[col]);
+          const values = columnNames.map((col: string) => (row as Record<string, unknown>)[col]);
           insertStmt.run(...values);
         }
       }
@@ -376,7 +390,7 @@ export class FileBackedDatabase extends Database {
     // Check if file exists and overwrite is not set
     if (fs.existsSync(options.path)) {
       if (!options.overwrite) {
-        throw new Error(`SQLITE_ERROR: file exists and overwrite is false - ${options.path}`);
+        throw new StorageError(StorageErrorCode.WRITE_FAILED, `SQLITE_ERROR: file exists and overwrite is false - ${options.path}`);
       }
       // Delete existing file to start fresh
       fs.unlinkSync(options.path);
@@ -385,7 +399,7 @@ export class FileBackedDatabase extends Database {
     // Ensure parent directory exists
     const dir = path.dirname(options.path);
     if (!fs.existsSync(dir)) {
-      throw new Error(`SQLITE_CANTOPEN: unable to open database file - directory ${dir} not found`);
+      throw new StorageError(StorageErrorCode.READ_FAILED, `SQLITE_CANTOPEN: unable to open database file - directory ${dir} not found`);
     }
 
     // Create target database
@@ -422,7 +436,7 @@ export class FileBackedDatabase extends Database {
           targetDb.exec(createSql);
         } else {
           // Fallback: build from table_info
-          const columns = tableInfo.map((col: any) => {
+          const columns = tableInfo.map((col: SQLiteColumnInfo) => {
             let def = `"${col.name}" ${col.type || 'TEXT'}`;
             if (col.pk) def += ' PRIMARY KEY';
             if (col.notnull) def += ' NOT NULL';
@@ -436,7 +450,7 @@ export class FileBackedDatabase extends Database {
         if (!options.schemaOnly) {
           const rows = this.prepare(`SELECT * FROM ${tableName}`).all();
           if (rows.length > 0) {
-            const columnNames = tableInfo.map((col: any) => col.name);
+            const columnNames = tableInfo.map((col: SQLiteColumnInfo) => col.name);
             const placeholders = columnNames.map(() => '?').join(', ');
             const insertStmt = targetDb.prepare(
               `INSERT INTO "${tableName}" (${columnNames.map(n => `"${n}"`).join(', ')}) VALUES (${placeholders})`
@@ -444,7 +458,7 @@ export class FileBackedDatabase extends Database {
 
             for (const row of rows) {
               const values = columnNames.map((col: string) => {
-                const val = (row as any)[col];
+                const val = (row as Record<string, unknown>)[col];
                 // Handle Uint8Array -> Buffer for better-sqlite3
                 if (val instanceof Uint8Array) {
                   return Buffer.from(val);
@@ -511,7 +525,7 @@ export class FileBackedDatabase extends Database {
    */
   async importFrom(options: ImportOptions): Promise<void> {
     if (!fs.existsSync(options.path)) {
-      throw new Error(`SQLITE_CANTOPEN: unable to open database file - ${options.path} not found`);
+      throw new StorageError(StorageErrorCode.READ_FAILED, `SQLITE_CANTOPEN: unable to open database file - ${options.path} not found`);
     }
 
     // Validate it's a SQLite database
@@ -520,7 +534,7 @@ export class FileBackedDatabase extends Database {
     fs.readSync(fd, buffer, 0, 16, 0);
     fs.closeSync(fd);
     if (buffer.toString('utf8', 0, 15) !== 'SQLite format 3') {
-      throw new Error('SQLITE_NOTADB: file is not a database');
+      throw new StorageError(StorageErrorCode.CORRUPTION, 'SQLITE_NOTADB: file is not a database');
     }
 
     // Open source database
@@ -560,7 +574,7 @@ export class FileBackedDatabase extends Database {
             // Copy data
             const rows = sourceDb.prepare(`SELECT * FROM "${tableName}"`).all();
             if (rows.length > 0 && tableInfo && tableInfo.length > 0) {
-              const columnNames = tableInfo.map((col: any) => col.name);
+              const columnNames = tableInfo.map((col: SQLiteColumnInfo) => col.name);
               const placeholders = columnNames.map(() => '?').join(', ');
               const insertStmt = this.prepare(
                 `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders})`
@@ -568,7 +582,7 @@ export class FileBackedDatabase extends Database {
 
               for (const row of rows) {
                 const values = columnNames.map((col: string) => {
-                  const val = (row as any)[col];
+                  const val = (row as Record<string, unknown>)[col];
                   if (Buffer.isBuffer(val)) {
                     return new Uint8Array(val);
                   }
@@ -579,7 +593,7 @@ export class FileBackedDatabase extends Database {
             }
             continue;
           } else {
-            throw new Error(`Table ${tableName} already exists`);
+            throw new StatementError(StatementErrorCode.CONSTRAINT_VIOLATION, `Table ${tableName} already exists`, undefined, { context: { table: tableName } });
           }
         }
 
@@ -588,7 +602,7 @@ export class FileBackedDatabase extends Database {
         if (!tableInfo || !Array.isArray(tableInfo) || tableInfo.length === 0) continue;
 
         // Build CREATE TABLE statement using unquoted identifiers for DoSQL compatibility
-        const columns = tableInfo.map((col: any) => {
+        const columns = tableInfo.map((col: SQLiteColumnInfo) => {
           let def = `${col.name} ${col.type || 'TEXT'}`;
           if (col.pk) def += ' PRIMARY KEY';
           if (col.notnull) def += ' NOT NULL';
@@ -601,7 +615,7 @@ export class FileBackedDatabase extends Database {
         // Copy data
         const rows = sourceDb.prepare(`SELECT * FROM "${tableName}"`).all();
         if (rows.length > 0) {
-          const columnNames = tableInfo.map((col: any) => col.name);
+          const columnNames = tableInfo.map((col: SQLiteColumnInfo) => col.name);
           const placeholders = columnNames.map(() => '?').join(', ');
           const insertStmt = this.prepare(
             `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders})`
@@ -609,7 +623,7 @@ export class FileBackedDatabase extends Database {
 
           for (const row of rows) {
             const values = columnNames.map((col: string) => {
-              const val = (row as any)[col];
+              const val = (row as Record<string, unknown>)[col];
               // Handle Buffer -> Uint8Array for DoSQL
               if (Buffer.isBuffer(val)) {
                 return new Uint8Array(val);
@@ -711,7 +725,7 @@ export class FileBackedDatabase extends Database {
    */
   checkpoint(mode: CheckpointMode = 'passive'): void {
     if (!this.nativeDb) {
-      throw new Error('Cannot checkpoint an in-memory database');
+      throw new DatabaseError(DatabaseErrorCode.CONFIG_ERROR, 'Cannot checkpoint an in-memory database');
     }
 
     const modeMap: Record<CheckpointMode, string> = {
@@ -746,7 +760,7 @@ export class FileBackedDatabase extends Database {
           const tableInfo = this.pragma('table_info', tableName);
           if (!tableInfo || !Array.isArray(tableInfo) || tableInfo.length === 0) continue;
 
-          const columns = tableInfo.map((col: any) => {
+          const columns = tableInfo.map((col: SQLiteColumnInfo) => {
             let def = `"${col.name}" ${col.type || 'TEXT'}`;
             if (col.pk) def += ' PRIMARY KEY';
             if (col.notnull) def += ' NOT NULL';
@@ -758,14 +772,14 @@ export class FileBackedDatabase extends Database {
           // Use unquoted identifiers for DoSQL compatibility
           const rows = this.prepare(`SELECT * FROM ${tableName}`).all();
           if (rows.length > 0) {
-            const columnNames = tableInfo.map((col: any) => col.name);
+            const columnNames = tableInfo.map((col: SQLiteColumnInfo) => col.name);
             const placeholders = columnNames.map(() => '?').join(', ');
             const insertStmt = targetDb.prepare(
               `INSERT INTO "${tableName}" (${columnNames.map(n => `"${n}"`).join(', ')}) VALUES (${placeholders})`
             );
             for (const row of rows) {
               const values = columnNames.map((col: string) => {
-                const val = (row as any)[col];
+                const val = (row as Record<string, unknown>)[col];
                 if (val instanceof Uint8Array) {
                   return Buffer.from(val);
                 }
@@ -802,7 +816,7 @@ export class FileBackedDatabase extends Database {
         const tableInfo = this.pragma('table_info', tableName);
         if (!tableInfo || !Array.isArray(tableInfo) || tableInfo.length === 0) continue;
 
-        const columns = tableInfo.map((col: any) => {
+        const columns = tableInfo.map((col: SQLiteColumnInfo) => {
           let def = `"${col.name}" ${col.type || 'TEXT'}`;
           if (col.pk) def += ' PRIMARY KEY';
           if (col.notnull) def += ' NOT NULL';
@@ -814,14 +828,14 @@ export class FileBackedDatabase extends Database {
         // Use unquoted identifiers for DoSQL compatibility
         const rows = this.prepare(`SELECT * FROM ${tableName}`).all();
         if (rows.length > 0) {
-          const columnNames = tableInfo.map((col: any) => col.name);
+          const columnNames = tableInfo.map((col: SQLiteColumnInfo) => col.name);
           const placeholders = columnNames.map(() => '?').join(', ');
           const insertStmt = tempDb.prepare(
             `INSERT INTO "${tableName}" (${columnNames.map(n => `"${n}"`).join(', ')}) VALUES (${placeholders})`
           );
           for (const row of rows) {
             const values = columnNames.map((col: string) => {
-              const val = (row as any)[col];
+              const val = (row as Record<string, unknown>)[col];
               if (val instanceof Uint8Array) {
                 return Buffer.from(val);
               }
@@ -852,7 +866,7 @@ export class FileBackedDatabase extends Database {
   static deserialize(buffer: Buffer, options?: Partial<FileBackedDatabaseOptions>): FileBackedDatabase {
     // Validate buffer is a SQLite database
     if (buffer.length < 16 || buffer.toString('utf8', 0, 15) !== 'SQLite format 3') {
-      throw new Error('SQLITE_NOTADB: buffer is not a valid SQLite database');
+      throw new StorageError(StorageErrorCode.CORRUPTION, 'SQLITE_NOTADB: buffer is not a valid SQLite database');
     }
 
     // Create a temporary file to deserialize into
@@ -877,7 +891,7 @@ export class FileBackedDatabase extends Database {
         if (!tableInfo || !Array.isArray(tableInfo) || tableInfo.length === 0) continue;
 
         // Build CREATE TABLE statement using unquoted identifiers for DoSQL compatibility
-        const columns = tableInfo.map((col: any) => {
+        const columns = tableInfo.map((col: SQLiteColumnInfo) => {
           let def = `${col.name} ${col.type || 'TEXT'}`;
           if (col.pk) def += ' PRIMARY KEY';
           if (col.notnull) def += ' NOT NULL';
@@ -890,7 +904,7 @@ export class FileBackedDatabase extends Database {
         // Copy data
         const rows = sourceDb.prepare(`SELECT * FROM "${tableName}"`).all();
         if (rows.length > 0) {
-          const columnNames = tableInfo.map((col: any) => col.name);
+          const columnNames = tableInfo.map((col: SQLiteColumnInfo) => col.name);
           const placeholders = columnNames.map(() => '?').join(', ');
           const insertStmt = result.prepare(
             `INSERT INTO ${tableName} (${columnNames.join(', ')}) VALUES (${placeholders})`
@@ -898,7 +912,7 @@ export class FileBackedDatabase extends Database {
 
           for (const row of rows) {
             const values = columnNames.map((col: string) => {
-              const val = (row as any)[col];
+              const val = (row as Record<string, unknown>)[col];
               if (Buffer.isBuffer(val)) {
                 return new Uint8Array(val);
               }

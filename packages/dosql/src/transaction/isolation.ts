@@ -416,9 +416,9 @@ export function createLockManager(
             );
             if (preventionError) {
               // Check if this is wound-wait (older wounds younger)
-              if ((preventionError as any).woundTarget) {
+              if (preventionError.woundTarget) {
                 // Release the holder's locks and grant to requester
-                manager.releaseAll((preventionError as any).woundTarget);
+                manager.releaseAll(preventionError.woundTarget);
 
                 // Now can acquire immediately
                 state.holders.set(request.txnId, request.lockType);
@@ -459,8 +459,8 @@ export function createLockManager(
       if (detectDeadlocks) {
         const deadlockInfo = deadlockDetector.checkDeadlock(request.txnId);
         if (deadlockInfo) {
-          // Cast victimTxnId from external DeadlockInfo to TransactionId
-          const victimTxnId = deadlockInfo.victimTxnId as TransactionId;
+          // Validate victimTxnId from external DeadlockInfo via factory function
+          const victimTxnId = createTransactionId(deadlockInfo.victimTxnId);
 
           // Remove wait edges since we're aborting
           deadlockDetector.removeWait(request.txnId);

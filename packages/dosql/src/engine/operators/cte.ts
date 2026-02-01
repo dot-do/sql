@@ -407,15 +407,15 @@ export interface CTEScanPlan {
 /**
  * Check if a plan node is a CTE plan
  */
-export function isCTEPlan(plan: any): plan is CTEPlan {
-  return plan?.type === 'cte';
+export function isCTEPlan(plan: unknown): plan is CTEPlan {
+  return plan !== null && typeof plan === 'object' && (plan as { type?: string }).type === 'cte';
 }
 
 /**
  * Check if a plan node is a CTE scan plan
  */
-export function isCTEScanPlan(plan: any): plan is CTEScanPlan {
-  return plan?.type === 'cteScan';
+export function isCTEScanPlan(plan: unknown): plan is CTEScanPlan {
+  return plan !== null && typeof plan === 'object' && (plan as { type?: string }).type === 'cteScan';
 }
 
 // =============================================================================

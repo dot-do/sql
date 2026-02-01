@@ -5,6 +5,7 @@
  * in sandboxed V8 isolates.
  */
 
+import { createLogger } from '../logging/index.js';
 import type {
   DatabaseSchema,
   TableSchema,
@@ -18,6 +19,8 @@ import type {
   Predicate,
   QueryOptions,
 } from './types.js';
+
+const logger = createLogger({ defaultContext: { module: 'proc-context' } });
 
 // =============================================================================
 // TABLE ACCESSOR IMPLEMENTATION
@@ -492,7 +495,7 @@ export function createInMemoryTransactionManager(): TransactionManager {
     async execute<Result = unknown>(_txId: string, sql: string, _params: unknown[]): Promise<Result[]> {
       // In a real implementation, this would execute within the transaction
       // For testing, we just return empty results
-      console.log(`[Transaction] Executing: ${sql}`);
+      logger.debug('Transaction executing', { sql });
       return [] as Result[];
     },
   };

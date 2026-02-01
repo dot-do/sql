@@ -1,3 +1,7 @@
+import { createLogger } from './logging/index.js';
+
+const logger = createLogger({ defaultContext: { module: 'join-parser' } });
+
 /**
  * JOIN Parser Types for DoSQL
  *
@@ -592,12 +596,12 @@ export function createTypedDatabase<DB extends DatabaseSchema>(): TypedDatabase<
       const sql = strings.reduce((acc, str, i) =>
         acc + str + (values[i] !== undefined ? `$${i + 1}` : ''), ''
       );
-      console.log('Executing:', sql);
-      return [] as any;
+      logger.debug('Executing', { sql });
+      return [] as never;
     },
     async query(sql) {
-      console.log('Executing:', sql);
-      return [] as any;
+      logger.debug('Executing', { sql });
+      return [] as never;
     }
   };
 }

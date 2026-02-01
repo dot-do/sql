@@ -7,7 +7,10 @@
  * - Replay from last checkpoint on recovery
  */
 
+import { createLogger } from '../logging/index.js';
 import type { FSXBackend } from '../fsx/types.js';
+
+const logger = createLogger({ defaultContext: { module: 'wal-checkpoint' } });
 import {
   type WALEntry,
   type WALSegment,
@@ -203,10 +206,7 @@ export function createCheckpointManager(
             archivedCount++;
           }
         } catch (error) {
-          console.error(
-            `Failed to archive segment ${segmentId}:`,
-            error
-          );
+          logger.error('Failed to archive segment', error instanceof Error ? error : new Error(String(error)), { segmentId });
         }
       }
 
@@ -229,10 +229,7 @@ export function createCheckpointManager(
                 `${fullConfig.archivePrefix}${segmentId}`
               );
             } catch (error) {
-              console.error(
-                `Failed to delete archived segment ${segmentId}:`,
-                error
-              );
+              logger.error('Failed to delete archived segment', error instanceof Error ? error : new Error(String(error)), { segmentId });
             }
           }
         }
@@ -357,9 +354,7 @@ export function createCheckpointManager(
 
       // Throw if there were critical errors
       if (state.errors.length > 0) {
-        console.warn(
-          `Recovery completed with ${state.errors.length} errors`
-        );
+        logger.warn('Recovery completed with errors', { errorCount: state.errors.length });
       }
 
       return state;
@@ -510,7 +505,7 @@ export function createAutoCheckpointer(
 
         return checkpoint;
       } catch (error) {
-        console.error('Auto-checkpoint failed:', error);
+        logger.error('Auto-checkpoint failed', error instanceof Error ? error : new Error(String(error)));
       }
     }
 
@@ -556,7 +551,7 @@ export function createAutoCheckpointer(
     start(): void {
       if (timer) return;
       timer = setInterval(() => {
-        maybeCheckpoint().catch(console.error);
+        maybeCheckpoint().catch((err: unknown) => logger.error('Periodic checkpoint failed', err instanceof Error ? err : new Error(String(err))));
       }, timeInterval);
     },
 

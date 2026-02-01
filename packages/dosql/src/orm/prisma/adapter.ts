@@ -7,7 +7,10 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '../../logging/index.js';
 import type { SqlValue, Row, QueryResult } from '../../engine/types.js';
+
+const _prismaLogger = createLogger({ defaultContext: { module: 'prisma-adapter' } });
 
 // =============================================================================
 // Prisma Driver Adapter Types
@@ -278,7 +281,7 @@ export class PrismaDoSQLAdapter implements DriverAdapter {
   constructor(config: PrismaDoSQLConfig) {
     this.backend = config.backend;
     this.logging = config.logging ?? false;
-    this.logger = config.logger ?? console.log;
+    this.logger = config.logger ?? ((msg: string, params?: unknown) => _prismaLogger.debug(msg, { params }));
   }
 
   /**

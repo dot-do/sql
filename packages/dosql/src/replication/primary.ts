@@ -11,7 +11,10 @@
  * @packageDocumentation
  */
 
+import { createLogger } from '../logging/index.js';
 import type { FSXBackend } from '../fsx/types.js';
+
+const logger = createLogger({ defaultContext: { module: 'replication-primary' } });
 import type { WALWriter, WALReader, WALEntry, WALSegment } from '../wal/types.js';
 import { crc32 } from '../wal/writer.js';
 import {
@@ -625,7 +628,7 @@ export function createPrimaryDO(
   }
 
   // Load state on creation
-  loadReplicaState().catch(console.error);
+  loadReplicaState().catch((err: unknown) => logger.error('Failed to load replica state', err instanceof Error ? err : new Error(String(err))));
 
   // Return interface
   return {
