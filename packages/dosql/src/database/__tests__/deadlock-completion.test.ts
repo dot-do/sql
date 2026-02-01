@@ -439,8 +439,8 @@ describe('Deadlock Timeout Configuration', () => {
 
     expect(deadlock).not.toBeNull();
     // GAP: Should indicate which transactions exceeded timeout
-    expect((deadlock as any).exceededTimeout).toBeDefined();
-    expect((deadlock as any).exceededTimeout).toContain('txn1');
+    expect(deadlock!.exceededTimeout).toBeDefined();
+    expect(deadlock!.exceededTimeout).toContain('txn1');
   });
 
   /**
@@ -832,7 +832,7 @@ describe('Prevention vs Detection Modes', () => {
 
     expect(error).not.toBeNull();
     // Wound-wait returns error targeting the holder (younger)
-    expect((error as any).woundTarget).toBe('txn_young');
+    expect(error!.woundTarget).toBe('txn_young');
   });
 
   /**

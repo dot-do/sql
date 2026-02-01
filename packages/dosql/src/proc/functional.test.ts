@@ -216,11 +216,16 @@ describe('Context Builder', () => {
 
   describe('functionalDb builder', () => {
     it('should build db with fluent API', () => {
-      const userAdapter = createInMemoryAdapter([
+      // Define row types matching the TestDB schema
+      type UserRow = { id: number; name: string; email: string; active: boolean };
+      type OrderRow = { id: number; userId: number; totalAmount: number; status: string };
+      type AccountRow = { id: string; balance: number; ownerId: number };
+
+      const userAdapter = createInMemoryAdapter<UserRow>([
         { id: 1, name: 'Test', email: 'test@test.com', active: true },
       ]);
-      const orderAdapter = createInMemoryAdapter<{ id: number; userId: number; totalAmount: number; status: string }>([]);
-      const accountAdapter = createInMemoryAdapter<{ id: string; balance: number; ownerId: number }>([]);
+      const orderAdapter = createInMemoryAdapter<OrderRow>([]);
+      const accountAdapter = createInMemoryAdapter<AccountRow>([]);
 
       const tableMap = new Map<string, ReturnType<typeof createInMemoryAdapter>>();
       tableMap.set('users', userAdapter);
@@ -228,10 +233,10 @@ describe('Context Builder', () => {
       tableMap.set('accounts', accountAdapter);
 
       const db = functionalDb<TestDB>()
-        .table('users', userAdapter as any)
-        .table('orders', orderAdapter as any)
-        .table('accounts', accountAdapter as any)
-        .sql(createInMemorySqlExecutor(tableMap as any))
+        .table('users', userAdapter)
+        .table('orders', orderAdapter)
+        .table('accounts', accountAdapter)
+        .sql(createInMemorySqlExecutor(tableMap))
         .transactions(createInMemoryTransactionManager())
         .build();
 
@@ -615,8 +620,8 @@ describe('withValidation', () => {
     const result = await validated('Alice', 25, ctx);
     expect(result).toEqual({ name: 'Alice', age: 25 });
 
-    // Invalid first arg
-    await expect(validated(123 as any, 25, ctx)).rejects.toThrow('index 0');
+    // Invalid first arg - pass number as unknown to test runtime validation
+    await expect(validated(123 as unknown as string, 25, ctx)).rejects.toThrow('index 0');
 
     // Invalid second arg
     await expect(validated('Bob', -5, ctx)).rejects.toThrow('index 1');

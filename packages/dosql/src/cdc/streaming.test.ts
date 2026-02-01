@@ -947,11 +947,11 @@ describe('CDC Streaming - Schema Evolution', () => {
     const entries = await reader.readEntries({ operations: ['INSERT'] });
     const events = entries
       .filter((e) => e.table === 'items')
-      .map((e) => walEntryToChangeEvent(e, decode) as ChangeEvent);
+      .map((e) => walEntryToChangeEvent(e, decode) as ChangeEvent<Record<string, unknown>>);
 
     expect(events).toHaveLength(2);
-    expect((events[0].data as any).deprecated_field).toBe('old');
-    expect((events[1].data as any).deprecated_field).toBeUndefined();
+    expect(events[0].data?.['deprecated_field']).toBe('old');
+    expect(events[1].data?.['deprecated_field']).toBeUndefined();
   });
 
   it('should handle column type changes gracefully', async () => {
@@ -968,11 +968,11 @@ describe('CDC Streaming - Schema Evolution', () => {
     const entries = await reader.readEntries({ operations: ['INSERT'] });
     const events = entries
       .filter((e) => e.table === 'products')
-      .map((e) => walEntryToChangeEvent(e, decode) as ChangeEvent);
+      .map((e) => walEntryToChangeEvent(e, decode) as ChangeEvent<Record<string, unknown>>);
 
     expect(events).toHaveLength(2);
-    expect((events[0].data as any).price).toBe(100);
-    expect((events[1].data as any).price).toBe('199.99');
+    expect(events[0].data?.['price']).toBe(100);
+    expect(events[1].data?.['price']).toBe('199.99');
   });
 
   it('should handle updates with schema differences between before and after', async () => {
@@ -1002,10 +1002,10 @@ describe('CDC Streaming - Schema Evolution', () => {
     const entries = await reader.readEntries({ operations: ['INSERT'] });
     const events = entries
       .filter((e) => e.table === 'orders')
-      .map((e) => walEntryToChangeEvent(e, decode) as ChangeEvent);
+      .map((e) => walEntryToChangeEvent(e, decode) as ChangeEvent<Record<string, unknown>>);
 
-    expect((events[0].data as any).discount).toBeNull();
-    expect((events[1].data as any).discount).toBe(10);
+    expect(events[0].data?.['discount']).toBeNull();
+    expect(events[1].data?.['discount']).toBe(10);
   });
 });
 

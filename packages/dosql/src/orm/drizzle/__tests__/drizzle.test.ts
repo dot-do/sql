@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 // Import our types directly (these work in workers)
 import type { DoSQLBackend, DoSQLDrizzleConfig, DoSQLRunResult } from '../types.js';
+import type { ExecutionContext } from '../../../engine/types.js';
 
 // =============================================================================
 // TYPE AND INTERFACE TESTS
@@ -37,13 +38,18 @@ describe('DoSQL Drizzle Types', () => {
     });
 
     it('should support optional getContext method', () => {
+      // getContext returns ExecutionContext but is optional, so we test with a partial mock
       const mockBackend: DoSQLBackend = {
         all: async () => [],
         get: async () => undefined,
         run: async () => ({ rowsAffected: 0 }),
         values: async () => [],
         transaction: async (fn) => fn({} as DoSQLBackend),
-        getContext: () => ({ timestamp: Date.now() } as any),
+        getContext: () => ({
+          schema: {} as ExecutionContext['schema'],
+          btree: {} as ExecutionContext['btree'],
+          columnar: {} as ExecutionContext['columnar'],
+        }),
       };
 
       expect(typeof mockBackend.getContext).toBe('function');
@@ -339,12 +345,12 @@ describe('Drizzle Integration Pattern', () => {
       transaction: async (fn) => fn({} as DoSQLBackend),
     };
 
-    // Config with schema type
+    // Config with schema type - using placeholder objects for table definitions
     const config: DoSQLDrizzleConfig<Schema> = {
       backend,
       schema: {
-        users: {} as any,
-        posts: {} as any,
+        users: {} as Schema['users'],
+        posts: {} as Schema['posts'],
       },
     };
 

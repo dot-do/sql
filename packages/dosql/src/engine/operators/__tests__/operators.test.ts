@@ -67,6 +67,7 @@ import {
   createSetOperationOperator,
   executeSetOperation,
   getSetOperationPrecedence,
+  type SetOperationType,
 } from '../set-ops.js';
 
 // Subquery operator imports
@@ -625,7 +626,7 @@ describe('CASE Expression Operator', () => {
       const folded = foldConstantCase(constantCase);
       expect(folded).not.toBeNull();
       expect(folded?.type).toBe('literal');
-      expect((folded as any).value).toBe('result');
+      expect(folded?.type === 'literal' && folded.value).toBe('result');
     });
   });
 
@@ -1806,7 +1807,8 @@ describe('Set Operations Operator', () => {
       const left = createMockOperator([]);
       const right = createMockOperator([]);
 
-      expect(() => createSetOperationOperator('UNKNOWN' as any, left, right, false)).toThrow('Unknown set operation');
+      // Test with invalid set operation type to verify error handling
+      expect(() => createSetOperationOperator('UNKNOWN' as SetOperationType, left, right, false)).toThrow('Unknown set operation');
     });
   });
 
@@ -2995,19 +2997,19 @@ describe('Window Operator', () => {
     });
 
     it('should extract window function definitions', () => {
-      const expressions = [
+      const expressions: { expr: Expression & { over?: WindowSpec }; alias: string }[] = [
         {
           expr: {
             type: 'function' as const,
             name: 'row_number',
             args: [],
-            over: { orderBy: [{ column: 'id', direction: 'asc' }] },
+            over: { orderBy: [{ expression: col('id'), direction: 'asc' as const }] },
           },
           alias: 'rn',
         },
       ];
 
-      const windowFuncs = extractWindowFunctions(expressions as any);
+      const windowFuncs = extractWindowFunctions(expressions);
 
       expect(windowFuncs).toHaveLength(1);
       expect(windowFuncs[0].name).toBe('row_number');

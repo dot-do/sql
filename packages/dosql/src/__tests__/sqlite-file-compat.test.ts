@@ -388,9 +388,10 @@ describe('Read existing .sqlite file into DoSQL', () => {
     });
 
     // Original table should be preserved
-    const products = db.prepare('SELECT * FROM products').all();
+    interface CustomProduct { id: number; custom: string }
+    const products = db.prepare<CustomProduct>('SELECT * FROM products').all();
     expect(products).toHaveLength(1);
-    expect((products[0] as any).custom).toBe('existing');
+    expect(products[0].custom).toBe('existing');
   });
 
   /**
@@ -408,11 +409,12 @@ describe('Read existing .sqlite file into DoSQL', () => {
     });
 
     // Table should have been replaced with imported data (old rows deleted, new rows added)
-    const products = db.prepare('SELECT * FROM products ORDER BY id').all();
+    interface ProductRow { id: number; name: string; price: number; stock: number }
+    const products = db.prepare<ProductRow>('SELECT * FROM products ORDER BY id').all();
     expect(products).toHaveLength(3);
-    expect((products[0] as any).name).toBe('Widget');
+    expect(products[0].name).toBe('Widget');
     // The old 'existing' row should be gone
-    const existingRow = products.find((p: any) => p.name === 'existing');
+    const existingRow = products.find(p => p.name === 'existing');
     expect(existingRow).toBeUndefined();
   });
 });
@@ -907,22 +909,29 @@ describe('Serialization and buffer operations', () => {
 
     const restoredDb = FileBackedDatabase.deserialize(buffer);
 
-    const rows = restoredDb.prepare('SELECT * FROM complex ORDER BY id').all();
+    interface ComplexRow {
+      id: number;
+      int_val: number | null;
+      real_val: number | null;
+      text_val: string | null;
+      blob_val: Uint8Array | null;
+    }
+    const rows = restoredDb.prepare<ComplexRow>('SELECT * FROM complex ORDER BY id').all();
     expect(rows).toHaveLength(3);
 
-    expect((rows[0] as any).int_val).toBe(42);
-    expect((rows[0] as any).real_val).toBeCloseTo(3.14159, 5);
-    expect((rows[0] as any).text_val).toBe('Hello, World!');
+    expect(rows[0].int_val).toBe(42);
+    expect(rows[0].real_val).toBeCloseTo(3.14159, 5);
+    expect(rows[0].text_val).toBe('Hello, World!');
     // BLOB comparison - may be Buffer or Uint8Array depending on implementation
-    const row0Blob = (rows[0] as any).blob_val;
+    const row0Blob = rows[0].blob_val;
     if (row0Blob) {
       const arr = row0Blob instanceof Uint8Array ? row0Blob : new Uint8Array(row0Blob);
       expect(arr[0]).toBe(0x00);
       expect(arr[5]).toBe(0xfd);
     }
 
-    expect((rows[1] as any).int_val).toBeNull();
-    expect((rows[1] as any).text_val).toBeNull();
+    expect(rows[1].int_val).toBeNull();
+    expect(rows[1].text_val).toBeNull();
 
     originalDb.close();
     restoredDb.close();

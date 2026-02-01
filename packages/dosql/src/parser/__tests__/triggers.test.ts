@@ -25,63 +25,24 @@
 
 import { describe, it, expect } from 'vitest';
 import { parseDDL, isParseSuccess, isParseError } from '../ddl.js';
-import type { DDLStatement } from '../ddl-types.js';
+import type { DDLStatement, CreateTriggerStatement, DropTriggerStatement } from '../ddl-types.js';
 
 // =============================================================================
-// TYPE DEFINITIONS FOR TRIGGER SUPPORT
+// TYPE GUARDS FOR TRIGGER STATEMENTS
 // =============================================================================
-
-/**
- * Expected trigger timing type
- */
-type TriggerTiming = 'BEFORE' | 'AFTER' | 'INSTEAD OF';
-
-/**
- * Expected trigger event type
- */
-type TriggerEvent = 'INSERT' | 'UPDATE' | 'DELETE';
-
-/**
- * Expected CREATE TRIGGER statement structure
- * This is the expected AST structure when trigger support is implemented
- */
-interface CreateTriggerStatement {
-  type: 'CREATE TRIGGER';
-  name: string;
-  schema?: string;
-  ifNotExists?: boolean;
-  temporary?: boolean;
-  timing: TriggerTiming;
-  event: TriggerEvent;
-  columns?: string[]; // For UPDATE OF column_list
-  table: string;
-  forEachRow?: boolean;
-  when?: string; // WHEN condition expression
-  body: string[]; // Trigger body statements
-}
-
-/**
- * Expected DROP TRIGGER statement structure
- */
-interface DropTriggerStatement {
-  type: 'DROP TRIGGER';
-  name: string;
-  schema?: string;
-  ifExists?: boolean;
-}
 
 /**
  * Type guard for CREATE TRIGGER statement
  */
-function isCreateTriggerStatement(stmt: DDLStatement): stmt is CreateTriggerStatement & DDLStatement {
-  return (stmt as any).type === 'CREATE TRIGGER';
+function isCreateTriggerStatement(stmt: DDLStatement): stmt is CreateTriggerStatement {
+  return stmt.type === 'CREATE TRIGGER';
 }
 
 /**
  * Type guard for DROP TRIGGER statement
  */
-function isDropTriggerStatement(stmt: DDLStatement): stmt is DropTriggerStatement & DDLStatement {
-  return (stmt as any).type === 'DROP TRIGGER';
+function isDropTriggerStatement(stmt: DDLStatement): stmt is DropTriggerStatement {
+  return stmt.type === 'DROP TRIGGER';
 }
 
 // =============================================================================

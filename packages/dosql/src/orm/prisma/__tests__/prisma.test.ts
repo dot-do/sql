@@ -145,7 +145,8 @@ class InMemoryDoSQLBackend implements DoSQLBackend {
     const newRow: Row = {};
     const values = params ?? [];
     for (let i = 0; i < columns.length && i < values.length; i++) {
-      newRow[columns[i]] = values[i] as any;
+      // SQL parameters are expected to be SqlValue types
+      newRow[columns[i]] = values[i] as Row[string];
     }
 
     // Auto-generate ID if not provided

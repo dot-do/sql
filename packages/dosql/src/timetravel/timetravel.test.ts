@@ -51,6 +51,8 @@ import {
   DEFAULT_TIER_CONFIG,
 } from './query.js';
 
+import type { SnapshotId } from '../fsx/cow-types.js';
+
 // =============================================================================
 // Test Utilities
 // =============================================================================
@@ -461,7 +463,7 @@ describe('Query Rewriting', () => {
     const sql = "SELECT * FROM users AS OF SNAPSHOT 'main@100'";
     const parsed = parseTimeTravelQuery(sql)!;
     const resolution: TierResolution = {
-      tiers: [{ tier: 'memory', isPrimary: true, snapshotId: 'main@100' as any }],
+      tiers: [{ tier: 'memory', isPrimary: true, snapshotId: 'main@100' as SnapshotId }],
       explanation: 'test',
       estimatedAge: 'hot',
       requiresMerge: false,

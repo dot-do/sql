@@ -537,13 +537,18 @@ describe('Database Context', () => {
   });
 
   it('should create full database context', () => {
+    interface TestSchema extends DatabaseSchema {
+      users: { id: number; name: string; email: string };
+      orders: { id: number; userId: number; total: number };
+    }
+
     const adapters = {
-      users: createInMemoryAdapter([{ id: 1, name: 'Test', email: 'test@test.com' }]),
-      orders: createInMemoryAdapter([{ id: 1, userId: 1, total: 100 }]),
+      users: createInMemoryAdapter<TestSchema['users']>([{ id: 1, name: 'Test', email: 'test@test.com' }]),
+      orders: createInMemoryAdapter<TestSchema['orders']>([{ id: 1, userId: 1, total: 100 }]),
     };
 
-    const db = createDatabaseContext({
-      adapters: adapters as any,
+    const db = createDatabaseContext<TestSchema>({
+      adapters,
       sqlExecutor: createInMemorySqlExecutor(new Map(Object.entries(adapters))),
       transactionManager: createInMemoryTransactionManager(),
     });

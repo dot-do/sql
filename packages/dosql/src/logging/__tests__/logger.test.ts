@@ -87,9 +87,12 @@ describe('Structured Logger - Error Events Include Structured Fields', () => {
   });
 
   it('should include error details with name, code, message, and stack', () => {
-    const error = new Error('Something failed');
+    interface ErrorWithCode extends Error {
+      code?: string;
+    }
+    const error: ErrorWithCode = new Error('Something failed');
     error.name = 'TransactionError';
-    (error as any).code = 'ROLLBACK_FAILED';
+    error.code = 'ROLLBACK_FAILED';
 
     logger.error('Operation failed', error, { operation: 'rollback' });
 
@@ -391,9 +394,12 @@ describe('Structured Logger - JSON Serialization', () => {
 
     const logger = createLogger({ sink });
 
-    const error = new Error('Test error');
+    interface ErrorWithFunction extends Error {
+      fn?: () => void;
+    }
+    const error: ErrorWithFunction = new Error('Test error');
     // Add non-serializable property
-    (error as any).fn = () => {};
+    error.fn = () => {};
 
     // Should not throw
     expect(() => logger.error('error test', error)).not.toThrow();
@@ -583,8 +589,11 @@ describe('Structured Logger - Transaction Manager Integration', () => {
 
     // Simulate what transaction manager would log
     const txnId = 'txn-12345';
-    const error = new Error('WAL write failed');
-    (error as any).code = 'WAL_FAILURE';
+    interface ErrorWithCode extends Error {
+      code?: string;
+    }
+    const error: ErrorWithCode = new Error('WAL write failed');
+    error.code = 'WAL_FAILURE';
 
     logger.error('Failed to apply rollback operations', error, {
       txnId,

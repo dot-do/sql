@@ -47,6 +47,19 @@ import type {
 import { isParseSuccess, isParseError } from '../dml-types.js';
 
 // =============================================================================
+// Expected Extended Types (GAP Documentation)
+// =============================================================================
+
+/**
+ * Extended ReturningClause type with wildcard expansion metadata
+ * This documents the expected future implementation
+ */
+interface ExtendedReturningClause extends ReturningClause {
+  /** Whether this RETURNING clause requires schema-aware wildcard expansion */
+  requiresWildcardExpansion?: boolean;
+}
+
+// =============================================================================
 // INSERT ... RETURNING * Tests
 // =============================================================================
 
@@ -64,7 +77,8 @@ describe('RETURNING Clause: INSERT ... RETURNING *', () => {
     expect(result.statement.returning?.columns[0].expression).toBe('*');
     // This property doesn't exist yet - documenting expected feature
     // When implemented, wildcard should have metadata for schema-aware expansion
-    expect((result.statement.returning as any).requiresWildcardExpansion).toBe(true);
+    const extendedReturning = result.statement.returning as ExtendedReturningClause;
+    expect(extendedReturning.requiresWildcardExpansion).toBe(true);
   });
 
   it('should parse INSERT DEFAULT VALUES with RETURNING * (gap: DEFAULT VALUES source)', () => {

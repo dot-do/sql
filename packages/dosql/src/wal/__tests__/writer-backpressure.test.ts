@@ -12,7 +12,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { createWALWriter, DefaultWALEncoder } from '../writer.js';
-import { DEFAULT_WAL_CONFIG, WALError, WALErrorCode } from '../types.js';
+import { DEFAULT_WAL_CONFIG, WALError, WALErrorCode, createTransactionId } from '../types.js';
 import type { FSXBackend } from '../../fsx/types.js';
 
 /**
@@ -45,7 +45,7 @@ function createMockBackend(options?: { failWrites?: boolean }): FSXBackend {
 function makeEntry(table = 'test_table') {
   return {
     timestamp: Date.now(),
-    txnId: 'txn_test' as any,
+    txnId: createTransactionId('txn_test'),
     op: 'INSERT' as const,
     table,
     after: new Uint8Array([1, 2, 3]),
@@ -55,8 +55,8 @@ function makeEntry(table = 'test_table') {
 describe('WAL Writer Backpressure (sql-j4ze)', () => {
   it('should have a default maxPendingEntries in DEFAULT_WAL_CONFIG', () => {
     // The default config should define a maxPendingEntries limit
-    expect((DEFAULT_WAL_CONFIG as any).maxPendingEntries).toBeDefined();
-    expect((DEFAULT_WAL_CONFIG as any).maxPendingEntries).toBeGreaterThan(0);
+    expect(DEFAULT_WAL_CONFIG.maxPendingEntries).toBeDefined();
+    expect(DEFAULT_WAL_CONFIG.maxPendingEntries).toBeGreaterThan(0);
   });
 
   it('should reject appends when pendingEntries exceeds maxPendingEntries', async () => {

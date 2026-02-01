@@ -1599,8 +1599,8 @@ describe('Cross-DO Communication: Network Failure Handling', () => {
         selectorWithCircuitBreaker.recordFailure('shard-1', 'shard-1');
       }
 
-      // The circuit is now open
-      const healthState = (selectorWithCircuitBreaker as any).getHealthStateDebug('shard-1', 'shard-1');
+      // The circuit is now open - access debug method via implementation type
+      const healthState = (selectorWithCircuitBreaker as DefaultReplicaSelector).getHealthStateDebug('shard-1', 'shard-1');
       expect(healthState.circuitState).toBe('open');
     });
   });

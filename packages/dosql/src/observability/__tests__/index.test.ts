@@ -16,6 +16,7 @@ import { TracerImpl } from '../tracer.js';
 import { MetricsRegistryImpl } from '../metrics.js';
 import { NoOpTracer } from '../tracer.js';
 import { NoOpMetricsRegistry } from '../metrics.js';
+import type { TracingConfig, MetricsConfig } from '../types.js';
 
 // =============================================================================
 // createObservability
@@ -41,28 +42,28 @@ describe('createObservability', () => {
   });
 
   it('returns TracerImpl when tracing is enabled', () => {
-    const obs = createObservability({ tracing: { enabled: true } as any });
+    const obs = createObservability({ tracing: { enabled: true } as Partial<TracingConfig> });
     expect(obs.tracer).toBeInstanceOf(TracerImpl);
   });
 
   it('returns NoOpTracer when tracing is disabled', () => {
-    const obs = createObservability({ tracing: { enabled: false } as any });
+    const obs = createObservability({ tracing: { enabled: false } as Partial<TracingConfig> });
     expect(obs.tracer).toBeInstanceOf(NoOpTracer);
   });
 
   it('returns MetricsRegistryImpl when metrics are enabled', () => {
-    const obs = createObservability({ metrics: { enabled: true } as any });
+    const obs = createObservability({ metrics: { enabled: true } as Partial<MetricsConfig> });
     expect(obs.metrics).toBeInstanceOf(MetricsRegistryImpl);
   });
 
   it('returns NoOpMetricsRegistry when metrics are disabled', () => {
-    const obs = createObservability({ metrics: { enabled: false } as any });
+    const obs = createObservability({ metrics: { enabled: false } as Partial<MetricsConfig> });
     expect(obs.metrics).toBeInstanceOf(NoOpMetricsRegistry);
   });
 
   it('merges custom config with defaults', () => {
     const obs = createObservability({
-      tracing: { serviceName: 'custom-service' } as any,
+      tracing: { serviceName: 'custom-service' } as Partial<TracingConfig>,
     });
 
     expect(obs.config.tracing.serviceName).toBe('custom-service');

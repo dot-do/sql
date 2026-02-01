@@ -54,7 +54,8 @@ describe('DoSQL Knex Integration', () => {
 
   async function executeKnex<T>(builder: Knex.QueryBuilder | Knex.Raw): Promise<T[]> {
     const compiled = builder.toSQL();
-    const result = await backend.query(compiled.sql, compiled.bindings as any[]);
+    // Knex bindings are compatible with SqlValue[] type
+    const result = await backend.query(compiled.sql, compiled.bindings as Parameters<typeof backend.query>[1]);
     return result.rows as T[];
   }
 
@@ -65,7 +66,8 @@ describe('DoSQL Knex Integration', () => {
 
   async function executeKnexModify(builder: Knex.QueryBuilder | Knex.Raw): Promise<number> {
     const compiled = builder.toSQL();
-    const result = await backend.exec(compiled.sql, compiled.bindings as any[]);
+    // Knex bindings are compatible with SqlValue[] type
+    const result = await backend.exec(compiled.sql, compiled.bindings as Parameters<typeof backend.exec>[1]);
     return result.rowsAffected ?? 0;
   }
 

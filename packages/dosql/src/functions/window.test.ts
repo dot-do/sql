@@ -53,6 +53,8 @@ import {
   resolveWindowSpec,
   validateWindowSpec,
   type WindowDefinition,
+  type ColumnReference,
+  type Expression as WindowExpression,
 } from '../parser/window.js';
 
 import {
@@ -689,14 +691,16 @@ describe('Window Parser', () => {
       const result = parseWindowSpec({ input: '(PARTITION BY dept)', position: 0 });
       expect(result).not.toBeNull();
       expect(result!.spec.partitionBy).toHaveLength(1);
-      expect((result!.spec.partitionBy![0] as any).column).toBe('dept');
+      const expr = result!.spec.partitionBy![0] as ColumnReference;
+      expect(expr.column).toBe('dept');
     });
 
     it('parses ORDER BY clause', () => {
       const result = parseWindowSpec({ input: '(ORDER BY salary DESC)', position: 0 });
       expect(result).not.toBeNull();
       expect(result!.spec.orderBy).toHaveLength(1);
-      expect((result!.spec.orderBy![0].expression as any).column).toBe('salary');
+      const expr = result!.spec.orderBy![0].expression as ColumnReference;
+      expect(expr.column).toBe('salary');
       expect(result!.spec.orderBy![0].direction).toBe('desc');
     });
 

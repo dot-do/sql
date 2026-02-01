@@ -1434,7 +1434,7 @@ describe('INSTEAD OF Triggers', () => {
     `));
 
     const executor = createSimpleTriggerExecutor(registry, {
-      user_view: [] as any[],
+      user_view: [] as Record<string, unknown>[],
       users: [{ id: 1, name: 'Old', email: 'old@example.com' }],
       profiles: [{ user_id: 1, bio: 'Old bio' }],
     });

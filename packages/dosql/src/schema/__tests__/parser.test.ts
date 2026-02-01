@@ -21,6 +21,7 @@ import {
   isArrayType,
   getDefaultValue,
 } from '../parser.js';
+import type { SchemaDefinition } from '../types.js';
 
 // =============================================================================
 // parseField TESTS
@@ -366,13 +367,14 @@ describe('parseSchema', () => {
   });
 
   it('should skip schema directives (@ prefixed keys)', () => {
+    // Schema with directive key - parseSchema handles mixed table and directive entries
     const result = parseSchema({
       users: {
         id: 'uuid!',
         name: 'string',
       },
       '@index': ['email'],
-    } as any);
+    } as SchemaDefinition);
 
     expect(result.size).toBe(1);
     expect(result.has('users')).toBe(true);

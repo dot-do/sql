@@ -266,7 +266,8 @@ describe('Parameter Binding', () => {
     });
 
     it('should return false for null', () => {
-      expect(isNamedParameters(null as any)).toBe(false);
+      // Test null handling - cast to unknown to satisfy type checker
+      expect(isNamedParameters(null as unknown as Record<string, unknown>)).toBe(false);
     });
   });
 });
@@ -503,7 +504,8 @@ describe('PreparedStatement', () => {
 
   describe('all()', () => {
     it('should return all matching rows', () => {
-      const stmt = new PreparedStatement(
+      interface UserRow { name: string; age: number; id: number }
+      const stmt = new PreparedStatement<UserRow>(
         'SELECT * FROM users WHERE age > ?',
         engine
       );
@@ -511,8 +513,8 @@ describe('PreparedStatement', () => {
       const users = stmt.all(25);
 
       expect(users).toHaveLength(2);
-      expect(users.map(u => (u as any).name)).toContain('Alice');
-      expect(users.map(u => (u as any).name)).toContain('Charlie');
+      expect(users.map(u => u.name)).toContain('Alice');
+      expect(users.map(u => u.name)).toContain('Charlie');
     });
 
     it('should return empty array for no matches', () => {
@@ -529,11 +531,12 @@ describe('PreparedStatement', () => {
 
   describe('iterate()', () => {
     it('should iterate over all rows', () => {
-      const stmt = new PreparedStatement('SELECT * FROM users', engine);
+      interface UserRow { name: string; age: number; id: number }
+      const stmt = new PreparedStatement<UserRow>('SELECT * FROM users', engine);
 
       const names: string[] = [];
       for (const user of stmt.iterate()) {
-        names.push((user as any).name);
+        names.push(user.name);
       }
 
       expect(names).toHaveLength(3);
@@ -862,12 +865,15 @@ describe('Integration Tests', () => {
       )
     `);
 
+    // Define product row type
+    interface ProductRow { id: number; name: string; price: number; quantity: number }
+
     // Prepare statements
     const insert = db.prepare(
       'INSERT INTO products (name, price, quantity) VALUES (:name, :price, :quantity)'
     );
-    const selectAll = db.prepare('SELECT * FROM products');
-    const selectByPrice = db.prepare('SELECT * FROM products WHERE price > ?');
+    const selectAll = db.prepare<ProductRow>('SELECT * FROM products');
+    const selectByPrice = db.prepare<ProductRow>('SELECT * FROM products WHERE price > ?');
 
     // Insert products
     insert.run({ name: 'Widget', price: 100, quantity: 50 });
@@ -881,7 +887,7 @@ describe('Integration Tests', () => {
     // Query by price
     const expensive = selectByPrice.all(150);
     expect(expensive).toHaveLength(1);
-    expect((expensive[0] as any).name).toBe('Gadget');
+    expect(expensive[0].name).toBe('Gadget');
 
     // Update
     const update = db.prepare(

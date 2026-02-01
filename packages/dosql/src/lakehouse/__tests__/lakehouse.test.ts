@@ -1175,7 +1175,9 @@ describe('Lakehouse Manifest Manager - Snapshots', () => {
     const rollbackSnapshot = await manager.rollbackTo(snapshot1.id);
 
     expect(rollbackSnapshot.operation.type).toBe('rollback');
-    expect((rollbackSnapshot.operation as any).targetSnapshotId).toBe(snapshot1.id);
+    // Rollback operation includes the target snapshot ID
+    const rollbackOp = rollbackSnapshot.operation as { type: 'rollback'; targetSnapshotId: string };
+    expect(rollbackOp.targetSnapshotId).toBe(snapshot1.id);
   });
 
   it('should throw error when rolling back to non-existent snapshot', async () => {
@@ -1215,7 +1217,9 @@ describe('Lakehouse Manifest Manager - Schema Evolution', () => {
     const snapshot = await manager.updateSchema('users', newSchema, ['add_column: email']);
 
     expect(snapshot.operation.type).toBe('schema-evolution');
-    expect((snapshot.operation as any).changes).toContain('add_column: email');
+    // Schema evolution operation includes the changes array
+    const schemaOp = snapshot.operation as { type: 'schema-evolution'; changes: string[] };
+    expect(schemaOp.changes).toContain('add_column: email');
 
     const table = await manager.getTable('users');
     expect(table?.schema.columns).toHaveLength(4);

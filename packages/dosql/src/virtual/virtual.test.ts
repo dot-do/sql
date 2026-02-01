@@ -412,14 +412,15 @@ describe('VirtualTableRegistry', () => {
   });
 
   it('should create R2 virtual table with binding', async () => {
-    const mockBucket = {
+    // Partial mock of R2Bucket with only the methods needed for virtual tables
+    const mockBucket: Pick<R2Bucket, 'get' | 'head' | 'list'> = {
       get: vi.fn().mockResolvedValue(null),
       head: vi.fn().mockResolvedValue(null),
       list: vi.fn().mockResolvedValue({ objects: [], truncated: false, delimitedPrefixes: [] }),
     };
 
     const registry = createVirtualTableRegistry({
-      bindings: { r2: { mybucket: mockBucket as any } },
+      bindings: { r2: { mybucket: mockBucket as R2Bucket } },
     });
 
     const table = await registry.create('r2://mybucket/data.json');
@@ -427,14 +428,15 @@ describe('VirtualTableRegistry', () => {
   });
 
   it('should add R2 bucket dynamically', async () => {
-    const mockBucket = {
+    // Partial mock of R2Bucket with only the methods needed for virtual tables
+    const mockBucket: Pick<R2Bucket, 'get' | 'head' | 'list'> = {
       get: vi.fn().mockResolvedValue(null),
       head: vi.fn().mockResolvedValue(null),
       list: vi.fn().mockResolvedValue({ objects: [], truncated: false, delimitedPrefixes: [] }),
     };
 
     const registry = createVirtualTableRegistry();
-    registry.addR2Bucket('mybucket', mockBucket as any);
+    registry.addR2Bucket('mybucket', mockBucket as R2Bucket);
 
     const table = await registry.create('r2://mybucket/data.json');
     expect(table.uri).toBe('r2://mybucket/data.json');

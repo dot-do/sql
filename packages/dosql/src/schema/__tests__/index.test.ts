@@ -206,10 +206,11 @@ describe('getTableNames', () => {
   });
 
   it('should exclude @ prefixed keys', () => {
-    const schema = {
+    // Schema with directive key - getTableNames filters out directive entries
+    const schema: Record<string, unknown> = {
       users: { id: 'uuid!' },
       '@index': ['email'],
-    } as any;
+    };
     const names = getTableNames(schema);
     expect(names).toContain('users');
     expect(names).not.toContain('@index');
