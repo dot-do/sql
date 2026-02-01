@@ -176,6 +176,7 @@ export interface TableSchema {
   columns: ColumnDef[];
   primaryKey?: string[];
   indexes?: IndexDef[];
+  storageConfig?: import('./storage-config.js').TableStorageConfig;
 }
 
 /**

@@ -748,3 +748,14 @@ export {
   type TableTTLConfig,
   DEFAULT_CACHE_INVALIDATION_CONFIG,
 } from './cache-invalidation.js';
+
+// =============================================================================
+// Storage Config Bridge (DoSQL StorageConfig -> DoLake ScalingConfig)
+// =============================================================================
+
+export {
+  getMaxParquetFileSize,
+  applyTableStorageConfig,
+  type TableParquetConfig,
+  type TableStorageOverrides,
+} from './storage-config-bridge.js';

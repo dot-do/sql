@@ -231,6 +231,38 @@ export {
 export { RPCErrorCode } from './types.js';
 
 // =============================================================================
+// Storage Configuration Types
+// =============================================================================
+
+/**
+ * Storage configuration types for per-table and per-database storage settings.
+ * Used with the WITH STORAGE clause in CREATE TABLE statements.
+ *
+ * @public
+ * @stability experimental
+ * @since 0.2.0
+ */
+export type {
+  StorageConfig,
+  TableStorageConfig,
+  DatabaseStorageConfig,
+  StorageConfigField,
+} from './storage-config.js';
+
+/**
+ * Storage configuration constants and utilities.
+ *
+ * @public
+ * @stability experimental
+ * @since 0.2.0
+ */
+export {
+  DEFAULT_STORAGE_CONFIG,
+  STORAGE_CONFIG_FIELDS,
+  isValidStorageConfig,
+} from './storage-config.js';
+
+// =============================================================================
 // Experimental Utility Exports
 // =============================================================================
 

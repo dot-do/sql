@@ -58,6 +58,9 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
   private readonly coldBackend: ColdBackendWithBatch;
   private readonly config: TieredStorageConfig;
 
+  /** Per-table (path prefix) config overrides */
+  private tableConfigs = new Map<string, Partial<TieredStorageConfig>>();
+
   /** In-memory index of file locations (for fast tier lookup) */
   private tierIndex = new Map<string, TierIndexEntry>();
 
@@ -93,6 +96,41 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
       this.progressTracker,
       this.indexPrefix
     );
+  }
+
+  // ===========================================================================
+  // Per-Table Config
+  // ===========================================================================
+
+  /**
+   * Set per-table (path prefix) config overrides.
+   * Values override the constructor-level config for paths matching the prefix.
+   */
+  setTableConfig(prefix: string, config: Partial<TieredStorageConfig>): void {
+    this.tableConfigs.set(prefix, config);
+  }
+
+  /**
+   * Resolve the effective TieredStorageConfig for a given path.
+   * Merges: DEFAULT_TIERED_CONFIG -> constructor config -> matching table config.
+   */
+  getConfigForPath(path: string): TieredStorageConfig {
+    // Find matching table prefix (longest prefix match)
+    let matchedPrefix: string | undefined;
+    for (const prefix of this.tableConfigs.keys()) {
+      if (path.startsWith(prefix)) {
+        if (!matchedPrefix || prefix.length > matchedPrefix.length) {
+          matchedPrefix = prefix;
+        }
+      }
+    }
+
+    if (!matchedPrefix) {
+      return this.config;
+    }
+
+    const tableOverrides = this.tableConfigs.get(matchedPrefix)!;
+    return { ...this.config, ...tableOverrides };
   }
 
   // ===========================================================================
@@ -137,6 +175,7 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
   ): Promise<void> {
     const now = Date.now();
     const size = data.length;
+    const pathConfig = this.getConfigForPath(path);
 
     // Determine initial tier based on options, then size
     let tier: StorageTier;
@@ -147,16 +186,16 @@ export class TieredStorageBackend implements FSXBackendWithMeta {
       tier = StorageTier.COLD;
     } else if (options.tier === StorageTier.HOT) {
       // User explicitly requested hot storage (if within size limit)
-      if (size > this.config.maxHotFileSize) {
+      if (size > pathConfig.maxHotFileSize) {
         throw new FSXError(
           FSXErrorCode.SIZE_EXCEEDED,
-          `File size ${size} exceeds maxHotFileSize ${this.config.maxHotFileSize}`,
+          `File size ${size} exceeds maxHotFileSize ${pathConfig.maxHotFileSize}`,
           path
         );
       }
       await this.hotBackend.write(path, data);
       tier = StorageTier.HOT;
-    } else if (size > this.config.maxHotFileSize) {
+    } else if (size > pathConfig.maxHotFileSize) {
       // Large files go directly to cold storage
       await this.coldBackend.write(path, data);
       tier = StorageTier.COLD;

@@ -22,6 +22,8 @@ import {
   TARGET_ROW_GROUP_SIZE,
 } from './types.js';
 
+import type { TableStorageConfig } from '../engine/storage-config.js';
+
 import {
   encodeRaw,
   encodeRawStrings,
@@ -98,9 +100,17 @@ export interface WriterConfig {
 
   /** Flush callback when row group is ready */
   onFlush?: (rowGroup: RowGroup, data: Uint8Array) => Promise<void>;
+
+  /**
+   * Per-table storage config overrides from StorageConfig.
+   * Provides defaults for targetRowsPerGroup (from maxRowsPerRowGroup)
+   * and targetBytesPerGroup (from rowGroupSize).
+   * Explicit targetRowsPerGroup/targetBytesPerGroup take precedence.
+   */
+  storageConfig?: TableStorageConfig;
 }
 
-const DEFAULT_CONFIG: Required<Omit<WriterConfig, 'forceEncoding' | 'onFlush'>> = {
+const DEFAULT_CONFIG: Required<Omit<WriterConfig, 'forceEncoding' | 'onFlush' | 'storageConfig'>> = {
   targetRowsPerGroup: MAX_ROWS_PER_ROW_GROUP,
   targetBytesPerGroup: TARGET_ROW_GROUP_SIZE,
   disableAutoEncoding: false,
@@ -121,7 +131,7 @@ interface ColumnBuffer {
 
 export class ColumnarWriter {
   private readonly schema: ColumnarTableSchema;
-  private readonly config: Required<Omit<WriterConfig, 'forceEncoding' | 'onFlush'>> &
+  private readonly config: Required<Omit<WriterConfig, 'forceEncoding' | 'onFlush' | 'storageConfig'>> &
     Pick<WriterConfig, 'forceEncoding' | 'onFlush'>;
   private readonly fsx?: FSXInterface;
 
@@ -137,7 +147,19 @@ export class ColumnarWriter {
     fsx?: FSXInterface
   ) {
     this.schema = schema;
-    this.config = { ...DEFAULT_CONFIG, ...config };
+
+    // Resolve config: explicit fields > storageConfig > hardcoded defaults
+    const storageDefaults: Partial<Pick<typeof DEFAULT_CONFIG, 'targetRowsPerGroup' | 'targetBytesPerGroup'>> = {};
+    if (config?.storageConfig) {
+      if (config.storageConfig.maxRowsPerRowGroup !== undefined && config.targetRowsPerGroup === undefined) {
+        storageDefaults.targetRowsPerGroup = config.storageConfig.maxRowsPerRowGroup;
+      }
+      if (config.storageConfig.rowGroupSize !== undefined && config.targetBytesPerGroup === undefined) {
+        storageDefaults.targetBytesPerGroup = config.storageConfig.rowGroupSize;
+      }
+    }
+
+    this.config = { ...DEFAULT_CONFIG, ...storageDefaults, ...config };
     this.fsx = fsx;
 
     // Initialize column buffers

@@ -945,6 +945,7 @@ interface TableSchema {
   name: string;
   columns: { name: string; type: string; nullable: boolean }[];
   primaryKey: string;
+  storageConfig?: import('./storage-config.js').TableStorageConfig;
 }
 
 // =============================================================================

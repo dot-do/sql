@@ -209,6 +209,29 @@ export type {
 } from './types.js';
 
 // =============================================================================
+// Storage Configuration
+// =============================================================================
+
+/**
+ * Storage configuration types and utilities - experimental.
+ *
+ * @stability experimental
+ * @since 0.2.0
+ */
+export type {
+  StorageConfig,
+  TableStorageConfig,
+  DatabaseStorageConfig,
+  StorageConfigField,
+} from './storage-config.js';
+
+export {
+  DEFAULT_STORAGE_CONFIG,
+  STORAGE_CONFIG_FIELDS,
+  isValidStorageConfig,
+} from './storage-config.js';
+
+// =============================================================================
 // Response/Result Converters
 // =============================================================================
 
