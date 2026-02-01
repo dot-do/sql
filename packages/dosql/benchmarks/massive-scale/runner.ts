@@ -7,9 +7,14 @@
  * - Wiktionary: Dictionary lookups, full-text patterns
  * - Common Crawl: Graph traversals, degree distributions
  *
+ * Also compares Cache API vs Sharded DO performance:
+ * - Cache API: Edge-local (~1ms), eventually consistent
+ * - Sharded DOs: Single location, strongly consistent, full SQL
+ *
  * Usage:
  *   npx tsx runner.ts --dataset=imdb --queries=1000
  *   npx tsx runner.ts --all --concurrency=10
+ *   npx tsx runner.ts --cache-comparison --dataset=imdb
  */
 
 import {
@@ -514,6 +519,168 @@ async function benchmarkCrawlGraph(
 }
 
 // =============================================================================
+// Cache API vs Sharded DO Comparison
+// =============================================================================
+
+interface CacheComparisonResult {
+  dataset: string;
+  queryType: string;
+  iterations: number;
+  cache: {
+    p50: number;
+    p95: number;
+    p99: number;
+    avg: number;
+    hitRate: number;
+  };
+  do: {
+    p50: number;
+    p95: number;
+    p99: number;
+    avg: number;
+  };
+  speedup: {
+    p50: number;
+    avg: number;
+  };
+  recommendation: string;
+}
+
+async function runCacheComparison(
+  endpoint: string,
+  dataset: 'imdb' | 'wiktionary' | 'crawl_graph',
+  config: BenchmarkConfig
+): Promise<CacheComparisonResult[]> {
+  const results: CacheComparisonResult[] = [];
+
+  // Sample keys for each dataset
+  const sampleKeys = {
+    imdb: [
+      'tt0111161', 'tt0068646', 'tt0071562', 'tt0468569', 'tt0050083',
+      'tt0108052', 'tt0167260', 'tt0110912', 'tt0060196', 'tt0120737',
+    ],
+    wiktionary: [
+      'hello', 'world', 'computer', 'database', 'algorithm',
+      'language', 'dictionary', 'etymology', 'syntax', 'grammar',
+    ],
+    crawl_graph: [
+      '0', '1000000', '10000000', '50000000', '100000000',
+      '150000000', '200000000', '250000000', '300000000', '309000000',
+    ],
+  };
+
+  const keys = sampleKeys[dataset];
+  const iterations = Math.min(config.benchmarkQueries, 100);
+
+  console.log(`\nRunning Cache API vs DO comparison for ${dataset}...`);
+  console.log(`  Keys: ${keys.length}, Iterations: ${iterations}`);
+
+  try {
+    // Point query comparison
+    const pointResponse = await fetch(`${endpoint}/cache/benchmark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dataset, keys, iterations }),
+    });
+
+    const pointResult = await pointResponse.json() as {
+      cache: { p50: number; p95: number; p99: number; avg: number; hitRate: number };
+      do: { p50: number; p95: number; p99: number; avg: number };
+      speedup: { p50: number; avg: number };
+    };
+
+    results.push({
+      dataset,
+      queryType: 'point',
+      iterations,
+      cache: pointResult.cache,
+      do: pointResult.do,
+      speedup: pointResult.speedup,
+      recommendation: pointResult.cache.hitRate > 0.8 && pointResult.speedup.p50 > 5
+        ? 'Use Cache API for read-heavy point queries with acceptable staleness'
+        : 'Use Sharded DOs for consistency or low cache hit rates',
+    });
+
+    // Scatter query comparison (for aggregations)
+    if (dataset === 'imdb') {
+      const scatterResponse = await fetch(`${endpoint}/cache/benchmark/scatter`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dataset,
+          sql: 'SELECT COUNT(*) as cnt FROM title_basics WHERE startYear = 2023',
+          cacheKey: 'movies_2023_count',
+          iterations: Math.min(iterations, 50),
+        }),
+      });
+
+      const scatterResult = await scatterResponse.json() as {
+        cache: { p50: number; p95: number; p99: number; avg: number; hitRate: number };
+        scatter: { p50: number; p95: number; p99: number; avg: number };
+        speedup: { p50: number; avg: number };
+        recommendation: string;
+      };
+
+      results.push({
+        dataset,
+        queryType: 'scatter',
+        iterations: Math.min(iterations, 50),
+        cache: scatterResult.cache,
+        do: scatterResult.scatter,
+        speedup: scatterResult.speedup,
+        recommendation: scatterResult.recommendation,
+      });
+    }
+  } catch (err) {
+    console.error(`Cache comparison failed: ${err}`);
+  }
+
+  return results;
+}
+
+function generateCacheComparisonReport(results: CacheComparisonResult[]): void {
+  console.log('\n' + '='.repeat(80));
+  console.log('              CACHE API vs SHARDED DO COMPARISON');
+  console.log('='.repeat(80));
+  console.log('\n┌─────────────┬──────────┬─────────────────────────────┬─────────────────────────────┬──────────┐');
+  console.log('│   Dataset   │   Type   │       Cache API (ms)        │       Sharded DO (ms)       │ Speedup  │');
+  console.log('├─────────────┼──────────┼─────────────────────────────┼─────────────────────────────┼──────────┤');
+
+  for (const r of results) {
+    const cacheStats = `p50:${r.cache.p50.toFixed(1)} p95:${r.cache.p95.toFixed(1)}`;
+    const doStats = `p50:${r.do.p50.toFixed(1)} p95:${r.do.p95.toFixed(1)}`;
+    console.log(
+      `│ ${r.dataset.padEnd(11)} │ ${r.queryType.padEnd(8)} │ ${cacheStats.padEnd(27)} │ ${doStats.padEnd(27)} │ ${r.speedup.p50.toFixed(1)}x`.padEnd(88) + '│'
+    );
+  }
+
+  console.log('└─────────────┴──────────┴─────────────────────────────┴─────────────────────────────┴──────────┘');
+
+  // Trade-offs summary
+  console.log('\n┌───────────────────────────────────────────────────────────────────────────────┐');
+  console.log('│                           TRADE-OFF ANALYSIS                                  │');
+  console.log('├───────────────────────────────────────────────────────────────────────────────┤');
+  console.log('│  Cache API                        │  Sharded DOs                              │');
+  console.log('│  ✓ Edge-local (~1ms latency)      │  ✓ Single location consistency            │');
+  console.log('│  ✓ Massive read scalability       │  ✓ Full SQL query support                 │');
+  console.log('│  ✗ Eventually consistent          │  ✓ Strong consistency                     │');
+  console.log('│  ✗ Key-value only (no queries)    │  ✓ Joins, aggregations, filters           │');
+  console.log('│  ✗ TTL-based expiry               │  ✓ Durable persistent storage             │');
+  console.log('├───────────────────────────────────────────────────────────────────────────────┤');
+  console.log('│  RECOMMENDATION: Use hybrid approach                                          │');
+  console.log('│  - Cache API for hot read paths (product pages, user profiles)               │');
+  console.log('│  - Sharded DOs for writes & consistency-critical reads                       │');
+  console.log('│  - Invalidate cache on DO writes for near-real-time consistency              │');
+  console.log('└───────────────────────────────────────────────────────────────────────────────┘');
+
+  // Recommendations per result
+  console.log('\n[SPECIFIC RECOMMENDATIONS]');
+  for (const r of results) {
+    console.log(`  ${r.dataset}/${r.queryType}: ${r.recommendation}`);
+  }
+}
+
+// =============================================================================
 // Report Generator
 // =============================================================================
 
@@ -613,10 +780,16 @@ export async function runBenchmarks(
   return allResults;
 }
 
+// Export cache comparison for use as module
+export { runCacheComparison, generateCacheComparisonReport };
+export type { CacheComparisonResult };
+
 // CLI entry point
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
   const config: Partial<BenchmarkConfig> = {};
+  let endpoint = 'http://localhost:8787';
+  let cacheComparison = false;
 
   for (const arg of args) {
     if (arg.startsWith('--dataset=')) {
@@ -625,20 +798,68 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       config.benchmarkQueries = parseInt(arg.split('=')[1], 10);
     } else if (arg.startsWith('--concurrency=')) {
       config.concurrency = parseInt(arg.split('=')[1], 10);
+    } else if (arg.startsWith('--endpoint=')) {
+      endpoint = arg.split('=')[1];
+    } else if (arg === '--cache-comparison') {
+      cacheComparison = true;
     }
   }
 
-  // Mock database for testing
-  const mockDb: ShardedDatabase = {
-    async query(_shardId, _sql, _params) {
-      await new Promise(r => setTimeout(r, Math.random() * 2));
-      return { rows: [{ id: 1 }], latencyMs: Math.random() * 2 };
-    },
-    async queryAll(_sql, _params) {
-      await new Promise(r => setTimeout(r, Math.random() * 10));
-      return { rows: [{ id: 1 }, { id: 2 }], latencyMs: Math.random() * 10 };
-    },
-  };
+  if (cacheComparison) {
+    // Run Cache API vs DO comparison
+    const dataset = (config.dataset || 'imdb') as 'imdb' | 'wiktionary' | 'crawl_graph';
+    const fullConfig: BenchmarkConfig = { ...DEFAULT_BENCHMARK_CONFIG, ...config };
 
-  runBenchmarks(mockDb, config).catch(console.error);
+    console.log('Cache API vs Sharded DO Benchmark');
+    console.log('='.repeat(60));
+    console.log(`Endpoint: ${endpoint}`);
+    console.log(`Dataset:  ${dataset}`);
+    console.log('='.repeat(60));
+
+    runCacheComparison(endpoint, dataset, fullConfig)
+      .then(results => {
+        generateCacheComparisonReport(results);
+      })
+      .catch(console.error);
+  } else {
+    // Run standard benchmarks with HTTP client
+    const httpDb: ShardedDatabase = {
+      async query(shardId, sql, params = []) {
+        const shardIndex = parseInt(shardId.replace('shard_', ''), 10);
+        const start = performance.now();
+
+        const response = await fetch(`${endpoint}/query/${config.dataset || 'imdb'}/${shardIndex}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql, params }),
+        });
+
+        const result = await response.json() as { rows: unknown[]; latencyMs?: number };
+        return {
+          rows: result.rows || [],
+          latencyMs: result.latencyMs || (performance.now() - start),
+        };
+      },
+
+      async queryAll(sql, params = []) {
+        const start = performance.now();
+
+        const response = await fetch(`${endpoint}/scatter/${config.dataset || 'imdb'}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql, params }),
+        });
+
+        const result = await response.json() as { totalRows: number; shardResults: Array<{ rows?: unknown[] }> };
+        const allRows = (result.shardResults || []).flatMap(r => r.rows || []);
+
+        return {
+          rows: allRows,
+          latencyMs: performance.now() - start,
+        };
+      },
+    };
+
+    runBenchmarks(httpDb, config).catch(console.error);
+  }
 }

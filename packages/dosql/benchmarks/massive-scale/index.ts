@@ -93,9 +93,30 @@
  * | D1          | 10GB     | No          | No           |
  * | DO SQLite   | ~1GB     | Manual      | No           |
  * | **DoSQL**   | **∞**    | **Built-in**| **R2/Parquet**|
+ *
+ * ## Cache API vs Sharded DO Comparison
+ *
+ * This benchmark also compares Cache API vs Sharded DO performance:
+ *
+ * ```bash
+ * # Run cache comparison benchmark
+ * npx tsx runner.ts --cache-comparison --dataset=imdb
+ * ```
+ *
+ * | Approach     | Latency  | Consistency       | Query Support |
+ * |--------------|----------|-------------------|---------------|
+ * | Cache API    | ~1ms     | Eventually (TTL)  | Key-value     |
+ * | Sharded DOs  | ~5-20ms  | Strong            | Full SQL      |
+ *
+ * **Trade-offs:**
+ * - Cache API is 5-20x faster for point reads at the edge
+ * - Cache API has no SQL support (key-value only)
+ * - DOs provide strong consistency and full SQL queries
+ * - Hybrid approach: Cache for hot reads, DOs for writes/consistency
  */
 
 export { IMDB_SCHEMAS, WIKTIONARY_SCHEMAS, CRAWL_GRAPH_SCHEMAS } from './schema.js';
 export { BENCHMARK_QUERIES, BenchmarkConfig, DEFAULT_BENCHMARK_CONFIG } from './schema.js';
 export { loadIMDBTable, loadWiktionary, loadCrawlGraphVertices, loadCrawlGraphEdges } from './loader.js';
-export { runBenchmarks } from './runner.js';
+export { runBenchmarks, runCacheComparison, generateCacheComparisonReport } from './runner.js';
+export type { CacheComparisonResult } from './runner.js';
