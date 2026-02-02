@@ -45,25 +45,74 @@ export function checkContentLength(request: Request): Response | null {
 }
 
 /**
+ * Read request body with streaming size enforcement.
+ * Rejects immediately when size limit is exceeded, before consuming entire body.
+ * This prevents memory exhaustion from chunked transfer encoding attacks.
+ */
+async function readBodyWithSizeLimit(request: Request): Promise<string | Response> {
+  const body = request.body;
+  if (!body) {
+    return '';
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalSize = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      totalSize += value.byteLength;
+
+      // Reject immediately when limit is exceeded - don't wait to read entire body
+      if (totalSize > MAX_REQUEST_BODY_SIZE) {
+        // Cancel the reader to stop reading more data
+        await reader.cancel();
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `Request body too large: exceeds maximum of ${MAX_REQUEST_BODY_SIZE} bytes`,
+          }),
+          {
+            status: 413,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  // Concatenate chunks and decode as UTF-8
+  const combined = new Uint8Array(totalSize);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return new TextDecoder().decode(combined);
+}
+
+/**
  * Parse and validate the request body for query endpoints.
  * Returns a QueryRequest on success or an HTTP error Response on failure.
  */
 export async function parseAndValidateBody(request: Request): Promise<QueryRequest | Response> {
-  // Read body as text first to enforce size limit regardless of Content-Length header
-  const bodyText = await request.text();
+  // Read body with streaming size enforcement to prevent memory exhaustion
+  const bodyResult = await readBodyWithSizeLimit(request);
 
-  if (bodyText.length > MAX_REQUEST_BODY_SIZE) {
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: `Request body too large: ${bodyText.length} bytes exceeds maximum of ${MAX_REQUEST_BODY_SIZE} bytes`,
-      }),
-      {
-        status: 413,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
+  // If we got a Response, it means size limit was exceeded
+  if (bodyResult instanceof Response) {
+    return bodyResult;
   }
+
+  const bodyText = bodyResult;
 
   let body: QueryRequest;
   try {
