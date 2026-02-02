@@ -391,9 +391,9 @@ export function evaluatePredicate(predicate: Predicate, row: Row): boolean {
           if (v === value) return true;
           if (v === null) hasNull = true;
         }
-        // If no match found and list contains NULL, result should be NULL (false in boolean context)
+        // If no match found and list contains NULL, result should be NULL
         // If no match found and no NULL in list, result is false
-        return false;
+        return hasNull ? null : false;
       }
 
       // Subquery case - predicate.values is a QueryPlan

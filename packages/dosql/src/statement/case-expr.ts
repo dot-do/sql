@@ -356,10 +356,18 @@ export function evaluateCaseExpr(
       // NULL IN non-empty (...) returns NULL
       if (leftVal === null) return null;
 
+      // Check if list contains NULL
+      const hasNull = values.some(v => v === null);
+
       // Check if value is in the list
       const inList = values.some(v => v !== null && valuesEqualForExpr(v, leftVal));
 
-      return inList ? 1 : 0;
+      if (inList) return 1; // value found, IN = TRUE
+
+      // Value not found
+      if (hasNull) return null; // NULL in list makes result NULL
+
+      return 0; // IN = FALSE
     }
   }
 

@@ -148,6 +148,42 @@ describe('SQLLogicTest in2.test - IN Edge Cases', () => {
   // NULL LEFT OPERAND (Lines 244-289 of in2.test)
   // ===========================================================================
 
+  // ===========================================================================
+  // IN EXPRESSION VALUE (Lines 795-813 of in1.test - SQLLogicTest failures)
+  // ===========================================================================
+
+  describe('IN expression returns NULL when value not found but NULL in list', () => {
+    // Per SQL standard: If value is NOT found AND list contains NULL,
+    // result is NULL (unknown), NOT false
+    // This is because the NULL could potentially equal the search value
+
+    it('SELECT 1 IN (2,3,4,null) should return NULL - line 795', () => {
+      // This is the actual failing SQLLogicTest case
+      const result = db.prepare('SELECT 1 IN (2,3,4,null) as result').get();
+      // Currently returns 0 (false), but should return NULL
+      expect(result).toEqual({ result: null });
+    });
+
+    it("SELECT 'a' IN ('b','c',null,'d') should return NULL - line 805", () => {
+      // Another failing SQLLogicTest case
+      const result = db.prepare("SELECT 'a' IN ('b','c',null,'d') as result").get();
+      // Currently returns 0 (false), but should return NULL
+      expect(result).toEqual({ result: null });
+    });
+
+    it('SELECT 1 IN (1,2,null) should return 1 (true) when value IS found', () => {
+      // When value IS found, should return true regardless of NULL in list
+      const result = db.prepare('SELECT 1 IN (1,2,null) as result').get();
+      expect(result).toEqual({ result: 1 });
+    });
+
+    it('SELECT 1 IN (2,3,4) should return 0 (false) when no NULL in list', () => {
+      // When value not found and NO NULL in list, result is false
+      const result = db.prepare('SELECT 1 IN (2,3,4) as result').get();
+      expect(result).toEqual({ result: 0 });
+    });
+  });
+
   describe('NULL as left operand', () => {
     it('should return FALSE (NULL) for NULL IN (1) - line 245', () => {
       const result = db.prepare('SELECT 1 FROM t1 WHERE NULL IN (1)').all();
