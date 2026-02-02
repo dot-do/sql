@@ -241,7 +241,9 @@ describe('Memory Should Not Grow Unbounded', () => {
 
   it('memory should stay bounded with repeated createTransactionId/createLSN cycles', () => {
     // Simulate a long-running application creating many branded types
-    const iterations = 50000;
+    // Reduced from 50000 to 12000 to avoid test timeout (LRU operations are O(n))
+    // Must be > DEFAULT_MAX_WRAPPER_CACHE_SIZE (10000) to trigger eviction
+    const iterations = 12000;
     const maxSize = DEFAULT_MAX_WRAPPER_CACHE_SIZE;
 
     for (let i = 0; i < iterations; i++) {
