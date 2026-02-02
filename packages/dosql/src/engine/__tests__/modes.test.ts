@@ -30,6 +30,10 @@ import {
   isReadOnlyOptions,
   isReadWriteOptions,
 } from '../factory.js';
+import {
+  createTypedStorageTransaction,
+  type TypedStorageTransaction,
+} from '../../__tests__/test-utils.js';
 
 // =============================================================================
 // TEST UTILITIES - Mock R2 Types
@@ -587,13 +591,10 @@ describe('DOQueryEngine', () => {
         }
         return result;
       },
-      transaction: async <T>(closure: (txn: any) => Promise<T>): Promise<T> => {
+      transaction: async <T>(closure: (txn: TypedStorageTransaction) => Promise<T>): Promise<T> => {
         // Simplified - just execute the closure
-        return closure({
-          get: async (k: string) => data.get(k),
-          put: async (k: string, v: any) => data.set(k, v),
-          delete: async (k: string) => data.delete(k),
-        });
+        const txn = createTypedStorageTransaction(data);
+        return closure(txn);
       },
       deleteAll: async () => { data.clear(); },
       getAlarm: async () => null,
@@ -772,7 +773,7 @@ describe('createQueryEngine', () => {
         put: async () => {},
         delete: async () => false,
         list: async () => new Map(),
-        transaction: async <T>(fn: any) => fn({}),
+        transaction: async <T>(fn: (txn: TypedStorageTransaction) => Promise<T>) => fn(createTypedStorageTransaction()),
         deleteAll: async () => {},
         getAlarm: async () => null,
         setAlarm: async () => {},

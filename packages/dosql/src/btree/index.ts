@@ -1,18 +1,18 @@
 /**
  * B-tree Page Manager for DoSQL
  *
- * A B+tree implementation for row-oriented storage using fsx blob storage.
+ * A B+tree implementation for row-oriented storage using the unified StorageInterface.
  *
- * @example
+ * @example Using the unified StorageInterface
  * ```typescript
  * import { createBTree, StringKeyCodec, JsonValueCodec } from 'dosql/btree';
- * import { MemoryFSXBackend } from 'dosql/fsx';
+ * import { createMemoryStorage } from 'dosql/storage';
  *
- * // Create storage backend
- * const fsx = new MemoryFSXBackend();
+ * // Create storage backend using the unified interface
+ * const storage = createMemoryStorage();
  *
  * // Create B-tree with string keys and JSON values
- * const tree = createBTree(fsx, StringKeyCodec, JsonValueCodec);
+ * const tree = createBTree(storage, StringKeyCodec, JsonValueCodec);
  * await tree.init();
  *
  * // Basic operations
@@ -23,6 +23,16 @@
  * for await (const [key, value] of tree.range('user:', 'user:~')) {
  *   console.log(key, value);
  * }
+ * ```
+ *
+ * @example Legacy FSXBackend (still supported)
+ * ```typescript
+ * import { createBTree, StringKeyCodec, JsonValueCodec } from 'dosql/btree';
+ * import { MemoryFSXBackend } from 'dosql/fsx';
+ *
+ * // Legacy FSXBackend interface is still supported for backward compatibility
+ * const fsx = new MemoryFSXBackend();
+ * const tree = createBTree(fsx, StringKeyCodec, JsonValueCodec);
  * ```
  *
  * @packageDocumentation
@@ -44,6 +54,9 @@ export {
   type CacheStats,
   DEFAULT_BTREE_CONFIG,
   DEFAULT_PAGE_CACHE_CONFIG,
+
+  // Storage interface (unified abstraction)
+  type StorageInterface,
 
   // Codec types
   type KeyCodec,

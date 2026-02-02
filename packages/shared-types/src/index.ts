@@ -49,6 +49,33 @@ import {
 } from './config.js';
 
 // =============================================================================
+// Hash Functions
+// =============================================================================
+
+/**
+ * Hash function utilities for sharding, deduplication, and content addressing.
+ * @public
+ * @stability stable
+ */
+export {
+  // FNV-1a hash functions
+  fnv1a,
+  fnv1aString,
+  fnv1aNumber,
+  fnv1aBigInt,
+  fnv1aBytes,
+  // xxHash function
+  xxhash,
+  // Hash function selector
+  getHashFunction,
+  // Constants
+  FNV_OFFSET_BASIS,
+  FNV_PRIME,
+  // Types
+  type HashAlgorithm,
+} from './hash.js';
+
+// =============================================================================
 // Branded Types
 // =============================================================================
 

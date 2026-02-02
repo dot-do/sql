@@ -128,14 +128,30 @@ export interface WebSocketConnectionConfig {
 }
 
 /**
- * WebSocket-like interface for mocking
+ * WebSocket event map for type-safe event handling
+ */
+interface WebSocketEventMap {
+  open: Event;
+  close: CloseEvent;
+  error: Event;
+  message: MessageEvent;
+}
+
+/**
+ * WebSocket-like interface for mocking with type-safe event handlers
  */
 interface WebSocketLike {
   readyState: number;
   send(data: string): void;
   close(): void;
-  addEventListener(event: string, handler: (ev: unknown) => void): void;
-  removeEventListener(event: string, handler: (ev: unknown) => void): void;
+  addEventListener<K extends keyof WebSocketEventMap>(
+    event: K,
+    handler: (ev: WebSocketEventMap[K]) => void
+  ): void;
+  removeEventListener<K extends keyof WebSocketEventMap>(
+    event: K,
+    handler: (ev: WebSocketEventMap[K]) => void
+  ): void;
 }
 
 // =============================================================================

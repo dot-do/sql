@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import { D1Adapter, createD1Adapter } from '../d1.js';
 import { TableSchemaConfig, DEFAULT_BENCHMARK_CONFIG } from '../../types.js';
+import { extractIndexNames, type D1QueryResults, type D1IndexRow } from '../../../__tests__/test-utils.js';
 
 // =============================================================================
 // Test Schema
@@ -83,9 +84,9 @@ describe('D1Adapter', () => {
     it('should create indexes', async () => {
       const indexes = await env.TEST_D1
         .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='benchmark_test'")
-        .all();
+        .all() as D1QueryResults<D1IndexRow>;
 
-      const indexNames = indexes.results?.map((r: any) => r.name) ?? [];
+      const indexNames = extractIndexNames(indexes);
       expect(indexNames).toContain('idx_benchmark_test_name');
       expect(indexNames).toContain('idx_benchmark_test_created_at');
     });

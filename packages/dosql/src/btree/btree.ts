@@ -238,7 +238,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     // Remove from cache first (don't write back since we're deleting)
     this.pageCache.delete(pageId);
     // Delete from persistent storage
-    await this.fsx.delete(this.pageKey(pageId));
+    await this.storage.delete(this.pageKey(pageId));
   }
 
   /**
@@ -250,7 +250,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
       const page = this.pageCache.peek(pageId); // Use peek to avoid updating LRU order
       if (page) {
         const data = serializePage(page);
-        await this.fsx.write(this.pageKey(pageId), data);
+        await this.storage.write(this.pageKey(pageId), data);
         this.pageCache.markClean(pageId);
       }
     }
@@ -902,9 +902,9 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'Failed to load B-tree metadata');
 
     // Delete all pages
-    const pageKeys = await this.fsx.list(this.config.pagePrefix);
+    const pageKeys = await this.storage.list(this.config.pagePrefix);
     for (const key of pageKeys) {
-      await this.fsx.delete(key);
+      await this.storage.delete(key);
     }
 
     // Reset cache

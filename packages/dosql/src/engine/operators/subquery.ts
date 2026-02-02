@@ -306,6 +306,21 @@ export class InSubqueryOperator implements Operator {
     if (value instanceof Uint8Array) return `B:${Array.from(value).join(',')}`;
     return `${typeof value}:${value}`;
   }
+
+  /**
+   * Async iterator support - enables `for await (const row of operator)`
+   * Note: The operator must be opened before iterating
+   */
+  async *[Symbol.asyncIterator](): AsyncIterator<Row> {
+    try {
+      let row: Row | null;
+      while ((row = await this.next()) !== null) {
+        yield row;
+      }
+    } finally {
+      await this.close();
+    }
+  }
 }
 
 // =============================================================================
@@ -376,6 +391,21 @@ export class ExistsSubqueryOperator implements Operator {
       return row !== null;
     } finally {
       await operator.close();
+    }
+  }
+
+  /**
+   * Async iterator support - enables `for await (const row of operator)`
+   * Note: The operator must be opened before iterating
+   */
+  async *[Symbol.asyncIterator](): AsyncIterator<Row> {
+    try {
+      let row: Row | null;
+      while ((row = await this.next()) !== null) {
+        yield row;
+      }
+    } finally {
+      await this.close();
     }
   }
 }
@@ -514,6 +544,21 @@ export class QuantifiedSubqueryOperator implements Operator {
       default: return false;
     }
   }
+
+  /**
+   * Async iterator support - enables `for await (const row of operator)`
+   * Note: The operator must be opened before iterating
+   */
+  async *[Symbol.asyncIterator](): AsyncIterator<Row> {
+    try {
+      let row: Row | null;
+      while ((row = await this.next()) !== null) {
+        yield row;
+      }
+    } finally {
+      await this.close();
+    }
+  }
 }
 
 // =============================================================================
@@ -617,6 +662,21 @@ export class DerivedTableOperator implements Operator {
       await operator.close();
     }
   }
+
+  /**
+   * Async iterator support - enables `for await (const row of operator)`
+   * Note: The operator must be opened before iterating
+   */
+  async *[Symbol.asyncIterator](): AsyncIterator<Row> {
+    try {
+      let row: Row | null;
+      while ((row = await this.next()) !== null) {
+        yield row;
+      }
+    } finally {
+      await this.close();
+    }
+  }
 }
 
 // =============================================================================
@@ -707,6 +767,21 @@ export class LateralJoinOperator implements Operator {
       prefixed[`${this.alias}.${key}`] = value;
     }
     return prefixed;
+  }
+
+  /**
+   * Async iterator support - enables `for await (const row of operator)`
+   * Note: The operator must be opened before iterating
+   */
+  async *[Symbol.asyncIterator](): AsyncIterator<Row> {
+    try {
+      let row: Row | null;
+      while ((row = await this.next()) !== null) {
+        yield row;
+      }
+    } finally {
+      await this.close();
+    }
   }
 }
 

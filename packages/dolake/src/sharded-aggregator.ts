@@ -43,6 +43,7 @@
  */
 
 import type { CDCEvent, FlushResult, FlushTrigger } from './types.js';
+import { fnv1a } from '@dotdo/sql-types';
 
 // =============================================================================
 // Configuration
@@ -159,15 +160,10 @@ export interface AggregatedShardStatus {
 /**
  * Compute a deterministic hash for a string.
  * Uses FNV-1a for fast, well-distributed hashing.
+ *
+ * Re-exported from @dotdo/sql-types for backward compatibility.
  */
-export function fnv1aHash(str: string): number {
-  let hash = 0x811c9dc5; // FNV offset basis
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = (hash * 0x01000193) >>> 0; // FNV prime, keep as unsigned 32-bit
-  }
-  return hash;
-}
+export const fnv1aHash = fnv1a;
 
 /**
  * Map a table name to a shard index using consistent hashing.
@@ -178,7 +174,7 @@ export function fnv1aHash(str: string): number {
  */
 export function tableToShardIndex(tableName: string, shardCount: number): number {
   if (shardCount <= 1) return 0;
-  return fnv1aHash(tableName) % shardCount;
+  return fnv1a(tableName) % shardCount;
 }
 
 // =============================================================================

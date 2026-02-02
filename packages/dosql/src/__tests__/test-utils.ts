@@ -519,3 +519,249 @@ export interface D1BenchmarkResult extends BenchmarkResult {
 export function getIndexNames(result: D1BenchmarkResult): string[] {
   return result.results?.map((r) => r.name) ?? [];
 }
+
+// =============================================================================
+// Window Function Test Utilities
+// =============================================================================
+
+/**
+ * Window specification for window functions
+ */
+export interface WindowSpec {
+  partitionBy?: unknown[];
+  orderBy?: unknown[];
+  frame?: unknown;
+}
+
+/**
+ * Expression with optional window over clause
+ */
+export interface WindowExpression {
+  type: string;
+  name: string;
+  args: unknown[];
+  over?: WindowSpec;
+}
+
+/**
+ * Creates a window expression for testing
+ */
+export function createWindowExpression(
+  name: string,
+  args: unknown[] = [],
+  over?: WindowSpec
+): WindowExpression {
+  return {
+    type: 'function',
+    name,
+    args,
+    over,
+  };
+}
+
+// =============================================================================
+// Storage Transaction Utilities
+// =============================================================================
+
+/**
+ * Type-safe storage transaction with generic value type
+ */
+export interface TypedStorageTransaction<V = unknown> {
+  get(key: string): Promise<V | undefined>;
+  put(key: string, value: V): Promise<void>;
+  delete(key: string): Promise<boolean>;
+  list?(options?: { prefix?: string }): Promise<Map<string, V>>;
+  rollback?(): void;
+}
+
+/**
+ * Creates a typed storage transaction for testing
+ */
+export function createTypedStorageTransaction<V = unknown>(
+  data: Map<string, V> = new Map()
+): TypedStorageTransaction<V> {
+  return {
+    get: async (key: string) => data.get(key),
+    put: async (key: string, value: V) => {
+      data.set(key, value);
+    },
+    delete: async (key: string) => data.delete(key),
+    list: async (options?: { prefix?: string }) => {
+      const result = new Map<string, V>();
+      for (const [key, value] of data) {
+        if (!options?.prefix || key.startsWith(options.prefix)) {
+          result.set(key, value);
+        }
+      }
+      return result;
+    },
+    rollback: () => {
+      // No-op in mock
+    },
+  };
+}
+
+/**
+ * Creates a mock storage with transaction support
+ */
+export function createMockStorageWithTransaction(): {
+  storage: MockDOStorage;
+  transaction<T>(closure: (txn: TypedStorageTransaction) => Promise<T>): Promise<T>;
+} {
+  const storage = new MockDOStorage();
+  return {
+    storage,
+    async transaction<T>(closure: (txn: TypedStorageTransaction) => Promise<T>): Promise<T> {
+      const txn = createTypedStorageTransaction();
+      return closure(txn);
+    },
+  };
+}
+
+// =============================================================================
+// Size Alert Utilities
+// =============================================================================
+
+/**
+ * Size warning alert information
+ */
+export interface SizeAlert {
+  current: number;
+  max: number;
+  percentage: number;
+}
+
+/**
+ * Size warning callback type
+ */
+export type SizeWarningCallback = (current: number, max: number) => void;
+
+/**
+ * Creates a size alert collector for testing
+ */
+export function createSizeAlertCollector(): {
+  alerts: SizeAlert[];
+  callback: SizeWarningCallback;
+} {
+  const alerts: SizeAlert[] = [];
+  const callback: SizeWarningCallback = (current, max) => {
+    alerts.push({ current, max, percentage: (current / max) * 100 });
+  };
+  return { alerts, callback };
+}
+
+// =============================================================================
+// Extended WAL Retention Manager
+// =============================================================================
+
+/**
+ * Extended WAL retention manager with size warning support
+ */
+export interface ExtendedWALRetentionManager {
+  onSizeWarning?: SizeWarningCallback;
+}
+
+// =============================================================================
+// Extended Lock Manager Config
+// =============================================================================
+
+/**
+ * Extended lock manager configuration with deadlock callback
+ */
+export interface ExtendedLockManagerConfig {
+  detectDeadlocks?: boolean;
+  onDeadlock?: DeadlockHandler;
+  timeout?: number;
+}
+
+// =============================================================================
+// Cross Join Row Utilities
+// =============================================================================
+
+/**
+ * Row type for cross join results with indexed columns
+ */
+export interface CrossJoinRow {
+  col0?: unknown;
+  col1?: unknown;
+  [key: string]: unknown;
+}
+
+/**
+ * Extracts column pairs from cross join results
+ */
+export function extractColumnPairs(
+  rows: CrossJoinRow[],
+  col1: string,
+  col2: string
+): [unknown, unknown][] {
+  return rows.map((r) => [r[col1], r[col2]]);
+}
+
+// =============================================================================
+// Hibernatable WebSocket State Utilities
+// =============================================================================
+
+/**
+ * RPC session state type
+ */
+export interface RPCSessionState {
+  clientId?: string;
+  database?: string;
+  authenticated?: boolean;
+  lastMessageId?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Extended hibernatable interface with RPC state
+ */
+export interface ExtendedHibernatableInterface {
+  getRpcSessionState(wsId: string): RPCSessionState | undefined;
+  persistRpcSessionState(wsId: string, state: RPCSessionState): Promise<void>;
+  restoreRpcSessionState(wsId: string): Promise<RPCSessionState | undefined>;
+}
+
+/**
+ * Creates an extended hibernatable interface mock
+ */
+export function createExtendedHibernatableMock(): ExtendedHibernatableInterface {
+  const states = new Map<string, RPCSessionState>();
+  return {
+    getRpcSessionState: (wsId: string) => states.get(wsId),
+    persistRpcSessionState: async (wsId: string, state: RPCSessionState) => {
+      states.set(wsId, state);
+    },
+    restoreRpcSessionState: async (wsId: string) => states.get(wsId),
+  };
+}
+
+// =============================================================================
+// D1 Query Result Utilities
+// =============================================================================
+
+/**
+ * D1 index result row
+ */
+export interface D1IndexRow {
+  name: string;
+  unique?: number;
+  origin?: string;
+  partial?: number;
+}
+
+/**
+ * D1 query results wrapper
+ */
+export interface D1QueryResults<T = unknown> {
+  results?: T[];
+  success?: boolean;
+  error?: string;
+}
+
+/**
+ * Extracts index names from D1 query results
+ */
+export function extractIndexNames(results: D1QueryResults<D1IndexRow>): string[] {
+  return results.results?.map((r) => r.name) ?? [];
+}

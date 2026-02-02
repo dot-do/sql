@@ -97,7 +97,9 @@ export {
   type ReadRequest,
   type WriteRequest,
 
-  // FSX interface
+  // Storage interface (unified abstraction)
+  type StorageInterface,
+  // FSX interface (deprecated alias for StorageInterface)
   type FSXInterface,
 
   // Constants

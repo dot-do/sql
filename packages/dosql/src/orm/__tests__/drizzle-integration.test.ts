@@ -352,20 +352,60 @@ class InMemoryDrizzleBackend implements DoSQLBackend {
     const tableName = match[1].toLowerCase();
     const rows = this.tables.get(tableName) || [];
 
-    // Parse SET clause
+    // Parse SET clause - handle arithmetic expressions like "balance = balance - 100"
     const setParts = match[2].split(',');
-    const updates: Record<string, unknown> = {};
-    let paramIndex = 0;
+    const updates: Array<{ column: string; compute: (row: Record<string, unknown>, paramIndex: number) => { value: unknown; nextIndex: number } }> = [];
+    let setParamIndex = 0;
 
     for (const part of setParts) {
-      const [col, val] = part.split('=').map((s) => s.trim());
+      const eqIndex = part.indexOf('=');
+      if (eqIndex === -1) continue;
+
+      const col = part.slice(0, eqIndex).trim();
+      const val = part.slice(eqIndex + 1).trim();
       const colName = col.replace(/["'`]/g, '');
-      if (val === '?') {
-        updates[colName] = params?.[paramIndex++];
+
+      // Check for arithmetic expression: col = col +/- value
+      const arithMatch = val.match(/^["'`]?(\w+)["'`]?\s*([+-])\s*(\?|\d+)$/);
+      if (arithMatch) {
+        const sourceCol = arithMatch[1];
+        const op = arithMatch[2];
+        const operand = arithMatch[3];
+
+        updates.push({
+          column: colName,
+          compute: (row, pIdx) => {
+            const currentVal = row[sourceCol] as number || 0;
+            let operandVal: number;
+            if (operand === '?') {
+              operandVal = params?.[pIdx] as number || 0;
+              pIdx++;
+            } else {
+              operandVal = parseInt(operand, 10);
+            }
+            const newVal = op === '+' ? currentVal + operandVal : currentVal - operandVal;
+            return { value: newVal, nextIndex: pIdx };
+          },
+        });
+        if (operand === '?') setParamIndex++;
+      } else if (val === '?') {
+        const capturedIndex = setParamIndex++;
+        updates.push({
+          column: colName,
+          compute: (_row, _pIdx) => ({ value: params?.[capturedIndex], nextIndex: _pIdx }),
+        });
       } else if (val.startsWith("'")) {
-        updates[colName] = val.slice(1, -1);
+        const strVal = val.slice(1, -1);
+        updates.push({
+          column: colName,
+          compute: (_row, pIdx) => ({ value: strVal, nextIndex: pIdx }),
+        });
       } else if (/^\d+$/.test(val)) {
-        updates[colName] = parseInt(val, 10);
+        const numVal = parseInt(val, 10);
+        updates.push({
+          column: colName,
+          compute: (_row, pIdx) => ({ value: numVal, nextIndex: pIdx }),
+        });
       }
     }
 
@@ -376,7 +416,7 @@ class InMemoryDrizzleBackend implements DoSQLBackend {
       const column = whereMatch[1];
       let value: unknown = whereMatch[2];
       if (value === '?') {
-        value = params?.[paramIndex];
+        value = params?.[setParamIndex];
       } else if (typeof value === 'string' && value.startsWith("'")) {
         value = value.slice(1, -1);
       } else if (/^\d+$/.test(String(value))) {
@@ -387,8 +427,11 @@ class InMemoryDrizzleBackend implements DoSQLBackend {
 
     // Apply updates
     for (const row of targetRows) {
-      for (const [key, val] of Object.entries(updates)) {
-        row[key] = val;
+      let pIdx = 0;
+      for (const update of updates) {
+        const result = update.compute(row, pIdx);
+        row[update.column] = result.value;
+        pIdx = result.nextIndex;
       }
     }
 
@@ -816,6 +859,262 @@ describe('Drizzle ORM Integration Tests', () => {
 
       expect(snakeCaseConfig.casing).toBe('snake_case');
       expect(camelCaseConfig.casing).toBe('camelCase');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Type Inference Tests
+  // ---------------------------------------------------------------------------
+
+  describe('Type Inference', () => {
+    beforeEach(async () => {
+      await backend.run('CREATE TABLE typed_users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, age INTEGER, active INTEGER)');
+      backend.seed('typed_users', [
+        { id: 1, name: 'Alice', email: 'alice@example.com', age: 30, active: 1 },
+        { id: 2, name: 'Bob', email: 'bob@example.com', age: 25, active: 0 },
+      ]);
+    });
+
+    it('should infer correct types from all() result', async () => {
+      const rows = await backend.all('SELECT * FROM typed_users');
+
+      expect(rows).toHaveLength(2);
+      const row = rows[0] as Record<string, unknown>;
+
+      // Verify runtime types match expected
+      expect(typeof row.id).toBe('number');
+      expect(typeof row.name).toBe('string');
+      expect(typeof row.email).toBe('string');
+      expect(typeof row.age).toBe('number');
+      expect(typeof row.active).toBe('number');
+    });
+
+    it('should infer correct type from get() result', async () => {
+      const row = await backend.get('SELECT * FROM typed_users WHERE id = ?', [1]);
+
+      expect(row).toBeDefined();
+      const typedRow = row as Record<string, unknown>;
+      expect(typedRow.name).toBe('Alice');
+    });
+
+    it('should return undefined from get() for non-existent row', async () => {
+      const row = await backend.get('SELECT * FROM typed_users WHERE id = ?', [999]);
+      expect(row).toBeUndefined();
+    });
+
+    it('should infer array types from values()', async () => {
+      const values = await backend.values('SELECT * FROM typed_users');
+
+      expect(values).toHaveLength(2);
+      expect(Array.isArray(values[0])).toBe(true);
+      // Values returns all columns from the row
+      expect(values[0].length).toBeGreaterThan(0);
+    });
+
+    it('should infer correct run() result type', async () => {
+      const result = await backend.run(
+        'UPDATE typed_users SET active = ? WHERE id = ?',
+        [1, 2]
+      );
+
+      expect(typeof result.rowsAffected).toBe('number');
+      expect(result.rowsAffected).toBe(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Bulk Operations
+  // ---------------------------------------------------------------------------
+
+  describe('Bulk Operations', () => {
+    beforeEach(async () => {
+      await backend.run('CREATE TABLE bulk_test (id INTEGER PRIMARY KEY, value TEXT, category TEXT)');
+    });
+
+    it('should handle multiple sequential inserts', async () => {
+      for (let i = 0; i < 5; i++) {
+        await backend.run(
+          'INSERT INTO bulk_test (value, category) VALUES (?, ?)',
+          [`value_${i}`, 'categoryA']
+        );
+      }
+
+      const rows = await backend.all('SELECT * FROM bulk_test');
+      expect(rows).toHaveLength(5);
+    });
+
+    it('should handle update affecting multiple rows', async () => {
+      backend.seed('bulk_test', [
+        { id: 1, value: 'v1', category: 'catA' },
+        { id: 2, value: 'v2', category: 'catA' },
+        { id: 3, value: 'v3', category: 'catB' },
+        { id: 4, value: 'v4', category: 'catA' },
+      ]);
+
+      const result = await backend.run(
+        'UPDATE bulk_test SET value = ? WHERE category = ?',
+        ['updated', 'catA']
+      );
+
+      expect(result.rowsAffected).toBe(3);
+
+      const updatedRows = await backend.all('SELECT * FROM bulk_test WHERE category = ?', ['catA']);
+      expect(updatedRows.every((r: Record<string, unknown>) => r.value === 'updated')).toBe(true);
+    });
+
+    it('should handle delete affecting multiple rows', async () => {
+      backend.seed('bulk_test', [
+        { id: 1, value: 'v1', category: 'catA' },
+        { id: 2, value: 'v2', category: 'catA' },
+        { id: 3, value: 'v3', category: 'catB' },
+      ]);
+
+      const result = await backend.run('DELETE FROM bulk_test WHERE category = ?', ['catA']);
+      expect(result.rowsAffected).toBe(2);
+
+      const remaining = await backend.all('SELECT * FROM bulk_test');
+      expect(remaining).toHaveLength(1);
+    });
+
+    it('should handle sequential transactions', async () => {
+      // First transaction
+      await backend.transaction(async (tx) => {
+        await tx.run('INSERT INTO bulk_test (value, category) VALUES (?, ?)', ['tx1', 'cat1']);
+      });
+
+      // Second transaction
+      await backend.transaction(async (tx) => {
+        await tx.run('INSERT INTO bulk_test (value, category) VALUES (?, ?)', ['tx2', 'cat2']);
+      });
+
+      const rows = await backend.all('SELECT * FROM bulk_test');
+      expect(rows).toHaveLength(2);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Advanced Transaction Patterns
+  // ---------------------------------------------------------------------------
+
+  describe('Advanced Transaction Patterns', () => {
+    beforeEach(async () => {
+      await backend.run('CREATE TABLE ledger (id INTEGER PRIMARY KEY, account TEXT, amount INTEGER)');
+      backend.seed('ledger', [
+        { id: 1, account: 'A', amount: 1000 },
+        { id: 2, account: 'B', amount: 500 },
+      ]);
+    });
+
+    it('should support read-write operations in single transaction', async () => {
+      await backend.transaction(async (tx) => {
+        const accountA = await tx.get('SELECT * FROM ledger WHERE account = ?', ['A']);
+        const currentAmount = (accountA as Record<string, unknown>)?.amount as number || 0;
+
+        await tx.run('UPDATE ledger SET amount = ? WHERE account = ?', [currentAmount - 100, 'A']);
+        await tx.run('UPDATE ledger SET amount = amount + 100 WHERE account = ?', ['B']);
+      });
+
+      const finalA = await backend.get('SELECT * FROM ledger WHERE account = ?', ['A']);
+      const finalB = await backend.get('SELECT * FROM ledger WHERE account = ?', ['B']);
+
+      expect((finalA as Record<string, unknown>)?.amount).toBe(900);
+      expect((finalB as Record<string, unknown>)?.amount).toBe(600);
+    });
+
+    it('should isolate transaction reads during modification', async () => {
+      // Read initial state
+      const before = await backend.get('SELECT * FROM ledger WHERE account = ?', ['A']);
+      const initialAmount = (before as Record<string, unknown>)?.amount;
+
+      await backend.transaction(async (tx) => {
+        // Read within transaction
+        const inTx = await tx.get('SELECT * FROM ledger WHERE account = ?', ['A']);
+        expect((inTx as Record<string, unknown>)?.amount).toBe(initialAmount);
+
+        // Modify
+        await tx.run('UPDATE ledger SET amount = 500 WHERE account = ?', ['A']);
+
+        // Verify modification visible within transaction
+        const afterUpdate = await tx.get('SELECT * FROM ledger WHERE account = ?', ['A']);
+        expect((afterUpdate as Record<string, unknown>)?.amount).toBe(500);
+      });
+    });
+
+    it('should return values from transaction callback', async () => {
+      const result = await backend.transaction(async (tx) => {
+        const rows = await tx.all('SELECT * FROM ledger');
+        return rows.length;
+      });
+
+      expect(result).toBe(2);
+    });
+
+    it('should handle transaction with only reads', async () => {
+      const result = await backend.transaction(async (tx) => {
+        const all = await tx.all('SELECT * FROM ledger');
+        const single = await tx.get('SELECT * FROM ledger WHERE id = ?', [1]);
+        return {
+          count: all.length,
+          firstAccount: (single as Record<string, unknown>)?.account,
+        };
+      });
+
+      expect(result.count).toBe(2);
+      expect(result.firstAccount).toBe('A');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Error Recovery
+  // ---------------------------------------------------------------------------
+
+  describe('Error Recovery', () => {
+    beforeEach(async () => {
+      await backend.run('CREATE TABLE error_test (id INTEGER PRIMARY KEY, value TEXT)');
+      backend.seed('error_test', [
+        { id: 1, value: 'original' },
+      ]);
+    });
+
+    it('should continue working after failed transaction', async () => {
+      // First, fail a transaction
+      try {
+        await backend.transaction(async (tx) => {
+          await tx.run('UPDATE error_test SET value = ? WHERE id = ?', ['modified', 1]);
+          throw new Error('Intentional failure');
+        });
+      } catch {
+        // Expected
+      }
+
+      // Verify we can still use the backend
+      const rows = await backend.all('SELECT * FROM error_test');
+      expect(rows).toHaveLength(1);
+      expect((rows[0] as Record<string, unknown>).value).toBe('original');
+
+      // Verify we can still run successful transactions
+      await backend.transaction(async (tx) => {
+        await tx.run('UPDATE error_test SET value = ? WHERE id = ?', ['updated', 1]);
+      });
+
+      const updated = await backend.get('SELECT * FROM error_test WHERE id = ?', [1]);
+      expect((updated as Record<string, unknown>)?.value).toBe('updated');
+    });
+
+    it('should handle multiple consecutive failed transactions', async () => {
+      for (let i = 0; i < 3; i++) {
+        try {
+          await backend.transaction(async (_tx) => {
+            throw new Error(`Failure ${i}`);
+          });
+        } catch {
+          // Expected
+        }
+      }
+
+      // Backend should still work
+      const result = await backend.run('INSERT INTO error_test (value) VALUES (?)', ['success']);
+      expect(result.rowsAffected).toBe(1);
     });
   });
 });

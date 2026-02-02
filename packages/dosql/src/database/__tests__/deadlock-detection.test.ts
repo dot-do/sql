@@ -38,6 +38,10 @@ import {
   TransactionErrorCode,
   IsolationLevel,
 } from '../../transaction/types.js';
+import type {
+  DeadlockEvent as TestDeadlockEvent,
+  DeadlockHandler,
+} from '../../__tests__/test-utils.js';
 
 // =============================================================================
 // EXTENDED TYPES FOR TDD (Expected Future API)
@@ -964,12 +968,20 @@ describe('Deadlock Reporting and Logging', () => {
    * GAP: onDeadlock callback should be supported
    */
   it('should invoke onDeadlock callback', async () => {
-    const deadlockEvents: any[] = [];
+    const deadlockEvents: DeadlockEvent[] = [];
 
     // GAP: onDeadlock option should be accepted
+    const onDeadlock: DeadlockHandler = (info: TestDeadlockEvent) => {
+      deadlockEvents.push({
+        timestamp: info.timestamp,
+        cycle: info.chain ?? [],
+        victimTxnId: info.transactionId,
+        resources: [],
+      });
+    };
     const lockManager = createLockManager({
       detectDeadlocks: true,
-      onDeadlock: (info: any) => deadlockEvents.push(info),
+      onDeadlock,
     } as ExtendedLockManagerConfig);
 
     await lockManager.acquire(lockRequest('txn1', 'A', LockType.EXCLUSIVE));

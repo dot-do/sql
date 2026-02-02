@@ -19,6 +19,7 @@ import {
   createInMemoryStorage,
   type InMemoryStorage,
 } from '../statement/statement.js';
+import { type CrossJoinRow, extractColumnPairs } from './test-utils.js';
 
 describe('CROSS JOIN Parsing', () => {
   let db: Database;
@@ -68,12 +69,12 @@ describe('CROSS JOIN Parsing', () => {
     });
 
     it('should resolve column references with CROSS JOIN aliases', () => {
-      const result = db.prepare('SELECT cor0.col0, cor1.col0 FROM tab2 AS cor0 CROSS JOIN tab2 AS cor1').all();
+      const result = db.prepare('SELECT cor0.col0, cor1.col0 FROM tab2 AS cor0 CROSS JOIN tab2 AS cor1').all() as CrossJoinRow[];
 
       expect(result.length).toBe(4);
       // Should have both col0 values from both tables
       // All combinations: (3,3), (3,4), (4,3), (4,4)
-      const pairs = result.map((r: any) => [r.col0, r.col0]);
+      const pairs = extractColumnPairs(result, 'col0', 'col0');
       expect(pairs.length).toBe(4);
     });
   });

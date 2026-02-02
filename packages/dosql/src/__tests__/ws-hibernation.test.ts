@@ -37,10 +37,20 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { RPCSessionState } from './test-utils.js';
 
 // =============================================================================
 // Test Helpers - Mock Durable Object Types
 // =============================================================================
+
+/**
+ * WebSocket attachment data structure
+ */
+interface WebSocketAttachment {
+  sessionId?: string;
+  authenticatedAt?: number;
+  [key: string]: unknown;
+}
 
 interface MockWebSocket {
   id: string;
@@ -48,12 +58,12 @@ interface MockWebSocket {
   tags: string[];
   send(data: string): void;
   close(code?: number, reason?: string): void;
-  serializeAttachment(): any;
-  deserializeAttachment(data: any): void;
+  serializeAttachment(): WebSocketAttachment;
+  deserializeAttachment(data: WebSocketAttachment): void;
 }
 
 interface MockDurableObjectState {
-  storage: Map<string, any>;
+  storage: Map<string, unknown>;
   webSockets: Map<string, MockWebSocket>;
   acceptWebSocket(ws: MockWebSocket, tags?: string[]): void;
   getWebSockets(tag?: string): MockWebSocket[];
@@ -108,8 +118,8 @@ interface HibernatingDoSQLDO {
   getConnectionsByTag(tag: string): MockWebSocket[];
 
   // RPC session state
-  getRpcSessionState(wsId: string): any;
-  persistRpcSessionState(wsId: string, state: any): Promise<void>;
+  getRpcSessionState(wsId: string): RPCSessionState | undefined;
+  persistRpcSessionState(wsId: string, state: RPCSessionState): Promise<void>;
 }
 
 // =============================================================================

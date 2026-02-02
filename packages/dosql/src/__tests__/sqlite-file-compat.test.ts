@@ -29,6 +29,7 @@ import type {
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { findColumn, type SQLiteColumnInfo } from './test-utils.js';
 
 // =============================================================================
 // TEST UTILITIES
@@ -194,12 +195,12 @@ describe('Write DoSQL database readable by sqlite3', () => {
     const BetterSqlite3 = await import('better-sqlite3').then(m => m.default);
     const externalDb = new BetterSqlite3(filepath, { readonly: true });
 
-    const tableInfo = externalDb.pragma('table_info(complex_table)');
+    const tableInfo = externalDb.pragma('table_info(complex_table)') as SQLiteColumnInfo[];
     expect(tableInfo).toHaveLength(5);
     // Verify column names and types are preserved
-    const nameCol = tableInfo.find((c: any) => c.name === 'name');
+    const nameCol = findColumn(tableInfo, 'name');
     expect(nameCol).toBeDefined();
-    expect(nameCol.type).toBe('TEXT');
+    expect(nameCol!.type).toBe('TEXT');
     // Note: NOT NULL constraint is not currently preserved by DoSQL pragma
     // This is a known limitation of the in-memory engine
 

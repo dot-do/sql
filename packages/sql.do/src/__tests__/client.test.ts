@@ -40,9 +40,14 @@ import {
   createTestClient,
   createExtendedError,
   createEventListener,
+  createReconnectionCollector,
+  createQueryLogCollector,
   type TestClientConfig,
   type ExtendedClient,
   type ExtendedTransactionContext,
+  type ReconnectingEvent,
+  type QueryLogEntry,
+  type TransactionContextWithIdempotency,
 } from './test-utils.js';
 
 // =============================================================================
@@ -998,7 +1003,7 @@ describe('WebSocket Reconnection', () => {
   it.fails('should use exponential backoff for reconnection', async () => {
     vi.useFakeTimers();
 
-    const client = new DoSQLClient({
+    const config: TestClientConfig = {
       url: 'ws://localhost:8080',
       autoReconnect: true,
       reconnect: {
@@ -1006,12 +1011,14 @@ describe('WebSocket Reconnection', () => {
         baseDelayMs: 1000,
         maxDelayMs: 30000,
       },
-    } as any);
+    };
+    const client = createTestClient(config);
 
-    const delays: number[] = [];
-    (client as any).on?.('reconnecting', (e: any) => delays.push(e.delayMs));
+    const { delays, callback } = createReconnectionCollector();
+    const extClient = asExtendedClient(client);
+    extClient.on?.('reconnecting', callback as (e: ReconnectingEvent) => void);
 
-    await (client as any).connect?.();
+    await extClient.connect?.();
     mockWs.simulateClose();
 
     // Simulate multiple reconnection attempts
@@ -1032,14 +1039,16 @@ describe('WebSocket Reconnection', () => {
    * Currently: Requests fail immediately when disconnected
    */
   it.fails('should queue requests during reconnection', async () => {
-    const client = new DoSQLClient({
+    const config: TestClientConfig = {
       url: 'ws://localhost:8080',
       autoReconnect: true,
       // GAP: queueWhileReconnecting option
       queueWhileReconnecting: true,
-    } as any);
+    };
+    const client = createTestClient(config);
+    const extClient = asExtendedClient(client);
 
-    await (client as any).connect?.();
+    await extClient.connect?.();
     mockWs.simulateClose();
 
     // Start query while disconnected
@@ -1563,15 +1572,16 @@ describe('Additional Client Features', () => {
    * Currently: No query logging
    */
   it.fails('should support query logging', async () => {
-    const queryLog: any[] = [];
+    const { log: queryLog, logger: queryLogger } = createQueryLogCollector();
 
-    const client = new DoSQLClient({
+    const config: TestClientConfig = {
       url: 'ws://localhost:8080',
       // GAP: queryLogger option should exist
-      queryLogger: (entry: any) => queryLog.push(entry),
-    } as any);
+      queryLogger,
+    };
+    const client = createTestClient(config);
 
-    (globalThis as any).WebSocket = MockWebSocket;
+    getGlobalWithWebSocket().WebSocket = MockWebSocket;
 
     await client.query('SELECT 1');
 

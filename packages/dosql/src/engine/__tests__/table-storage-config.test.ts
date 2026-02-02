@@ -5,12 +5,16 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import type { TableSchema } from '../types.js';
 import type { TableStorageConfig } from '../storage-config.js';
 import { createDOEngine } from '../do-engine.js';
+import {
+  createTypedStorageTransaction,
+  type TypedStorageTransaction,
+} from '../../__tests__/test-utils.js';
 
 /**
  * Create a mock DurableObjectStorage for testing.
  */
 function createMockStorage() {
-  const data = new Map<string, any>();
+  const data = new Map<string, unknown>();
 
   return {
     get: async <T>(key: string | string[]): Promise<T | Map<string, T> | undefined> => {
@@ -19,7 +23,7 @@ function createMockStorage() {
         for (const k of key) {
           const value = data.get(k);
           if (value !== undefined) {
-            result.set(k, value);
+            result.set(k, value as T);
           }
         }
         return result;
@@ -46,7 +50,7 @@ function createMockStorage() {
       return data.delete(key);
     },
     list: async () => new Map(data),
-    transaction: async <T>(fn: (txn: any) => Promise<T>): Promise<T> => fn({}),
+    transaction: async <T>(fn: (txn: TypedStorageTransaction) => Promise<T>): Promise<T> => fn(createTypedStorageTransaction(data)),
     deleteAll: async () => data.clear(),
     getAlarm: async () => null,
     setAlarm: async () => {},

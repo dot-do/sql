@@ -1236,4 +1236,360 @@ describe('Prisma ORM Integration Tests', () => {
       expect(adapter.adapterName).toBe('dosql-prisma');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Advanced Type Inference and ResultSet Structure
+  // ---------------------------------------------------------------------------
+
+  describe('Advanced ResultSet Structure', () => {
+    beforeEach(() => {
+      backend.seedTable('typed_records', [
+        { id: 1, str_val: 'hello', int_val: 42, float_val: 3.14, bool_val: true, null_val: null },
+        { id: 2, str_val: 'world', int_val: -10, float_val: 0.0, bool_val: false, null_val: null },
+      ]);
+    });
+
+    it('should correctly map column names to positions', async () => {
+      const result = await adapter.queryRaw({
+        sql: 'SELECT * FROM typed_records ORDER BY id ASC',
+        args: [],
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Column names should include all columns from the table
+        expect(result.value.columnNames).toContain('id');
+        expect(result.value.columnNames).toContain('str_val');
+        expect(result.value.columnNames).toContain('int_val');
+
+        // First row values by position
+        const idIdx = result.value.columnNames.indexOf('id');
+        const strIdx = result.value.columnNames.indexOf('str_val');
+        const intIdx = result.value.columnNames.indexOf('int_val');
+
+        expect(result.value.rows[0][idIdx]).toBe(1);
+        expect(result.value.rows[0][strIdx]).toBe('hello');
+        expect(result.value.rows[0][intIdx]).toBe(42);
+      }
+    });
+
+    it('should infer SQLite types for all column types', async () => {
+      const result = await adapter.queryRaw({
+        sql: 'SELECT * FROM typed_records WHERE id = ?',
+        args: [1],
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const typeMap = new Map(
+          result.value.columnTypes.map((ct) => [ct.name, ct.type])
+        );
+
+        expect(typeMap.get('id')).toBe('INTEGER');
+        expect(typeMap.get('str_val')).toBe('TEXT');
+        expect(typeMap.get('int_val')).toBe('INTEGER');
+        expect(typeMap.get('float_val')).toBe('REAL');
+        // Booleans converted to INTEGER in SQLite
+        expect(typeMap.get('bool_val')).toBe('INTEGER');
+        expect(typeMap.get('null_val')).toBe('NULL');
+      }
+    });
+
+    it('should preserve column order across multiple queries', async () => {
+      // First query - SELECT * returns all columns
+      const result1 = await adapter.queryRaw({
+        sql: 'SELECT * FROM typed_records',
+        args: [],
+      });
+
+      // Second query - same query returns same columns
+      const result2 = await adapter.queryRaw({
+        sql: 'SELECT * FROM typed_records',
+        args: [],
+      });
+
+      expect(result1.ok).toBe(true);
+      expect(result2.ok).toBe(true);
+
+      if (result1.ok && result2.ok) {
+        // Both queries should return the same column names
+        expect(result1.value.columnNames).toEqual(result2.value.columnNames);
+        // Should include expected columns
+        expect(result1.value.columnNames).toContain('str_val');
+        expect(result1.value.columnNames).toContain('int_val');
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Bulk Operations via Prisma Adapter
+  // ---------------------------------------------------------------------------
+
+  describe('Bulk Operations', () => {
+    beforeEach(() => {
+      backend.clear();
+    });
+
+    it('should handle multiple sequential inserts', async () => {
+      for (let i = 0; i < 5; i++) {
+        const result = await adapter.executeRaw({
+          sql: 'INSERT INTO users (name, email) VALUES (?, ?)',
+          args: [`User${i}`, `user${i}@example.com`],
+        });
+        expect(result.ok).toBe(true);
+      }
+
+      const query = await adapter.queryRaw({
+        sql: 'SELECT * FROM users',
+        args: [],
+      });
+
+      expect(query.ok).toBe(true);
+      if (query.ok) {
+        expect(query.value.rows).toHaveLength(5);
+      }
+    });
+
+    it('should handle multiple operations in transaction', async () => {
+      const txnResult = await adapter.startTransaction();
+      expect(txnResult.ok).toBe(true);
+
+      if (txnResult.ok) {
+        const txn = txnResult.value;
+
+        // Multiple inserts
+        for (let i = 0; i < 3; i++) {
+          await txn.executeRaw({
+            sql: 'INSERT INTO users (name, email) VALUES (?, ?)',
+            args: [`TxnUser${i}`, `txn${i}@example.com`],
+          });
+        }
+
+        // Query within transaction
+        const queryResult = await txn.queryRaw({
+          sql: 'SELECT * FROM users',
+          args: [],
+        });
+
+        expect(queryResult.ok).toBe(true);
+        if (queryResult.ok) {
+          expect(queryResult.value.rows).toHaveLength(3);
+        }
+
+        await txn.commit();
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Advanced Transaction Patterns
+  // ---------------------------------------------------------------------------
+
+  describe('Advanced Transaction Patterns', () => {
+    beforeEach(() => {
+      backend.seedTable('accounts', [
+        { id: 1, name: 'Checking', balance: 1000 },
+        { id: 2, name: 'Savings', balance: 5000 },
+      ]);
+    });
+
+    it('should support read-modify-write pattern in transaction', async () => {
+      const txnResult = await adapter.startTransaction();
+      expect(txnResult.ok).toBe(true);
+
+      if (txnResult.ok) {
+        const txn = txnResult.value;
+
+        // Read current balance
+        const readResult = await txn.queryRaw({
+          sql: 'SELECT * FROM accounts WHERE id = ?',
+          args: [1],
+        });
+
+        expect(readResult.ok).toBe(true);
+        if (readResult.ok && readResult.value.rows.length > 0) {
+          const balanceIdx = readResult.value.columnNames.indexOf('balance');
+          const currentBalance = readResult.value.rows[0][balanceIdx] as number;
+
+          // Update with new balance
+          const newBalance = currentBalance - 100;
+          await txn.executeRaw({
+            sql: 'UPDATE accounts SET balance = ? WHERE id = ?',
+            args: [newBalance, 1],
+          });
+        }
+
+        await txn.commit();
+      }
+
+      // Verify result
+      const verifyResult = await adapter.queryRaw({
+        sql: 'SELECT * FROM accounts WHERE id = ?',
+        args: [1],
+      });
+
+      expect(verifyResult.ok).toBe(true);
+      if (verifyResult.ok && verifyResult.value.rows.length > 0) {
+        const balanceIdx = verifyResult.value.columnNames.indexOf('balance');
+        expect(verifyResult.value.rows[0][balanceIdx]).toBe(900);
+      }
+    });
+
+    it('should support transaction with only reads returning data', async () => {
+      const txnResult = await adapter.startTransaction();
+      expect(txnResult.ok).toBe(true);
+
+      if (txnResult.ok) {
+        const txn = txnResult.value;
+
+        const result1 = await txn.queryRaw({
+          sql: 'SELECT * FROM accounts WHERE id = ?',
+          args: [1],
+        });
+
+        const result2 = await txn.queryRaw({
+          sql: 'SELECT * FROM accounts WHERE id = ?',
+          args: [2],
+        });
+
+        expect(result1.ok).toBe(true);
+        expect(result2.ok).toBe(true);
+
+        await txn.commit();
+      }
+    });
+
+    it('should handle consecutive transactions', async () => {
+      // First transaction
+      const txn1 = await adapter.startTransaction();
+      expect(txn1.ok).toBe(true);
+      if (txn1.ok) {
+        await txn1.value.executeRaw({
+          sql: 'INSERT INTO users (name, email) VALUES (?, ?)',
+          args: ['First', 'first@example.com'],
+        });
+        await txn1.value.commit();
+      }
+
+      // Second transaction
+      const txn2 = await adapter.startTransaction();
+      expect(txn2.ok).toBe(true);
+      if (txn2.ok) {
+        await txn2.value.executeRaw({
+          sql: 'INSERT INTO users (name, email) VALUES (?, ?)',
+          args: ['Second', 'second@example.com'],
+        });
+        await txn2.value.commit();
+      }
+
+      // Verify
+      const result = await adapter.queryRaw({
+        sql: 'SELECT * FROM users',
+        args: [],
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.rows).toHaveLength(2);
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Edge Cases and Error Recovery
+  // ---------------------------------------------------------------------------
+
+  describe('Edge Cases and Error Recovery', () => {
+    it('should handle empty query result gracefully', async () => {
+      const result = await adapter.queryRaw({
+        sql: 'SELECT * FROM users WHERE id = ?',
+        args: [99999],
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.rows).toHaveLength(0);
+      }
+    });
+
+    it('should recover after transaction rollback', async () => {
+      // Clear users table first
+      backend.seedTable('users', []);
+
+      // Start a transaction
+      const txn1 = await adapter.startTransaction();
+      expect(txn1.ok).toBe(true);
+
+      if (txn1.ok) {
+        // Do some work
+        await txn1.value.executeRaw({
+          sql: 'INSERT INTO users (name) VALUES (?)',
+          args: ['WillRollback'],
+        });
+
+        // Rollback - note: our simple in-memory backend doesn't actually undo data changes
+        await txn1.value.rollback();
+      }
+
+      // Should be able to start a new transaction
+      const txn2 = await adapter.startTransaction();
+      expect(txn2.ok).toBe(true);
+
+      if (txn2.ok) {
+        await txn2.value.executeRaw({
+          sql: 'INSERT INTO users (name) VALUES (?)',
+          args: ['AfterRollback'],
+        });
+        await txn2.value.commit();
+      }
+
+      // Verify data exists (rollback semantics depend on backend implementation)
+      const result = await adapter.queryRaw({
+        sql: 'SELECT * FROM users',
+        args: [],
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // At least one row should exist (from second transaction)
+        expect(result.value.rows.length).toBeGreaterThanOrEqual(1);
+      }
+    });
+
+    it('should handle special characters in string values', async () => {
+      await adapter.executeRaw({
+        sql: 'INSERT INTO users (name, email) VALUES (?, ?)',
+        args: ["O'Brien", 'obrien@example.com'],
+      });
+
+      const result = await adapter.queryRaw({
+        sql: 'SELECT * FROM users WHERE email = ?',
+        args: ['obrien@example.com'],
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok && result.value.rows.length > 0) {
+        const nameIdx = result.value.columnNames.indexOf('name');
+        expect(result.value.rows[0][nameIdx]).toBe("O'Brien");
+      }
+    });
+
+    it('should handle unicode characters', async () => {
+      await adapter.executeRaw({
+        sql: 'INSERT INTO users (name, email) VALUES (?, ?)',
+        args: ['用户名', 'unicode@example.com'],
+      });
+
+      const result = await adapter.queryRaw({
+        sql: 'SELECT * FROM users WHERE email = ?',
+        args: ['unicode@example.com'],
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok && result.value.rows.length > 0) {
+        const nameIdx = result.value.columnNames.indexOf('name');
+        expect(result.value.rows[0][nameIdx]).toBe('用户名');
+      }
+    });
+  });
 });

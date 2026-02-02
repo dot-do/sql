@@ -27,7 +27,26 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { DoSQLClient, createSQLClient, type SQLClientConfig } from '../client.js';
+import { DoSQLClient, createSQLClient, type SQLClientConfig, type TransactionContext } from '../client.js';
+
+// =============================================================================
+// WebSocket Event Types
+// =============================================================================
+
+/**
+ * WebSocket event data structure
+ */
+interface WebSocketEventData {
+  data?: string;
+  error?: Error;
+  code?: number;
+  reason?: string;
+}
+
+/**
+ * WebSocket event callback type
+ */
+type WebSocketEventCallback = (event: WebSocketEventData) => void;
 
 // =============================================================================
 // Test Helpers
@@ -49,7 +68,7 @@ class MockPooledWebSocket {
   id: string;
   createdAt: number;
   lastUsedAt: number;
-  private listeners: Map<string, Set<(event: any) => void>> = new Map();
+  private listeners: Map<string, Set<WebSocketEventCallback>> = new Map();
 
   constructor(url: string) {
     this.url = url;
@@ -65,20 +84,20 @@ class MockPooledWebSocket {
     }, 10);
   }
 
-  addEventListener(event: string, callback: (event: any) => void): void {
+  addEventListener(event: string, callback: WebSocketEventCallback): void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
     this.listeners.get(event)!.add(callback);
   }
 
-  removeEventListener(event: string, callback: (event: any) => void): void {
+  removeEventListener(event: string, callback: WebSocketEventCallback): void {
     this.listeners.get(event)?.delete(callback);
   }
 
   send(data: string): void {
     this.lastUsedAt = Date.now();
-    const request = JSON.parse(data);
+    const request = JSON.parse(data) as { id: string };
     setTimeout(() => {
       this.emit('message', {
         data: JSON.stringify({
@@ -94,7 +113,7 @@ class MockPooledWebSocket {
     this.emit('close', {});
   }
 
-  private emit(event: string, data: any): void {
+  private emit(event: string, data: WebSocketEventData): void {
     this.listeners.get(event)?.forEach((callback) => callback(data));
   }
 }
@@ -811,9 +830,9 @@ describe('CapnWeb RPC over Persistent Connections', () => {
       url: 'ws://localhost:8080',
       // @ts-expect-error - pool config not supported yet
       pool: { maxSize: 5 },
-    }) as any;
+    });
 
-    await client.transaction(async (tx: any) => {
+    await client.transaction(async (tx: TransactionContext) => {
       // All transaction operations should use same connection
       await tx.exec('INSERT INTO test VALUES (1)');
       await tx.exec('INSERT INTO test VALUES (2)');

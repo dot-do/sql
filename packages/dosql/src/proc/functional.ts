@@ -255,7 +255,10 @@ export function defineProcedures<
  * Generate ESM code representation of a functional procedure.
  * This is used when integrating with the existing registry system.
  */
-function generateProcedureCode(name: string, handler: Function): string {
+function generateProcedureCode<Args extends unknown[], R>(
+  name: string,
+  handler: (...args: Args) => R | Promise<R>
+): string {
   // Get the function source and convert to ESM format
   const source = handler.toString();
 

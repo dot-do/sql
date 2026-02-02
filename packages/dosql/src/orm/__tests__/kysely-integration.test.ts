@@ -23,6 +23,7 @@ import {
   type Selectable,
 } from '../kysely/index.js';
 import { MockDoSQLBackend, createMockBackend } from '../kysely/mock-backend.js';
+import type { SqlValue } from '../../engine/types.js';
 
 // =============================================================================
 // TEST DATABASE SCHEMA
@@ -625,6 +626,285 @@ describe('Kysely ORM Integration Tests', () => {
       // Verify original data unchanged
       const users = await db.selectFrom('users').selectAll().execute();
       expect(users).toHaveLength(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Advanced Type Inference
+  // ---------------------------------------------------------------------------
+
+  describe('Advanced Type Inference', () => {
+    beforeEach(() => {
+      backend.seed('users', [
+        { id: 1, username: 'alice', email: 'alice@example.com', created_at: new Date(), is_admin: true },
+        { id: 2, username: 'bob', email: 'bob@example.com', created_at: new Date(), is_admin: false },
+      ]);
+      backend.seed('posts', [
+        { id: 1, author_id: 1, title: 'First Post', body: 'Content', status: 'published', view_count: 100 },
+      ]);
+    });
+
+    it('should infer types for chained select operations', async () => {
+      const result = await db
+        .selectFrom('users')
+        .select(['id', 'username', 'is_admin'])
+        .where('is_admin', '=', true)
+        .orderBy('username', 'asc')
+        .limit(10)
+        .execute();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].username).toBe('alice');
+      expect(result[0].is_admin).toBe(true);
+      // Should only have the selected columns
+      expect(Object.keys(result[0])).toHaveLength(3);
+    });
+
+    it('should infer types from join operations', async () => {
+      const result = await db
+        .selectFrom('posts')
+        .innerJoin('users', 'users.id', 'posts.author_id')
+        .select(['posts.title', 'posts.status', 'users.username'])
+        .execute();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].title).toBe('First Post');
+      expect(result[0].username).toBe('alice');
+    });
+
+    it('should support executeTakeFirstOrThrow pattern', async () => {
+      const user = await db
+        .selectFrom('users')
+        .selectAll()
+        .where('id', '=', 1)
+        .executeTakeFirst();
+
+      // This would throw if not found
+      expect(user).toBeDefined();
+      expect(user?.username).toBe('alice');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Bulk Query Operations
+  // ---------------------------------------------------------------------------
+
+  describe('Bulk Query Operations', () => {
+    beforeEach(() => {
+      backend.seed('users', []);
+      backend.seed('posts', []);
+    });
+
+    it('should handle multiple sequential inserts efficiently', async () => {
+      // Insert multiple users
+      for (let i = 0; i < 5; i++) {
+        await db.insertInto('users').values({
+          username: `user_${i}`,
+          email: `user_${i}@example.com`,
+          is_admin: i % 2 === 0,
+        }).execute();
+      }
+
+      const users = await db.selectFrom('users').selectAll().execute();
+      expect(users).toHaveLength(5);
+    });
+
+    it('should handle batch-style update', async () => {
+      backend.seed('users', [
+        { id: 1, username: 'alice', email: 'alice@old.com', created_at: new Date(), is_admin: false },
+        { id: 2, username: 'bob', email: 'bob@old.com', created_at: new Date(), is_admin: false },
+        { id: 3, username: 'charlie', email: 'charlie@old.com', created_at: new Date(), is_admin: true },
+      ]);
+
+      // Update all non-admin users
+      await db.updateTable('users')
+        .set({ is_admin: true })
+        .where('is_admin', '=', false)
+        .execute();
+
+      const users = await db.selectFrom('users').selectAll().execute();
+      expect(users.every((u) => u.is_admin === true)).toBe(true);
+    });
+
+    it('should handle conditional delete', async () => {
+      backend.seed('posts', [
+        { id: 1, author_id: 1, title: 'Post 1', body: 'Content', status: 'draft', view_count: 0 },
+        { id: 2, author_id: 1, title: 'Post 2', body: 'Content', status: 'published', view_count: 100 },
+        { id: 3, author_id: 2, title: 'Post 3', body: 'Content', status: 'draft', view_count: 0 },
+      ]);
+
+      // Delete all drafts
+      await db.deleteFrom('posts').where('status', '=', 'draft').execute();
+
+      const posts = await db.selectFrom('posts').selectAll().execute();
+      expect(posts).toHaveLength(1);
+      expect(posts[0].status).toBe('published');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Advanced Transaction Scenarios
+  // ---------------------------------------------------------------------------
+
+  describe('Advanced Transaction Scenarios', () => {
+    beforeEach(() => {
+      backend.seed('products', [
+        { id: 1, sku: 'SKU001', name: 'Product A', price: 100, stock: 50, category: 'electronics' },
+        { id: 2, sku: 'SKU002', name: 'Product B', price: 200, stock: 30, category: 'electronics' },
+      ]);
+      backend.seed('orders', []);
+    });
+
+    it('should handle transaction with mixed operations', async () => {
+      const result = await db.transaction().execute(async (trx) => {
+        // Insert order
+        await trx.insertInto('orders').values({
+          user_id: 1,
+          product_id: 1,
+          quantity: 2,
+          total: 200,
+          status: 'pending',
+        }).execute();
+
+        // Update stock
+        await trx.updateTable('products')
+          .set({ stock: 48 })
+          .where('id', '=', 1)
+          .execute();
+
+        // Read within transaction
+        const product = await trx.selectFrom('products')
+          .selectAll()
+          .where('id', '=', 1)
+          .executeTakeFirst();
+
+        return {
+          newStock: product?.stock,
+          orderCreated: true,
+        };
+      });
+
+      expect(result.newStock).toBe(48);
+      expect(result.orderCreated).toBe(true);
+    });
+
+    it('should properly rollback on mid-transaction error', async () => {
+      const initialStock = 50;
+      backend.seed('products', [
+        { id: 1, sku: 'SKU001', name: 'Product A', price: 100, stock: initialStock, category: 'electronics' },
+      ]);
+
+      try {
+        await db.transaction().execute(async (trx) => {
+          // First update succeeds
+          await trx.updateTable('products')
+            .set({ stock: 40 })
+            .where('id', '=', 1)
+            .execute();
+
+          // Then error occurs
+          throw new Error('Payment failed');
+        });
+      } catch {
+        // Expected
+      }
+
+      // Verify rollback
+      const product = await db.selectFrom('products')
+        .selectAll()
+        .where('id', '=', 1)
+        .executeTakeFirst();
+
+      expect(product?.stock).toBe(initialStock);
+    });
+
+    it('should handle transaction that only reads', async () => {
+      const result = await db.transaction().execute(async (trx) => {
+        const products = await trx.selectFrom('products').selectAll().execute();
+        const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
+        return { count: products.length, totalStock };
+      });
+
+      expect(result.count).toBe(2);
+      expect(result.totalStock).toBe(80);
+    });
+
+    it('should support sequential transactions', async () => {
+      // First transaction
+      await db.transaction().execute(async (trx) => {
+        await trx.insertInto('orders').values({
+          user_id: 1,
+          product_id: 1,
+          quantity: 1,
+          total: 100,
+          status: 'completed',
+        }).execute();
+      });
+
+      // Second transaction
+      await db.transaction().execute(async (trx) => {
+        await trx.insertInto('orders').values({
+          user_id: 2,
+          product_id: 2,
+          quantity: 1,
+          total: 200,
+          status: 'completed',
+        }).execute();
+      });
+
+      const orders = await db.selectFrom('orders').selectAll().execute();
+      expect(orders).toHaveLength(2);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Driver Configuration
+  // ---------------------------------------------------------------------------
+
+  describe('Driver Configuration', () => {
+    it('should support parameter transformation', async () => {
+      const transformedParams: unknown[][] = [];
+
+      const customBackend = createMockBackend();
+      customBackend.seed('users', [
+        { id: 1, username: 'test', email: 'test@example.com', created_at: new Date(), is_admin: false },
+      ]);
+
+      const db2 = new Kysely<TestDatabase>({
+        dialect: new DoSQLDialect({
+          backend: customBackend,
+          transformParameters: (params) => {
+            transformedParams.push(params);
+            return params as SqlValue[];
+          },
+        }),
+      });
+
+      await db2.selectFrom('users').selectAll().where('id', '=', 42).execute();
+
+      expect(transformedParams.length).toBeGreaterThan(0);
+      expect(transformedParams[0]).toContain(42);
+
+      await db2.destroy();
+    });
+
+    it('should support strict mode flag', async () => {
+      const db2 = new Kysely<TestDatabase>({
+        dialect: new DoSQLDialect({
+          backend,
+          strict: true,
+        }),
+      });
+
+      // Strict mode should still allow valid queries
+      backend.seed('users', [
+        { id: 1, username: 'test', email: 'test@example.com', created_at: new Date(), is_admin: false },
+      ]);
+
+      const users = await db2.selectFrom('users').selectAll().execute();
+      expect(users).toHaveLength(1);
+
+      await db2.destroy();
     });
   });
 });

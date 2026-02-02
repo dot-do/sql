@@ -108,6 +108,7 @@ import {
 
 import { type WithClause, type CTEDefinition } from '../../../parser/cte-types.js';
 import { type WindowSpec } from '../../../functions/window.js';
+import { type WindowExpression } from '../../../__tests__/test-utils.js';
 
 // =============================================================================
 // TEST HELPERS
@@ -3137,7 +3138,7 @@ describe('Window Operator', () => {
 
   describe('Utility Functions', () => {
     it('should detect window functions in expressions', () => {
-      const windowExpr: Expression & { over?: any } = {
+      const windowExpr: WindowExpression = {
         type: 'function',
         name: 'row_number',
         args: [],
@@ -3150,7 +3151,7 @@ describe('Window Operator', () => {
         args: [col('name')],
       };
 
-      expect(containsWindowFunction(windowExpr)).toBe(true);
+      expect(containsWindowFunction(windowExpr as Expression)).toBe(true);
       expect(containsWindowFunction(regularExpr)).toBe(false);
     });
 

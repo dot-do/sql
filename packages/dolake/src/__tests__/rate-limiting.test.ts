@@ -29,6 +29,14 @@ import {
   generateUUID,
   DEFAULT_CLIENT_CAPABILITIES,
 } from '../index.js';
+import {
+  type WSResponseMessage,
+  isRateLimitedResponse,
+  isAckResponse,
+  isPongResponse,
+  filterRateLimitedResponses,
+  filterAckResponses,
+} from './test-utils.js';
 
 // =============================================================================
 // Test Utilities
@@ -522,9 +530,7 @@ describe('Message Rate Limiting', () => {
       }
 
       // EXPECTED: Heartbeats should have lenient rate limiting
-      const heartbeatThrottled = heartbeatResponses.filter(
-        (r: any) => r.type === 'nack' && r.reason === 'rate_limited'
-      );
+      const heartbeatThrottled = filterRateLimitedResponses(heartbeatResponses as WSResponseMessage[]);
 
       // Heartbeats should mostly succeed (higher limit)
       expect(heartbeatThrottled.length).toBeLessThan(heartbeatCount * 0.1);
@@ -740,7 +746,7 @@ describe('Token Bucket Burst Handling', () => {
       }
 
       // EXPECTED: All burst messages should succeed
-      const successful = responses.filter((r: any) => r.type === 'ack');
+      const successful = filterAckResponses(responses as WSResponseMessage[]);
       expect(successful.length).toBe(burstCapacity);
     } finally {
       client.close();
@@ -766,9 +772,7 @@ describe('Token Bucket Burst Handling', () => {
         responses.push(response);
       }
 
-      const rateLimited = responses.filter(
-        (r: any) => r.type === 'nack' && r.reason === 'rate_limited'
-      );
+      const rateLimited = filterRateLimitedResponses(responses as WSResponseMessage[]);
 
       // EXPECTED: Messages beyond burst capacity should be rate-limited
       expect(rateLimited.length).toBeGreaterThan(0);
@@ -1459,7 +1463,9 @@ describe('Graceful Degradation', () => {
       const allResponses = await collectResponses(client, 60, 3000);
 
       // EXPECTED: At least one response should be a 'pong' from heartbeat
-      const hasPong = allResponses.some((r: any) => r.type === 'pong');
+      const hasPong = allResponses.some((r: unknown) =>
+        isPongResponse(r as WSResponseMessage)
+      );
       expect(hasPong).toBe(true);
     } finally {
       client.close();

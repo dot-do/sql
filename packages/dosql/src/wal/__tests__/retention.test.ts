@@ -17,6 +17,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FSXBackend } from '../../fsx/types.js';
+import { createSizeAlertCollector, type SizeAlert } from '../../__tests__/test-utils.js';
 
 // =============================================================================
 // Extended Types for TDD Tests (Expected Future API)
@@ -452,13 +453,11 @@ describe('WAL Retention Policy - Size-Based Retention [RED]', () => {
     const { createWALReader } = await import('../reader.js');
 
     const reader = createWALReader(backend);
-    const sizeAlerts: any[] = [];
+    const { alerts: sizeAlerts, callback: onSizeWarning } = createSizeAlertCollector();
 
     const manager = createWALRetentionManager(backend, reader, null, {
       maxTotalBytes: 100 * 1024,
-      onSizeWarning: (current: number, max: number) => {
-        sizeAlerts.push({ current, max, percentage: (current / max) * 100 });
-      },
+      onSizeWarning,
       sizeWarningThreshold: 0.8, // Alert at 80%
     });
 

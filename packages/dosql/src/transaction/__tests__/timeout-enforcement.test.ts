@@ -78,10 +78,29 @@ function createMockDOState(overrides?: Partial<MockDOStorage>): MockDOState {
 }
 
 // Mock WAL Writer for transaction manager
+
+/**
+ * WAL entry type for mock writer
+ */
+interface WALEntry {
+  lsn?: bigint;
+  timestamp: number;
+  operation: string;
+  data?: unknown;
+}
+
+/**
+ * WAL append options
+ */
+interface WALAppendOptions {
+  sync?: boolean;
+  skipFsync?: boolean;
+}
+
 function createMockWALWriter() {
   let currentLSN = 0n;
   return {
-    async append(_entry: any, _options?: any) {
+    async append(_entry: WALEntry, _options?: WALAppendOptions) {
       return { lsn: currentLSN++, flushed: true };
     },
     async flush() {

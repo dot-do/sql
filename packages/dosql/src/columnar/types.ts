@@ -248,26 +248,23 @@ export interface ColumnarTableSchema {
 }
 
 // ============================================================================
-// FSX Interface (assumed from context)
+// Storage Interface (unified abstraction)
 // ============================================================================
 
+import type { StorageInterface } from '../storage/interface.js';
+
+// Re-export StorageInterface as the preferred type for columnar storage
+export type { StorageInterface };
+
 /**
- * Simplified FSX interface for blob storage.
- * Matches the fsx API used elsewhere in the codebase.
+ * FSXInterface is an alias for StorageInterface for backward compatibility.
+ *
+ * The columnar engine now uses the unified StorageInterface from the storage
+ * module, which provides a common abstraction shared with the B-tree engine.
+ *
+ * @deprecated Use StorageInterface directly
  */
-export interface FSXInterface {
-  /** Read a blob by key */
-  get(key: string): Promise<Uint8Array | null>;
-
-  /** Write a blob by key (max 2MB) */
-  put(key: string, data: Uint8Array): Promise<void>;
-
-  /** Delete a blob by key */
-  delete(key: string): Promise<void>;
-
-  /** List blobs by prefix */
-  list(prefix: string): Promise<string[]>;
-}
+export type FSXInterface = StorageInterface;
 
 // ============================================================================
 // Query Types

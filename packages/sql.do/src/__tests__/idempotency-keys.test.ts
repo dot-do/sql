@@ -27,6 +27,11 @@ import {
   DoSQLClient,
 } from '../client.js';
 import { DEFAULT_IDEMPOTENCY_CONFIG } from '../types.js';
+import {
+  asExtendedClient,
+  type ExtendedClient,
+  type TransactionContextWithIdempotency,
+} from './test-utils.js';
 
 // =============================================================================
 // DOCUMENTED GAPS - Features that should be implemented
@@ -600,13 +605,16 @@ describe('Transaction Idempotency', () => {
     });
 
     // GAP: retryableTransaction() should exist
+    const extClient = asExtendedClient(client);
     let attempts = 0;
-    let keys: string[] = [];
+    const keys: string[] = [];
 
-    await (client as any).retryableTransaction?.(
-      async (tx: any) => {
+    await extClient.retryableTransaction?.(
+      async (tx: TransactionContextWithIdempotency) => {
         attempts++;
-        keys.push(tx.idempotencyKey);
+        if (tx.idempotencyKey) {
+          keys.push(tx.idempotencyKey);
+        }
         if (attempts < 2) {
           throw new Error('Transient failure');
         }

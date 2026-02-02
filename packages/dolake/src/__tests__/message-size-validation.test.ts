@@ -43,6 +43,10 @@ import {
   DEFAULT_CLIENT_CAPABILITIES,
 } from '../index.js';
 import { DEFAULT_RATE_LIMIT_CONFIG } from '../rate-limiter.js';
+import {
+  type WSResponseMessage,
+  filterMemoryPressureResponses,
+} from './test-utils.js';
 
 // =============================================================================
 // Test Utilities
@@ -439,7 +443,7 @@ describe('Memory Protection', () => {
       );
 
       // Check for memory pressure response
-      const nacks = responses.filter((r: any) => r.type === 'nack' && r.reason === 'memory_pressure');
+      const nacks = filterMemoryPressureResponses(responses as WSResponseMessage[]);
 
       // EXPECTED: Should detect memory pressure and start rejecting
       expect(nacks.length).toBeGreaterThan(0);

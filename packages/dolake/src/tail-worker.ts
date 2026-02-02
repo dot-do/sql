@@ -24,6 +24,7 @@
  */
 
 import { generateUUID, type CDCEvent, type CDCBatchMessage } from './types.js';
+import { fnv1a } from '@dotdo/sql-types';
 
 // =============================================================================
 // TraceItem Type (Cloudflare Tail Worker Event Format)
@@ -422,20 +423,11 @@ export class TailWorkerCDCStreamer {
   }
 
   /**
-   * FNV-1a hash for consistent shard assignment
+   * FNV-1a hash for consistent shard assignment.
+   * Uses the shared implementation from @dotdo/sql-types.
    */
   private fnv1aHash(str: string): number {
-    const FNV_OFFSET_BASIS = 2166136261;
-    const FNV_PRIME = 16777619;
-
-    let hash = FNV_OFFSET_BASIS;
-
-    for (let i = 0; i < str.length; i++) {
-      hash ^= str.charCodeAt(i);
-      hash = (hash * FNV_PRIME) >>> 0;
-    }
-
-    return hash;
+    return fnv1a(str);
   }
 
   // ===========================================================================

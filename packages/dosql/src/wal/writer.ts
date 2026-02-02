@@ -25,6 +25,7 @@ import {
   type HLCConfig,
   type HLCReceiveOptions,
   type DriftMetrics,
+  type DriftWarning,
   type HLCEventType,
   type HLCEventHandler,
 } from '../hlc.js';
@@ -185,6 +186,13 @@ export class DefaultWALEncoder implements WALEncoder {
 // =============================================================================
 
 /**
+ * Event map for WAL Writer HLC events
+ */
+export interface WALWriterHLCEventMap {
+  'drift-warning': DriftWarning;
+}
+
+/**
  * Extended WAL Writer interface with HLC support
  */
 export interface WALWriterHLC {
@@ -198,9 +206,12 @@ export interface WALWriterHLC {
   /**
    * Register an event handler for HLC events
    * @param event Event type
-   * @param callback Event handler
+   * @param callback Event handler with typed payload based on event type
    */
-  on(event: string, callback: (...args: unknown[]) => void): void;
+  on<K extends keyof WALWriterHLCEventMap>(
+    event: K,
+    callback: (data: WALWriterHLCEventMap[K]) => void
+  ): void;
 
   /**
    * Get drift metrics for monitoring
@@ -450,7 +461,10 @@ export function createWALWriter(
       await hlcClock.receive(hlc, options);
     },
 
-    on(event: string, callback: (...args: unknown[]) => void): void {
+    on<K extends keyof WALWriterHLCEventMap>(
+      event: K,
+      callback: (data: WALWriterHLCEventMap[K]) => void
+    ): void {
       if (event === 'drift-warning') {
         hlcClock.on('drift-warning', callback as HLCEventHandler);
       }

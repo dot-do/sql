@@ -529,10 +529,11 @@ export class MockDoSQLBackend implements DoSQLBackend {
     if (this.inTransaction) {
       throw new Error('Transaction already in progress');
     }
-    // Snapshot current state
+    // Snapshot current state - deep copy rows to preserve original values
     this.transactionSnapshot = new Map();
-    for (const [name, table] of (this.storage as unknown as { tables: Map<string, { rows: unknown[] }> }).tables) {
-      this.transactionSnapshot.set(name, [...table.rows]);
+    for (const [name, table] of (this.storage as unknown as { tables: Map<string, { rows: Row[] }> }).tables) {
+      // Deep copy each row to prevent mutation
+      this.transactionSnapshot.set(name, table.rows.map((row) => ({ ...row })));
     }
     this.inTransaction = true;
   }
