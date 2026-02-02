@@ -447,7 +447,60 @@ export interface UnifiedObservability {
 // =============================================================================
 
 /**
- * Create a unified observability instance
+ * Creates a unified observability instance with integrated tracing, metrics, and logging.
+ *
+ * This is the recommended entry point for DoSQL observability. It provides:
+ * - Distributed tracing with correlation IDs across Durable Object boundaries
+ * - Prometheus-compatible metrics collection
+ * - Structured logging with automatic trace context injection
+ * - SQL statement sanitization for safe tracing
+ * - High-level instrumentation methods for queries, transactions, and DO calls
+ *
+ * @param config - Partial configuration for unified observability.
+ *   Missing values will be filled from DEFAULT_UNIFIED_CONFIG.
+ * @returns A UnifiedObservability instance with all components initialized
+ *
+ * @example Basic usage
+ * ```typescript
+ * const obs = createUnifiedObservability({
+ *   serviceName: 'my-database',
+ *   instanceId: 'shard-1',
+ * });
+ *
+ * // Handle incoming request with automatic trace propagation
+ * async function fetch(request: Request): Promise<Response> {
+ *   return obs.traceRequest(request, 'handle-query', async (span) => {
+ *     span.setAttribute('db.operation', 'SELECT');
+ *
+ *     // Logger automatically includes correlationId, traceId, spanId
+ *     obs.logger.info('Processing query');
+ *
+ *     // Instrument query execution
+ *     const result = await obs.instrumentQuery(sql, params, () => db.query(sql, params));
+ *
+ *     obs.metrics.queryTotal.inc({ operation: 'SELECT', table: 'users', status: 'success' });
+ *     return new Response(JSON.stringify(result));
+ *   });
+ * }
+ * ```
+ *
+ * @example Traced DO-to-DO calls
+ * ```typescript
+ * const response = await obs.tracedFetch(shardStub, shardRequest, 'shard-query');
+ * // Trace context automatically propagated to the target DO
+ * ```
+ *
+ * @example Export Prometheus metrics
+ * ```typescript
+ * if (url.pathname === '/metrics') {
+ *   return new Response(obs.getPrometheusMetrics(), {
+ *     headers: { 'Content-Type': 'text/plain' },
+ *   });
+ * }
+ * ```
+ *
+ * @see {@link UnifiedObservability} for the full API interface
+ * @see {@link DEFAULT_UNIFIED_CONFIG} for default configuration values
  */
 export function createUnifiedObservability(
   config: Partial<UnifiedObservabilityConfig> = {}

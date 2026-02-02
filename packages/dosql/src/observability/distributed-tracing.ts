@@ -348,7 +348,43 @@ export interface DistributedSpanOptions extends SpanOptions {
 }
 
 /**
- * Distributed tracer implementation
+ * Distributed tracer implementation with correlation ID support.
+ *
+ * Extends the base tracer with distributed tracing capabilities specifically
+ * designed for Durable Object boundaries. Provides correlation IDs for
+ * cross-service request tracking and baggage propagation.
+ *
+ * Key features:
+ * - Correlation ID generation and propagation across DO boundaries
+ * - W3C Trace Context (traceparent/tracestate) support
+ * - W3C Baggage propagation for cross-boundary context
+ * - AsyncLocalStorage-based context management
+ * - Configurable sampling strategies
+ *
+ * @example
+ * ```typescript
+ * const tracer = new DistributedTracerImpl({
+ *   enabled: true,
+ *   serviceName: 'my-do',
+ *   sampler: 'always_on',
+ *   samplingRate: 1.0,
+ * });
+ *
+ * // Extract context from incoming request
+ * const parentContext = tracer.extractDistributedContext(request.headers);
+ *
+ * // Start a span with the parent context
+ * const span = tracer.startDistributedSpan('handle-request', {
+ *   parentContext,
+ *   kind: 'SERVER',
+ * });
+ *
+ * // Propagate context to outgoing requests
+ * const headers = new Headers();
+ * tracer.injectDistributedContext(headers, span.getDistributedContext());
+ * ```
+ *
+ * @see {@link NoOpDistributedTracer} for a no-operation implementation
  */
 export class DistributedTracerImpl implements DistributedTracer {
   private readonly config: DistributedTracerConfig;
@@ -670,7 +706,19 @@ export class DistributedTracerImpl implements DistributedTracer {
 }
 
 /**
- * No-op distributed tracer for when tracing is disabled
+ * No-operation distributed tracer for when tracing is disabled.
+ *
+ * All methods return no-op spans or perform no operations, allowing
+ * application code to use distributed tracing APIs unconditionally
+ * without conditional checks or performance overhead.
+ *
+ * @example
+ * ```typescript
+ * const tracer = new NoOpDistributedTracer();
+ * const span = tracer.startDistributedSpan('operation'); // Returns NoOpDistributedSpan
+ * span.getCorrelationId(); // Returns 'noop'
+ * tracer.injectDistributedContext(headers, context); // No-op
+ * ```
  */
 export class NoOpDistributedTracer implements DistributedTracer {
   private static readonly noOpSpan = new NoOpDistributedSpan();
@@ -737,7 +785,37 @@ export class NoOpDistributedTracer implements DistributedTracer {
 }
 
 /**
- * Create a distributed tracer instance
+ * Creates a distributed tracer instance based on the provided configuration.
+ *
+ * Returns a fully functional DistributedTracerImpl when tracing is enabled,
+ * or a NoOpDistributedTracer when disabled. Merges provided configuration
+ * with DEFAULT_DISTRIBUTED_TRACER_CONFIG for any missing values.
+ *
+ * @param config - Partial configuration for the distributed tracer.
+ *   Missing values will be filled from DEFAULT_DISTRIBUTED_TRACER_CONFIG.
+ * @returns A DistributedTracer instance (either real or no-op based on config.enabled)
+ *
+ * @example Enabled distributed tracing
+ * ```typescript
+ * const tracer = createDistributedTracer({
+ *   enabled: true,
+ *   serviceName: 'my-do',
+ *   sampler: 'probability',
+ *   samplingRate: 0.5,
+ * });
+ *
+ * const span = tracer.startDistributedSpan('my-operation');
+ * console.log(span.getCorrelationId()); // UUID for request correlation
+ * ```
+ *
+ * @example Disabled tracing
+ * ```typescript
+ * const tracer = createDistributedTracer({ enabled: false });
+ * // All operations silently ignored with minimal overhead
+ * ```
+ *
+ * @see {@link DistributedTracerImpl} for the full implementation
+ * @see {@link DEFAULT_DISTRIBUTED_TRACER_CONFIG} for default values
  */
 export function createDistributedTracer(config: Partial<DistributedTracerConfig> = {}): DistributedTracer {
   const mergedConfig = { ...DEFAULT_DISTRIBUTED_TRACER_CONFIG, ...config };
@@ -752,7 +830,32 @@ export function createDistributedTracer(config: Partial<DistributedTracerConfig>
 // =============================================================================
 
 /**
- * Prepare headers for a DO fetch call with trace context propagation
+ * Prepares an outgoing request with trace context propagation headers.
+ *
+ * Clones the request with injected W3C Trace Context headers (traceparent,
+ * tracestate, correlation ID, baggage) from the current distributed trace
+ * context. This enables trace continuity across Durable Object boundaries.
+ *
+ * If no distributed context is currently active, returns the original request unchanged.
+ *
+ * @param tracer - The distributed tracer to get current context from
+ * @param request - The outgoing request to add trace headers to
+ * @param additionalHeaders - Optional additional headers to include
+ * @returns A new Request with trace context headers injected
+ *
+ * @example
+ * ```typescript
+ * // Inside a traced span context
+ * const tracedRequest = prepareTracedFetch(tracer, new Request(url, {
+ *   method: 'POST',
+ *   body: JSON.stringify(data),
+ * }));
+ *
+ * // Make the call to another DO
+ * const response = await otherDO.fetch(tracedRequest);
+ * ```
+ *
+ * @see {@link startServerSpan} for the receiving side of trace propagation
  */
 export function prepareTracedFetch(
   tracer: DistributedTracer,
@@ -783,7 +886,42 @@ export function prepareTracedFetch(
 }
 
 /**
- * Extract trace context from incoming request and start a server span
+ * Extracts trace context from an incoming request and starts a server span.
+ *
+ * This is the receiving side of distributed trace propagation. It extracts
+ * W3C Trace Context headers from the incoming request, creates a child span
+ * linked to the parent trace, and automatically adds HTTP metadata attributes.
+ *
+ * If no trace context is present in the headers, a new root trace is started.
+ *
+ * @param tracer - The distributed tracer to create the span with
+ * @param request - The incoming HTTP request containing trace headers
+ * @param spanName - Name for the server span (e.g., 'handle-query', 'process-request')
+ * @param additionalAttributes - Optional extra attributes to add to the span
+ * @returns A new DistributedSpan linked to the parent trace (or a new root span)
+ *
+ * @example
+ * ```typescript
+ * export default {
+ *   async fetch(request: Request): Promise<Response> {
+ *     const span = startServerSpan(tracer, request, 'handle-request', {
+ *       'db.operation': 'query',
+ *     });
+ *
+ *     try {
+ *       const result = await tracer.withDistributedSpanAsync(span, async () => {
+ *         return processRequest(request);
+ *       });
+ *       return new Response(JSON.stringify(result));
+ *     } catch (error) {
+ *       span.setStatus('ERROR', error.message);
+ *       throw error;
+ *     }
+ *   }
+ * };
+ * ```
+ *
+ * @see {@link prepareTracedFetch} for the sending side of trace propagation
  */
 export function startServerSpan(
   tracer: DistributedTracer,
@@ -808,7 +946,30 @@ export function startServerSpan(
 }
 
 /**
- * Run a function with distributed tracing context
+ * Runs a function within a specific distributed tracing context.
+ *
+ * Uses AsyncLocalStorage to propagate the trace context through
+ * asynchronous operations within the function. This enables child
+ * spans created during execution to automatically inherit the context.
+ *
+ * @typeParam T - The return type of the function
+ * @param context - The distributed trace context to make active
+ * @param fn - The function to execute within the context (sync or async)
+ * @returns The result of the function
+ *
+ * @example
+ * ```typescript
+ * const context = tracer.createRootContext('my-service');
+ *
+ * const result = await withDistributedContext(context, async () => {
+ *   // Any spans created here will be children of `context`
+ *   const span = tracer.startDistributedSpan('child-operation');
+ *   // ...
+ *   return computeResult();
+ * });
+ * ```
+ *
+ * @see {@link DistributedTraceStorage} for the underlying AsyncLocalStorage instance
  */
 export async function withDistributedContext<T>(
   context: DistributedTraceContext,

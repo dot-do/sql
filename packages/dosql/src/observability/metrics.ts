@@ -271,7 +271,25 @@ class GaugeImpl implements Gauge {
 // =============================================================================
 
 /**
- * Metrics registry implementation
+ * Prometheus-compatible metrics registry implementation.
+ *
+ * Manages creation and export of counters, histograms, and gauges in Prometheus format.
+ * Supports optional metric name prefixing and label-based metric cardinality.
+ *
+ * @example
+ * ```typescript
+ * const registry = new MetricsRegistryImpl({
+ *   enabled: true,
+ *   prefix: 'myapp',
+ *   defaultLabels: {},
+ *   histogramBuckets: { latency: [0.01, 0.1, 1], size: [100, 1000] },
+ * });
+ *
+ * const counter = registry.createCounter('requests_total', 'Total requests', ['method']);
+ * counter.inc({ method: 'GET' });
+ *
+ * const output = registry.getMetrics(); // Prometheus format output
+ * ```
  */
 export class MetricsRegistryImpl implements MetricsRegistry {
   private readonly config: MetricsConfig;
@@ -388,6 +406,21 @@ class NoOpGauge implements Gauge {
   reset(): void {}
 }
 
+/**
+ * No-operation metrics registry for when metrics collection is disabled.
+ *
+ * All methods return no-op metric instances that silently ignore operations.
+ * This allows application code to use metrics APIs without conditional checks,
+ * while incurring minimal overhead when metrics are disabled.
+ *
+ * @example
+ * ```typescript
+ * const registry = new NoOpMetricsRegistry();
+ * const counter = registry.createCounter('requests', 'Total requests');
+ * counter.inc(); // Silently ignored
+ * registry.getMetrics(); // Returns empty string
+ * ```
+ */
 export class NoOpMetricsRegistry implements MetricsRegistry {
   private static readonly noOpCounter = new NoOpCounter();
   private static readonly noOpHistogram = new NoOpHistogram();
@@ -401,7 +434,33 @@ export class NoOpMetricsRegistry implements MetricsRegistry {
 }
 
 /**
- * Create a metrics registry based on configuration
+ * Creates a metrics registry based on the provided configuration.
+ *
+ * Returns a fully functional MetricsRegistryImpl when metrics are enabled,
+ * or a NoOpMetricsRegistry when disabled. This allows application code to
+ * use metrics APIs unconditionally without performance impact when disabled.
+ *
+ * @param config - Metrics configuration specifying enabled state, prefix, and bucket settings
+ * @returns A MetricsRegistry instance (either real or no-op based on config.enabled)
+ *
+ * @example Enabled metrics
+ * ```typescript
+ * const registry = createMetricsRegistry({
+ *   enabled: true,
+ *   prefix: 'dosql',
+ *   defaultLabels: { env: 'production' },
+ *   histogramBuckets: {
+ *     latency: [0.001, 0.01, 0.1, 1, 10],
+ *     size: [100, 1000, 10000],
+ *   },
+ * });
+ * ```
+ *
+ * @example Disabled metrics (no-op)
+ * ```typescript
+ * const registry = createMetricsRegistry({ enabled: false, ... });
+ * // All operations are silently ignored
+ * ```
  */
 export function createMetricsRegistry(config: MetricsConfig): MetricsRegistry {
   if (!config.enabled) {

@@ -151,7 +151,45 @@ function generateId(bytes: number): string {
 }
 
 /**
- * Default tracer implementation
+ * OpenTelemetry-compatible tracer implementation for Cloudflare Workers.
+ *
+ * Provides distributed tracing capabilities with W3C Trace Context support
+ * for propagating trace context across service boundaries. Supports configurable
+ * sampling strategies and automatic span lifecycle management.
+ *
+ * Key features:
+ * - W3C Trace Context (traceparent/tracestate) extraction and injection
+ * - Configurable sampling: always_on, always_off, probability, rate_limiting
+ * - Automatic parent-child span relationships
+ * - Span attribute and event recording
+ * - Context management with span stacking
+ *
+ * @example
+ * ```typescript
+ * const tracer = new TracerImpl({
+ *   enabled: true,
+ *   serviceName: 'my-service',
+ *   sampler: 'probability',
+ *   samplingRate: 0.1,
+ *   maxAttributeLength: 256,
+ * });
+ *
+ * const span = tracer.startSpan('operation', { kind: 'SERVER' });
+ * span.setAttribute('http.method', 'GET');
+ *
+ * try {
+ *   const result = await doWork();
+ *   span.setStatus('OK');
+ *   return result;
+ * } catch (error) {
+ *   span.setStatus('ERROR', error.message);
+ *   throw error;
+ * } finally {
+ *   span.end();
+ * }
+ * ```
+ *
+ * @see {@link NoOpTracer} for a no-operation implementation when tracing is disabled
  */
 export class TracerImpl implements Tracer {
   private readonly config: TracingConfig;
@@ -325,7 +363,19 @@ export class TracerImpl implements Tracer {
 }
 
 /**
- * No-op tracer for when tracing is disabled
+ * No-operation tracer implementation for when tracing is disabled.
+ *
+ * All methods return no-op spans or perform no operations, allowing
+ * application code to use tracing APIs unconditionally without
+ * conditional checks or performance overhead when tracing is disabled.
+ *
+ * @example
+ * ```typescript
+ * const tracer = new NoOpTracer();
+ * const span = tracer.startSpan('operation'); // Returns NoOpSpan
+ * span.setAttribute('key', 'value'); // Silently ignored
+ * span.end(); // No-op
+ * ```
  */
 export class NoOpTracer implements Tracer {
   private static readonly noOpSpan = new NoOpSpan();
@@ -356,7 +406,35 @@ export class NoOpTracer implements Tracer {
 }
 
 /**
- * Create a tracer instance based on configuration
+ * Creates a tracer instance based on the provided configuration.
+ *
+ * Returns a fully functional TracerImpl when tracing is enabled,
+ * or a NoOpTracer when disabled. This factory pattern allows application
+ * code to use tracing APIs unconditionally without performance impact
+ * when tracing is disabled.
+ *
+ * @param config - Tracing configuration specifying enabled state, service name,
+ *   sampling strategy, and other options
+ * @returns A Tracer instance (either TracerImpl or NoOpTracer based on config.enabled)
+ *
+ * @example Enabled tracing with probability sampling
+ * ```typescript
+ * const tracer = createTracer({
+ *   enabled: true,
+ *   serviceName: 'my-service',
+ *   sampler: 'probability',
+ *   samplingRate: 0.1, // 10% of traces
+ *   maxAttributeLength: 256,
+ * });
+ *
+ * const span = tracer.startSpan('my-operation');
+ * ```
+ *
+ * @example Disabled tracing (no-op)
+ * ```typescript
+ * const tracer = createTracer({ enabled: false, ... });
+ * // All operations are silently ignored with minimal overhead
+ * ```
  */
 export function createTracer(config: TracingConfig): Tracer {
   if (!config.enabled) {

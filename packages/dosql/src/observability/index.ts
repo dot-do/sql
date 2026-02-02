@@ -191,7 +191,31 @@ export interface Observability {
 }
 
 /**
- * Create an observability instance with all components
+ * Creates a complete observability instance with tracer, metrics registry, and SQL sanitizer.
+ *
+ * This factory function initializes all observability components with the provided configuration,
+ * merging with sensible defaults. Use this when you need access to individual observability
+ * components rather than the unified observability interface.
+ *
+ * @param config - Partial configuration to customize observability behavior.
+ *   Missing values will be filled from DEFAULT_OBSERVABILITY_CONFIG.
+ * @returns An Observability instance containing tracer, metrics, sanitizer, and merged config.
+ *
+ * @example Basic usage with defaults
+ * ```typescript
+ * const obs = createObservability();
+ * const span = obs.tracer.startSpan('my-operation');
+ * ```
+ *
+ * @example Custom configuration
+ * ```typescript
+ * const obs = createObservability({
+ *   tracing: { enabled: true, serviceName: 'my-service', sampler: 'probability', samplingRate: 0.1 },
+ *   metrics: { enabled: true, prefix: 'myapp' },
+ * });
+ * ```
+ *
+ * @see {@link createUnifiedObservability} for a higher-level API with integrated logging
  */
 export function createObservability(config: Partial<ObservabilityConfig> = {}): Observability {
   const mergedConfig: ObservabilityConfig = {
@@ -229,7 +253,29 @@ export interface DoSQLMetrics {
 }
 
 /**
- * Create standard DoSQL metrics
+ * Creates standard DoSQL metrics registered with the provided metrics registry.
+ *
+ * This function initializes all standard database metrics including query counters,
+ * duration histograms, error tracking, transaction metrics, WAL metrics, and CDC metrics.
+ * All metrics are automatically prefixed according to the registry's configuration.
+ *
+ * @param registry - The metrics registry to register all DoSQL metrics with.
+ * @returns A DoSQLMetrics object containing all standard database metrics.
+ *
+ * @example
+ * ```typescript
+ * const registry = createMetricsRegistry({ enabled: true, prefix: 'dosql' });
+ * const metrics = createDoSQLMetrics(registry);
+ *
+ * // Record a successful query
+ * metrics.queryTotal.inc({ operation: 'SELECT', table: 'users', status: 'success' });
+ * metrics.queryDuration.observe({ operation: 'SELECT', table: 'users' }, 0.025);
+ *
+ * // Record a transaction
+ * metrics.transactionsTotal.inc({ outcome: 'commit' });
+ * ```
+ *
+ * @see {@link DoSQLMetrics} for the full list of available metrics
  */
 export function createDoSQLMetrics(registry: MetricsRegistry): DoSQLMetrics {
   return {
@@ -305,7 +351,36 @@ export function createDoSQLMetrics(registry: MetricsRegistry): DoSQLMetrics {
 // =============================================================================
 
 /**
- * Instrument a query execution with tracing and metrics
+ * Instruments a SQL query execution with distributed tracing and metrics collection.
+ *
+ * This function wraps a query execution to automatically:
+ * - Create a trace span with SQL metadata (operation type, table, sanitized statement)
+ * - Record query duration in a histogram metric
+ * - Increment success/error counters
+ * - Capture exceptions with stack traces in the span
+ *
+ * The SQL statement is automatically sanitized before being recorded in the span
+ * to prevent sensitive data from appearing in traces.
+ *
+ * @typeParam T - The return type of the query execution
+ * @param observability - The observability instance containing tracer and sanitizer
+ * @param doSQLMetrics - The DoSQL metrics instance for recording query metrics
+ * @param sql - The SQL statement being executed (will be sanitized for tracing)
+ * @param params - Optional query parameters (used for sanitization context)
+ * @param execute - Async function that performs the actual query execution
+ * @returns The result from the execute function
+ * @throws Re-throws any error from the execute function after recording metrics
+ *
+ * @example
+ * ```typescript
+ * const result = await instrumentQuery(
+ *   observability,
+ *   metrics,
+ *   'SELECT * FROM users WHERE id = ?',
+ *   [123],
+ *   () => db.query('SELECT * FROM users WHERE id = ?', [123])
+ * );
+ * ```
  */
 export async function instrumentQuery<T>(
   observability: Observability,
@@ -363,7 +438,35 @@ export async function instrumentQuery<T>(
 }
 
 /**
- * Instrument a transaction with tracing and metrics
+ * Instruments a database transaction with distributed tracing and metrics collection.
+ *
+ * This function wraps a transaction execution to automatically:
+ * - Create a trace span for the entire transaction
+ * - Record transaction duration in a histogram metric
+ * - Track transaction outcomes (commit/rollback) in counters
+ * - Capture exceptions with details in the span
+ *
+ * @typeParam T - The return type of the transaction execution
+ * @param observability - The observability instance containing the tracer
+ * @param doSQLMetrics - The DoSQL metrics instance for recording transaction metrics
+ * @param execute - Async function that performs the transaction operations
+ * @returns The result from the execute function
+ * @throws Re-throws any error from the execute function after recording rollback metrics
+ *
+ * @example
+ * ```typescript
+ * const result = await instrumentTransaction(
+ *   observability,
+ *   metrics,
+ *   async () => {
+ *     await db.execute('BEGIN');
+ *     await db.execute('INSERT INTO orders ...');
+ *     await db.execute('UPDATE inventory ...');
+ *     await db.execute('COMMIT');
+ *     return { orderId: 123 };
+ *   }
+ * );
+ * ```
  */
 export async function instrumentTransaction<T>(
   observability: Observability,
