@@ -9,7 +9,6 @@
 
 import type {
   SQLClient,
-  SQLClientConfig,
   QueryResult,
   SQLValue,
   TransactionContext,
@@ -25,6 +24,7 @@ import type {
   DisconnectedEvent,
   ClientErrorEvent,
 } from '../types.js';
+import type { SQLClientConfig } from '../client.js';
 import { DoSQLClient, createSQLClient } from '../client.js';
 import { createTransactionId, createLSN } from '../types.js';
 
@@ -127,7 +127,11 @@ export class MockWebSocket {
 
   simulateClose(code?: number, reason?: string): void {
     this.readyState = WebSocketReadyState.CLOSED;
-    this.emit('close', { code, reason });
+    const data: WebSocketEventData = {};
+    // Only add optional properties if defined (for exactOptionalPropertyTypes)
+    if (code !== undefined) data.code = code;
+    if (reason !== undefined) data.reason = reason;
+    this.emit('close', data);
   }
 
   simulateMessage(data: unknown): void {
@@ -213,10 +217,30 @@ export function setupMockWebSocket(
 // =============================================================================
 
 /**
+ * Extended idempotency config with GAP features
+ */
+interface ExtendedIdempotencyConfig {
+  enabled: boolean;
+  keyPrefix?: string;
+  maxCacheSize?: number;
+  cacheTtlMs?: number;
+  cleanupIntervalMs?: number;
+  ttlMs?: number;
+  // GAP features
+  onEviction?: (event: EvictionEvent) => void;
+  keyGenerator?: (sql: string, params?: SQLValue[]) => Promise<string>;
+  keyStorage?: {
+    get: (key: string) => string | undefined;
+    set: (key: string, value: string) => void;
+    delete: (key: string) => boolean;
+  };
+}
+
+/**
  * Extended client config that includes all possible test configurations.
  * Use this instead of `config as any` for testing GAP features.
  */
-export interface TestClientConfig extends SQLClientConfig {
+export interface TestClientConfig extends Omit<SQLClientConfig, 'idempotency'> {
   // GAP features that may or may not exist
   eagerConnect?: boolean;
   autoReconnect?: boolean;
@@ -241,22 +265,7 @@ export interface TestClientConfig extends SQLClientConfig {
   };
   httpFallback?: boolean;
   queryLogger?: (entry: QueryLogEntry) => void;
-  idempotency?: {
-    enabled?: boolean;
-    keyPrefix?: string;
-    maxCacheSize?: number;
-    cacheTtlMs?: number;
-    cleanupIntervalMs?: number;
-    ttlMs?: number;
-    // GAP features
-    onEviction?: (event: EvictionEvent) => void;
-    keyGenerator?: (sql: string, params?: SQLValue[]) => Promise<string>;
-    keyStorage?: {
-      get: (key: string) => string | undefined;
-      set: (key: string, value: string) => void;
-      delete: (key: string) => boolean;
-    };
-  };
+  idempotency?: ExtendedIdempotencyConfig;
 }
 
 /**
@@ -281,22 +290,24 @@ export interface EvictionEvent {
  * Creates a test client with proper typing.
  */
 export function createTestClient(config: TestClientConfig): DoSQLClient {
-  // Filter out GAP properties that the real client doesn't accept
+  // Build valid config with only defined properties (for exactOptionalPropertyTypes)
   const validConfig: SQLClientConfig = {
     url: config.url,
-    token: config.token,
-    database: config.database,
-    timeout: config.timeout,
-    retry: config.retry,
-    idempotency: config.idempotency ? {
-      enabled: config.idempotency.enabled,
-      keyPrefix: config.idempotency.keyPrefix,
-      maxCacheSize: config.idempotency.maxCacheSize,
-      cacheTtlMs: config.idempotency.cacheTtlMs,
-      cleanupIntervalMs: config.idempotency.cleanupIntervalMs,
-      ttlMs: config.idempotency.ttlMs,
-    } : undefined,
   };
+  if (config.token !== undefined) validConfig.token = config.token;
+  if (config.database !== undefined) validConfig.database = config.database;
+  if (config.timeout !== undefined) validConfig.timeout = config.timeout;
+  if (config.retry !== undefined) validConfig.retry = config.retry;
+  if (config.idempotency !== undefined) {
+    validConfig.idempotency = {
+      enabled: config.idempotency.enabled,
+    };
+    if (config.idempotency.keyPrefix !== undefined) validConfig.idempotency.keyPrefix = config.idempotency.keyPrefix;
+    if (config.idempotency.maxCacheSize !== undefined) validConfig.idempotency.maxCacheSize = config.idempotency.maxCacheSize;
+    if (config.idempotency.cacheTtlMs !== undefined) validConfig.idempotency.cacheTtlMs = config.idempotency.cacheTtlMs;
+    if (config.idempotency.cleanupIntervalMs !== undefined) validConfig.idempotency.cleanupIntervalMs = config.idempotency.cleanupIntervalMs;
+    if (config.idempotency.ttlMs !== undefined) validConfig.idempotency.ttlMs = config.idempotency.ttlMs;
+  }
   return new DoSQLClient(validConfig);
 }
 
@@ -527,13 +538,19 @@ export function createQueryResult<T = Record<string, SQLValue>>(
   rows: T[] = [],
   options: Partial<Omit<QueryResult<T>, 'rows'>> = {}
 ): QueryResult<T> {
-  return {
+  const result: QueryResult<T> = {
     rows,
     columns: options.columns ?? [],
     rowsAffected: options.rowsAffected ?? 0,
-    lastInsertRowId: options.lastInsertRowId,
-    ...options,
+    duration: options.duration ?? 0,
   };
+  // Only add optional properties if defined (for exactOptionalPropertyTypes)
+  if (options.lastInsertRowid !== undefined) result.lastInsertRowid = options.lastInsertRowid;
+  if (options.columnTypes !== undefined) result.columnTypes = options.columnTypes;
+  if (options.lsn !== undefined) result.lsn = options.lsn;
+  if (options.hasMore !== undefined) result.hasMore = options.hasMore;
+  if (options.cursor !== undefined) result.cursor = options.cursor;
+  return result;
 }
 
 /**
@@ -545,9 +562,10 @@ export function createTransactionState(
 ): TransactionState {
   return {
     id: createTransactionId(id ?? `txn-${Date.now()}`),
-    status: options.status ?? 'active',
+    isolationLevel: options.isolationLevel ?? 'SERIALIZABLE',
+    readOnly: options.readOnly ?? false,
     startedAt: options.startedAt ?? new Date(),
-    lsn: options.lsn ?? createLSN(BigInt(0)),
+    snapshotLSN: options.snapshotLSN ?? createLSN(BigInt(0)),
   };
 }
 
@@ -623,11 +641,13 @@ export function createDisconnectedEvent(
   url: string = 'ws://localhost:8080',
   reason?: string
 ): DisconnectedEvent {
-  return {
+  const event: DisconnectedEvent = {
     url,
     timestamp: new Date(),
-    reason,
   };
+  // Only add optional reason if defined (for exactOptionalPropertyTypes)
+  if (reason !== undefined) event.reason = reason;
+  return event;
 }
 
 /**
@@ -754,4 +774,213 @@ export function filterResponses<T extends WSResponseMessage>(
   predicate: (r: WSResponseMessage) => r is T
 ): T[] {
   return responses.filter(predicate);
+}
+
+// =============================================================================
+// Reconnection Event Types
+// =============================================================================
+
+/**
+ * Reconnecting event for tracking reconnection attempts
+ */
+export interface ReconnectingEvent {
+  attempt: number;
+  delayMs: number;
+  maxAttempts: number;
+}
+
+/**
+ * Reconnection event callback type
+ */
+export type ReconnectingEventCallback = (event: ReconnectingEvent) => void;
+
+/**
+ * Creates a reconnection event collector
+ */
+export function createReconnectionCollector(): {
+  delays: number[];
+  events: ReconnectingEvent[];
+  callback: ReconnectingEventCallback;
+} {
+  const delays: number[] = [];
+  const events: ReconnectingEvent[] = [];
+  const callback: ReconnectingEventCallback = (e) => {
+    delays.push(e.delayMs);
+    events.push(e);
+  };
+  return { delays, events, callback };
+}
+
+// =============================================================================
+// Query Logger Types
+// =============================================================================
+
+/**
+ * Query log entry type
+ */
+export interface QueryLogEntry {
+  sql: string;
+  startTime: number;
+  endTime: number;
+  duration: number;
+  params?: SQLValue[];
+  error?: Error;
+}
+
+/**
+ * Creates a query log collector
+ */
+export function createQueryLogCollector(): {
+  log: QueryLogEntry[];
+  logger: (entry: QueryLogEntry) => void;
+} {
+  const log: QueryLogEntry[] = [];
+  const logger = (entry: QueryLogEntry) => log.push(entry);
+  return { log, logger };
+}
+
+// =============================================================================
+// Transaction Context Extension Types
+// =============================================================================
+
+/**
+ * Transaction closure type with proper typing
+ */
+export type TransactionClosure<T> = (tx: TransactionContext) => Promise<T>;
+
+/**
+ * Transaction closure with idempotency key access
+ */
+export interface TransactionContextWithIdempotency extends TransactionContext {
+  idempotencyKey?: string;
+}
+
+/**
+ * Retryable transaction options
+ */
+export interface RetryableTransactionOptions {
+  maxRetries?: number;
+  retryDelayMs?: number;
+  onRetry?: (attempt: number, error: Error) => void;
+}
+
+// =============================================================================
+// WebSocket Event Types for Pool
+// =============================================================================
+
+/**
+ * WebSocket event data union type
+ */
+export type WebSocketEventPayload =
+  | { type: 'open' }
+  | { type: 'close'; code?: number; reason?: string }
+  | { type: 'message'; data: string }
+  | { type: 'error'; error: Error };
+
+/**
+ * Type-safe WebSocket event callback
+ */
+export type TypedWebSocketCallback = (event: WebSocketEventPayload) => void;
+
+/**
+ * Mock WebSocket with typed event handling
+ */
+export interface TypedMockWebSocket {
+  id: string;
+  url: string;
+  readyState: number;
+  createdAt: number;
+  lastUsedAt: number;
+
+  addEventListener(event: string, callback: TypedWebSocketCallback): void;
+  removeEventListener(event: string, callback: TypedWebSocketCallback): void;
+  send(data: string): void;
+  close(): void;
+
+  // Test helpers
+  simulateOpen(): void;
+  simulateClose(code?: number, reason?: string): void;
+  simulateMessage(data: unknown): void;
+  simulateError(error: Error): void;
+}
+
+/**
+ * Creates a typed mock WebSocket for connection pool tests
+ */
+export function createTypedMockWebSocket(url: string): TypedMockWebSocket {
+  const listeners = new Map<string, Set<TypedWebSocketCallback>>();
+  let readyState = 0;
+
+  const emit = (event: string, payload: WebSocketEventPayload) => {
+    listeners.get(event)?.forEach((cb) => cb(payload));
+  };
+
+  const ws: TypedMockWebSocket = {
+    id: `ws-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    url,
+    get readyState() { return readyState; },
+    createdAt: Date.now(),
+    lastUsedAt: Date.now(),
+
+    addEventListener(event, callback) {
+      if (!listeners.has(event)) {
+        listeners.set(event, new Set());
+      }
+      listeners.get(event)!.add(callback);
+    },
+
+    removeEventListener(event, callback) {
+      listeners.get(event)?.delete(callback);
+    },
+
+    send(data: string) {
+      ws.lastUsedAt = Date.now();
+      const request = JSON.parse(data) as { id: string };
+      setTimeout(() => {
+        emit('message', {
+          type: 'message',
+          data: JSON.stringify({
+            id: request.id,
+            result: { rows: [], rowsAffected: 0 },
+          }),
+        });
+      }, 5);
+    },
+
+    close() {
+      readyState = 3;
+      emit('close', { type: 'close' });
+    },
+
+    // Test helpers
+    simulateOpen() {
+      readyState = 1;
+      emit('open', { type: 'open' });
+    },
+
+    simulateClose(code?: number, reason?: string) {
+      readyState = 3;
+      const closeEvent: { type: 'close'; code?: number; reason?: string } = { type: 'close' };
+      // Only add optional properties if defined (for exactOptionalPropertyTypes)
+      if (code !== undefined) closeEvent.code = code;
+      if (reason !== undefined) closeEvent.reason = reason;
+      emit('close', closeEvent);
+    },
+
+    simulateMessage(data: unknown) {
+      emit('message', { type: 'message', data: JSON.stringify(data) });
+    },
+
+    simulateError(error: Error) {
+      emit('error', { type: 'error', error });
+    },
+  };
+
+  // Simulate async connection
+  setTimeout(() => {
+    readyState = 1;
+    emit('open', { type: 'open' });
+  }, 10);
+
+  return ws;
 }

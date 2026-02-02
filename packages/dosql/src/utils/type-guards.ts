@@ -17,6 +17,12 @@ export function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Alias for isObject - checks if a value is a Record<string, unknown>
+ * This is the same as isObject but with a more explicit name for record patterns
+ */
+export const isRecord = isObject;
+
+/**
  * Check if a value is a non-null object or array
  */
 export function isObjectOrArray(value: unknown): value is Record<string, unknown> | unknown[] {
@@ -470,4 +476,100 @@ export function isRow(value: unknown): value is Row {
     if (!isSqlValue(val)) return false;
   }
   return true;
+}
+
+// =============================================================================
+// SAFE PROPERTY ACCESS
+// =============================================================================
+
+/**
+ * Safely get a property from an unknown value
+ * Returns undefined if the value is not an object or doesn't have the property
+ */
+export function safeGet<K extends string>(
+  obj: unknown,
+  key: K
+): unknown {
+  if (isObject(obj) && key in obj) {
+    return obj[key];
+  }
+  return undefined;
+}
+
+/**
+ * Safely get a nested property from an unknown value using a path
+ * Path can be a dot-separated string or an array of keys
+ * Returns undefined if any part of the path doesn't exist
+ */
+export function safeGetPath(
+  obj: unknown,
+  path: string | (string | number)[]
+): unknown {
+  const segments = typeof path === 'string' ? path.split('.') : path;
+
+  let current: unknown = obj;
+
+  for (const segment of segments) {
+    if (current === null || current === undefined) {
+      return undefined;
+    }
+
+    if (typeof segment === 'number') {
+      if (Array.isArray(current)) {
+        current = current[segment];
+      } else {
+        return undefined;
+      }
+    } else if (isObject(current)) {
+      current = current[segment];
+    } else if (Array.isArray(current) && /^\d+$/.test(segment)) {
+      current = current[parseInt(segment, 10)];
+    } else {
+      return undefined;
+    }
+  }
+
+  return current;
+}
+
+/**
+ * Narrowing helper that asserts a value is an object and returns it
+ * Throws if the value is not an object
+ */
+export function narrowToRecord(value: unknown, errorMessage = 'Expected object'): Record<string, unknown> {
+  if (!isObject(value)) {
+    throw new TypeError(errorMessage);
+  }
+  return value;
+}
+
+/**
+ * Narrowing helper that returns the value if it's an object, or a default
+ */
+export function narrowToRecordOr<T>(
+  value: unknown,
+  defaultValue: T
+): Record<string, unknown> | T {
+  return isObject(value) ? value : defaultValue;
+}
+
+/**
+ * Type-safe property setter for Record<string, unknown>
+ * Returns a new object with the property set
+ */
+export function setProperty<K extends string, V>(
+  obj: Record<string, unknown>,
+  key: K,
+  value: V
+): Record<string, unknown> & Record<K, V> {
+  return { ...obj, [key]: value } as Record<string, unknown> & Record<K, V>;
+}
+
+/**
+ * Check if value is a plain object created by Object constructor or object literal
+ */
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!isObject(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === null || proto === Object.prototype;
 }

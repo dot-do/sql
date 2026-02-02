@@ -146,16 +146,18 @@ export function createCDCEvent(
   operation: CDCEvent['operation'],
   data: Partial<Omit<CDCEvent, 'table' | 'operation'>> = {}
 ): CDCEvent {
-  return {
+  const event: CDCEvent = {
     id: data.id ?? `cdc-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     timestamp: data.timestamp ?? Date.now(),
     table,
     operation,
-    before: data.before,
-    after: data.after,
-    lsn: data.lsn,
-    txId: data.txId,
   };
+  // Only add optional properties if they are defined (for exactOptionalPropertyTypes)
+  if (data.before !== undefined) event.before = data.before;
+  if (data.after !== undefined) event.after = data.after;
+  if (data.lsn !== undefined) event.lsn = data.lsn;
+  if (data.txId !== undefined) event.txId = data.txId;
+  return event;
 }
 
 /**

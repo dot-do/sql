@@ -7,9 +7,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   isObject,
+  isRecord,
   isObjectOrArray,
   isArray,
   isTypedArray,
+  isPlainObject,
   hasProperty,
   hasPropertyOfType,
   hasStringProperty,
@@ -27,6 +29,8 @@ import {
   getArrayProperty,
   getObjectProperty,
   getTypedProperty,
+  safeGet,
+  safeGetPath,
   hasErrorCode,
   hasTypeProperty,
   isErrorLike,
@@ -46,6 +50,9 @@ import {
   asRecordOrThrow,
   asArray,
   asTypedArray,
+  narrowToRecord,
+  narrowToRecordOr,
+  setProperty,
   isSqlValue,
   isRow,
 } from '../type-guards.js';
@@ -75,6 +82,38 @@ describe('type-guards', () => {
       expect(isObject('string')).toBe(false);
       expect(isObject(123)).toBe(false);
       expect(isObject(true)).toBe(false);
+    });
+  });
+
+  describe('isRecord', () => {
+    it('should be an alias for isObject', () => {
+      expect(isRecord).toBe(isObject);
+    });
+
+    it('should work identically to isObject', () => {
+      expect(isRecord({})).toBe(true);
+      expect(isRecord({ a: 1 })).toBe(true);
+      expect(isRecord([])).toBe(false);
+      expect(isRecord(null)).toBe(false);
+    });
+  });
+
+  describe('isPlainObject', () => {
+    it('should return true for plain objects', () => {
+      expect(isPlainObject({})).toBe(true);
+      expect(isPlainObject({ a: 1 })).toBe(true);
+      expect(isPlainObject(Object.create(null))).toBe(true);
+    });
+
+    it('should return false for class instances', () => {
+      class MyClass {}
+      expect(isPlainObject(new MyClass())).toBe(false);
+    });
+
+    it('should return false for arrays and primitives', () => {
+      expect(isPlainObject([])).toBe(false);
+      expect(isPlainObject(null)).toBe(false);
+      expect(isPlainObject('string')).toBe(false);
     });
   });
 
@@ -243,6 +282,64 @@ describe('type-guards', () => {
   });
 
   // ============================================================================
+  // Safe Property Access
+  // ============================================================================
+
+  describe('safeGet', () => {
+    it('should get property from object', () => {
+      expect(safeGet({ name: 'test' }, 'name')).toBe('test');
+      expect(safeGet({ age: 25 }, 'age')).toBe(25);
+    });
+
+    it('should return undefined for missing property', () => {
+      expect(safeGet({ name: 'test' }, 'age')).toBeUndefined();
+      expect(safeGet({}, 'name')).toBeUndefined();
+    });
+
+    it('should return undefined for non-objects', () => {
+      expect(safeGet(null, 'name')).toBeUndefined();
+      expect(safeGet(undefined, 'name')).toBeUndefined();
+      expect(safeGet('string', 'length')).toBeUndefined();
+      expect(safeGet([1, 2], '0')).toBeUndefined();
+    });
+  });
+
+  describe('safeGetPath', () => {
+    const nested = {
+      user: {
+        name: 'Alice',
+        address: {
+          city: 'NYC',
+          zip: '10001'
+        }
+      },
+      items: [{ id: 1 }, { id: 2 }]
+    };
+
+    it('should get nested property with string path', () => {
+      expect(safeGetPath(nested, 'user.name')).toBe('Alice');
+      expect(safeGetPath(nested, 'user.address.city')).toBe('NYC');
+    });
+
+    it('should get nested property with array path', () => {
+      expect(safeGetPath(nested, ['user', 'name'])).toBe('Alice');
+      expect(safeGetPath(nested, ['user', 'address', 'city'])).toBe('NYC');
+    });
+
+    it('should handle array indices', () => {
+      expect(safeGetPath(nested, ['items', 0, 'id'])).toBe(1);
+      expect(safeGetPath(nested, ['items', 1, 'id'])).toBe(2);
+      expect(safeGetPath(nested, 'items.0.id')).toBe(1);
+    });
+
+    it('should return undefined for invalid paths', () => {
+      expect(safeGetPath(nested, 'user.invalid')).toBeUndefined();
+      expect(safeGetPath(nested, 'invalid.path')).toBeUndefined();
+      expect(safeGetPath(null, 'any')).toBeUndefined();
+    });
+  });
+
+  // ============================================================================
   // Common Object Shape Guards
   // ============================================================================
 
@@ -392,6 +489,45 @@ describe('type-guards', () => {
       expect(asRecordOrThrow({ a: 1 })).toEqual({ a: 1 });
       expect(() => asRecordOrThrow([])).toThrow(TypeError);
       expect(() => asRecordOrThrow(null, 'Custom message')).toThrow('Custom message');
+    });
+  });
+
+  describe('narrowToRecord', () => {
+    it('should return the object if valid', () => {
+      const obj = { a: 1 };
+      expect(narrowToRecord(obj)).toBe(obj);
+    });
+
+    it('should throw for non-objects', () => {
+      expect(() => narrowToRecord(null)).toThrow(TypeError);
+      expect(() => narrowToRecord([])).toThrow(TypeError);
+      expect(() => narrowToRecord('string', 'Custom error')).toThrow('Custom error');
+    });
+  });
+
+  describe('narrowToRecordOr', () => {
+    it('should return the object if valid', () => {
+      const obj = { a: 1 };
+      expect(narrowToRecordOr(obj, null)).toBe(obj);
+    });
+
+    it('should return default for non-objects', () => {
+      expect(narrowToRecordOr(null, 'default')).toBe('default');
+      expect(narrowToRecordOr([], { fallback: true })).toEqual({ fallback: true });
+    });
+  });
+
+  describe('setProperty', () => {
+    it('should return a new object with the property set', () => {
+      const original = { a: 1 };
+      const result = setProperty(original, 'b', 2);
+      expect(result).toEqual({ a: 1, b: 2 });
+      expect(original).toEqual({ a: 1 }); // Original unchanged
+    });
+
+    it('should override existing properties', () => {
+      const result = setProperty({ a: 1, b: 2 }, 'b', 3);
+      expect(result).toEqual({ a: 1, b: 3 });
     });
   });
 

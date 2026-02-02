@@ -133,9 +133,11 @@ export {
 export {
   // Type guards for Record<string, unknown>
   isObject,
+  isRecord,
   isObjectOrArray,
   isArray,
   isTypedArray,
+  isPlainObject,
 
   // Property type guards
   hasProperty,
@@ -157,6 +159,10 @@ export {
   getArrayProperty,
   getObjectProperty,
   getTypedProperty,
+
+  // Safe property access
+  safeGet,
+  safeGetPath,
 
   // Common object shape guards
   hasErrorCode,
@@ -184,6 +190,11 @@ export {
   asRecordOrThrow,
   asArray,
   asTypedArray,
+
+  // Narrowing helpers
+  narrowToRecord,
+  narrowToRecordOr,
+  setProperty,
 
   // SQL value guards
   isSqlValue,
