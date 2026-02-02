@@ -509,6 +509,8 @@ export function serializeTimePoint(point: TimePoint): SerializedTimePoint {
         timeOffset: point.timeOffset,
         versionOffset: point.versionOffset,
       };
+    default:
+      return assertNever(point, `Unknown time point type: ${(point as { type: string }).type}`);
   }
 }
 

@@ -16,6 +16,7 @@ import { initProject } from './commands/init.js';
 import { findMigrations, runMigrations } from './commands/migrate.js';
 import { generateTypes } from './commands/generate.js';
 import { resolve } from 'node:path';
+import { logger } from './utils/logger.js';
 
 /**
  * Creates and configures the DoSQL CLI program.
@@ -65,12 +66,12 @@ export function createCLI(): Command {
           force: options.force,
         });
 
-        console.log('DoSQL project initialized successfully!');
-        console.log('Created files:');
-        result.createdFiles.forEach(file => console.log(`  - ${file}`));
+        logger.success('DoSQL project initialized successfully!');
+        logger.section('Created files');
+        logger.list(result.createdFiles);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        console.error(`Error: ${err.message}`);
+        logger.error(err.message);
         process.exit(1);
       }
     });
@@ -87,15 +88,15 @@ export function createCLI(): Command {
         const migrations = await findMigrations(migrationsDir);
 
         if (migrations.length === 0) {
-          console.log('No migrations found.');
+          logger.info('No migrations found.');
           return;
         }
 
-        console.log(`Found ${migrations.length} migration(s)`);
+        logger.info(`Found ${migrations.length} migration(s)`);
 
         if (options.dryRun) {
-          console.log('Pending migrations (dry run):');
-          migrations.forEach(m => console.log(`  - ${m.name}`));
+          logger.section('Pending migrations (dry run)');
+          logger.list(migrations.map(m => m.name));
           return;
         }
 
@@ -121,14 +122,16 @@ export function createCLI(): Command {
         //   --token <token> Authentication token
         //
         // See README.md for more details on programmatic usage.
-        console.log('\nNote: Database connection not yet implemented in CLI.');
-        console.log('Available migrations (not applied):');
-        migrations.forEach(m => console.log(`  - ${m.name}`));
-        console.log('\nTo apply migrations, use the programmatic API.');
-        console.log('See: https://github.com/dotdo/dosql-cli#programmatic-api');
+        logger.newline();
+        logger.warn('Database connection not yet implemented in CLI.');
+        logger.section('Available migrations (not applied)');
+        logger.list(migrations.map(m => m.name));
+        logger.newline();
+        logger.info('To apply migrations, use the programmatic API.');
+        logger.info('See: https://github.com/dotdo/dosql-cli#programmatic-api');
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        console.error(`Error: ${err.message}`);
+        logger.error(err.message);
         process.exit(1);
       }
     });
@@ -146,14 +149,14 @@ export function createCLI(): Command {
           outputDir: resolve(options.output),
         });
 
-        console.log('Types generated successfully!');
-        console.log('Generated files:');
-        result.generatedFiles.forEach(file => console.log(`  - ${file}`));
-        console.log('Tables processed:');
-        result.tablesProcessed.forEach(table => console.log(`  - ${table}`));
+        logger.success('Types generated successfully!');
+        logger.section('Generated files');
+        logger.list(result.generatedFiles);
+        logger.section('Tables processed');
+        logger.list(result.tablesProcessed);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        console.error(`Error: ${err.message}`);
+        logger.error(err.message);
         process.exit(1);
       }
     });

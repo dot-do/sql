@@ -22,6 +22,7 @@ import {
   type Predicate,
 } from '../types.js';
 import { evaluateExpression, evaluatePredicate } from './filter.js';
+import { createAggregateExpressionError } from '../../errors/index.js';
 
 // =============================================================================
 // AGGREGATE STATE
@@ -198,7 +199,7 @@ function getAggregateInfo(aggExpr: AggregateExpr): { func: string; argExpr: Expr
     return { func, argExpr: '*' };
   }
 
-  throw new Error('Invalid aggregate expression format');
+  throw createAggregateExpressionError();
 }
 
 /**

@@ -8,6 +8,7 @@
  */
 
 import { createLogger } from '../logging/index.js';
+import { assertNever } from '../utils/assert-never.js';
 import type { ShardId } from '../sharding/types.js';
 import { IsolationLevel } from '../transaction/types.js';
 import { DistributedTransactionError, DistributedTransactionErrorCode } from './errors.js';
@@ -704,6 +705,15 @@ export function createDistributedTransactionCoordinator(
             }
             await txnLog.delete(record.txnId);
             break;
+
+          case 'PREPARE_ACK':
+          case 'COMMIT_ACK':
+            // These are acknowledgment records, not state changes
+            // Skip processing for recovery
+            break;
+
+          default:
+            assertNever(lastRecord.type, `Unknown transaction log record type: ${lastRecord.type}`);
         }
       }
     },

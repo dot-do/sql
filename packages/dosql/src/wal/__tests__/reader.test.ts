@@ -495,16 +495,16 @@ describe('tailWAL', () => {
     const writer = createWALWriter(backend);
     const reader = createWALReader(backend);
 
-    // Write initial entry
+    // Write both entries to the same segment by not using sync on first
     await writer.append({
       timestamp: Date.now(),
       txnId: createTransactionId('txn_1'),
       op: 'INSERT',
       table: 'test',
       after: new Uint8Array([1]),
-    }, { sync: true });
+    });
 
-    // Write second entry before tailing (to ensure reliability)
+    // Write second entry and flush both together
     await writer.append({
       timestamp: Date.now(),
       txnId: createTransactionId('txn_2'),
@@ -513,10 +513,15 @@ describe('tailWAL', () => {
       after: new Uint8Array([2]),
     }, { sync: true });
 
-    // Start tailing - entries already exist
+    // Verify entries are readable before tailing
+    const allEntries = await reader.readEntries({});
+    expect(allEntries.length).toBe(2);
+
+    // Start tailing - use fromLSN: -1n to ensure we capture from LSN 0
+    // (tailWAL adds 1 to fromLSN, so -1n + 1n = 0n)
     const entries: WALEntry[] = [];
     const tail = tailWAL(reader, {
-      fromLSN: 0n,
+      fromLSN: -1n,
       maxEntries: 2,
       timeout: 500,
       pollInterval: 50,

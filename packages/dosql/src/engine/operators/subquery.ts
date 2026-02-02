@@ -21,6 +21,7 @@ import {
   type FilterPlan,
 } from '../types.js';
 import { evaluateExpression, evaluatePredicate } from './filter.js';
+import { createScalarSubqueryError } from '../../errors/index.js';
 
 // =============================================================================
 // SUBQUERY PLAN TYPES
@@ -174,7 +175,7 @@ export class ScalarSubqueryOperator {
       // Verify only one row
       const secondRow = await operator.next();
       if (secondRow !== null) {
-        throw new Error('Scalar subquery returned more than one row');
+        throw createScalarSubqueryError();
       }
 
       if (!this.isCorrelated) {

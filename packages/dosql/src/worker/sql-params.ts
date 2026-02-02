@@ -31,6 +31,12 @@ export function escapeSqlValue(value: unknown): string {
  * Substitute named parameters (:name) in a SQL string with safely escaped values.
  * Only substitutes outside of string literals and quoted identifiers to avoid
  * corrupting literal content or identifier names.
+ *
+ * Handles all common SQL quoting styles:
+ * - Single quotes ('value') - string literals
+ * - Double quotes ("identifier") - ANSI SQL identifiers
+ * - Backticks (`identifier`) - MySQL/MariaDB identifiers
+ * - Square brackets ([identifier]) - SQL Server identifiers
  */
 export function substituteParams(sql: string, params: Record<string, unknown>): string {
   let result = '';
@@ -57,7 +63,7 @@ export function substituteParams(sql: string, params: Record<string, unknown>): 
       continue;
     }
 
-    // Handle double-quoted identifiers - skip over them
+    // Handle double-quoted identifiers (ANSI SQL) - skip over them
     if (sql[i] === '"') {
       result += '"';
       i++;
@@ -68,6 +74,48 @@ export function substituteParams(sql: string, params: Record<string, unknown>): 
           i += 2;
         } else if (sql[i] === '"') {
           result += '"';
+          i++;
+          break;
+        } else {
+          result += sql[i];
+          i++;
+        }
+      }
+      continue;
+    }
+
+    // Handle backtick-quoted identifiers (MySQL/MariaDB) - skip over them
+    if (sql[i] === '`') {
+      result += '`';
+      i++;
+      while (i < sql.length) {
+        if (sql[i] === '`' && sql[i + 1] === '`') {
+          // Escaped backtick inside identifier
+          result += '``';
+          i += 2;
+        } else if (sql[i] === '`') {
+          result += '`';
+          i++;
+          break;
+        } else {
+          result += sql[i];
+          i++;
+        }
+      }
+      continue;
+    }
+
+    // Handle bracket-quoted identifiers (SQL Server) - skip over them
+    if (sql[i] === '[') {
+      result += '[';
+      i++;
+      while (i < sql.length) {
+        if (sql[i] === ']' && sql[i + 1] === ']') {
+          // Escaped bracket inside identifier
+          result += ']]';
+          i += 2;
+        } else if (sql[i] === ']') {
+          result += ']';
           i++;
           break;
         } else {

@@ -510,7 +510,7 @@ describe('ColumnarReader - Large Columns', () => {
     await writer.finalize();
 
     const reader = new ColumnarReader(fsx);
-    const result = await reader.scan({ table: 'many_columns' });
+    const result = await reader.read({ table: 'many_columns' });
 
     expect(result.rowCount).toBe(1);
     expect(result.columns.size).toBe(100);

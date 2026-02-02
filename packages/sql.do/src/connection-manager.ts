@@ -10,6 +10,7 @@
 import type { PoolConfig, PoolStats, PoolHealth, ConnectionInfo, PoolEventMap } from './types.js';
 import { ConnectionError } from './errors.js';
 import { WebSocketPool, type PooledConnection } from './pool.js';
+import { connectionLogger } from './logger.js';
 
 // =============================================================================
 // Types
@@ -358,7 +359,11 @@ export class ConnectionManager {
         try {
           listener(data);
         } catch (error) {
-          console.error(`Error in ${event} listener:`, error);
+          connectionLogger.error(
+            `Error in ${event} listener`,
+            error instanceof Error ? error : new Error(String(error)),
+            { event }
+          );
         }
       }
     }

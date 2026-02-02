@@ -18,6 +18,7 @@ import type {
   PoolEventMap,
 } from './types.js';
 import { DEFAULT_POOL_CONFIG } from './types.js';
+import { poolLogger } from './logger.js';
 
 /**
  * Generic pool event listener type.
@@ -500,7 +501,11 @@ export class WebSocketPool {
         try {
           listener(data);
         } catch (error) {
-          console.error(`Error in ${event} listener:`, error);
+          poolLogger.error(
+            `Error in ${event} listener`,
+            error instanceof Error ? error : new Error(String(error)),
+            { event }
+          );
         }
       }
     }

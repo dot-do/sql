@@ -28,6 +28,7 @@ import type {
 } from './types.js';
 
 import type { ReplicaSelector } from './replica.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // CIRCUIT BREAKER TYPES
@@ -610,7 +611,7 @@ export class DistributedExecutor extends EventEmitter {
         return this.applyLimit(rows, op.count, op.offset);
 
       default:
-        return rows;
+        return assertNever(op, `Unknown post-processing operation type: ${(op as PostProcessingOp).type}`);
     }
   }
 

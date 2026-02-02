@@ -89,6 +89,9 @@
  * @since 0.1.0
  */
 export {
+  // Generic Branded Type Utility
+  type Brand,
+
   // Branded Types
   type TransactionId,
   type LSN,

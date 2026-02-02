@@ -8,6 +8,11 @@
 import type { BTree } from '../btree/index.js';
 import type { DOStorageBackend } from '../fsx/index.js';
 import type { WALWriter } from '../wal/index.js';
+import {
+  StatementError,
+  StatementErrorCode,
+  createTableNotFoundError,
+} from '../errors/index.js';
 
 // =============================================================================
 // Types
@@ -84,7 +89,11 @@ export class SchemaManager {
     // Simple parser: CREATE TABLE name (col1 TYPE, col2 TYPE, PRIMARY KEY (col))
     const match = sql.match(/CREATE\s+TABLE\s+(\w+)\s*\(([\s\S]+)\)/i);
     if (!match) {
-      throw new Error('Invalid CREATE TABLE syntax');
+      throw new StatementError(
+        StatementErrorCode.INVALID_SQL,
+        'Invalid CREATE TABLE syntax',
+        sql
+      );
     }
 
     const tableName = match[1];
@@ -143,7 +152,11 @@ export class SchemaManager {
     // Parse: DROP TABLE [IF EXISTS] tablename
     const match = sql.match(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i);
     if (!match) {
-      throw new Error('Invalid DROP TABLE syntax');
+      throw new StatementError(
+        StatementErrorCode.INVALID_SQL,
+        'Invalid DROP TABLE syntax',
+        sql
+      );
     }
 
     const tableName = match[1];
@@ -156,7 +169,7 @@ export class SchemaManager {
         // IF EXISTS specified, silently succeed
         return { rows: [], rowsAffected: 0 };
       }
-      throw new Error(`no such table: ${tableName}`);
+      throw createTableNotFoundError(tableName, sql);
     }
 
     // Delete all rows from the B-tree

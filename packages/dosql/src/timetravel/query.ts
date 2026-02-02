@@ -31,6 +31,7 @@ import {
   snapshot,
   branch,
 } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // Query Types
@@ -607,6 +608,9 @@ export function resolveTiers(
         explanation = 'Relative query from HEAD';
       }
       break;
+
+    default:
+      assertNever(point, `Unknown time point type: ${(point as { type: string }).type}`);
   }
 
   return { tiers, explanation, estimatedAge, requiresMerge };
@@ -633,6 +637,9 @@ function getTimestampFromPoint(point: TimePoint): Date | null {
         }
       }
       return null;
+
+    default:
+      return assertNever(point, `Unknown time point type: ${(point as { type: string }).type}`);
   }
 }
 
@@ -706,6 +713,9 @@ function formatTimePoint(point: TimePoint): string {
       return `'${point.branch}'`;
     case 'relative':
       return 'HEAD'; // Would need resolution
+
+    default:
+      return assertNever(point, `Unknown time point type: ${(point as { type: string }).type}`);
   }
 }
 

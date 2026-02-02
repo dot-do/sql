@@ -27,6 +27,7 @@ import {
   TimeTravelError,
   TimeTravelErrorCode,
 } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // Resolver Configuration
@@ -130,6 +131,8 @@ class ResolverCache {
         return `branch:${point.branch}:${point.point ? this.makeKey(point.point, point.branch) : 'HEAD'}`;
       case 'relative':
         return `rel:${branch}:${point.lsnOffset ?? 0}:${point.timeOffset ?? 0}:${point.versionOffset ?? 0}`;
+      default:
+        return assertNever(point, `Unknown time point type: ${(point as { type: string }).type}`);
     }
   }
 }
@@ -469,6 +472,9 @@ export function createTimePointResolver(
         case 'relative':
           resolved = await resolveRelative(point, branch);
           break;
+
+        default:
+          return assertNever(point, `Unknown time point type: ${(point as { type: string }).type}`);
       }
 
       // Update cache
@@ -669,6 +675,9 @@ export function validateTimePoint(point: TimePoint): void {
         validateTimePoint(point.anchor);
       }
       break;
+
+    default:
+      assertNever(point, `Unknown time point type: ${(point as { type: string }).type}`);
   }
 }
 

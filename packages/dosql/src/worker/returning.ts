@@ -5,6 +5,11 @@
  * Handles parsing, evaluation, and application of SQL RETURNING clauses.
  */
 
+import {
+  StatementError,
+  StatementErrorCode,
+} from '../errors/index.js';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -263,7 +268,10 @@ export function evaluateFunction(
     case 'AVG':
     case 'MIN':
     case 'MAX':
-      throw new Error(`Aggregate function ${name} is not allowed in RETURNING clause`);
+      throw new StatementError(
+        StatementErrorCode.UNSUPPORTED,
+        `Aggregate function ${name} is not allowed in RETURNING clause`
+      );
 
     default:
       // Unknown function - try to evaluate nested expressions
@@ -365,7 +373,12 @@ export function validateColumnReference(expr: string, schemaColumns: string[]): 
 
     // Check if column exists in schema (or is id/primary key)
     if (!schemaColumns.includes(colName) && colName !== 'id') {
-      throw new Error(`no such column: ${colName}`);
+      throw new StatementError(
+        StatementErrorCode.COLUMN_NOT_FOUND,
+        `no such column: ${colName}`,
+        undefined,
+        { context: { column: colName } }
+      );
     }
   }
 }

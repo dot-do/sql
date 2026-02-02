@@ -12,6 +12,7 @@
  */
 
 import type { BackpressureSignal } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // Configuration Types
@@ -219,6 +220,8 @@ export class BackpressureController {
       case 'resume':
         this.handleResumeSignal(signal, now);
         break;
+      default:
+        assertNever(signal.type, `Unknown backpressure signal type: ${signal.type}`);
     }
 
     // Update state based on buffer utilization

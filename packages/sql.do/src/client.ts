@@ -29,6 +29,7 @@ import type {
 } from './types.js';
 import { createTransactionId, createLSN, createStatementHash, DEFAULT_IDEMPOTENCY_CONFIG, DEFAULT_RETRY_CONFIG } from './types.js';
 import { MessageParseError } from './errors.js';
+import { clientLogger } from './logger.js';
 
 // =============================================================================
 // Idempotency Key Generation
@@ -731,7 +732,11 @@ export class DoSQLClient implements SQLClient {
       try {
         (listener as ClientEventListener<K>)(data);
       } catch (error) {
-        console.error(`Error in ${event} listener:`, error);
+        clientLogger.error(
+          `Error in ${event} listener`,
+          error instanceof Error ? error : new Error(String(error)),
+          { event }
+        );
       }
     }
   }
@@ -1002,7 +1007,7 @@ export class DoSQLClient implements SQLClient {
       if (!pending) {
         // This could happen if the request timed out before the response arrived
         // or if the server sent an unsolicited message - log but don't throw
-        console.warn(`Received response for unknown request ID: ${response.id}`);
+        clientLogger.warn('Received response for unknown request ID', { requestId: response.id });
         return;
       }
 
@@ -1059,8 +1064,12 @@ export class DoSQLClient implements SQLClient {
    * @internal
    */
   private emitError(error: Error, context: 'message_parse' | 'connection' | 'rpc', requestId?: string): void {
-    // Always log errors to console for debugging
-    console.error(`[DoSQLClient] ${context} error:`, error);
+    // Log errors using structured logging
+    clientLogger.error(
+      `${context} error`,
+      error,
+      requestId ? { context, requestId } : { context }
+    );
 
     // Build error event, only including requestId if it's defined
     const errorEvent: ClientErrorEvent = {

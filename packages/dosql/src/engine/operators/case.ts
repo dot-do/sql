@@ -17,6 +17,7 @@ import {
   type SqlValue,
 } from '../types.js';
 import { evaluateExpression } from './filter.js';
+import { ExecutorError, ExecutorErrorCode } from '../../errors/index.js';
 
 // =============================================================================
 // CASE EXPRESSION TYPES (extended from engine/types.ts)
@@ -269,7 +270,10 @@ export function evaluateNvl2(
  */
 export function evaluateDecode(args: Expression[], row: Row): SqlValue {
   if (args.length < 3) {
-    throw new Error('DECODE requires at least 3 arguments');
+    throw new ExecutorError(
+      ExecutorErrorCode.OPERATOR_ERROR,
+      'DECODE requires at least 3 arguments'
+    );
   }
 
   const exprValue = evaluateExpression(args[0], row);

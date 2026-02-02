@@ -101,6 +101,8 @@ export { DEFAULT_RETRY_CONFIG, isRetryConfig, createRetryConfig } from './types.
  * @stability stable
  */
 export type {
+  // Generic branded type utility
+  Brand,
   // Branded types
   TransactionId,
   LSN,
@@ -323,3 +325,17 @@ export {
 export {
   DEFAULT_CLIENT_CAPABILITIES,
 } from './types.js';
+
+// =============================================================================
+// Logging Configuration
+// =============================================================================
+
+/**
+ * Logger configuration for controlling client SDK logging behavior.
+ *
+ * @public
+ * @stability experimental
+ * @since 0.4.0
+ */
+export { configureLogger, NoOpSink } from './logger.js';
+export type { LogLevel, LogEntry, LogSink, LoggerConfig } from './logger.js';

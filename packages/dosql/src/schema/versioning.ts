@@ -17,13 +17,64 @@ import type { ParsedField } from './types.js';
 // Schema Version Types
 // =============================================================================
 
-/**
- * Schema version identifier (branded type for type safety)
- */
-export type SchemaVersion = bigint & { readonly __brand: 'SchemaVersion' };
+/** Brand symbol for Schema Version */
+declare const SchemaVersionBrand: unique symbol;
 
 /**
- * Create a SchemaVersion from a bigint or number
+ * Branded type for schema version identifiers.
+ *
+ * SchemaVersion is a bigint branded type that represents the version of a table schema.
+ * Schema versions are monotonically increasing numbers that track schema evolution.
+ * Used for CDC event enrichment and schema compatibility validation.
+ *
+ * Use `createSchemaVersion()` to create validated instances.
+ *
+ * @example
+ * ```typescript
+ * import { createSchemaVersion, SchemaVersion } from './versioning.js';
+ *
+ * // Create a schema version
+ * const version: SchemaVersion = createSchemaVersion(1);
+ *
+ * // Use in schema tracking
+ * const schema: TableSchema = {
+ *   tableName: 'users',
+ *   version: version,
+ *   // ...
+ * };
+ *
+ * // Increment version for schema changes
+ * const nextVersion = createSchemaVersion(version + 1n);
+ * ```
+ *
+ * @public
+ * @stability stable
+ */
+export type SchemaVersion = bigint & { readonly [SchemaVersionBrand]: never };
+
+/**
+ * Creates a branded SchemaVersion from a bigint or number value.
+ *
+ * This is the recommended way to create SchemaVersion values.
+ * The function converts numbers to bigint automatically.
+ *
+ * @param value - The version number as bigint or number
+ * @returns A branded SchemaVersion value
+ *
+ * @example
+ * ```typescript
+ * // From number
+ * const v1 = createSchemaVersion(1);
+ *
+ * // From bigint
+ * const v2 = createSchemaVersion(2n);
+ *
+ * // Increment existing version
+ * const v3 = createSchemaVersion(v2 + 1n);
+ * ```
+ *
+ * @public
+ * @stability stable
  */
 export function createSchemaVersion(value: bigint | number): SchemaVersion {
   return BigInt(value) as SchemaVersion;

@@ -15,6 +15,7 @@ import { createLogger } from '../logging/index.js';
 import { createBTree, StringKeyCodec, JsonValueCodec, type BTree } from '../btree/index.js';
 import { createDOBackend, type DOStorageBackend } from '../fsx/index.js';
 import { createWALWriter, type WALWriter } from '../wal/index.js';
+import { ExecutorError, ExecutorErrorCode } from '../errors/index.js';
 
 const logger = createLogger({ defaultContext: { module: 'hibernating-database' } });
 import {
@@ -384,7 +385,11 @@ export class HibernatingDoSQLDatabase extends HibernatingDurableObject {
           const p = params as RPCMethods['commit'];
           const session = this.getSessionState(ws);
           if (session?.transaction?.txId !== p.txId) {
-            throw new Error(`Transaction not found: ${p.txId}`);
+            throw new ExecutorError(
+              ExecutorErrorCode.TRANSACTION_ERROR,
+              `Transaction not found: ${p.txId}`,
+              { context: { transactionId: p.txId } }
+            );
           }
           this.clearTransactionState(ws);
           return { id, result: { lsn: '1' } };
@@ -394,7 +399,11 @@ export class HibernatingDoSQLDatabase extends HibernatingDurableObject {
           const p = params as RPCMethods['rollback'];
           const session = this.getSessionState(ws);
           if (session?.transaction?.txId !== p.txId) {
-            throw new Error(`Transaction not found: ${p.txId}`);
+            throw new ExecutorError(
+              ExecutorErrorCode.TRANSACTION_ERROR,
+              `Transaction not found: ${p.txId}`,
+              { context: { transactionId: p.txId } }
+            );
           }
           this.clearTransactionState(ws);
           return { id, result: {} };

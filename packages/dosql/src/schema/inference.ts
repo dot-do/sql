@@ -32,7 +32,7 @@ import type {
 
 // Import branded types from @dotdo/sql-types (via sql.do)
 // These follow the standardized unique symbol pattern for type safety
-export type { UUID, Email, Timestamp } from 'sql.do';
+export type { Brand, UUID, Email, Timestamp } from 'sql.do';
 export {
   createUUID,
   createEmail,

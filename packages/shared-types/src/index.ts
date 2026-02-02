@@ -53,6 +53,43 @@ import {
 // =============================================================================
 
 /**
+ * Generic utility type for creating branded types.
+ *
+ * Branded types (also known as "opaque types" or "nominal types") add compile-time
+ * type safety by preventing accidental assignment between structurally equivalent types.
+ *
+ * This utility uses a unique symbol pattern which is the recommended approach:
+ * - Prevents type collisions between different branded types
+ * - Zero runtime overhead (symbol is only used in type system)
+ * - Compatible with JSON serialization (symbol properties are not enumerable)
+ *
+ * @typeParam T - The underlying primitive type (string, number, bigint, etc.)
+ * @typeParam B - A unique string literal type used as the brand identifier
+ *
+ * @example
+ * ```typescript
+ * // Define branded types
+ * type UserId = Brand<string, 'UserId'>;
+ * type OrderId = Brand<string, 'OrderId'>;
+ *
+ * // These are incompatible at compile time, even though both are strings
+ * const userId: UserId = 'user-123' as UserId;
+ * const orderId: OrderId = 'order-456' as OrderId;
+ *
+ * // Error: Type 'OrderId' is not assignable to type 'UserId'
+ * // const wrong: UserId = orderId;
+ *
+ * // But they're still usable as their underlying type at runtime
+ * console.log(userId.toLowerCase()); // Works!
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.3.0
+ */
+export type Brand<T, B extends string> = T & { readonly __brand: B };
+
+/**
  * Branded types for type-safe identifiers.
  * @public
  * @stability stable

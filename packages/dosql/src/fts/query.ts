@@ -16,6 +16,7 @@ import type {
   NearQuery,
   ColumnQuery,
 } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // Re-export query types for convenience
 export type {
@@ -421,7 +422,7 @@ export function queryToString(query: MatchQuery): string {
     case 'column':
       return `${query.column}:${queryToString(query.query)}`;
     default:
-      return '';
+      return assertNever(query, `Unknown query type: ${(query as { type: string }).type}`);
   }
 }
 
@@ -457,6 +458,8 @@ export function extractTerms(query: MatchQuery): string[] {
       case 'column':
         walk(q.query);
         break;
+      default:
+        assertNever(q, `Unknown query type: ${(q as { type: string }).type}`);
     }
   }
 

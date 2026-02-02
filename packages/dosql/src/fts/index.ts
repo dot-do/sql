@@ -25,6 +25,7 @@ import { calculateBM25, DocumentScorer, DEFAULT_BM25_PARAMS } from './ranking.js
 import { highlight, snippet } from './auxiliary.js';
 import { StatementError } from '../errors/index.js';
 import { StatementErrorCode } from '../errors/codes.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // Re-export types and functions
 export * from './types.js';
@@ -261,7 +262,7 @@ class FTSIndexImpl implements FTSIndex {
       }
 
       default:
-        return new Set();
+        return assertNever(query, `Unknown query type: ${(query as { type: string }).type}`);
     }
   }
 

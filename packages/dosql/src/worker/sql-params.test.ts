@@ -117,6 +117,82 @@ describe('substituteParams', () => {
     });
   });
 
+  describe('backtick-quoted identifiers (MySQL style)', () => {
+    it('should not substitute parameters inside backtick-quoted identifiers', () => {
+      const sql = 'SELECT * FROM `table:name` WHERE id = :id';
+      const result = substituteParams(sql, { id: 1, name: 'test' });
+      expect(result).toBe('SELECT * FROM `table:name` WHERE id = 1');
+    });
+
+    it('should not substitute parameters that look like column names in backtick identifiers', () => {
+      const sql = 'SELECT `col:umn` FROM users WHERE id = :id';
+      const result = substituteParams(sql, { id: 42, umn: 'value' });
+      expect(result).toBe('SELECT `col:umn` FROM users WHERE id = 42');
+    });
+
+    it('should handle multiple backtick-quoted identifiers', () => {
+      const sql = 'SELECT `a:b`, `c:d` FROM `table:x` WHERE `col:y` = :value';
+      const result = substituteParams(sql, { value: 'test', b: 1, d: 2, x: 3, y: 4 });
+      expect(result).toBe("SELECT `a:b`, `c:d` FROM `table:x` WHERE `col:y` = 'test'");
+    });
+
+    it('should handle escaped backticks inside identifiers', () => {
+      const sql = 'SELECT * FROM `table``with``backticks:name` WHERE id = :id';
+      const result = substituteParams(sql, { id: 1, name: 'test' });
+      expect(result).toBe('SELECT * FROM `table``with``backticks:name` WHERE id = 1');
+    });
+
+    it('should handle mixed backticks and other quotes', () => {
+      const sql = "SELECT `col:name` FROM t WHERE x = ':param' AND \"y:z\" = :id";
+      const result = substituteParams(sql, { id: 99, name: 'a', param: 'b', z: 'c' });
+      expect(result).toBe("SELECT `col:name` FROM t WHERE x = ':param' AND \"y:z\" = 99");
+    });
+
+    it('should handle unclosed backtick gracefully', () => {
+      const sql = 'SELECT * FROM `unclosed';
+      const result = substituteParams(sql, {});
+      expect(result).toBe('SELECT * FROM `unclosed');
+    });
+  });
+
+  describe('bracket-quoted identifiers (SQL Server style)', () => {
+    it('should not substitute parameters inside bracket-quoted identifiers', () => {
+      const sql = 'SELECT * FROM [table:name] WHERE id = :id';
+      const result = substituteParams(sql, { id: 1, name: 'test' });
+      expect(result).toBe('SELECT * FROM [table:name] WHERE id = 1');
+    });
+
+    it('should not substitute parameters that look like column names in bracket identifiers', () => {
+      const sql = 'SELECT [col:umn] FROM users WHERE id = :id';
+      const result = substituteParams(sql, { id: 42, umn: 'value' });
+      expect(result).toBe('SELECT [col:umn] FROM users WHERE id = 42');
+    });
+
+    it('should handle multiple bracket-quoted identifiers', () => {
+      const sql = 'SELECT [a:b], [c:d] FROM [table:x] WHERE [col:y] = :value';
+      const result = substituteParams(sql, { value: 'test', b: 1, d: 2, x: 3, y: 4 });
+      expect(result).toBe("SELECT [a:b], [c:d] FROM [table:x] WHERE [col:y] = 'test'");
+    });
+
+    it('should handle escaped brackets inside identifiers', () => {
+      const sql = 'SELECT * FROM [table]]with]]brackets:name] WHERE id = :id';
+      const result = substituteParams(sql, { id: 1, name: 'test' });
+      expect(result).toBe('SELECT * FROM [table]]with]]brackets:name] WHERE id = 1');
+    });
+
+    it('should handle mixed brackets and other quotes', () => {
+      const sql = "SELECT [col:name] FROM t WHERE x = ':param' AND \"y:z\" = :id";
+      const result = substituteParams(sql, { id: 99, name: 'a', param: 'b', z: 'c' });
+      expect(result).toBe("SELECT [col:name] FROM t WHERE x = ':param' AND \"y:z\" = 99");
+    });
+
+    it('should handle unclosed bracket gracefully', () => {
+      const sql = 'SELECT * FROM [unclosed';
+      const result = substituteParams(sql, {});
+      expect(result).toBe('SELECT * FROM [unclosed');
+    });
+  });
+
   describe('edge cases', () => {
     it('should handle empty strings', () => {
       expect(substituteParams('', {})).toBe('');

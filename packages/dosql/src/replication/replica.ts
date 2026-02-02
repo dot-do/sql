@@ -149,7 +149,7 @@ export function createReplicaDO(
   }
 
   async function registerWithPrimary(): Promise<void> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
 
     try {
       // In real implementation, this would make an RPC call to primary
@@ -172,7 +172,7 @@ export function createReplicaDO(
   // ==========================================================================
 
   async function startStreaming(): Promise<void> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
     if (state.streamingActive) return;
 
     state.streamingActive = true;
@@ -229,7 +229,7 @@ export function createReplicaDO(
   }
 
   async function stopStreaming(): Promise<void> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
 
     state.streamingActive = false;
     if (state.streamingInterval) {
@@ -257,7 +257,7 @@ export function createReplicaDO(
   }
 
   async function applyWALBatch(batch: WALBatch): Promise<WALAck> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
 
     const errors: WALApplyError[] = [];
     let lastAppliedLSN = state.currentLSN;
@@ -378,7 +378,7 @@ export function createReplicaDO(
   // ==========================================================================
 
   async function catchUpFromSnapshot(snapshotInfo: SnapshotInfo): Promise<void> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
 
     state.snapshotInProgress = {
       info: snapshotInfo,
@@ -390,7 +390,7 @@ export function createReplicaDO(
   }
 
   async function applySnapshotChunk(chunk: SnapshotChunk): Promise<void> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
     if (!state.snapshotInProgress) {
       throw new ReplicationError(
         ReplicationErrorCode.SNAPSHOT_NOT_FOUND,
@@ -477,7 +477,7 @@ export function createReplicaDO(
     consistency: ConsistencyLevel,
     session?: SessionState
   ): Promise<unknown> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
 
     // Check consistency requirements
     if (consistency === 'strong') {
@@ -527,7 +527,7 @@ export function createReplicaDO(
   }
 
   async function forwardWrite(sql: string): Promise<unknown> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
 
     // In real implementation, this would forward to primary via RPC
     // For now, we throw an error indicating write forwarding is needed
@@ -543,17 +543,17 @@ export function createReplicaDO(
   // ==========================================================================
 
   async function getStatus(): Promise<ReplicaInfo> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
     return state.info;
   }
 
   async function getCurrentLSN(): Promise<bigint> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
     return state.currentLSN;
   }
 
   async function sendHeartbeat(): Promise<void> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
 
     state.info.lastHeartbeat = Date.now();
 
@@ -568,7 +568,7 @@ export function createReplicaDO(
   // ==========================================================================
 
   async function promoteToPrimary(): Promise<void> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
 
     // Stop streaming
     await stopStreaming();
@@ -581,7 +581,7 @@ export function createReplicaDO(
   }
 
   async function demoteToReplica(newPrimaryUrl: string): Promise<void> {
-    if (!state) throw new Error('Replica not initialized');
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
 
     // Update primary URL
     state.primaryUrl = newPrimaryUrl;

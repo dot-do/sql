@@ -84,6 +84,16 @@ export {
   createStorageReadError,
   createStorageWriteError,
   createCteNotMaterializedError,
+  createScalarSubqueryError,
+  createAggregateExpressionError,
+  createUnknownFunctionError,
+  createUnknownWindowFunctionError,
+  createUnknownSetOperationError,
+  createTransactionStateError,
+  createUnknownOperationError,
+  createInvalidStatementError,
+  createInvalidPageIdError,
+  createBucketNotFoundError,
 } from './typed-errors.js';
 
 // Syntax errors

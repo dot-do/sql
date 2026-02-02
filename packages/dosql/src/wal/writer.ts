@@ -604,10 +604,16 @@ export class WALTransaction {
 
   private assertActive(): void {
     if (this.committed) {
-      throw new Error(`Transaction ${this.txnId} already committed`);
+      throw new WALError(
+        WALErrorCode.INVALID_STATE,
+        `Transaction ${this.txnId} already committed`
+      );
     }
     if (this.rolledBack) {
-      throw new Error(`Transaction ${this.txnId} already rolled back`);
+      throw new WALError(
+        WALErrorCode.INVALID_STATE,
+        `Transaction ${this.txnId} already rolled back`
+      );
     }
   }
 }

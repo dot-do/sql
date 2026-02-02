@@ -817,6 +817,8 @@ export const DEFAULT_REPLICATION_CONFIG: Readonly<ReplicationConfig> = {
  * Replication error codes
  */
 export enum ReplicationErrorCode {
+  /** Replica not initialized */
+  NOT_INITIALIZED = 'REPL_NOT_INITIALIZED',
   /** Replica not found */
   REPLICA_NOT_FOUND = 'REPL_REPLICA_NOT_FOUND',
   /** Primary not available */

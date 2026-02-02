@@ -21,6 +21,13 @@ import {
   IcebergError,
 } from './types.js';
 
+/**
+ * Exhaustiveness checking utility for discriminated unions.
+ */
+function assertNever(value: never, message?: string): never {
+  throw new Error(message || `Unexpected value: ${JSON.stringify(value)}`);
+}
+
 // =============================================================================
 // Iceberg Path Utilities
 // =============================================================================
@@ -873,6 +880,9 @@ export class R2IcebergStorage implements IcebergStorage {
           );
         }
         break;
+
+      default:
+        assertNever(req, `Unknown commit requirement type: ${(req as CommitRequirement).type}`);
     }
   }
 }

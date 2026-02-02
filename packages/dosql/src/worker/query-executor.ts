@@ -16,6 +16,14 @@ import {
   evaluateExpression,
   type ParsedReturning,
 } from './returning.js';
+import {
+  StatementError,
+  StatementErrorCode,
+  createTableNotFoundError,
+  createUnsupportedSqlError,
+  DatabaseError,
+  DatabaseErrorCode,
+} from '../errors/index.js';
 
 // =============================================================================
 // Query Result Type
@@ -94,7 +102,7 @@ export class QueryExecutor {
       return this.schemaManager.executeDropTable(sql, this.btree, this.wal);
     }
 
-    throw new Error(`Unsupported SQL: ${sql.substring(0, 50)}...`);
+    throw createUnsupportedSqlError(sql);
   }
 
   /**
@@ -122,7 +130,11 @@ export class QueryExecutor {
     );
 
     if (!multiValueMatch) {
-      throw new Error('Invalid INSERT syntax');
+      throw new StatementError(
+        StatementErrorCode.INVALID_SQL,
+        'Invalid INSERT syntax',
+        sql
+      );
     }
 
     const tableName = multiValueMatch[1];
@@ -131,7 +143,7 @@ export class QueryExecutor {
 
     const schema = this.schemaManager.getSchema(tableName);
     if (!schema) {
-      throw new Error(`Table not found: ${tableName}`);
+      throw createTableNotFoundError(tableName, sql);
     }
 
     // Get schema columns for RETURNING *
@@ -207,7 +219,11 @@ export class QueryExecutor {
       // Get primary key value
       const pkValue = row[schema.primaryKey];
       if (pkValue === undefined) {
-        throw new Error(`Primary key ${schema.primaryKey} is required`);
+        throw new StatementError(
+          StatementErrorCode.CONSTRAINT_VIOLATION,
+          `Primary key ${schema.primaryKey} is required`,
+          sql
+        );
       }
 
       // Write to B-tree
@@ -253,7 +269,7 @@ export class QueryExecutor {
 
     const schema = this.schemaManager.getSchema(tableName);
     if (!schema) {
-      throw new Error(`Table not found: ${tableName}`);
+      throw createTableNotFoundError(tableName, sql);
     }
 
     // Get schema columns for RETURNING *
@@ -327,7 +343,11 @@ export class QueryExecutor {
     // Simple parser: SELECT * FROM table [WHERE col = value]
     const match = sql.match(/SELECT\s+(.+?)\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?/i);
     if (!match) {
-      throw new Error('Invalid SELECT syntax');
+      throw new StatementError(
+        StatementErrorCode.INVALID_SQL,
+        'Invalid SELECT syntax',
+        sql
+      );
     }
 
     const _selectCols = match[1];
@@ -336,7 +356,7 @@ export class QueryExecutor {
 
     const schema = this.schemaManager.getSchema(tableName);
     if (!schema) {
-      throw new Error(`Table not found: ${tableName}`);
+      throw createTableNotFoundError(tableName, sql);
     }
 
     const rows: Record<string, unknown>[] = [];
@@ -379,7 +399,11 @@ export class QueryExecutor {
       /UPDATE\s+(\w+)(?:\s+AS\s+\w+)?\s+SET\s+(.+?)(?:\s+WHERE\s+(.+?))?(?:\s+ORDER\s+BY|\s+LIMIT|$)/i
     );
     if (!match) {
-      throw new Error('Invalid UPDATE syntax');
+      throw new StatementError(
+        StatementErrorCode.INVALID_SQL,
+        'Invalid UPDATE syntax',
+        sql
+      );
     }
 
     const tableName = match[1];
@@ -388,7 +412,7 @@ export class QueryExecutor {
 
     const schema = this.schemaManager.getSchema(tableName);
     if (!schema) {
-      throw new Error(`Table not found: ${tableName}`);
+      throw createTableNotFoundError(tableName, sql);
     }
 
     // Get schema columns for RETURNING *
@@ -413,7 +437,11 @@ export class QueryExecutor {
     }
 
     if (setUpdates.length === 0) {
-      throw new Error('Invalid SET clause');
+      throw new StatementError(
+        StatementErrorCode.INVALID_SQL,
+        'Invalid SET clause',
+        sql
+      );
     }
 
     // Collect matching rows
@@ -504,7 +532,11 @@ export class QueryExecutor {
       /DELETE\s+FROM\s+(\w+)(?:\s+AS\s+\w+)?(?:\s+WHERE\s+(.+?))?(?:\s+ORDER\s+BY|\s+LIMIT|$)/i
     );
     if (!match) {
-      throw new Error('Invalid DELETE syntax');
+      throw new StatementError(
+        StatementErrorCode.INVALID_SQL,
+        'Invalid DELETE syntax',
+        sql
+      );
     }
 
     const tableName = match[1];
@@ -512,7 +544,7 @@ export class QueryExecutor {
 
     const schema = this.schemaManager.getSchema(tableName);
     if (!schema) {
-      throw new Error(`Table not found: ${tableName}`);
+      throw createTableNotFoundError(tableName, sql);
     }
 
     // Get schema columns for RETURNING *
@@ -594,7 +626,11 @@ export class QueryExecutor {
       /REPLACE\s+INTO\s+(\w+)\s*\(([^)]+)\)\s*VALUES\s*(.+)$/i
     );
     if (!match) {
-      throw new Error('Invalid REPLACE syntax');
+      throw new StatementError(
+        StatementErrorCode.INVALID_SQL,
+        'Invalid REPLACE syntax',
+        sql
+      );
     }
 
     const tableName = match[1];
@@ -603,7 +639,7 @@ export class QueryExecutor {
 
     const schema = this.schemaManager.getSchema(tableName);
     if (!schema) {
-      throw new Error(`Table not found: ${tableName}`);
+      throw createTableNotFoundError(tableName, sql);
     }
 
     // Get schema columns for RETURNING *

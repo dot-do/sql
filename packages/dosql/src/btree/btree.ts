@@ -14,6 +14,12 @@
 import type { StorageInterface } from '../storage/interface.js';
 import type { FSXBackend } from '../fsx/types.js';
 import {
+  StorageError,
+  StorageErrorCode,
+  DatabaseError,
+  DatabaseErrorCode,
+} from '../errors/index.js';
+import {
   Page,
   PageType,
   BTree,
@@ -194,7 +200,11 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     this.pageCache.recordMiss();
     const data = await this.storage.read(this.pageKey(pageId));
     if (!data) {
-      throw new Error(`Page ${pageId} not found`);
+      throw new StorageError(
+        StorageErrorCode.INVALID_PAGE_ID,
+        `Page ${pageId} not found`,
+        { context: { metadata: { pageId } } }
+      );
     }
 
     page = deserializePage(data);
@@ -252,7 +262,10 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   private allocPageId(): number {
     if (!this.metadata) {
-      throw new Error('B-tree not initialized');
+      throw new DatabaseError(
+        DatabaseErrorCode.INTERNAL,
+        'B-tree not initialized'
+      );
     }
     return this.metadata.nextPageId++;
   }
@@ -272,7 +285,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   async get(key: K): Promise<V | undefined> {
     if (!this.metadata) await this.loadMetadata();
-    if (!this.metadata) throw new Error('Failed to load metadata');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'Failed to load B-tree metadata');
 
     const serializedKey = this.keyCodec.encode(key);
     const leafPage = await this.findLeaf(serializedKey);
@@ -294,7 +307,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    * Find the leaf page that should contain a key
    */
   private async findLeaf(key: Uint8Array): Promise<Page> {
-    if (!this.metadata) throw new Error('B-tree not initialized');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'B-tree not initialized');
 
     let page = await this.readPage(this.metadata.rootPageId);
 
@@ -327,7 +340,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   async set(key: K, value: V): Promise<void> {
     if (!this.metadata) await this.loadMetadata();
-    if (!this.metadata) throw new Error('Failed to load metadata');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'Failed to load B-tree metadata');
 
     const serializedKey = this.keyCodec.encode(key);
     const serializedValue = this.valueCodec.encode(value);
@@ -335,7 +348,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     // Find path to leaf
     const path = await this.findPath(serializedKey);
     if (path.length === 0) {
-      throw new Error('B-tree findPath returned empty path');
+      throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'B-tree findPath returned empty path');
     }
     const leafPage = path[path.length - 1];
 
@@ -372,7 +385,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    * Find the path from root to the leaf containing a key
    */
   private async findPath(key: Uint8Array): Promise<Page[]> {
-    if (!this.metadata) throw new Error('B-tree not initialized');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'B-tree not initialized');
 
     const path: Page[] = [];
     let page = await this.readPage(this.metadata.rootPageId);
@@ -432,7 +445,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     insertIndex: number,
     path: Page[]
   ): Promise<void> {
-    if (!this.metadata) throw new Error('B-tree not initialized');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'B-tree not initialized');
 
     // Insert the new key-value temporarily
     leaf.keys.splice(insertIndex, 0, key);
@@ -480,7 +493,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     key: Uint8Array,
     rightChildId: number
   ): Promise<void> {
-    if (!this.metadata) throw new Error('B-tree not initialized');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'B-tree not initialized');
 
     if (parentIndex < 0) {
       // Need to create a new root
@@ -558,12 +571,12 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   async delete(key: K): Promise<boolean> {
     if (!this.metadata) await this.loadMetadata();
-    if (!this.metadata) throw new Error('Failed to load metadata');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'Failed to load B-tree metadata');
 
     const serializedKey = this.keyCodec.encode(key);
     const path = await this.findPath(serializedKey);
     if (path.length === 0) {
-      throw new Error('B-tree findPath returned empty path');
+      throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'B-tree findPath returned empty path');
     }
     const leaf = path[path.length - 1];
 
@@ -596,7 +609,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    * Handle underflow in a node by redistributing or merging with siblings
    */
   private async handleUnderflow(path: Page[], nodeIndex: number): Promise<void> {
-    if (!this.metadata) throw new Error('B-tree not initialized');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'B-tree not initialized');
 
     const node = path[nodeIndex];
 
@@ -675,7 +688,11 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
         return i;
       }
     }
-    throw new Error(`Child ${childId} not found in parent ${parent.id}`);
+    throw new DatabaseError(
+      DatabaseErrorCode.INTERNAL,
+      `Child ${childId} not found in parent ${parent.id}`,
+      { context: { metadata: { childId, parentId: parent.id } } }
+    );
   }
 
   /**
@@ -800,7 +817,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   async *range(start: K, end: K): AsyncIterableIterator<[K, V]> {
     if (!this.metadata) await this.loadMetadata();
-    if (!this.metadata) throw new Error('Failed to load metadata');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'Failed to load B-tree metadata');
 
     const startKey = this.keyCodec.encode(start);
     const endKey = this.keyCodec.encode(end);
@@ -844,7 +861,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   async *entries(): AsyncIterableIterator<[K, V]> {
     if (!this.metadata) await this.loadMetadata();
-    if (!this.metadata) throw new Error('Failed to load metadata');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'Failed to load B-tree metadata');
 
     // Find the leftmost leaf
     let page = await this.readPage(this.metadata.rootPageId);
@@ -873,7 +890,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   async count(): Promise<number> {
     if (!this.metadata) await this.loadMetadata();
-    if (!this.metadata) throw new Error('Failed to load metadata');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'Failed to load B-tree metadata');
     return this.metadata.entryCount;
   }
 
@@ -882,7 +899,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   async clear(): Promise<void> {
     if (!this.metadata) await this.loadMetadata();
-    if (!this.metadata) throw new Error('Failed to load metadata');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'Failed to load B-tree metadata');
 
     // Delete all pages
     const pageKeys = await this.fsx.list(this.config.pagePrefix);
@@ -917,7 +934,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     rootPageId: number;
   }> {
     if (!this.metadata) await this.loadMetadata();
-    if (!this.metadata) throw new Error('Failed to load metadata');
+    if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'Failed to load B-tree metadata');
 
     return {
       height: this.metadata.height,

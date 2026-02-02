@@ -31,6 +31,7 @@ import type {
 } from './types.js';
 
 import { createVindex, type Vindex } from './vindex.js';
+import { assertNever } from '../utils/assert-never.js';
 
 import {
   StatisticsStore,
@@ -373,7 +374,7 @@ export class QueryRouter {
         return this.routeSharded(parsed, config, tableName, params, effectiveReadPref, canUseReplica);
 
       default:
-        throw new Error(`Unknown table type: ${(config as TableShardingConfig).type}`);
+        return assertNever(config, `Unknown table type: ${(config as TableShardingConfig).type}`);
     }
   }
 
