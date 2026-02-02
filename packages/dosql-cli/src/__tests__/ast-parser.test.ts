@@ -170,9 +170,8 @@ export const categories = {
       await generateTypes({ schemaDir, outputDir });
 
       const content = await fs.readFile(join(outputDir, 'types.ts'), 'utf-8');
-      // Note: Simple singularization "categories" -> "Categorie" (not "Category")
-      // This is a known limitation of the simple singularization logic
-      expect(content).toContain('interface Categorie');
+      // Singularization handles "categories" -> "Category" correctly
+      expect(content).toContain('interface Category');
       // Should resolve [ID_COLUMN] to 'id'
       expect(content).toContain('id: number');
       // Should resolve [NAME_COLUMN] to 'name'

@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
+import ts from 'typescript';
 
 export interface GenerateOptions {
   schemaDir: string;
@@ -219,276 +220,573 @@ function tableNameToInterfaceName(tableName: string): string {
 }
 
 /**
- * Regex to match exported table schema definitions.
- * Pattern breakdown:
- *   export\s+const\s+(\w+)     - "export const <varName>" (captures variable name in $1)
- *   \s*=\s*\{                  - " = {" with optional whitespace
- *   [\s\S]*?                   - any characters (non-greedy) before tableName
- *   tableName:\s*['"]([^'"]+)['"]  - "tableName: '<name>'" (captures table name in $2)
- *   [\s\S]*?                   - any characters (non-greedy) before columns
- *   columns:\s*\{([\s\S]*?)\}  - "columns: { ... }" (captures columns block in $3)
- *   \s*,?\s*\}                 - optional trailing comma and closing brace
- *   \s*as\s+const              - "as const" type assertion
- *
- * Limitations:
- * - Requires "as const" suffix (won't match plain objects)
- * - tableName must come before columns in the object
- * - Doesn't handle nested objects or computed property names
- * - Single-line and multi-line strings only (no template literals)
+ * Storage for resolved variable values during AST traversal.
+ * Used to resolve shorthand properties and external const references.
  */
-const TABLE_EXPORT_REGEX = /export\s+const\s+(\w+)\s*=\s*\{[\s\S]*?tableName:\s*['"]([^'"]+)['"][\s\S]*?columns:\s*\{([\s\S]*?)\}\s*,?\s*\}\s*as\s+const/g;
-
-/**
- * Regex to parse individual column definitions within the columns block.
- * Pattern breakdown:
- *   (\w+):                       - column name followed by colon (captures in $1)
- *   \s*\{\s*                     - opening brace with optional whitespace
- *   type:\s*['"](\w+)['"]        - "type: '<type>'" (captures type in $2)
- *   (?:,\s*primaryKey:\s*(true|false))?  - optional "primaryKey: true/false" ($3)
- *   (?:,\s*nullable:\s*(true|false))?    - optional "nullable: true/false" ($4)
- *   \s*\}                        - closing brace
- *
- * Limitations:
- * - Properties must be in order: type, then primaryKey, then nullable
- * - Doesn't handle other column properties (e.g., default, unique)
- */
-const COLUMN_DEFINITION_REGEX = /(\w+):\s*\{\s*type:\s*['"](\w+)['"](?:,\s*primaryKey:\s*(true|false))?(?:,\s*nullable:\s*(true|false))?\s*\}/g;
-
-/**
- * Named indices for COLUMN_DEFINITION_REGEX capture groups.
- * Provides type-safe access to regex match results.
- */
-const ColumnCaptureGroups = {
-  /** The full matched string (index 0) */
-  FULL_MATCH: 0,
-  /** Column name (e.g., "id", "email") */
-  COLUMN_NAME: 1,
-  /** Column type (e.g., "integer", "text") */
-  COLUMN_TYPE: 2,
-  /** Primary key flag ("true" | "false" | undefined) */
-  PRIMARY_KEY: 3,
-  /** Nullable flag ("true" | "false" | undefined) */
-  NULLABLE: 4,
-} as const;
-
-/**
- * Named indices for TABLE_EXPORT_REGEX capture groups.
- * Provides type-safe access to regex match results.
- */
-const TableCaptureGroups = {
-  /** The full matched string (index 0) */
-  FULL_MATCH: 0,
-  /** Variable name (e.g., "usersSchema") */
-  VARIABLE_NAME: 1,
-  /** Table name (e.g., "users") */
-  TABLE_NAME: 2,
-  /** Columns block content (the string between "columns: {" and "}") */
-  COLUMNS_BLOCK: 3,
-} as const;
-
-/**
- * Type-safe helper to extract a required capture group from a regex match.
- * @param match - The regex match array
- * @param index - The capture group index
- * @param groupName - Human-readable name for error messages
- * @returns The captured string value
- * @throws Error if the capture group is undefined or empty
- */
-function getRequiredCaptureGroup(
-  match: RegExpExecArray,
-  index: number,
-  groupName: string
-): string {
-  const value = match[index];
-  if (value === undefined || value === '') {
-    throw new Error(`Missing required capture group: ${groupName} (index ${index})`);
-  }
-  return value;
+interface VariableStore {
+  [key: string]: {
+    value: unknown;
+    node?: ts.Node;
+  };
 }
 
 /**
- * Type-safe helper to extract an optional capture group from a regex match.
- * @param match - The regex match array
- * @param index - The capture group index
- * @returns The captured string value or undefined
+ * Extracts a string value from a TypeScript AST node.
+ * Handles string literals, template literals, and identifiers (for shorthand).
  */
-function getOptionalCaptureGroup(
-  match: RegExpExecArray,
-  index: number
+function extractStringValue(
+  node: ts.Node | undefined,
+  sourceFile: ts.SourceFile,
+  variables: VariableStore
 ): string | undefined {
-  return match[index];
-}
+  if (!node) return undefined;
 
-/**
- * Type-safe helper to extract a boolean capture group from a regex match.
- * @param match - The regex match array
- * @param index - The capture group index
- * @returns true if the captured value is "true", false otherwise
- */
-function getBooleanCaptureGroup(
-  match: RegExpExecArray,
-  index: number
-): boolean {
-  return match[index] === 'true';
-}
-
-/**
- * Parses a single column definition from a regex match result.
- * Uses type-safe capture group extraction via named indices.
- * @param match - The regex match array from COLUMN_DEFINITION_REGEX
- * @returns A tuple of [columnName, columnDefinition] or null if invalid
- */
-function parseColumnDefinition(match: RegExpExecArray): [string, ColumnDefinition] | null {
-  // Extract column name (required) - if missing, return null
-  const colName = getOptionalCaptureGroup(match, ColumnCaptureGroups.COLUMN_NAME);
-  if (!colName) {
-    return null;
+  // String literal: 'value' or "value"
+  if (ts.isStringLiteral(node)) {
+    return node.text;
   }
 
-  // Extract column type (required for valid match, but use optional for safety)
-  const rawType = getOptionalCaptureGroup(match, ColumnCaptureGroups.COLUMN_TYPE);
-  if (!rawType) {
-    return null;
+  // Template literal: `value` (no interpolation)
+  if (ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text;
   }
-  const colType = rawType as ColumnDefinition['type'];
 
-  // Extract optional boolean flags using type-safe boolean helper
-  const isPrimaryKey = getBooleanCaptureGroup(match, ColumnCaptureGroups.PRIMARY_KEY);
-  const isNullable = getBooleanCaptureGroup(match, ColumnCaptureGroups.NULLABLE);
+  // Template expression: `${prefix}value`
+  if (ts.isTemplateExpression(node)) {
+    let result = node.head.text;
+    for (const span of node.templateSpans) {
+      // Try to resolve the expression
+      const exprValue = extractStringValue(span.expression, sourceFile, variables);
+      if (exprValue !== undefined) {
+        result += exprValue;
+      }
+      result += span.literal.text;
+    }
+    return result;
+  }
 
-  return [
-    colName,
-    {
-      type: colType,
-      primaryKey: isPrimaryKey,
-      nullable: isNullable,
-    },
-  ];
-}
-
-/**
- * Parses the columns block from a table schema definition.
- * @param columnsBlock - The raw string content between "columns: {" and "}"
- * @param context - Optional context for error messages
- * @returns A record mapping column names to their definitions
- * @throws SchemaParseError if no valid columns are found
- */
-function parseColumnsBlock(
-  columnsBlock: string,
-  context?: SchemaParseContext
-): Record<string, ColumnDefinition> {
-  const columns: Record<string, ColumnDefinition> = {};
-
-  // Create a fresh regex instance to avoid lastIndex issues with global regex
-  const regex = new RegExp(COLUMN_DEFINITION_REGEX.source, COLUMN_DEFINITION_REGEX.flags);
-  let colMatch;
-
-  while ((colMatch = regex.exec(columnsBlock)) !== null) {
-    const parsed = parseColumnDefinition(colMatch);
-    if (parsed) {
-      const [colName, colDef] = parsed;
-      columns[colName] = colDef;
+  // Identifier: reference to a variable
+  if (ts.isIdentifier(node)) {
+    const varName = node.text;
+    const varInfo = variables[varName];
+    if (varInfo && typeof varInfo.value === 'string') {
+      return varInfo.value;
     }
   }
 
-  // Validate that at least one column was found
-  if (Object.keys(columns).length === 0) {
-    throw new SchemaParseError(
-      'No valid columns found in table schema. Each column must have a "type" property with a valid SQL type (integer, text, real, blob, boolean).\n\n' +
-      'Example column definition:\n' +
-      '  columns: {\n' +
-      '    id: { type: "integer", primaryKey: true },\n' +
-      '    name: { type: "text" },\n' +
-      '  }',
-      context
-    );
+  // Type assertion: 'value' as Type
+  if (ts.isAsExpression(node)) {
+    return extractStringValue(node.expression, sourceFile, variables);
+  }
+
+  return undefined;
+}
+
+/**
+ * Extracts a boolean value from a TypeScript AST node.
+ */
+function extractBooleanValue(node: ts.Node | undefined): boolean | undefined {
+  if (!node) return undefined;
+
+  // Handle type assertions: true as const, false as const
+  if (ts.isAsExpression(node)) {
+    return extractBooleanValue(node.expression);
+  }
+
+  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
+
+  return undefined;
+}
+
+/**
+ * Parses a column definition from an object literal expression.
+ */
+function parseColumnFromObjectLiteral(
+  obj: ts.ObjectLiteralExpression,
+  sourceFile: ts.SourceFile,
+  variables: VariableStore
+): ColumnDefinition | undefined {
+  let type: string | undefined;
+  let primaryKey: boolean | undefined;
+  let nullable: boolean | undefined;
+
+  for (const prop of obj.properties) {
+    // Handle property assignment: type: 'integer'
+    if (ts.isPropertyAssignment(prop)) {
+      const propName = prop.name.getText(sourceFile);
+
+      if (propName === 'type') {
+        type = extractStringValue(prop.initializer, sourceFile, variables);
+      } else if (propName === 'primaryKey') {
+        primaryKey = extractBooleanValue(prop.initializer);
+      } else if (propName === 'nullable') {
+        nullable = extractBooleanValue(prop.initializer);
+      }
+    }
+  }
+
+  // Valid SQL types
+  const validTypes = ['integer', 'text', 'real', 'blob', 'boolean'];
+  if (type && validTypes.includes(type)) {
+    return {
+      type: type as ColumnDefinition['type'],
+      primaryKey: primaryKey ?? false,
+      nullable: nullable ?? false,
+    };
+  }
+
+  return undefined;
+}
+
+/**
+ * Extracts the property name from a property assignment node.
+ * Handles regular identifiers, string literals, and computed property names.
+ */
+function extractPropertyName(
+  propName: ts.PropertyName,
+  sourceFile: ts.SourceFile,
+  variables: VariableStore
+): string | undefined {
+  // Regular identifier: id, name, etc.
+  if (ts.isIdentifier(propName)) {
+    return propName.text;
+  }
+
+  // String literal: 'my-column' or "my-column"
+  if (ts.isStringLiteral(propName)) {
+    return propName.text;
+  }
+
+  // Computed property name: [CONSTANT] or [`${prefix}key`]
+  if (ts.isComputedPropertyName(propName)) {
+    return extractStringValue(propName.expression, sourceFile, variables);
+  }
+
+  return undefined;
+}
+
+/**
+ * Parses columns from an object literal expression representing the columns block.
+ */
+function parseColumnsFromObjectLiteral(
+  obj: ts.ObjectLiteralExpression,
+  sourceFile: ts.SourceFile,
+  variables: VariableStore
+): Record<string, ColumnDefinition> {
+  const columns: Record<string, ColumnDefinition> = {};
+
+  for (const prop of obj.properties) {
+    // Property assignment: columnName: { type: '...' }
+    if (ts.isPropertyAssignment(prop)) {
+      const colName = extractPropertyName(prop.name, sourceFile, variables);
+      if (!colName) continue;
+
+      // Handle type assertions and satisfies on the column value
+      let valueNode = prop.initializer;
+
+      // Strip type assertion: { ... } as const
+      if (ts.isAsExpression(valueNode)) {
+        valueNode = valueNode.expression;
+      }
+
+      // Strip satisfies: { ... } satisfies Column<'integer'>
+      if (ts.isSatisfiesExpression(valueNode)) {
+        valueNode = valueNode.expression;
+      }
+
+      if (ts.isObjectLiteralExpression(valueNode)) {
+        const colDef = parseColumnFromObjectLiteral(valueNode, sourceFile, variables);
+        if (colDef) {
+          columns[colName] = colDef;
+        }
+      }
+    }
+
+    // Spread element: ...baseColumns
+    if (ts.isSpreadAssignment(prop)) {
+      // Try to resolve the spread expression
+      let spreadExpr = prop.expression;
+
+      // Handle property access: baseUser.columns
+      if (ts.isPropertyAccessExpression(spreadExpr)) {
+        const objName = spreadExpr.expression.getText(sourceFile);
+        const propName = spreadExpr.name.text;
+
+        const varInfo = variables[objName];
+        if (varInfo && typeof varInfo.value === 'object' && varInfo.value !== null) {
+          const objValue = varInfo.value as Record<string, unknown>;
+          const nestedValue = objValue[propName];
+          if (typeof nestedValue === 'object' && nestedValue !== null) {
+            Object.assign(columns, nestedValue);
+          }
+        }
+      }
+      // Handle identifier: ...columns
+      else if (ts.isIdentifier(spreadExpr)) {
+        const varName = spreadExpr.text;
+        const varInfo = variables[varName];
+        if (varInfo && typeof varInfo.value === 'object' && varInfo.value !== null) {
+          Object.assign(columns, varInfo.value);
+        }
+      }
+    }
   }
 
   return columns;
 }
 
 /**
- * Parses a single table definition from a regex match result.
- * Uses type-safe capture group extraction via named indices.
- * @param match - The regex match array from TABLE_EXPORT_REGEX
- * @param filePath - Optional file path for error context
- * @returns A TableSchema object
- * @throws SchemaParseError if tableName or columns block is missing/invalid
+ * Evaluates a columns object from an AST node, handling various patterns.
  */
-function parseTableDefinition(match: RegExpExecArray, filePath?: string): TableSchema {
-  // Extract capture groups using type-safe named indices
-  const variableName = getOptionalCaptureGroup(match, TableCaptureGroups.VARIABLE_NAME);
-  const tableName = getOptionalCaptureGroup(match, TableCaptureGroups.TABLE_NAME);
-  const columnsBlock = getOptionalCaptureGroup(match, TableCaptureGroups.COLUMNS_BLOCK);
-
-  const context = { filePath, variableName };
-
-  // Validate tableName is present and not empty
-  if (!tableName) {
-    throw new SchemaParseError(
-      'Missing "tableName" property in table schema. The tableName property is required and must be a non-empty string.\n\n' +
-      'Example:\n' +
-      '  export const usersSchema = {\n' +
-      '    tableName: "users",\n' +
-      '    columns: { ... }\n' +
-      '  } as const;',
-      context
-    );
+function evaluateColumnsValue(
+  node: ts.Node,
+  sourceFile: ts.SourceFile,
+  variables: VariableStore
+): Record<string, ColumnDefinition> | undefined {
+  // Strip type assertions
+  if (ts.isAsExpression(node)) {
+    return evaluateColumnsValue(node.expression, sourceFile, variables);
   }
 
-  // Validate tableName is a valid identifier (not just whitespace)
-  const trimmedTableName = tableName.trim();
-  if (trimmedTableName.length === 0) {
-    throw new SchemaParseError(
-      'The "tableName" property cannot be empty or contain only whitespace. Please provide a valid table name.',
-      { ...context, tableName }
-    );
+  // Object literal: { id: { type: 'integer' }, ... }
+  if (ts.isObjectLiteralExpression(node)) {
+    return parseColumnsFromObjectLiteral(node, sourceFile, variables);
   }
 
-  // Validate columns block is present
-  if (!columnsBlock) {
-    throw new SchemaParseError(
-      'Missing "columns" property in table schema. The columns property is required and must define at least one column.\n\n' +
-      'Example:\n' +
-      '  export const usersSchema = {\n' +
-      '    tableName: "users",\n' +
-      '    columns: {\n' +
-      '      id: { type: "integer", primaryKey: true },\n' +
-      '      email: { type: "text" },\n' +
-      '    }\n' +
-      '  } as const;',
-      { ...context, tableName: trimmedTableName }
-    );
+  // Identifier: reference to external const
+  if (ts.isIdentifier(node)) {
+    const varName = node.text;
+    const varInfo = variables[varName];
+    if (varInfo && typeof varInfo.value === 'object' && varInfo.value !== null) {
+      return varInfo.value as Record<string, ColumnDefinition>;
+    }
   }
 
-  const columns = parseColumnsBlock(columnsBlock, { ...context, tableName: trimmedTableName });
-
-  return {
-    tableName: trimmedTableName,
-    columns,
-  };
+  return undefined;
 }
 
 /**
- * Extracts all table schema definitions from file content.
+ * Collects all variable declarations from a source file for reference resolution.
+ */
+function collectVariables(sourceFile: ts.SourceFile): VariableStore {
+  const variables: VariableStore = {};
+
+  function visit(node: ts.Node) {
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      const name = node.name.getText(sourceFile);
+
+      // Handle string literals
+      if (ts.isStringLiteral(node.initializer)) {
+        variables[name] = { value: node.initializer.text, node: node.initializer };
+      }
+      // Handle object literals (for column definitions and schemas)
+      else if (ts.isObjectLiteralExpression(node.initializer)) {
+        // First pass: just store the node for later resolution
+        variables[name] = { value: {}, node: node.initializer };
+      }
+      // Handle 'as const' expressions
+      else if (ts.isAsExpression(node.initializer)) {
+        const inner = node.initializer.expression;
+        if (ts.isStringLiteral(inner)) {
+          variables[name] = { value: inner.text, node: inner };
+        } else if (ts.isObjectLiteralExpression(inner)) {
+          variables[name] = { value: {}, node: inner };
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+
+  // Second pass: resolve object literal values
+  for (const [name, info] of Object.entries(variables)) {
+    if (info.node && ts.isObjectLiteralExpression(info.node)) {
+      const columns = parseColumnsFromObjectLiteral(info.node, sourceFile, variables);
+      if (Object.keys(columns).length > 0) {
+        variables[name] = { value: columns, node: info.node };
+      }
+    }
+  }
+
+  return variables;
+}
+
+/**
+ * Interface for JSDoc comment info attached to columns.
+ */
+interface ColumnWithJsDoc extends ColumnDefinition {
+  jsDoc?: string;
+}
+
+/**
+ * Parses columns from an object literal expression, including JSDoc comments.
+ */
+function parseColumnsWithJsDoc(
+  obj: ts.ObjectLiteralExpression,
+  sourceFile: ts.SourceFile,
+  variables: VariableStore
+): Record<string, ColumnWithJsDoc> {
+  const columns: Record<string, ColumnWithJsDoc> = {};
+
+  for (const prop of obj.properties) {
+    if (ts.isPropertyAssignment(prop)) {
+      const colName = extractPropertyName(prop.name, sourceFile, variables);
+      if (!colName) continue;
+
+      let valueNode = prop.initializer;
+
+      // Strip type assertion
+      if (ts.isAsExpression(valueNode)) {
+        valueNode = valueNode.expression;
+      }
+
+      // Strip satisfies
+      if (ts.isSatisfiesExpression(valueNode)) {
+        valueNode = valueNode.expression;
+      }
+
+      if (ts.isObjectLiteralExpression(valueNode)) {
+        const colDef = parseColumnFromObjectLiteral(valueNode, sourceFile, variables);
+        if (colDef) {
+          // Extract JSDoc comment
+          const jsDocTags = ts.getJSDocTags(prop);
+          const leadingComments = ts.getLeadingCommentRanges(sourceFile.text, prop.pos);
+
+          let jsDoc: string | undefined;
+          if (leadingComments) {
+            for (const comment of leadingComments) {
+              const commentText = sourceFile.text.slice(comment.pos, comment.end);
+              if (commentText.startsWith('/**')) {
+                jsDoc = commentText;
+                break;
+              }
+            }
+          }
+
+          columns[colName] = { ...colDef, jsDoc };
+        }
+      }
+    }
+
+    // Handle spread
+    if (ts.isSpreadAssignment(prop)) {
+      let spreadExpr = prop.expression;
+
+      if (ts.isPropertyAccessExpression(spreadExpr)) {
+        const objName = spreadExpr.expression.getText(sourceFile);
+        const propName = spreadExpr.name.text;
+
+        const varInfo = variables[objName];
+        if (varInfo && typeof varInfo.value === 'object' && varInfo.value !== null) {
+          const objValue = varInfo.value as Record<string, unknown>;
+          const nestedValue = objValue[propName];
+          if (typeof nestedValue === 'object' && nestedValue !== null) {
+            Object.assign(columns, nestedValue);
+          }
+        }
+      } else if (ts.isIdentifier(spreadExpr)) {
+        const varName = spreadExpr.text;
+        const varInfo = variables[varName];
+        if (varInfo && typeof varInfo.value === 'object' && varInfo.value !== null) {
+          Object.assign(columns, varInfo.value);
+        }
+      }
+    }
+  }
+
+  return columns;
+}
+
+/**
+ * Interface for table schema with JSDoc comments on columns.
+ */
+interface TableSchemaWithJsDoc extends TableSchema {
+  columnsWithJsDoc?: Record<string, ColumnWithJsDoc>;
+}
+
+/**
+ * Extracts table schemas from a source file using TypeScript AST.
+ */
+function extractTableSchemasFromAst(
+  sourceFile: ts.SourceFile,
+  filePath?: string
+): TableSchemaWithJsDoc[] {
+  const schemas: TableSchemaWithJsDoc[] = [];
+  const variables = collectVariables(sourceFile);
+
+  function visit(node: ts.Node) {
+    // Look for exported variable declarations
+    if (ts.isVariableStatement(node)) {
+      const hasExport = node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword);
+      if (!hasExport) {
+        ts.forEachChild(node, visit);
+        return;
+      }
+
+      for (const decl of node.declarationList.declarations) {
+        if (!decl.initializer) continue;
+
+        let initNode = decl.initializer;
+
+        // Strip 'as const' and 'satisfies Type'
+        if (ts.isAsExpression(initNode)) {
+          initNode = initNode.expression;
+        }
+        if (ts.isSatisfiesExpression(initNode)) {
+          initNode = initNode.expression;
+        }
+        if (ts.isAsExpression(initNode)) {
+          initNode = initNode.expression;
+        }
+
+        if (!ts.isObjectLiteralExpression(initNode)) continue;
+
+        let tableName: string | undefined;
+        let columnsObj: ts.ObjectLiteralExpression | undefined;
+        let columnsFromVar: Record<string, ColumnDefinition> | undefined;
+
+        for (const prop of initNode.properties) {
+          // Handle spread: ...baseUser
+          if (ts.isSpreadAssignment(prop)) {
+            const spreadExpr = prop.expression;
+            if (ts.isIdentifier(spreadExpr)) {
+              const varName = spreadExpr.text;
+              const varInfo = variables[varName];
+              if (varInfo && varInfo.node && ts.isObjectLiteralExpression(varInfo.node)) {
+                // Extract tableName and columns from spread object if not already set
+                for (const spreadProp of varInfo.node.properties) {
+                  if (ts.isPropertyAssignment(spreadProp)) {
+                    const propName = spreadProp.name.getText(sourceFile);
+                    if (propName === 'tableName' && !tableName) {
+                      tableName = extractStringValue(spreadProp.initializer, sourceFile, variables);
+                    }
+                    if (propName === 'columns' && !columnsObj && !columnsFromVar) {
+                      let colNode = spreadProp.initializer;
+                      if (ts.isAsExpression(colNode)) colNode = colNode.expression;
+                      if (ts.isObjectLiteralExpression(colNode)) {
+                        columnsObj = colNode;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Handle property assignment
+          if (ts.isPropertyAssignment(prop)) {
+            const propName = prop.name.getText(sourceFile);
+
+            if (propName === 'tableName') {
+              tableName = extractStringValue(prop.initializer, sourceFile, variables);
+            }
+
+            if (propName === 'columns') {
+              let colNode = prop.initializer;
+
+              // Handle identifier (shorthand or reference): columns
+              if (ts.isIdentifier(colNode)) {
+                const varName = colNode.text;
+                const varInfo = variables[varName];
+                if (varInfo) {
+                  if (typeof varInfo.value === 'object' && varInfo.value !== null) {
+                    columnsFromVar = varInfo.value as Record<string, ColumnDefinition>;
+                  }
+                  if (varInfo.node && ts.isObjectLiteralExpression(varInfo.node)) {
+                    columnsObj = varInfo.node;
+                  }
+                }
+              } else {
+                // Strip type assertions
+                if (ts.isAsExpression(colNode)) colNode = colNode.expression;
+                if (ts.isSatisfiesExpression(colNode)) colNode = colNode.expression;
+
+                if (ts.isObjectLiteralExpression(colNode)) {
+                  columnsObj = colNode;
+                }
+              }
+            }
+          }
+
+          // Handle shorthand property: { tableName, columns }
+          if (ts.isShorthandPropertyAssignment(prop)) {
+            const propName = prop.name.text;
+
+            if (propName === 'tableName') {
+              const varInfo = variables[propName];
+              if (varInfo && typeof varInfo.value === 'string') {
+                tableName = varInfo.value;
+              }
+            }
+
+            if (propName === 'columns') {
+              const varInfo = variables[propName];
+              if (varInfo) {
+                if (typeof varInfo.value === 'object' && varInfo.value !== null) {
+                  columnsFromVar = varInfo.value as Record<string, ColumnDefinition>;
+                }
+                if (varInfo.node && ts.isObjectLiteralExpression(varInfo.node)) {
+                  columnsObj = varInfo.node;
+                }
+              }
+            }
+          }
+        }
+
+        if (tableName) {
+          let columns: Record<string, ColumnDefinition>;
+          let columnsWithJsDoc: Record<string, ColumnWithJsDoc> | undefined;
+
+          if (columnsObj) {
+            columnsWithJsDoc = parseColumnsWithJsDoc(columnsObj, sourceFile, variables);
+            columns = {};
+            for (const [name, col] of Object.entries(columnsWithJsDoc)) {
+              const { jsDoc, ...colDef } = col;
+              columns[name] = colDef;
+            }
+          } else if (columnsFromVar) {
+            columns = columnsFromVar;
+          } else {
+            continue;
+          }
+
+          if (Object.keys(columns).length > 0) {
+            schemas.push({
+              tableName,
+              columns,
+              columnsWithJsDoc,
+            });
+          }
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return schemas;
+}
+
+/**
+ * Extracts all table schema definitions from file content using TypeScript AST.
  * @param content - The raw file content to parse
  * @param filePath - Optional file path for error context
  * @returns An array of TableSchema objects found in the content
- * @throws SchemaParseError if any schema definition is invalid
  */
-function extractTableSchemas(content: string, filePath?: string): TableSchema[] {
-  const schemas: TableSchema[] = [];
+function extractTableSchemas(content: string, filePath?: string): TableSchemaWithJsDoc[] {
+  const sourceFile = ts.createSourceFile(
+    filePath || 'schema.ts',
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
 
-  // Create a fresh regex instance to avoid lastIndex issues with global regex
-  const regex = new RegExp(TABLE_EXPORT_REGEX.source, TABLE_EXPORT_REGEX.flags);
-  let match;
-
-  while ((match = regex.exec(content)) !== null) {
-    const schema = parseTableDefinition(match, filePath);
-    schemas.push(schema);
-  }
-
-  return schemas;
+  return extractTableSchemasFromAst(sourceFile, filePath);
 }
 
 /**
@@ -497,17 +795,26 @@ function extractTableSchemas(content: string, filePath?: string): TableSchema[] 
  * @returns An array of TableSchema objects found in the file
  * @throws SchemaParseError if any schema definition is invalid
  */
-async function parseSchemaFile(filePath: string): Promise<TableSchema[]> {
+async function parseSchemaFile(filePath: string): Promise<TableSchemaWithJsDoc[]> {
   const content = await fs.readFile(filePath, 'utf-8');
   return extractTableSchemas(content, filePath);
 }
 
-function generateInterface(schema: TableSchema): string {
+function generateInterface(schema: TableSchemaWithJsDoc): string {
   const interfaceName = tableNameToInterfaceName(schema.tableName);
   const lines: string[] = [`export interface ${interfaceName} {`];
 
+  const columnsWithJsDoc = schema.columnsWithJsDoc || {};
+
   for (const [colName, colDef] of Object.entries(schema.columns)) {
     const tsType = mapSqlTypeToTs(colDef.type, colDef.nullable ?? false);
+    const colWithJsDoc = columnsWithJsDoc[colName];
+
+    // Add JSDoc comment if present
+    if (colWithJsDoc?.jsDoc) {
+      lines.push(`  ${colWithJsDoc.jsDoc}`);
+    }
+
     lines.push(`  ${colName}: ${tsType};`);
   }
 
@@ -542,7 +849,7 @@ export async function generateTypes(options: GenerateOptions): Promise<GenerateR
     .map(e => join(schemaDir, e.name));
 
   // Parse all schemas
-  const allSchemas: TableSchema[] = [];
+  const allSchemas: TableSchemaWithJsDoc[] = [];
   for (const file of schemaFiles) {
     const schemas = await parseSchemaFile(file);
     allSchemas.push(...schemas);
