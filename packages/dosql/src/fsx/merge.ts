@@ -12,7 +12,6 @@
  */
 
 import type { FSXBackend } from './types.js';
-import type { COWBackend } from './cow-backend.js';
 import {
   type BlobRef,
   type Branch,
@@ -22,6 +21,7 @@ import {
   type BranchDiff,
   type SnapshotId,
   type Snapshot,
+  type ICOWBackend,
   COWError,
   COWErrorCode,
 } from './cow-types.js';
@@ -35,9 +35,9 @@ import {
  */
 export class MergeEngine {
   private readonly storage: FSXBackend;
-  private readonly cow: COWBackend;
+  private readonly cow: ICOWBackend;
 
-  constructor(storage: FSXBackend, cow: COWBackend) {
+  constructor(storage: FSXBackend, cow: ICOWBackend) {
     this.storage = storage;
     this.cow = cow;
   }
@@ -476,7 +476,7 @@ interface ThreeWayMergeResult {
  * Create a merge preview without actually merging
  */
 export async function previewMerge(
-  cow: COWBackend,
+  cow: ICOWBackend,
   source: string,
   target: string,
   strategy: MergeStrategy
@@ -499,7 +499,7 @@ export async function previewMerge(
  * Fast-forward is possible when target has no changes since the common ancestor
  */
 export async function canFastForward(
-  cow: COWBackend,
+  cow: ICOWBackend,
   source: string,
   target: string
 ): Promise<boolean> {
@@ -521,7 +521,7 @@ export async function canFastForward(
  * Perform a fast-forward merge
  */
 export async function fastForwardMerge(
-  cow: COWBackend,
+  cow: ICOWBackend,
   source: string,
   target: string
 ): Promise<MergeResult> {

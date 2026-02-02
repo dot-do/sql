@@ -29,7 +29,7 @@
  */
 
 import type { SqlValue } from '../engine/types.js';
-import type { SqlFunction, FunctionSignature } from './registry.js';
+import type { SqlFunction, FunctionSignature } from './function-types.js';
 
 // =============================================================================
 // CONSTANTS

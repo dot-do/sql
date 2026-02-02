@@ -5,7 +5,11 @@
  * Handles request body size limits, SQL length limits, and parameter count validation.
  */
 
-import type { QueryRequest } from './request-handler.js';
+// QueryRequest is defined here to avoid circular dependency with request-handler.ts
+export interface QueryRequest {
+  sql: string;
+  params?: Record<string, unknown>;
+}
 
 // =============================================================================
 // Input Size Limits

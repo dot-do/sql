@@ -23,65 +23,15 @@ import {
 } from './aggregate.js';
 import { vectorFunctions, vectorSignatures } from './vector.js';
 
-// =============================================================================
-// TYPES
-// =============================================================================
+// Re-export types from function-types.ts for backwards compatibility
+export type {
+  SqlFunction,
+  FunctionParam,
+  FunctionSignature,
+  UserDefinedFunction,
+} from './function-types.js';
 
-/**
- * SQL function implementation
- */
-export interface SqlFunction {
-  /** The function implementation */
-  fn: (...args: SqlValue[]) => SqlValue;
-  /** Minimum number of arguments */
-  minArgs: number;
-  /** Maximum number of arguments (Infinity for variadic) */
-  maxArgs: number;
-  /** Whether this is deterministic (same inputs = same output) */
-  deterministic?: boolean;
-}
-
-/**
- * Parameter definition for function signature
- */
-export interface FunctionParam {
-  /** Parameter name */
-  name: string;
-  /** Parameter type */
-  type: 'any' | 'string' | 'number' | 'boolean' | 'bytes' | 'date';
-  /** Is this parameter optional? */
-  optional?: boolean;
-  /** Is this a variadic parameter (can repeat)? */
-  variadic?: boolean;
-}
-
-/**
- * Function signature for documentation and type checking
- */
-export interface FunctionSignature {
-  /** Function name */
-  name: string;
-  /** Parameters */
-  params: FunctionParam[];
-  /** Return type */
-  returnType: 'any' | 'string' | 'number' | 'boolean' | 'bytes' | 'date' | 'null';
-  /** Description */
-  description: string;
-  /** Is this an aggregate function? */
-  isAggregate?: boolean;
-}
-
-/**
- * User-defined function definition
- */
-export interface UserDefinedFunction {
-  /** Function name */
-  name: string;
-  /** Implementation */
-  fn: SqlFunction;
-  /** Optional signature for documentation */
-  signature?: FunctionSignature;
-}
+import type { SqlFunction, FunctionSignature } from './function-types.js';
 
 // =============================================================================
 // FUNCTION REGISTRY

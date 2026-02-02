@@ -13,11 +13,11 @@
  */
 
 import type { FSXBackend } from './types.js';
-import type { COWBackend } from './cow-backend.js';
 import {
   type BlobRef,
   type GCResult,
   type GCOptions,
+  type ICOWBackend,
   COWError,
   COWErrorCode,
   BLOB_PREFIX,
@@ -45,9 +45,9 @@ const DEFAULT_GC_OPTIONS: Required<GCOptions> = {
  */
 export class GarbageCollector {
   private readonly storage: FSXBackend;
-  private readonly cow: COWBackend;
+  private readonly cow: ICOWBackend;
 
-  constructor(storage: FSXBackend, cow: COWBackend) {
+  constructor(storage: FSXBackend, cow: ICOWBackend) {
     this.storage = storage;
     this.cow = cow;
   }

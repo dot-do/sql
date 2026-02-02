@@ -9,16 +9,14 @@ import type { QueryExecutor } from './query-executor.js';
 import type { SchemaManager } from './schema-manager.js';
 import { RateLimiter } from './rate-limiter.js';
 import { checkAuth, type AuthConfig } from './auth.js';
-import { checkContentLength, parseAndValidateBody } from './input-validation.js';
+import { checkContentLength, parseAndValidateBody, type QueryRequest } from './input-validation.js';
+
+// Re-export QueryRequest for backwards compatibility
+export type { QueryRequest } from './input-validation.js';
 
 // =============================================================================
 // Types
 // =============================================================================
-
-export interface QueryRequest {
-  sql: string;
-  params?: Record<string, unknown>;
-}
 
 export interface QueryResponse {
   success: boolean;

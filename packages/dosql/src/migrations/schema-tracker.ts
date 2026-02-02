@@ -13,6 +13,8 @@ import {
   type CloneMigrationContext,
   type MigrationSource,
   type AppliedMigration,
+  type DatabaseExecutor,
+  type ISchemaTracker,
   isMigrationArray,
   isFolderSource,
   isDrizzleSource,
@@ -20,10 +22,8 @@ import {
   compareMigrationIds,
   calculateChecksumSync,
 } from './types.js';
-import {
-  MigrationRunner,
-  type DatabaseExecutor,
-} from './runner.js';
+// NOTE: MigrationRunner is imported dynamically in initializeWithMigrations()
+// to avoid circular dependency: runner.ts -> do-loader.ts -> schema-tracker.ts -> runner.ts
 import {
   loadDrizzleMigrations,
   type MigrationFileSystem,
@@ -62,7 +62,7 @@ export interface SchemaStorage {
  * Manages schema version state in DO storage and handles
  * migration-on-clone scenarios.
  */
-export class SchemaTracker {
+export class SchemaTracker implements ISchemaTracker {
   private readonly storage: SchemaStorage;
   private readonly storagePrefix: string;
 
@@ -362,6 +362,10 @@ export async function initializeWithMigrations(
   // Auto-migrate if enabled and needed
   if (autoMigrate && context.needsMigration) {
     logger.info(`Applying ${context.pendingMigrations.length} migrations...`);
+
+    // Dynamic import to avoid circular dependency:
+    // runner.ts -> do-loader.ts -> schema-tracker.ts -> runner.ts
+    const { MigrationRunner } = await import('./runner.js');
 
     const runner = new MigrationRunner(db, {
       logger: {

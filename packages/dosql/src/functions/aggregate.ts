@@ -17,7 +17,7 @@
  */
 
 import type { SqlValue } from '../engine/types.js';
-import type { FunctionSignature } from './registry.js';
+import type { FunctionSignature } from './function-types.js';
 
 // =============================================================================
 // AGGREGATE ACCUMULATOR INTERFACE

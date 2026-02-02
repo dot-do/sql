@@ -510,3 +510,55 @@ export function calculateChecksumSync(sql: string): string {
   }
   return Math.abs(hash).toString(16).padStart(8, '0');
 }
+
+// =============================================================================
+// DATABASE EXECUTOR INTERFACE
+// =============================================================================
+
+/**
+ * Minimal database interface for running migrations
+ *
+ * This abstracts over different database implementations (SQLite, PGLite, D1, etc.)
+ * Extracted to types.ts to avoid circular dependencies between runner.ts, do-loader.ts,
+ * and schema-tracker.ts.
+ */
+export interface DatabaseExecutor {
+  /** Execute SQL and return results */
+  exec(sql: string): Promise<void> | void;
+
+  /** Run a query and get results */
+  query<T = unknown>(sql: string, params?: unknown[]): Promise<T[]> | T[];
+
+  /** Run SQL that modifies data */
+  run(sql: string, params?: unknown[]): Promise<{ changes: number }> | { changes: number };
+
+  /** Begin transaction */
+  beginTransaction?(): Promise<void> | void;
+
+  /** Commit transaction */
+  commit?(): Promise<void> | void;
+
+  /** Rollback transaction */
+  rollback?(): Promise<void> | void;
+}
+
+// =============================================================================
+// SCHEMA TRACKER INTERFACE
+// =============================================================================
+
+/**
+ * Interface for schema tracking operations
+ *
+ * Extracted to types.ts to avoid circular dependencies between do-loader.ts
+ * and schema-tracker.ts. The SchemaTracker class implements this interface.
+ */
+export interface ISchemaTracker {
+  /** Get current schema version */
+  getCurrentVersion(): Promise<string | null>;
+
+  /** Get all applied migrations */
+  getAppliedMigrations(): Promise<AppliedMigration[]>;
+
+  /** Record a migration as applied */
+  recordMigration(migration: AppliedMigration): Promise<void>;
+}

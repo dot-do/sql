@@ -678,6 +678,47 @@ export interface FSXWithCOW extends FSXBackend {
 }
 
 // =============================================================================
+// COW Backend Interface for Sub-components
+// =============================================================================
+
+/**
+ * Interface for COW backend operations needed by sub-components (GC, Merge).
+ *
+ * Extracted to cow-types.ts to avoid circular dependencies:
+ * cow-backend.ts -> gc.ts/merge.ts -> cow-backend.ts
+ *
+ * COWBackend implements this interface, and GarbageCollector/MergeEngine
+ * use this interface instead of importing COWBackend directly.
+ */
+export interface ICOWBackend {
+  // Branch operations
+  listBranches(): Promise<Branch[]>;
+  getBranch(name: string): Promise<Branch | null>;
+
+  // Snapshot operations
+  listSnapshots(branch: string): Promise<Snapshot[]>;
+  getSnapshot(snapshotId: SnapshotId): Promise<Snapshot | null>;
+  snapshot(branch: string, message?: string): Promise<SnapshotId>;
+
+  // Read/Write operations
+  readFrom(path: string, branch: string, range?: ByteRange): Promise<Uint8Array | null>;
+  writeTo(path: string, data: Uint8Array, branch: string): Promise<void>;
+  readAt(path: string, snapshotId: SnapshotId, range?: ByteRange): Promise<Uint8Array | null>;
+
+  // List operations
+  listFrom(prefix: string, branch: string): Promise<string[]>;
+
+  // Reference operations (internal)
+  getRefInternal(path: string, branchName: string): Promise<BlobRef | null>;
+
+  // Storage access
+  getStorage(): FSXBackend;
+
+  // Merge operations
+  merge(source: string, target: string, strategy: MergeStrategy): Promise<MergeResult>;
+}
+
+// =============================================================================
 // COW Error Types
 // =============================================================================
 

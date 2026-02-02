@@ -26,12 +26,12 @@ import {
   type Migration,
   type AppliedMigration,
   type MigrationResult,
+  type DatabaseExecutor,
+  type ISchemaTracker,
   calculateChecksumSync,
 } from './types.js';
 
 import { type MigrationFileSystem } from './drizzle-compat.js';
-import { type SchemaTracker } from './schema-tracker.js';
-import { type DatabaseExecutor } from './runner.js';
 
 // =============================================================================
 // CONSTANTS
@@ -507,7 +507,7 @@ export function stripSqlComments(sql: string): string {
  * @returns Set of applied migration IDs
  */
 export async function detectAppliedMigrations(
-  tracker: SchemaTracker
+  tracker: ISchemaTracker
 ): Promise<Set<string>> {
   const applied = await tracker.getAppliedMigrations();
   return new Set(applied.map(m => m.id));
@@ -564,7 +564,7 @@ export interface ApplyMigrationsOptions {
 export async function applyMigrationsInOrder(
   migrations: Migration[],
   db: DatabaseExecutor,
-  tracker: SchemaTracker,
+  tracker: ISchemaTracker,
   options: ApplyMigrationsOptions = {}
 ): Promise<MigrationResult> {
   const {

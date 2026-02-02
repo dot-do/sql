@@ -16,6 +16,7 @@ import {
   type MigrationRunnerOptions,
   type MigrationLogger,
   type MigrationSource,
+  type DatabaseExecutor,
   compareMigrationIds,
   calculateChecksumSync,
   isMigrationArray,
@@ -23,6 +24,9 @@ import {
 } from './types.js';
 
 import { type MigrationFileSystem } from './drizzle-compat.js';
+
+// Re-export DatabaseExecutor for backwards compatibility
+export type { DatabaseExecutor } from './types.js';
 
 // =============================================================================
 // DEFAULT LOGGER
@@ -43,35 +47,6 @@ const consoleLogger: MigrationLogger = {
   error: (msg, ...args) => _logger.error(msg, undefined, { args }),
   debug: (msg, ...args) => _logger.debug(msg, { args }),
 };
-
-// =============================================================================
-// DATABASE EXECUTOR INTERFACE
-// =============================================================================
-
-/**
- * Minimal database interface for running migrations
- *
- * This abstracts over different database implementations (SQLite, PGLite, D1, etc.)
- */
-export interface DatabaseExecutor {
-  /** Execute SQL and return results */
-  exec(sql: string): Promise<void> | void;
-
-  /** Run a query and get results */
-  query<T = unknown>(sql: string, params?: unknown[]): Promise<T[]> | T[];
-
-  /** Run SQL that modifies data */
-  run(sql: string, params?: unknown[]): Promise<{ changes: number }> | { changes: number };
-
-  /** Begin transaction */
-  beginTransaction?(): Promise<void> | void;
-
-  /** Commit transaction */
-  commit?(): Promise<void> | void;
-
-  /** Rollback transaction */
-  rollback?(): Promise<void> | void;
-}
 
 // =============================================================================
 // MIGRATION RUNNER
