@@ -94,6 +94,28 @@ describe('Shared Parser Utilities', () => {
       expect(commentTokens.length).toBe(1);
     });
 
+    it('should tokenize block comments', () => {
+      const tokens = tokenize('SELECT /* comment */ id', { includeComments: true });
+      const commentTokens = tokens.filter(t => t.type === 'comment');
+      expect(commentTokens.length).toBe(1);
+      expect(commentTokens[0].value).toBe('comment');
+    });
+
+    it('should throw error for unterminated block comments', () => {
+      expect(() => tokenize('SELECT /* unclosed comment')).toThrow('Unterminated block comment');
+    });
+
+    it('should throw error for block comment at end of input', () => {
+      expect(() => tokenize('/* x')).toThrow('Unterminated block comment');
+    });
+
+    it('should handle block comments ending at very end of input', () => {
+      const tokens = tokenize('SELECT 1 /* comment */', { includeComments: true });
+      const commentTokens = tokens.filter(t => t.type === 'comment');
+      expect(commentTokens.length).toBe(1);
+      expect(commentTokens[0].value).toBe('comment');
+    });
+
     it('should track source locations', () => {
       const tokens = tokenize('SELECT\nid');
       expect(tokens[0].location.line).toBe(1);

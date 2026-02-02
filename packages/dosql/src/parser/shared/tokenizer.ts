@@ -249,14 +249,22 @@ export class Tokenizer {
     let value = '';
     this.advance(); // /
     this.advance(); // *
-    while (this.pos < this.sql.length - 1) {
+
+    let terminated = false;
+    while (this.pos < this.sql.length) {
       if (this.peek() === '*' && this.peek(1) === '/') {
         this.advance(); // *
         this.advance(); // /
+        terminated = true;
         break;
       }
       value += this.advance();
     }
+
+    if (!terminated) {
+      throw new SQLSyntaxError('Unterminated block comment', loc, this.sql);
+    }
+
     return { type: 'comment', value: value.trim(), location: loc };
   }
 

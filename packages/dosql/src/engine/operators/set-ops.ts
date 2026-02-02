@@ -232,42 +232,6 @@ class RowHashMap {
   }
 }
 
-/**
- * Legacy rowKey function for backward compatibility
- * @deprecated Use rowIdentity() with RowHashSet for better performance
- */
-function rowKey(row: Row): string {
-  return rowIdentity(row).key;
-}
-
-/**
- * Create a hash key for specific columns only
- * @deprecated Use rowIdentity approach for better performance
- */
-function rowKeyColumns(row: Row, columns: string[]): string {
-  const parts: string[] = [];
-  for (const k of columns) {
-    const v = row[k];
-    if (v === null) {
-      parts.push('N');
-    } else if (typeof v === 'string') {
-      parts.push('S' + v.length + ':' + v);
-    } else if (typeof v === 'number') {
-      parts.push('n' + v);
-    } else if (typeof v === 'bigint') {
-      parts.push('B' + v.toString());
-    } else if (typeof v === 'boolean') {
-      parts.push(v ? 'T' : 'F');
-    } else if (v instanceof Date) {
-      parts.push('D' + v.getTime());
-    } else if (v instanceof Uint8Array) {
-      parts.push('Y' + Array.from(v).map(b => b.toString(16).padStart(2, '0')).join(''));
-    }
-    parts.push('|');
-  }
-  return parts.join('');
-}
-
 // =============================================================================
 // UNION OPERATOR
 // =============================================================================
@@ -734,7 +698,7 @@ export class CompoundSelectOperator implements Operator {
     // If we buffered results (for ORDER BY/LIMIT)
     if (this.buffer.length > 0) {
       if (this.bufferIndex < this.buffer.length) {
-        return this.buffer[this.bufferIndex++];
+        return this.buffer[this.bufferIndex++] ?? null;
       }
       return null;
     }
@@ -847,7 +811,7 @@ function createArrayOperator(rows: Row[]): Operator {
 
   return {
     async open() { index = 0; },
-    async next() { return index < rows.length ? rows[index++] : null; },
+    async next(): Promise<Row | null> { return index < rows.length ? (rows[index++] ?? null) : null; },
     async close() {},
     columns() { return cols; },
   };

@@ -955,4 +955,85 @@ describe('Replica DO - State Persistence', () => {
     const status = await replica.getStatus();
     expect(status.id).toEqual(replicaId);
   });
+
+  it('handles invalid LSN values in persisted state', async () => {
+    const backend = createMockBackend();
+
+    // Pre-populate state with invalid LSN values (not valid BigInt strings)
+    const state = {
+      info: {
+        id: { region: 'us-west', instanceId: 'replica-1' },
+        status: 'active',
+        role: 'replica',
+        lastLSN: 'not-a-number',  // Invalid LSN
+        lastHeartbeat: Date.now(),
+        registeredAt: Date.now() - 10000,
+        doUrl: 'https://replica.do',
+      },
+      primaryUrl: 'https://primary.do',
+      currentLSN: 'also-not-valid',  // Invalid LSN
+      streamingActive: false,
+    };
+
+    await backend.write(
+      '_replica/state.json',
+      new TextEncoder().encode(JSON.stringify(state))
+    );
+
+    const walWriter = createWALWriter(backend);
+
+    // Should not throw - invalid LSN values should be handled gracefully
+    const replica = createReplica({ backend, walWriter });
+
+    // Wait for async load
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // State should be loaded with default LSN values (0n)
+    // We need to reinitialize since the loaded state may have invalid data
+    const replicaId = createReplicaId('us-west', 'replica-1');
+    await replica.initialize('https://primary.do', createReplicaInfo(replicaId));
+
+    const status = await replica.getStatus();
+    expect(status.id).toEqual(replicaId);
+  });
+
+  it('handles null/undefined LSN in persisted state', async () => {
+    const backend = createMockBackend();
+
+    // Pre-populate state with missing LSN values
+    const state = {
+      info: {
+        id: { region: 'us-west', instanceId: 'replica-1' },
+        status: 'active',
+        role: 'replica',
+        // lastLSN is missing
+        lastHeartbeat: Date.now(),
+        registeredAt: Date.now() - 10000,
+        doUrl: 'https://replica.do',
+      },
+      primaryUrl: 'https://primary.do',
+      // currentLSN is missing
+      streamingActive: false,
+    };
+
+    await backend.write(
+      '_replica/state.json',
+      new TextEncoder().encode(JSON.stringify(state))
+    );
+
+    const walWriter = createWALWriter(backend);
+
+    // Should not throw
+    const replica = createReplica({ backend, walWriter });
+
+    // Wait for async load
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Should be able to initialize fresh
+    const replicaId = createReplicaId('us-west', 'replica-1');
+    await replica.initialize('https://primary.do', createReplicaInfo(replicaId));
+
+    const status = await replica.getStatus();
+    expect(status.id).toEqual(replicaId);
+  });
 });

@@ -53,6 +53,33 @@ import {
 } from './leader-election.js';
 
 // =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+/**
+ * Safely converts a value to BigInt with validation.
+ * Returns the provided default value if conversion fails.
+ *
+ * @param value - The value to convert
+ * @param defaultValue - The default value to return if conversion fails
+ * @returns The converted BigInt or the default value
+ */
+function safeBigInt(value: unknown, defaultValue: bigint = 0n): bigint {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return BigInt(Math.floor(value));
+  }
+  if (typeof value === 'string') {
+    try {
+      return BigInt(value);
+    } catch {
+      return defaultValue;
+    }
+  }
+  return defaultValue;
+}
+
+// =============================================================================
 // REPLICA STATE
 // =============================================================================
 
@@ -989,17 +1016,21 @@ export function createReplicaDO(
     try {
       const persistedState = JSON.parse(textDecoder.decode(data));
 
+      // Safely convert LSN values with validation
+      const lastLSN = safeBigInt(persistedState.info?.lastLSN, 0n);
+      const currentLSN = safeBigInt(persistedState.currentLSN, 0n);
+
       state = {
         info: {
           ...persistedState.info,
-          lastLSN: BigInt(persistedState.info.lastLSN),
+          lastLSN,
         },
         primaryUrl: persistedState.primaryUrl,
-        currentLSN: BigInt(persistedState.currentLSN),
+        currentLSN,
         streamingActive: false, // Don't auto-start streaming
         appliedLSNs: new Set(),
         sessions: new Map(),
-        lastKnownPrimaryLSN: BigInt(persistedState.currentLSN),
+        lastKnownPrimaryLSN: currentLSN,
         knownReplicas: new Map(),
         observedLeaders: [],
         currentFencingToken: null,
@@ -1010,7 +1041,10 @@ export function createReplicaDO(
         electionStateMachine = new LeaderElectionStateMachine(state.info.id, fullConfig);
       }
     } catch (e) {
-      // Ignore corrupted state
+      // Log and ignore corrupted state - the replica will need to be reinitialized
+      logger.warn('Failed to parse persisted replica state, will require reinitialization', {
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
 

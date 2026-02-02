@@ -779,8 +779,19 @@ export function HibernationMixin<T extends DurableObjectMixinBase>(Base: T) {
       // Close the connection
       try {
         ws.close(1000, 'Idle timeout');
-      } catch {
-        // Connection may already be closed
+      } catch (e) {
+        // Connection may already be closed - log at debug level
+        // to distinguish expected vs unexpected errors
+        if (e instanceof Error && e.message.includes('already closed')) {
+          logger.debug('WebSocket already closed during idle timeout', {
+            sessionId: session.sessionId,
+          });
+        } else {
+          logger.warn('Unexpected error closing WebSocket during idle timeout', {
+            sessionId: session.sessionId,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
       }
     }
 
