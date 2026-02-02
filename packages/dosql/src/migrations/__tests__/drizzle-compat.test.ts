@@ -1150,3 +1150,665 @@ describe('Drizzle Compatibility - Integration', () => {
     );
   });
 });
+
+// =============================================================================
+// SCHEMA CHANGE HANDLING IN DOWN MIGRATIONS TESTS
+// =============================================================================
+
+describe('Drizzle Compatibility - Schema Change Handling', () => {
+  it('should handle complex column type changes in down migration', () => {
+    const previous: MigrationSnapshot = {
+      version: '5',
+      dialect: 'sqlite',
+      tables: {
+        users: {
+          name: 'users',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true, primaryKey: true },
+            age: { name: 'age', type: 'integer', notNull: false },
+          },
+        },
+      },
+    };
+
+    const current: MigrationSnapshot = {
+      version: '5',
+      dialect: 'sqlite',
+      tables: {
+        users: {
+          name: 'users',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true, primaryKey: true },
+            age: { name: 'age', type: 'text', notNull: true }, // Changed type
+          },
+        },
+      },
+    };
+
+    // Note: generateDownMigration only handles column additions/removals,
+    // not type changes. This test documents expected behavior.
+    const downSql = generateDownMigration(current, previous);
+
+    // Since the column exists in both, no DROP/ADD is generated
+    expect(downSql.trim()).toBe('');
+  });
+
+  it('should generate correct down migration for multiple table additions', () => {
+    const previous: MigrationSnapshot = {
+      version: '5',
+      dialect: 'sqlite',
+      tables: {
+        users: {
+          name: 'users',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true, primaryKey: true },
+          },
+        },
+      },
+    };
+
+    const current: MigrationSnapshot = {
+      version: '5',
+      dialect: 'sqlite',
+      tables: {
+        users: {
+          name: 'users',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true, primaryKey: true },
+          },
+        },
+        posts: {
+          name: 'posts',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true, primaryKey: true },
+            title: { name: 'title', type: 'text', notNull: true },
+          },
+        },
+        comments: {
+          name: 'comments',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true, primaryKey: true },
+            body: { name: 'body', type: 'text', notNull: false },
+          },
+        },
+      },
+    };
+
+    const downSql = generateDownMigration(current, previous);
+
+    expect(downSql).toContain('DROP TABLE IF EXISTS "posts"');
+    expect(downSql).toContain('DROP TABLE IF EXISTS "comments"');
+    // Original table should not be dropped
+    expect(downSql).not.toContain('DROP TABLE IF EXISTS "users"');
+  });
+
+  it('should generate CREATE TABLE with all column attributes', () => {
+    const previous: MigrationSnapshot = {
+      version: '5',
+      dialect: 'sqlite',
+      tables: {
+        settings: {
+          name: 'settings',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true, primaryKey: true, autoincrement: true },
+            key: { name: 'key', type: 'text', notNull: true },
+            value: { name: 'value', type: 'text', notNull: false, default: "'default'" },
+            created_at: { name: 'created_at', type: 'text', notNull: true, default: "CURRENT_TIMESTAMP" },
+          },
+        },
+      },
+    };
+
+    const current: MigrationSnapshot = {
+      version: '5',
+      dialect: 'sqlite',
+      tables: {},
+    };
+
+    const downSql = generateDownMigration(current, previous);
+
+    expect(downSql).toContain('CREATE TABLE "settings"');
+    expect(downSql).toContain('"id" integer PRIMARY KEY AUTOINCREMENT NOT NULL');
+    expect(downSql).toContain('"key" text NOT NULL');
+    expect(downSql).toContain('"value" text DEFAULT \'default\'');
+    expect(downSql).toContain('"created_at" text NOT NULL DEFAULT CURRENT_TIMESTAMP');
+  });
+
+  it('should handle mixed table and column changes', () => {
+    const previous: MigrationSnapshot = {
+      version: '5',
+      dialect: 'sqlite',
+      tables: {
+        users: {
+          name: 'users',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true, primaryKey: true },
+            email: { name: 'email', type: 'text', notNull: true },
+          },
+        },
+        old_table: {
+          name: 'old_table',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true },
+          },
+        },
+      },
+    };
+
+    const current: MigrationSnapshot = {
+      version: '5',
+      dialect: 'sqlite',
+      tables: {
+        users: {
+          name: 'users',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true, primaryKey: true },
+            email: { name: 'email', type: 'text', notNull: true },
+            name: { name: 'name', type: 'text', notNull: false }, // Added
+          },
+        },
+        new_table: {
+          name: 'new_table',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true },
+          },
+        },
+      },
+    };
+
+    const downSql = generateDownMigration(current, previous);
+
+    // Should drop the new table
+    expect(downSql).toContain('DROP TABLE IF EXISTS "new_table"');
+    // Should recreate the old table
+    expect(downSql).toContain('CREATE TABLE "old_table"');
+    // Should drop the new column
+    expect(downSql).toContain('ALTER TABLE "users" DROP COLUMN "name"');
+  });
+});
+
+// =============================================================================
+// ADVANCED V3 FORMAT TESTS
+// =============================================================================
+
+describe('Drizzle Compatibility - Advanced V3 Format', () => {
+  it('should handle v3 migrations with special characters in names', async () => {
+    const fs = createInMemoryFs({
+      '/drizzle/20240101000000_add_user_v2_api/migration.sql': 'CREATE TABLE user_v2 (id INT);',
+      '/drizzle/20240101000001_fix_2fa_bug/migration.sql': 'CREATE TABLE fix_2fa (id INT);',
+    });
+
+    const migrations = await loadDrizzleMigrations({
+      basePath: '/drizzle',
+      fs,
+    });
+
+    expect(migrations).toHaveLength(2);
+    expect(migrations[0].name).toBe('add_user_v2_api');
+    expect(migrations[1].name).toBe('fix_2fa_bug');
+  });
+
+  it('should skip invalid folder names in v3 format', async () => {
+    // No journal file means v3 format is used
+    const fs = createInMemoryFs({
+      '/drizzle/20240101000000_valid/migration.sql': 'SELECT 1;',
+      '/drizzle/invalid_no_timestamp/migration.sql': 'SELECT 2;',
+      '/drizzle/.hidden_folder/migration.sql': 'SELECT 3;',
+    });
+
+    const migrations = await loadDrizzleMigrations({
+      basePath: '/drizzle',
+      fs,
+    });
+
+    // Only valid v3 format should be loaded
+    expect(migrations).toHaveLength(1);
+    expect(migrations[0].name).toBe('valid');
+  });
+
+  it('should handle migration files with complex SQL', async () => {
+    const complexSql = `
+      -- Create users table
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Create index
+      CREATE INDEX idx_users_email ON users(email);
+
+      -- Insert default admin
+      INSERT INTO users (id, email, password_hash) VALUES (1, 'admin@example.com', 'hash');
+    `;
+
+    const fs = createInMemoryFs({
+      '/drizzle/20240101000000_init/migration.sql': complexSql,
+    });
+
+    const migrations = await loadDrizzleMigrations({
+      basePath: '/drizzle',
+      fs,
+    });
+
+    expect(migrations[0].sql).toContain('CREATE TABLE users');
+    expect(migrations[0].sql).toContain('CREATE INDEX');
+    expect(migrations[0].sql).toContain('INSERT INTO users');
+  });
+
+  it('should parse snapshot with composite primary keys', () => {
+    const content = JSON.stringify({
+      version: '5',
+      dialect: 'sqlite',
+      tables: {
+        order_items: {
+          name: 'order_items',
+          columns: {
+            order_id: { name: 'order_id', type: 'integer', notNull: true },
+            product_id: { name: 'product_id', type: 'integer', notNull: true },
+            quantity: { name: 'quantity', type: 'integer', notNull: true },
+          },
+        },
+      },
+      compositePrimaryKeys: {
+        pk_order_items: {
+          name: 'pk_order_items',
+          columns: ['order_id', 'product_id'],
+        },
+      },
+    });
+
+    const snapshot = parseSnapshotJson(content);
+
+    expect(snapshot?.compositePrimaryKeys?.pk_order_items).toBeDefined();
+    expect(snapshot?.compositePrimaryKeys?.pk_order_items.columns).toEqual(['order_id', 'product_id']);
+  });
+
+  it('should generate createdAt date correctly from timestamp', async () => {
+    const fs = createInMemoryFs({
+      '/drizzle/20240615143022_test/migration.sql': 'SELECT 1;',
+    });
+
+    const migrations = await loadDrizzleMigrations({
+      basePath: '/drizzle',
+      fs,
+    });
+
+    const createdAt = migrations[0].createdAt;
+    expect(createdAt.getFullYear()).toBe(2024);
+    expect(createdAt.getMonth()).toBe(5); // June (0-indexed)
+    expect(createdAt.getDate()).toBe(15);
+    expect(createdAt.getHours()).toBe(14);
+    expect(createdAt.getMinutes()).toBe(30);
+    expect(createdAt.getSeconds()).toBe(22);
+  });
+});
+
+// =============================================================================
+// ADVANCED V2 FORMAT TESTS
+// =============================================================================
+
+describe('Drizzle Compatibility - Advanced V2 Format', () => {
+  it('should handle v2 with high index numbers', async () => {
+    const fs = createInMemoryFs({
+      '/drizzle/meta/_journal.json': JSON.stringify({
+        version: '5',
+        dialect: 'sqlite',
+        entries: [
+          { idx: 100, version: '5', when: 1704067200000, tag: 'hundred', breakpoints: true },
+          { idx: 999, version: '5', when: 1704067200001, tag: 'nine_nine_nine', breakpoints: true },
+        ],
+      }),
+      '/drizzle/0100_hundred/migration.sql': 'SELECT 100;',
+      '/drizzle/0999_nine_nine_nine/migration.sql': 'SELECT 999;',
+    });
+
+    const migrations = await loadDrizzleMigrations({
+      basePath: '/drizzle',
+      fs,
+    });
+
+    expect(migrations).toHaveLength(2);
+    expect(migrations[0].name).toBe('hundred');
+    expect(migrations[1].name).toBe('nine_nine_nine');
+  });
+
+  it('should preserve journal order even if file timestamps differ', async () => {
+    const fs = createInMemoryFs({
+      '/drizzle/meta/_journal.json': JSON.stringify({
+        version: '5',
+        dialect: 'sqlite',
+        entries: [
+          { idx: 0, version: '5', when: 1704067200000, tag: 'first', breakpoints: true },
+          { idx: 1, version: '5', when: 1704067200001, tag: 'second', breakpoints: true },
+        ],
+      }),
+      '/drizzle/0000_first/migration.sql': 'SELECT 1;',
+      '/drizzle/0001_second/migration.sql': 'SELECT 2;',
+    });
+
+    const migrations = await loadDrizzleMigrations({
+      basePath: '/drizzle',
+      fs,
+    });
+
+    // Should be sorted by ID which includes timestamp from journal
+    expect(migrations[0].name).toBe('first');
+    expect(migrations[1].name).toBe('second');
+  });
+
+  it('should handle mixed v2 folder naming conventions', async () => {
+    const fs = createInMemoryFs({
+      '/drizzle/meta/_journal.json': JSON.stringify({
+        version: '5',
+        dialect: 'sqlite',
+        entries: [
+          { idx: 0, version: '5', when: 1704067200000, tag: 'init', breakpoints: true },
+        ],
+      }),
+      // Standard naming
+      '/drizzle/0000_init/migration.sql': 'SELECT 1;',
+    });
+
+    const migrations = await loadDrizzleMigrations({
+      basePath: '/drizzle',
+      fs,
+    });
+
+    expect(migrations).toHaveLength(1);
+  });
+});
+
+// =============================================================================
+// CONFIG PARSING EDGE CASES TESTS
+// =============================================================================
+
+describe('Drizzle Compatibility - Config Parsing Edge Cases', () => {
+  it('should parse config with single quotes', () => {
+    const content = `
+      export default defineConfig({
+        dialect: 'sqlite',
+        schema: './schema.ts',
+        out: './drizzle',
+      });
+    `;
+
+    const config = parseDrizzleConfig(content);
+
+    expect(config.dialect).toBe('sqlite');
+    expect(config.schema).toBe('./schema.ts');
+    expect(config.out).toBe('./drizzle');
+  });
+
+  it('should parse config with double quotes', () => {
+    const content = `
+      export default defineConfig({
+        dialect: "postgresql",
+        schema: "./schema.ts",
+        out: "./drizzle",
+      });
+    `;
+
+    const config = parseDrizzleConfig(content);
+
+    expect(config.dialect).toBe('postgresql');
+  });
+
+  it('should parse config with nested migrations object', () => {
+    const content = `
+      export default defineConfig({
+        dialect: "sqlite",
+        out: "./drizzle",
+        migrations: {
+          table: "__custom_migrations",
+          schema: "custom_schema",
+        },
+      });
+    `;
+
+    const config = parseDrizzleConfig(content);
+
+    expect(config.migrations?.table).toBe('__custom_migrations');
+  });
+
+  it('should handle config with comments', () => {
+    const content = `
+      // Drizzle config
+      export default defineConfig({
+        dialect: "sqlite", // SQLite dialect
+        out: "./drizzle", /* output folder */
+      });
+    `;
+
+    const config = parseDrizzleConfig(content);
+
+    expect(config.dialect).toBe('sqlite');
+    expect(config.out).toBe('./drizzle');
+  });
+
+  it('should handle config with template literals (not supported, returns undefined)', () => {
+    const content = `
+      const dir = './drizzle';
+      export default defineConfig({
+        dialect: "sqlite",
+        out: \`\${dir}/migrations\`,
+      });
+    `;
+
+    const config = parseDrizzleConfig(content);
+
+    expect(config.dialect).toBe('sqlite');
+    // Template literal not supported by regex parser
+    expect(config.out).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// IN-MEMORY FS EDGE CASES TESTS
+// =============================================================================
+
+describe('Drizzle Compatibility - In-Memory FS Edge Cases', () => {
+  it('should handle deeply nested paths', async () => {
+    const fs = createInMemoryFs({
+      '/a/b/c/d/e/file.txt': 'content',
+    });
+
+    expect(await fs.exists('/a')).toBe(true);
+    expect(await fs.exists('/a/b')).toBe(true);
+    expect(await fs.exists('/a/b/c')).toBe(true);
+    expect(await fs.exists('/a/b/c/d')).toBe(true);
+    expect(await fs.exists('/a/b/c/d/e')).toBe(true);
+    expect(await fs.exists('/a/b/c/d/e/file.txt')).toBe(true);
+  });
+
+  it('should correctly list siblings at each level', async () => {
+    const fs = createInMemoryFs({
+      '/root/a/file1.txt': 'content1',
+      '/root/b/file2.txt': 'content2',
+      '/root/c/file3.txt': 'content3',
+      '/root/standalone.txt': 'content4',
+    });
+
+    const entries = await fs.readdir('/root');
+
+    expect(entries).toContain('a');
+    expect(entries).toContain('b');
+    expect(entries).toContain('c');
+    expect(entries).toContain('standalone.txt');
+    expect(entries).toHaveLength(4);
+  });
+
+  it('should handle path with trailing slash', async () => {
+    const fs = createInMemoryFs({
+      '/dir/file.txt': 'content',
+    });
+
+    expect(await fs.exists('/dir/')).toBe(true);
+    expect(await fs.isDirectory('/dir/')).toBe(true);
+  });
+
+  it('should handle empty directories correctly', async () => {
+    const fs = createInMemoryFs({
+      '/root/file.txt': 'content',
+    });
+
+    // Parent of file should be a directory
+    expect(await fs.isDirectory('/root')).toBe(true);
+
+    // Non-existent path should not be a directory
+    expect(await fs.isDirectory('/nonexistent')).toBe(false);
+  });
+
+  it('should handle file paths that look like directories', async () => {
+    const fs = createInMemoryFs({
+      '/path/to/file': 'content without extension',
+    });
+
+    expect(await fs.exists('/path/to/file')).toBe(true);
+    expect(await fs.isDirectory('/path/to/file')).toBe(false);
+    expect(await fs.isDirectory('/path/to')).toBe(true);
+  });
+});
+
+// =============================================================================
+// ERROR HANDLING TESTS
+// =============================================================================
+
+describe('Drizzle Compatibility - Error Handling', () => {
+  it('should throw meaningful error for invalid journal JSON', async () => {
+    const fs = createInMemoryFs({
+      '/drizzle/meta/_journal.json': '{ invalid json }',
+    });
+
+    await expect(
+      loadDrizzleMigrations({ basePath: '/drizzle', fs })
+    ).rejects.toThrow(/journal/i);
+  });
+
+  it('should throw error for journal with empty entries', async () => {
+    const fs = createInMemoryFs({
+      '/drizzle/meta/_journal.json': JSON.stringify({
+        version: '5',
+        dialect: 'sqlite',
+        // Missing entries array
+      }),
+    });
+
+    await expect(
+      loadDrizzleMigrations({ basePath: '/drizzle', fs })
+    ).rejects.toThrow(/journal/i);
+  });
+
+  it('should gracefully handle missing migration file in v2', async () => {
+    const fs = createInMemoryFs({
+      '/drizzle/meta/_journal.json': JSON.stringify({
+        version: '5',
+        dialect: 'sqlite',
+        entries: [
+          { idx: 0, version: '5', when: 1704067200000, tag: 'missing', breakpoints: true },
+        ],
+      }),
+      // Missing: '/drizzle/0000_missing/migration.sql'
+    });
+
+    const migrations = await loadDrizzleMigrations({
+      basePath: '/drizzle',
+      fs,
+    });
+
+    // Should return empty array when migration file is missing
+    expect(migrations).toHaveLength(0);
+  });
+
+  it('should handle snapshot with invalid JSON gracefully', async () => {
+    const fs = createInMemoryFs({
+      '/drizzle/20240101000000_test/migration.sql': 'SELECT 1;',
+      '/drizzle/20240101000000_test/snapshot.json': 'not valid json',
+    });
+
+    const migrations = await loadDrizzleMigrations({
+      basePath: '/drizzle',
+      fs,
+      includeSnapshots: true,
+    });
+
+    expect(migrations).toHaveLength(1);
+    expect(migrations[0].snapshot).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// CHECKSUM AND ID CONVERSION TESTS
+// =============================================================================
+
+describe('Drizzle Compatibility - Checksum and ID Handling', () => {
+  it('should generate consistent checksums for identical SQL', async () => {
+    const sql = 'CREATE TABLE users (id INTEGER PRIMARY KEY);';
+    const fs1 = createInMemoryFs({
+      '/drizzle/20240101000000_test/migration.sql': sql,
+    });
+    const fs2 = createInMemoryFs({
+      '/drizzle/20240102000000_test/migration.sql': sql,
+    });
+
+    const migrations1 = await loadDrizzleMigrations({ basePath: '/drizzle', fs: fs1 });
+    const migrations2 = await loadDrizzleMigrations({ basePath: '/drizzle', fs: fs2 });
+
+    expect(migrations1[0].checksum).toBe(migrations2[0].checksum);
+  });
+
+  it('should generate different checksums for different SQL', async () => {
+    const fs = createInMemoryFs({
+      '/drizzle/20240101000000_a/migration.sql': 'CREATE TABLE a (id INT);',
+      '/drizzle/20240101000001_b/migration.sql': 'CREATE TABLE b (id INT);',
+    });
+
+    const migrations = await loadDrizzleMigrations({
+      basePath: '/drizzle',
+      fs,
+    });
+
+    expect(migrations[0].checksum).not.toBe(migrations[1].checksum);
+  });
+
+  it('should handle edge cases in ID conversion', () => {
+    // Various edge cases
+    expect(drizzleIdToDoSqlId('')).toBe('');
+    expect(drizzleIdToDoSqlId('0000_test')).toBe('00000000000000_test');
+    expect(drizzleIdToDoSqlId('9999_test')).toBe('00000000009999_test');
+    expect(drizzleIdToDoSqlId('20241231235959_test')).toBe('20241231235959_test');
+  });
+
+  it('should convert Drizzle migration with all fields', () => {
+    const snapshot: MigrationSnapshot = {
+      version: '5',
+      dialect: 'sqlite',
+      tables: {
+        users: {
+          name: 'users',
+          columns: {
+            id: { name: 'id', type: 'integer', notNull: true },
+          },
+        },
+      },
+    };
+
+    const drizzleMigration = {
+      tag: 'create_users',
+      when: 1704067200000,
+      sql: 'CREATE TABLE users (id INTEGER PRIMARY KEY);',
+      snapshot,
+    };
+
+    const migration = toDoSqlMigration(drizzleMigration);
+
+    expect(migration.id).toContain('create_users');
+    expect(migration.sql).toBe('CREATE TABLE users (id INTEGER PRIMARY KEY);');
+    expect(migration.name).toBe('create_users');
+    expect(migration.snapshot).toBeDefined();
+    expect(migration.snapshot?.tables.users).toBeDefined();
+    expect(migration.checksum).toBeTruthy();
+    expect(migration.createdAt.getTime()).toBe(1704067200000);
+  });
+});

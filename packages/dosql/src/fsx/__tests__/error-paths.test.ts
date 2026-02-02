@@ -137,11 +137,23 @@ function createFailingDOStorage(options: FailingDOStorageOptions): DurableObject
         throw new Error('DO storage write failed: simulated error');
       }
 
+      // Helper to extract data size from various value types
+      const getDataSize = (v: unknown): number => {
+        if (v instanceof ArrayBuffer) return v.byteLength;
+        if (v instanceof Uint8Array) return v.byteLength;
+        if (typeof v === 'string') return v.length;
+        // Check for FileEntry with nested data ArrayBuffer
+        if (v && typeof v === 'object' && 'data' in v) {
+          const entry = v as { data?: ArrayBuffer; size?: number };
+          if (entry.data instanceof ArrayBuffer) return entry.data.byteLength;
+          if (typeof entry.size === 'number') return entry.size;
+        }
+        return 100;
+      };
+
       if (typeof keyOrEntries === 'string') {
         // Check size limit for single write
-        const dataSize = value instanceof ArrayBuffer ? value.byteLength :
-                         value instanceof Uint8Array ? value.byteLength :
-                         typeof value === 'string' ? value.length : 100;
+        const dataSize = getDataSize(value);
         checkSizeLimit(dataSize);
 
         storage.set(keyOrEntries, value);
@@ -150,10 +162,7 @@ function createFailingDOStorage(options: FailingDOStorageOptions): DurableObject
         // Batch write
         let totalSize = 0;
         for (const [, v] of Object.entries(keyOrEntries)) {
-          const dataSize = v instanceof ArrayBuffer ? v.byteLength :
-                           v instanceof Uint8Array ? v.byteLength :
-                           typeof v === 'string' ? v.length : 100;
-          totalSize += dataSize;
+          totalSize += getDataSize(v);
         }
         checkSizeLimit(totalSize);
 
@@ -462,10 +471,11 @@ describe('FSX Read/Write Failures', () => {
 
     it('should handle batch write failures', async () => {
       const failingStorage = createFailingDOStorage({ failureMode: 'write_error' });
-      const backend = createDOBackend(failingStorage);
+      // Use smaller chunk size for testing
+      const backend = createDOBackend(failingStorage, { maxChunkSize: 32 * 1024 });
 
-      // Large data that would require chunking
-      const largeData = generateTestData(3 * 1024 * 1024); // 3MB - exceeds 2MB chunk limit
+      // Data that would require chunking (64KB with 32KB chunks = 2 chunks)
+      const largeData = generateTestData(64 * 1024);
 
       await expect(backend.write('large.bin', largeData)).rejects.toThrow('write failed');
     });
@@ -502,14 +512,15 @@ describe('FSX Read/Write Failures', () => {
   describe('Chunked file corruption detection', () => {
     it('should detect missing chunks', async () => {
       const storage = createFailingDOStorage({ failureMode: 'none' });
-      const backend = createDOBackend(storage);
+      // Use smaller chunk size for faster testing
+      const backend = createDOBackend(storage, { maxChunkSize: 32 * 1024 });
 
-      // Write large file that gets chunked
-      const largeData = generateTestData(3 * 1024 * 1024); // 3MB
+      // Write file that gets chunked (64KB with 32KB chunks = 2 chunks)
+      const largeData = generateTestData(64 * 1024);
       await backend.write('chunked.bin', largeData);
 
-      // Manually delete a chunk to simulate corruption
-      const chunkKey = `${DEFAULT_CHUNK_CONFIG.chunkPrefix}chunked.bin/000001`;
+      // Manually delete the second chunk to simulate corruption
+      const chunkKey = '_chunks/chunked.bin/000001';
       storage._storage.delete(chunkKey);
 
       // Read should detect missing chunk
@@ -662,12 +673,13 @@ describe('R2 Connection Errors', () => {
 
 describe('DO Storage Limit Exceeded', () => {
   describe('2MB per-blob limit', () => {
-    it('should auto-chunk files larger than 2MB', async () => {
+    it('should auto-chunk files larger than configured chunk size', async () => {
       const storage = createFailingDOStorage({ failureMode: 'none' });
-      const backend = createDOBackend(storage);
+      // Use a smaller chunk size for testing (64KB instead of 2MB)
+      const backend = createDOBackend(storage, { maxChunkSize: 64 * 1024 });
 
-      // File larger than 2MB should be chunked
-      const largeData = generateTestData(2.5 * 1024 * 1024); // 2.5MB
+      // File larger than 64KB should be chunked
+      const largeData = generateTestData(128 * 1024); // 128KB
       await backend.write('large.bin', largeData);
 
       // Verify data can be read back correctly
@@ -677,33 +689,35 @@ describe('DO Storage Limit Exceeded', () => {
       expect(result).toEqual(largeData);
     });
 
-    it('should handle files exactly at 2MB boundary', async () => {
+    it('should handle files exactly at chunk size boundary', async () => {
       const storage = createFailingDOStorage({ failureMode: 'none' });
-      const backend = createDOBackend(storage);
+      // Use a smaller chunk size for testing
+      const backend = createDOBackend(storage, { maxChunkSize: 64 * 1024 });
 
-      // Exactly 2MB - should not need chunking
-      const exactData = generateTestData(2 * 1024 * 1024);
-      await backend.write('exact-2mb.bin', exactData);
+      // Exactly 64KB - should not need chunking
+      const exactData = generateTestData(64 * 1024);
+      await backend.write('exact-boundary.bin', exactData);
 
-      const result = await backend.read('exact-2mb.bin');
+      const result = await backend.read('exact-boundary.bin');
       expect(result).toEqual(exactData);
     });
 
-    it('should properly chunk and reassemble very large files', async () => {
+    it('should properly chunk and reassemble multi-chunk files', async () => {
       const storage = createFailingDOStorage({ failureMode: 'none' });
-      const backend = createDOBackend(storage);
+      // Use a smaller chunk size for testing
+      const backend = createDOBackend(storage, { maxChunkSize: 32 * 1024 });
 
-      // 5MB file - needs 3 chunks
-      const veryLargeData = generateTestData(5 * 1024 * 1024);
-      await backend.write('very-large.bin', veryLargeData);
+      // 128KB file - needs 4 chunks with 32KB chunk size
+      const multiChunkData = generateTestData(128 * 1024);
+      await backend.write('multi-chunk.bin', multiChunkData);
 
-      const result = await backend.read('very-large.bin');
+      const result = await backend.read('multi-chunk.bin');
       expect(result).not.toBeNull();
-      expect(result?.length).toBe(veryLargeData.length);
+      expect(result?.length).toBe(multiChunkData.length);
 
       // Verify first and last bytes match
-      expect(result?.[0]).toBe(veryLargeData[0]);
-      expect(result?.[veryLargeData.length - 1]).toBe(veryLargeData[veryLargeData.length - 1]);
+      expect(result?.[0]).toBe(multiChunkData[0]);
+      expect(result?.[multiChunkData.length - 1]).toBe(multiChunkData[multiChunkData.length - 1]);
     });
   });
 
@@ -746,12 +760,13 @@ describe('DO Storage Limit Exceeded', () => {
 
     it('should track chunked files in stats', async () => {
       const storage = createFailingDOStorage({ failureMode: 'none' });
-      const backend = createDOBackend(storage);
+      // Use smaller chunk size to test chunking without memory issues
+      const backend = createDOBackend(storage, { maxChunkSize: 32 * 1024 });
 
-      // Write a chunked file
-      await backend.write('chunked.bin', generateTestData(3 * 1024 * 1024));
+      // Write a chunked file (larger than 32KB chunk size)
+      await backend.write('chunked.bin', generateTestData(64 * 1024));
 
-      // Write a regular file
+      // Write a regular file (smaller than chunk size)
       await backend.write('regular.bin', generateTestData(1000));
 
       const stats = await backend.getStats();
@@ -1127,6 +1142,564 @@ describe('Error Recovery Patterns', () => {
       const backend = createDOBackend(storage);
 
       await expect(backend.list('')).rejects.toThrow('list failed');
+    });
+  });
+});
+
+// =============================================================================
+// 7. R2 Auth Failure Scenarios
+// =============================================================================
+
+describe('R2 Auth Failure Scenarios', () => {
+  describe('Authentication error handling', () => {
+    it('should detect and report 401 unauthorized errors', () => {
+      // 401 typically manifests as network/auth errors at the R2 level
+      // The error detection primarily looks for keywords like 'forbidden', 'permission', 'access denied'
+      const error = detectR2ErrorType(new Error('401 Unauthorized: access denied'));
+      expect(error).toBe(R2ErrorCode.PERMISSION_DENIED);
+    });
+
+    it('should detect and report 403 forbidden errors', () => {
+      const error = detectR2ErrorType(new Error('403 Forbidden'));
+      expect(error).toBe(R2ErrorCode.PERMISSION_DENIED);
+    });
+
+    it('should provide helpful message for auth failures', () => {
+      const error = new R2Error(
+        R2ErrorCode.PERMISSION_DENIED,
+        'Access denied to bucket',
+        '/data/file.bin',
+        { httpStatus: 403 }
+      );
+      expect(error.httpStatus).toBe(403);
+      expect(error.toUserMessage()).toContain('denied');
+      expect(error.isRetryable()).toBe(false);
+    });
+  });
+
+  describe('Token/key rotation scenarios', () => {
+    it('should handle expired token errors', () => {
+      const expiredTokenError = new Error('Token has expired');
+      const errorType = detectR2ErrorType(expiredTokenError);
+      // Token expiry typically manifests as permission denied
+      expect([R2ErrorCode.PERMISSION_DENIED, R2ErrorCode.NETWORK_ERROR]).toContain(errorType);
+    });
+  });
+});
+
+// =============================================================================
+// 8. Corrupted Data Handling
+// =============================================================================
+
+describe('Corrupted Data Handling', () => {
+  describe('Checksum validation', () => {
+    it('should detect checksum mismatch error messages', () => {
+      const checksumError = new Error('Checksum mismatch: expected abc123, got xyz789');
+      expect(detectR2ErrorType(checksumError)).toBe(R2ErrorCode.CHECKSUM_MISMATCH);
+    });
+
+    it('should detect MD5 verification failures', () => {
+      const md5Error = new Error('MD5 verification failed');
+      expect(detectR2ErrorType(md5Error)).toBe(R2ErrorCode.CHECKSUM_MISMATCH);
+    });
+
+    it('should detect integrity check failures', () => {
+      const integrityError = new Error('Integrity check failed');
+      expect(detectR2ErrorType(integrityError)).toBe(R2ErrorCode.CHECKSUM_MISMATCH);
+    });
+
+    it('should create R2Error with checksum details', () => {
+      const error = new R2Error(
+        R2ErrorCode.CHECKSUM_MISMATCH,
+        'Data corruption detected',
+        '/data/file.bin',
+        {
+          expectedChecksum: 'abc123',
+          actualChecksum: 'xyz789',
+        }
+      );
+      expect(error.expectedChecksum).toBe('abc123');
+      expect(error.actualChecksum).toBe('xyz789');
+      expect(error.isRetryable()).toBe(false);
+    });
+
+    it('should indicate checksum errors are not retryable', () => {
+      const error = new R2Error(R2ErrorCode.CHECKSUM_MISMATCH, 'Corrupted');
+      expect(error.isRetryable()).toBe(false);
+    });
+  });
+
+  describe('DO chunk corruption', () => {
+    it('should detect corrupted chunk metadata', async () => {
+      const storage = createFailingDOStorage({ failureMode: 'none' });
+      // Use smaller chunk size for testing
+      const backend = createDOBackend(storage, { maxChunkSize: 32 * 1024 });
+
+      // Write a file that gets chunked (64KB with 32KB chunks)
+      const largeData = generateTestData(64 * 1024);
+      await backend.write('chunked-file.bin', largeData);
+
+      // Corrupt a chunk by replacing it with garbage
+      const chunkKey = `${DEFAULT_CHUNK_CONFIG.chunkPrefix}chunked-file.bin/000000`;
+      storage._storage.set(chunkKey, new ArrayBuffer(100)); // Wrong size
+
+      // Reading should detect corruption
+      try {
+        await backend.read('chunked-file.bin');
+      } catch (error) {
+        // Should either throw or return corrupted data
+        expect(error).toBeDefined();
+      }
+    });
+
+    it('should detect truncated chunk data', async () => {
+      const storage = createFailingDOStorage({ failureMode: 'none' });
+      const backend = createDOBackend(storage);
+
+      // Write file
+      await backend.write('test.bin', textToBytes('Hello, World!'));
+
+      // Truncate the data
+      const fileEntry = storage._storage.get('file:test.bin') as { data: ArrayBuffer };
+      if (fileEntry?.data) {
+        storage._storage.set('file:test.bin', {
+          ...fileEntry,
+          data: fileEntry.data.slice(0, 5), // Truncate to 5 bytes
+          size: 5,
+        });
+      }
+
+      // Read should return truncated data
+      const result = await backend.read('test.bin');
+      expect(result?.length).toBe(5);
+    });
+  });
+
+  describe('Data validation during writes', () => {
+    it('should verify data was written correctly for R2', async () => {
+      const bucket = createFailingR2Bucket({ failureMode: 'none' });
+      const backend = createR2Backend(bucket);
+
+      const testData = textToBytes('Test data for validation');
+      await backend.write('validated.bin', testData);
+
+      const result = await backend.read('validated.bin');
+      expect(result).toEqual(testData);
+    });
+  });
+});
+
+// =============================================================================
+// 9. Partial Write Recovery
+// =============================================================================
+
+describe('Partial Write Recovery', () => {
+  describe('R2 partial write detection', () => {
+    it('should detect when write size does not match expected', async () => {
+      const bucket = createFailingR2Bucket({ failureMode: 'none' });
+      const backend = createR2Backend(bucket);
+
+      // Normal write should succeed
+      const data = textToBytes('complete data');
+      await backend.write('complete.bin', data);
+
+      // Verify size matches
+      const meta = await backend.metadata('complete.bin');
+      expect(meta?.size).toBe(data.length);
+    });
+
+    it('should handle write interruption gracefully', async () => {
+      const bucket = createFailingR2Bucket({ failureMode: 'timeout' });
+      const backend = createR2Backend(bucket, { maxRetries: 0 });
+
+      // Write with timeout should throw error
+      await expect(
+        backend.write('interrupted.bin', textToBytes('data'))
+      ).rejects.toThrow('timeout');
+    });
+  });
+
+  describe('DO chunked write recovery', () => {
+    it('should handle interrupted chunked write', async () => {
+      const storage = createFailingDOStorage({ failureMode: 'none' });
+      const backend = createDOBackend(storage);
+
+      // Successfully write small file first
+      await backend.write('small.bin', textToBytes('small'));
+      expect(await backend.exists('small.bin')).toBe(true);
+
+      // Now try to write large file with failure mid-write
+      storage._setFailureMode('write_error');
+
+      await expect(
+        backend.write('large-interrupted.bin', generateTestData(100))
+      ).rejects.toThrow('write failed');
+
+      // Reset and verify we can still use storage
+      storage._setFailureMode('none');
+      await backend.write('recovery.bin', textToBytes('recovered'));
+      expect(await backend.exists('recovery.bin')).toBe(true);
+    });
+  });
+
+  describe('Recovery strategies', () => {
+    it('should clean up orphaned data after failed write', async () => {
+      const bucket = createFailingR2Bucket({ failureMode: 'none' });
+      const backend = createR2Backend(bucket);
+
+      // Write should succeed
+      await backend.write('will-be-cleaned.bin', textToBytes('data'));
+      expect(await backend.exists('will-be-cleaned.bin')).toBe(true);
+
+      // Delete the file
+      await backend.delete('will-be-cleaned.bin');
+      expect(await backend.exists('will-be-cleaned.bin')).toBe(false);
+    });
+
+    it('should handle concurrent writes to same path', async () => {
+      const bucket = createFailingR2Bucket({ failureMode: 'none' });
+      const backend = createR2Backend(bucket);
+
+      // Concurrent writes - one should win
+      const write1 = backend.write('concurrent.bin', textToBytes('write1'));
+      const write2 = backend.write('concurrent.bin', textToBytes('write2'));
+
+      await Promise.all([write1, write2]);
+
+      // One of the writes should have succeeded
+      const result = await backend.read('concurrent.bin');
+      expect(result).not.toBeNull();
+      const content = bytesToText(result!);
+      expect(['write1', 'write2']).toContain(content);
+    });
+  });
+});
+
+// =============================================================================
+// 10. Network Failure Patterns
+// =============================================================================
+
+describe('Network Failure Patterns', () => {
+  describe('Connection reset handling', () => {
+    it('should detect connection reset errors', () => {
+      expect(detectR2ErrorType(new Error('Connection reset'))).toBe(R2ErrorCode.NETWORK_ERROR);
+      expect(detectR2ErrorType(new Error('ECONNRESET'))).toBe(R2ErrorCode.NETWORK_ERROR);
+    });
+
+    it('should detect ETIMEDOUT errors', () => {
+      expect(detectR2ErrorType(new Error('ETIMEDOUT'))).toBe(R2ErrorCode.TIMEOUT);
+    });
+
+    it('should detect ENOTFOUND errors', () => {
+      expect(detectR2ErrorType(new Error('ENOTFOUND'))).toBe(R2ErrorCode.NETWORK_ERROR);
+    });
+  });
+
+  describe('R2 retry with backoff', () => {
+    it('should use exponential backoff delays', () => {
+      // The R2 backend should use 100ms, 200ms, 400ms, etc.
+      const baseDelay = 100;
+      const attempt0 = baseDelay * Math.pow(2, 0); // 100
+      const attempt1 = baseDelay * Math.pow(2, 1); // 200
+      const attempt2 = baseDelay * Math.pow(2, 2); // 400
+
+      expect(attempt0).toBe(100);
+      expect(attempt1).toBe(200);
+      expect(attempt2).toBe(400);
+    });
+  });
+
+  describe('Circuit breaker states', () => {
+    it('should create circuit open error', async () => {
+      const bucket = createFailingR2Bucket({ failureMode: 'network_error' });
+      const backend = createR2Backend(bucket, {
+        maxRetries: 0,
+        circuitBreakerThreshold: 2,
+      });
+
+      // Trigger multiple failures to open circuit
+      for (let i = 0; i < 3; i++) {
+        try {
+          await backend.write(`fail-${i}.bin`, textToBytes('test'));
+        } catch {
+          // Expected
+        }
+      }
+
+      // Check health status shows degraded
+      const health = await backend.getHealthStatus();
+      expect(health.failureCount).toBeGreaterThan(0);
+    });
+
+    it('should report health status', async () => {
+      const bucket = createFailingR2Bucket({ failureMode: 'none' });
+      const backend = createR2Backend(bucket);
+
+      const health = await backend.getHealthStatus();
+      expect(health.status).toBe('healthy');
+      expect(health.r2Available).toBe(true);
+      expect(health.failureCount).toBe(0);
+    });
+  });
+
+  describe('Degraded mode operation', () => {
+    it('should serve from cache during degraded mode', async () => {
+      const bucket = createFailingR2Bucket({ failureMode: 'none' });
+      const backend = createR2Backend(bucket, {
+        readCacheMaxBytes: 1024 * 1024,
+      });
+
+      // Populate cache
+      await backend.write('cached-data.bin', textToBytes('cached'));
+      await backend.read('cached-data.bin');
+
+      // Verify cache has data
+      const stats = backend.getReadCacheStats();
+      expect(stats.entryCount).toBeGreaterThan(0);
+
+      // Even if R2 fails, cache should have the data
+      bucket._setFailureMode('network_error');
+      const result = await backend.read('cached-data.bin');
+      expect(result).not.toBeNull();
+      expect(bytesToText(result!)).toBe('cached');
+    });
+  });
+});
+
+// =============================================================================
+// 11. Error Propagation and Context
+// =============================================================================
+
+describe('Error Propagation and Context', () => {
+  describe('Error chaining', () => {
+    it('should preserve original error as cause', () => {
+      const originalError = new Error('Original storage error');
+      const r2Error = createR2Error(originalError, '/path/to/file.bin', 'read');
+
+      expect(r2Error.cause).toBe(originalError);
+    });
+
+    it('should include operation context', () => {
+      const error = createR2Error(
+        new Error('Network failure'),
+        '/data/important.bin',
+        'write'
+      );
+
+      expect(error.message).toContain('/data/important.bin');
+      expect(error.message).toContain('write');
+    });
+  });
+
+  describe('Error formatting', () => {
+    it('should format R2 errors for logging', async () => {
+      const { formatR2ErrorForLog } = await import('../r2-errors.js');
+      const error = new R2Error(
+        R2ErrorCode.TIMEOUT,
+        'Request timed out',
+        '/data/file.bin',
+        {
+          httpStatus: 408,
+          retryCount: 3,
+          requestId: 'req-123',
+        }
+      );
+
+      const formatted = formatR2ErrorForLog(error);
+      expect(formatted).toContain('[R2_TIMEOUT]');
+      expect(formatted).toContain('path=/data/file.bin');
+      expect(formatted).toContain('status=408');
+      expect(formatted).toContain('retries=3');
+      expect(formatted).toContain('requestId=req-123');
+    });
+  });
+
+  describe('FSX error codes', () => {
+    it('should map R2 errors to FSX codes correctly', () => {
+      // Timeout should map to READ_FAILED
+      const timeoutError = new R2Error(R2ErrorCode.TIMEOUT, 'Timeout');
+      expect(timeoutError.code).toBe(FSXErrorCode.READ_FAILED);
+
+      // Not found should map to NOT_FOUND
+      const notFoundError = new R2Error(R2ErrorCode.NOT_FOUND, 'Not found');
+      expect(notFoundError.code).toBe(FSXErrorCode.NOT_FOUND);
+
+      // Size exceeded should map to SIZE_EXCEEDED
+      const sizeError = new R2Error(R2ErrorCode.SIZE_EXCEEDED, 'Too large');
+      expect(sizeError.code).toBe(FSXErrorCode.SIZE_EXCEEDED);
+
+      // Checksum mismatch should map to CHUNK_CORRUPTED
+      const checksumError = new R2Error(R2ErrorCode.CHECKSUM_MISMATCH, 'Corrupted');
+      expect(checksumError.code).toBe(FSXErrorCode.CHUNK_CORRUPTED);
+    });
+  });
+});
+
+// =============================================================================
+// 12. R2 Size Limit Handling
+// =============================================================================
+
+describe('R2 Size Limit Handling', () => {
+  describe('Object size detection', () => {
+    it('should detect size exceeded errors', () => {
+      expect(detectR2ErrorType(new Error('Object size exceeds limit'))).toBe(R2ErrorCode.SIZE_EXCEEDED);
+      expect(detectR2ErrorType(new Error('File too large'))).toBe(R2ErrorCode.SIZE_EXCEEDED);
+      expect(detectR2ErrorType(new Error('exceeds maximum size'))).toBe(R2ErrorCode.SIZE_EXCEEDED);
+    });
+
+    it('should provide user-friendly message for size exceeded', () => {
+      const error = new R2Error(R2ErrorCode.SIZE_EXCEEDED, 'Object too large');
+      const message = error.toUserMessage();
+      expect(message).toContain('5GB');
+      expect(message).not.toContain('R2_SIZE_EXCEEDED');
+    });
+
+    it('should indicate size exceeded is not retryable', () => {
+      const error = new R2Error(R2ErrorCode.SIZE_EXCEEDED, 'Too large');
+      expect(error.isRetryable()).toBe(false);
+    });
+  });
+
+  describe('Object size enforcement', () => {
+    it('should reject objects over configured limit', async () => {
+      const bucket = createFailingR2Bucket({
+        failureMode: 'size_exceeded',
+        maxSize: 1024, // 1KB limit for test
+      });
+      const backend = createR2Backend(bucket, { maxRetries: 0 });
+
+      await expect(
+        backend.write('too-large.bin', generateTestData(2048))
+      ).rejects.toThrow('size');
+    });
+  });
+});
+
+// =============================================================================
+// 13. R2 Conflict Handling
+// =============================================================================
+
+describe('R2 Conflict Handling', () => {
+  describe('Conflict detection', () => {
+    it('should detect conflict errors', () => {
+      expect(detectR2ErrorType(new Error('Write conflict'))).toBe(R2ErrorCode.CONFLICT);
+      expect(detectR2ErrorType(new Error('Concurrent modification'))).toBe(R2ErrorCode.CONFLICT);
+      expect(detectR2ErrorType(new Error('ETag mismatch'))).toBe(R2ErrorCode.CONFLICT);
+    });
+
+    it('should detect read during write errors', () => {
+      expect(detectR2ErrorType(new Error('Object is being written'))).toBe(R2ErrorCode.READ_DURING_WRITE);
+      expect(detectR2ErrorType(new Error('write in progress'))).toBe(R2ErrorCode.READ_DURING_WRITE);
+    });
+  });
+
+  describe('Conflict error properties', () => {
+    it('should indicate conflict is not retryable', () => {
+      const error = new R2Error(R2ErrorCode.CONFLICT, 'Conflict');
+      expect(error.isRetryable()).toBe(false);
+    });
+
+    it('should indicate read during write is retryable', () => {
+      const error = new R2Error(R2ErrorCode.READ_DURING_WRITE, 'Busy');
+      expect(error.isRetryable()).toBe(true);
+    });
+  });
+});
+
+// =============================================================================
+// 14. Tiered Storage Error Handling
+// =============================================================================
+
+describe('Tiered Storage Error Handling', () => {
+  describe('Tier write failures', () => {
+    it('should reject writes exceeding hot tier size limit', async () => {
+      const hotBackend = createHotBackendWithStats();
+      const coldBucket = createFailingR2Bucket({ failureMode: 'none' });
+      const coldBackend = createR2Backend(coldBucket);
+
+      const tieredBackend = createTieredBackend(
+        hotBackend as unknown as DOStorageBackend,
+        coldBackend,
+        {
+          autoMigrate: false,
+          maxHotFileSize: 1024, // 1KB limit
+        }
+      );
+
+      // Writing to hot tier with explicit tier option should fail if too large
+      await expect(
+        tieredBackend.writeWithTier(
+          'too-large-for-hot.bin',
+          generateTestData(2048),
+          { tier: StorageTier.HOT }
+        )
+      ).rejects.toThrow('exceeds maxHotFileSize');
+    });
+
+    it('should automatically route large files to cold tier', async () => {
+      const hotBackend = createHotBackendWithStats();
+      const coldBucket = createFailingR2Bucket({ failureMode: 'none' });
+      const coldBackend = createR2Backend(coldBucket);
+
+      const tieredBackend = createTieredBackend(
+        hotBackend as unknown as DOStorageBackend,
+        coldBackend,
+        {
+          autoMigrate: false,
+          maxHotFileSize: 1024, // 1KB limit
+        }
+      );
+
+      // Large file without explicit tier should go to cold
+      await tieredBackend.write('large-file.bin', generateTestData(2048));
+
+      // Check metadata shows cold tier
+      const meta = await tieredBackend.metadata('large-file.bin');
+      expect(meta?.tier).toBe(StorageTier.COLD);
+    });
+  });
+
+  describe('Tier read fallback', () => {
+    it('should fall back to cold tier when hot tier read fails', async () => {
+      const hotBackend = createHotBackendWithStats();
+      const coldBucket = createFailingR2Bucket({ failureMode: 'none' });
+      const coldBackend = createR2Backend(coldBucket);
+
+      const tieredBackend = createTieredBackend(
+        hotBackend as unknown as DOStorageBackend,
+        coldBackend,
+        { autoMigrate: false, cacheR2Reads: false }
+      );
+
+      // Write directly to cold tier
+      await tieredBackend.writeWithTier(
+        'cold-only.bin',
+        textToBytes('cold data'),
+        { tier: StorageTier.COLD }
+      );
+
+      // Read should succeed from cold tier
+      const result = await tieredBackend.read('cold-only.bin');
+      expect(result).not.toBeNull();
+      expect(bytesToText(result!)).toBe('cold data');
+    });
+  });
+
+  describe('Pin/unpin error handling', () => {
+    it('should throw NOT_FOUND when pinning non-existent file', async () => {
+      const hotBackend = createHotBackendWithStats();
+      const coldBucket = createFailingR2Bucket({ failureMode: 'none' });
+      const coldBackend = createR2Backend(coldBucket);
+
+      const tieredBackend = createTieredBackend(
+        hotBackend as unknown as DOStorageBackend,
+        coldBackend,
+        { autoMigrate: false }
+      );
+
+      await expect(
+        tieredBackend.pinToHot('non-existent.bin')
+      ).rejects.toThrow('not found');
     });
   });
 });

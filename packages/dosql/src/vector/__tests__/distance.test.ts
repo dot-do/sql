@@ -319,7 +319,8 @@ describe('Dot Product Distance (vector_distance_dot)', () => {
     it('should return 0 for orthogonal vectors', () => {
       const v1 = vec(1, 0, 0);
       const v2 = vec(0, 1, 0);
-      expect(vector_distance_dot(v1, v2)).toBe(0);
+      // Use toBeCloseTo to handle -0 vs +0
+      expect(vector_distance_dot(v1, v2)).toBeCloseTo(0, 10);
     });
 
     it('should return positive for opposite vectors', () => {
@@ -333,7 +334,8 @@ describe('Dot Product Distance (vector_distance_dot)', () => {
     it('should handle zero vectors', () => {
       const zero = vec(0, 0, 0);
       const v = vec(1, 2, 3);
-      expect(vector_distance_dot(zero, v)).toBe(0);
+      // Use toBeCloseTo to handle -0 vs +0
+      expect(vector_distance_dot(zero, v)).toBeCloseTo(0, 10);
     });
 
     it('should throw for dimension mismatch', () => {
@@ -523,14 +525,15 @@ describe('Vector Operations', () => {
     it('should produce unit vectors', () => {
       const v = vec(3, 4);
       const normalized = vector_normalize(v);
-      expect(vector_norm(normalized)).toBeCloseTo(1, 10);
+      // Use precision 6 as Float32 has ~7 significant digits
+      expect(vector_norm(normalized)).toBeCloseTo(1, 6);
     });
 
     it('should preserve direction', () => {
       const v = vec(3, 4);
       const normalized = vector_normalize(v);
-      // Check ratio is preserved
-      expect(normalized[0] / normalized[1]).toBeCloseTo(3 / 4, 10);
+      // Check ratio is preserved (use precision 6 for Float32)
+      expect(normalized[0] / normalized[1]).toBeCloseTo(3 / 4, 6);
     });
 
     it('should return zero vector for zero input', () => {
@@ -739,5 +742,168 @@ describe('Numerical Stability', () => {
     // Should be very small but not exactly 0
     expect(dist).toBeGreaterThanOrEqual(0);
     expect(dist).toBeLessThan(0.001);
+  });
+});
+
+// =============================================================================
+// EMPTY AND SINGLE DIMENSION TESTS
+// =============================================================================
+
+describe('Empty and Single Dimension Vectors', () => {
+  describe('empty vectors (0 dimensions)', () => {
+    it('should handle empty vectors in cosine distance', () => {
+      const empty = new Float32Array(0);
+      // Both empty vectors - degenerate case
+      const dist = vector_distance_cos(empty, empty);
+      // With no dimensions, denominator is 0, should return 1 (default for zero vectors)
+      expect(dist).toBe(1);
+    });
+
+    it('should handle empty vectors in L2 distance', () => {
+      const empty = new Float32Array(0);
+      const dist = vector_distance_l2(empty, empty);
+      expect(dist).toBe(0);
+    });
+
+    it('should handle empty vectors in dot product', () => {
+      const empty = new Float32Array(0);
+      const dist = vector_distance_dot(empty, empty);
+      expect(dist).toBeCloseTo(0, 10);
+    });
+
+    it('should handle empty vectors in hamming distance', () => {
+      const empty = new Float32Array(0);
+      const dist = vector_distance_hamming(empty, empty);
+      expect(dist).toBe(0);
+    });
+  });
+
+  describe('single dimension vectors', () => {
+    it('should compute cosine distance for 1D vectors', () => {
+      const v1 = vec(1);
+      const v2 = vec(-1);
+      // Opposite directions = distance of 2
+      expect(vector_distance_cos(v1, v2)).toBeCloseTo(2, 10);
+    });
+
+    it('should compute L2 distance for 1D vectors', () => {
+      const v1 = vec(3);
+      const v2 = vec(7);
+      expect(vector_distance_l2(v1, v2)).toBe(4);
+    });
+
+    it('should compute dot product for 1D vectors', () => {
+      const v1 = vec(3);
+      const v2 = vec(4);
+      expect(vector_dot_product(v1, v2)).toBe(12);
+    });
+
+    it('should normalize 1D vector', () => {
+      const v = vec(5);
+      const normalized = vector_normalize(v);
+      expect(normalized[0]).toBeCloseTo(1, 6);
+    });
+  });
+});
+
+// =============================================================================
+// SPECIAL FLOAT VALUES TESTS
+// =============================================================================
+
+describe('Special Float Values', () => {
+  describe('negative values', () => {
+    it('should handle all-negative vectors in cosine distance', () => {
+      const v1 = vec(-1, -2, -3);
+      const v2 = vec(-2, -4, -6);
+      // Same direction (both negative) = distance 0
+      expect(vector_distance_cos(v1, v2)).toBeCloseTo(0, 10);
+    });
+
+    it('should handle mixed positive/negative vectors', () => {
+      const v1 = vec(1, -1, 1);
+      const v2 = vec(-1, 1, -1);
+      // Opposite directions
+      expect(vector_distance_cos(v1, v2)).toBeCloseTo(2, 10);
+    });
+
+    it('should compute L2 distance with negative values', () => {
+      const v1 = vec(-3, -4);
+      const v2 = vec(0, 0);
+      expect(vector_distance_l2(v1, v2)).toBe(5);
+    });
+  });
+
+  describe('infinity handling', () => {
+    it('should handle Infinity in L2 distance', () => {
+      const v1 = vec(Infinity, 0, 0);
+      const v2 = vec(0, 0, 0);
+      const dist = vector_distance_l2(v1, v2);
+      expect(dist).toBe(Infinity);
+    });
+
+    it('should handle -Infinity in L2 distance', () => {
+      const v1 = vec(-Infinity, 0, 0);
+      const v2 = vec(0, 0, 0);
+      const dist = vector_distance_l2(v1, v2);
+      expect(dist).toBe(Infinity);
+    });
+  });
+
+  describe('mixed magnitude vectors', () => {
+    it('should handle vectors with vastly different magnitudes', () => {
+      const v1 = vec(1e10, 1e-10, 1);
+      const v2 = vec(1e10, 1e-10, 1);
+      // Same vector = 0 distance
+      expect(vector_distance_cos(v1, v2)).toBeCloseTo(0, 5);
+    });
+  });
+});
+
+// =============================================================================
+// VECTOR OPERATIONS COMPREHENSIVE TESTS
+// =============================================================================
+
+describe('Vector Operations - Additional Edge Cases', () => {
+  describe('vector_norm edge cases', () => {
+    it('should handle single negative element', () => {
+      const v = vec(-5);
+      expect(vector_norm(v)).toBe(5);
+    });
+
+    it('should handle unit vector', () => {
+      const v = vec(1, 0, 0);
+      expect(vector_norm(v)).toBe(1);
+    });
+  });
+
+  describe('vector_scale edge cases', () => {
+    it('should handle very large scalar', () => {
+      const v = vec(1, 2, 3);
+      const result = vector_scale(v, 1e10);
+      expect(result[0]).toBe(1e10);
+    });
+
+    it('should handle very small scalar', () => {
+      const v = vec(1, 2, 3);
+      const result = vector_scale(v, 1e-10);
+      expect(result[0]).toBeCloseTo(1e-10, 15);
+    });
+  });
+
+  describe('combined operations', () => {
+    it('should verify add then sub returns original', () => {
+      const v1 = vec(1, 2, 3);
+      const v2 = vec(4, 5, 6);
+      const sum = vector_add(v1, v2);
+      const result = vector_sub(sum, v2);
+      expect(Array.from(result)).toEqual(Array.from(v1));
+    });
+
+    it('should verify scale then normalize produces unit vector', () => {
+      const v = vec(3, 4);
+      const scaled = vector_scale(v, 100);
+      const normalized = vector_normalize(scaled);
+      expect(vector_norm(normalized)).toBeCloseTo(1, 6);
+    });
   });
 });

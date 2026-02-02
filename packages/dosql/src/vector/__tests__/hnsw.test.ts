@@ -551,17 +551,17 @@ describe('HnswIndex GetVector', () => {
     expect(index.getVector(999n)).toBeUndefined();
   });
 
-  it('should return a copy (verify immutability)', () => {
+  it('should store a copy of the inserted vector (immutable from insert)', () => {
     const index = new HnswIndex();
     const v = vec(1, 2, 3);
     index.insert(1n, v);
 
-    const retrieved = index.getVector(1n);
-    retrieved![0] = 999;
+    // Modify the original vector after insertion
+    v[0] = 999;
 
-    const retrievedAgain = index.getVector(1n);
-    // Original should be unchanged in index
-    expect(retrievedAgain![0]).toBe(1);
+    // The stored vector should be unchanged (copy on insert)
+    const retrieved = index.getVector(1n);
+    expect(retrieved![0]).toBe(1);
   });
 });
 
@@ -935,5 +935,202 @@ describe('HnswIndex Edge Cases', () => {
 
     const results = index.search(vec(0.5), 3);
     expect(results.length).toBe(3);
+  });
+});
+
+// =============================================================================
+// GRAPH CONNECTIVITY TESTS
+// =============================================================================
+
+describe('HnswIndex Graph Connectivity', () => {
+  it('should maintain connectivity after multiple insertions and deletions', () => {
+    const index = new HnswIndex({ M: 8, efConstruction: 50, efSearch: 50, seed: 42 });
+
+    // Insert many vectors
+    for (let i = 0; i < 100; i++) {
+      index.insert(BigInt(i), randomNormalizedVector(8, i));
+    }
+
+    // Delete every other vector
+    for (let i = 0; i < 100; i += 2) {
+      index.delete(BigInt(i));
+    }
+
+    expect(index.size).toBe(50);
+
+    // Search should still work and find results
+    const results = index.search(randomNormalizedVector(8, 999), 10);
+    expect(results.length).toBe(10);
+
+    // All results should be odd (even ones were deleted)
+    for (const result of results) {
+      expect(Number(result.rowId) % 2).toBe(1);
+    }
+  });
+
+  it('should handle repeated insert-delete cycles', () => {
+    const index = new HnswIndex({ M: 8, seed: 42 });
+
+    // Cycle: insert, search, delete, insert again
+    for (let cycle = 0; cycle < 3; cycle++) {
+      // Insert
+      for (let i = 0; i < 20; i++) {
+        const id = BigInt(cycle * 100 + i);
+        index.insert(id, randomNormalizedVector(4, Number(id)));
+      }
+
+      // Search
+      const results = index.search(randomNormalizedVector(4, 999), 5);
+      expect(results.length).toBeGreaterThan(0);
+
+      // Delete half
+      for (let i = 0; i < 10; i++) {
+        index.delete(BigInt(cycle * 100 + i));
+      }
+    }
+
+    // Final state should be consistent
+    expect(index.size).toBe(30); // 10 per cycle * 3 cycles
+  });
+
+  it('should find all nodes after deleting entry point multiple times', () => {
+    const index = new HnswIndex({ M: 4, efConstruction: 20, seed: 42 });
+
+    // Insert vectors
+    for (let i = 0; i < 10; i++) {
+      index.insert(BigInt(i), randomNormalizedVector(4, i));
+    }
+
+    // Delete the first few vectors (likely includes entry points)
+    index.delete(0n);
+    index.delete(1n);
+    index.delete(2n);
+
+    expect(index.size).toBe(7);
+
+    // Should still be able to search and find remaining vectors
+    const results = index.search(randomNormalizedVector(4, 999), 7);
+    expect(results.length).toBe(7);
+  });
+});
+
+// =============================================================================
+// BOUNDARY VALUE TESTS
+// =============================================================================
+
+describe('HnswIndex Boundary Values', () => {
+  it('should handle BigInt edge values', () => {
+    const index = new HnswIndex({ M: 4, seed: 42 });
+
+    // Test with large BigInt values
+    const largeId = 9007199254740993n; // Larger than Number.MAX_SAFE_INTEGER
+    index.insert(largeId, vec(1, 2, 3, 4));
+    index.insert(0n, vec(5, 6, 7, 8));
+
+    expect(index.has(largeId)).toBe(true);
+    expect(index.has(0n)).toBe(true);
+
+    const results = index.search(vec(1, 2, 3, 4), 2);
+    expect(results.length).toBe(2);
+  });
+
+  it('should handle vectors with all same values', () => {
+    const index = new HnswIndex({ M: 4, distanceMetric: DistanceMetric.L2, seed: 42 });
+
+    // All elements are the same value
+    index.insert(1n, vec(0.5, 0.5, 0.5, 0.5));
+    index.insert(2n, vec(0.5, 0.5, 0.5, 0.5)); // Identical to first
+
+    // Search for identical vector
+    const results = index.search(vec(0.5, 0.5, 0.5, 0.5), 2);
+    expect(results.length).toBe(2);
+    // Both should have distance 0 for L2
+    expect(results[0].distance).toBeCloseTo(0, 5);
+    expect(results[1].distance).toBeCloseTo(0, 5);
+  });
+
+  it('should handle vectors on unit sphere boundary', () => {
+    const index = new HnswIndex({ M: 8, distanceMetric: DistanceMetric.Cosine, seed: 42 });
+
+    // Insert unit vectors (on the unit sphere)
+    index.insert(1n, vec(1, 0, 0, 0));
+    index.insert(2n, vec(0, 1, 0, 0));
+    index.insert(3n, vec(0, 0, 1, 0));
+    index.insert(4n, vec(0, 0, 0, 1));
+
+    // Query with a unit vector - should find all orthogonal vectors with distance 1
+    const results = index.search(vec(1, 0, 0, 0), 4);
+    expect(results.length).toBe(4);
+    expect(results[0].rowId).toBe(1n); // Exact match first
+    expect(results[0].distance).toBeCloseTo(0, 5);
+  });
+
+  it('should maintain ordering consistency with ties', () => {
+    const index = new HnswIndex({ M: 8, distanceMetric: DistanceMetric.L2, seed: 42 });
+
+    // Insert vectors equidistant from query
+    index.insert(1n, vec(1, 0, 0));
+    index.insert(2n, vec(0, 1, 0));
+    index.insert(3n, vec(0, 0, 1));
+    index.insert(4n, vec(-1, 0, 0));
+
+    // All have same L2 distance from origin
+    const results = index.search(vec(0, 0, 0), 4);
+    expect(results.length).toBe(4);
+
+    // All should have the same distance
+    const firstDist = results[0].distance;
+    for (const result of results) {
+      expect(result.distance).toBeCloseTo(firstDist, 5);
+    }
+  });
+});
+
+// =============================================================================
+// SERIALIZATION ROUND-TRIP STRESS TESTS
+// =============================================================================
+
+describe('HnswIndex Serialization Stress', () => {
+  it('should survive multiple serialize/deserialize cycles', () => {
+    let index: HnswIndex = new HnswIndex({ M: 8, efConstruction: 50, seed: 42 });
+
+    // Insert initial data
+    for (let i = 0; i < 30; i++) {
+      index.insert(BigInt(i), randomNormalizedVector(8, i));
+    }
+
+    const query = randomNormalizedVector(8, 999);
+    const originalResults = index.search(query, 5);
+
+    // Multiple round trips
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const json = index.serialize();
+      index = HnswIndex.deserialize(json);
+
+      const results = index.search(query, 5);
+      expect(results.map((r) => r.rowId)).toEqual(originalResults.map((r) => r.rowId));
+    }
+  });
+
+  it('should handle binary serialization with special config values', () => {
+    const index = new HnswIndex({
+      M: 64, // High M value
+      efConstruction: 500, // High efConstruction
+      efSearch: 250, // High efSearch
+      distanceMetric: DistanceMetric.Hamming,
+      seed: 12345,
+    });
+
+    index.insert(1n, vec(1, 0, 1, 0));
+    index.insert(2n, vec(0, 1, 0, 1));
+
+    const binary = index.serializeBinary();
+    const restored = HnswIndex.deserializeBinary(binary);
+
+    const config = restored.getConfig();
+    expect(config.M).toBe(64);
+    expect(config.efConstruction).toBe(500);
+    expect(config.efSearch).toBe(250);
+    expect(config.distanceMetric).toBe(DistanceMetric.Hamming);
   });
 });

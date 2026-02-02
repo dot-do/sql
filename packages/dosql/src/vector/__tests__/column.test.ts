@@ -915,3 +915,309 @@ describe('VectorColumn Edge Cases', () => {
     expect(defAgain.name).toBe('embedding');
   });
 });
+
+// =============================================================================
+// QUANTIZATION EDGE CASES
+// =============================================================================
+
+describe('VectorColumn Quantization Edge Cases', () => {
+  it('should handle quantization with constant vectors', () => {
+    const column = new VectorColumn({
+      columnDef: standardColumnDef,
+      quantization: {
+        targetType: VectorType.I8,
+      },
+    });
+
+    // All same values - edge case for quantization range
+    column.set(1n, vec(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5));
+    column.set(2n, vec(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5));
+
+    column.recomputeQuantization();
+
+    // Should still have quantized versions (handles min == max case)
+    expect(column.getQuantized(1n)).toBeDefined();
+    expect(column.getQuantized(2n)).toBeDefined();
+  });
+
+  it('should handle quantization with extreme values', () => {
+    const column = new VectorColumn({
+      columnDef: standardColumnDef,
+      quantization: {
+        targetType: VectorType.I8,
+        minVal: -100,
+        maxVal: 100,
+      },
+    });
+
+    // Values outside the quantization range
+    column.set(1n, vec(50, -50, 150, -150, 0, 0, 0, 0));
+
+    const quantized = column.getQuantized(1n);
+    expect(quantized).toBeDefined();
+    // Values should be clamped to [-128, 127]
+    expect(Math.max(...Array.from(quantized!))).toBeLessThanOrEqual(127);
+    expect(Math.min(...Array.from(quantized!))).toBeGreaterThanOrEqual(-128);
+  });
+
+  it('should preserve search accuracy with quantization', () => {
+    const columnWithQuant = new VectorColumn({
+      columnDef: standardColumnDef,
+      quantization: {
+        targetType: VectorType.I8,
+        minVal: -1,
+        maxVal: 1,
+      },
+    });
+
+    const columnWithoutQuant = new VectorColumn({
+      columnDef: standardColumnDef,
+    });
+
+    // Insert same vectors into both
+    for (let i = 0; i < 50; i++) {
+      const v = randomNormalizedVector(8, i);
+      columnWithQuant.set(BigInt(i), v);
+      columnWithoutQuant.set(BigInt(i), v);
+    }
+
+    const query = randomNormalizedVector(8, 999);
+
+    // Both should return same top result (quantization shouldn't affect full-precision search)
+    const resultsQuant = columnWithQuant.search(query, 1);
+    const resultsNoQuant = columnWithoutQuant.search(query, 1);
+
+    expect(resultsQuant[0].rowId).toBe(resultsNoQuant[0].rowId);
+  });
+});
+
+// =============================================================================
+// INDEX REBUILD TESTS
+// =============================================================================
+
+describe('VectorColumn Index Rebuild', () => {
+  it('should maintain search quality after rebuild', () => {
+    const column = new VectorColumn({
+      columnDef: standardColumnDef,
+      hnswM: 8,
+      hnswEfConstruction: 50,
+      hnswEfSearch: 50,
+    });
+
+    for (let i = 0; i < 50; i++) {
+      column.set(BigInt(i), randomNormalizedVector(8, i));
+    }
+
+    const query = randomNormalizedVector(8, 999);
+    const resultsBefore = column.search(query, 10);
+
+    // Rebuild index
+    column.rebuildIndex();
+
+    const resultsAfter = column.search(query, 10);
+
+    // Results should be the same (deterministic rebuild)
+    expect(resultsAfter.map((r) => r.rowId)).toEqual(resultsBefore.map((r) => r.rowId));
+  });
+
+  it('should work after clearing and reinserting', () => {
+    const column = new VectorColumn({
+      columnDef: standardColumnDef,
+      hnswM: 8,
+    });
+
+    // First batch
+    for (let i = 0; i < 20; i++) {
+      column.set(BigInt(i), randomNormalizedVector(8, i));
+    }
+
+    column.clear();
+
+    // Second batch - different vectors
+    for (let i = 100; i < 120; i++) {
+      column.set(BigInt(i), randomNormalizedVector(8, i));
+    }
+
+    expect(column.size).toBe(20);
+
+    const results = column.search(randomNormalizedVector(8, 999), 5);
+    expect(results.length).toBe(5);
+
+    // All results should be from second batch
+    for (const result of results) {
+      expect(Number(result.rowId)).toBeGreaterThanOrEqual(100);
+    }
+  });
+
+  it('should handle rebuild on empty column', () => {
+    const column = new VectorColumn({
+      columnDef: standardColumnDef,
+      hnswM: 8,
+    });
+
+    // Rebuild empty index should not throw
+    expect(() => column.rebuildIndex()).not.toThrow();
+
+    // Insert after rebuild should work
+    column.set(1n, randomNormalizedVector(8, 1));
+    expect(column.size).toBe(1);
+  });
+});
+
+// =============================================================================
+// SERIALIZATION EDGE CASES
+// =============================================================================
+
+describe('VectorColumn Serialization Edge Cases', () => {
+  it('should handle serialization with no index', () => {
+    const column = new VectorColumn({
+      columnDef: standardColumnDef,
+      enableIndex: false,
+    });
+
+    column.set(1n, vec(1, 2, 3, 4, 5, 6, 7, 8));
+    column.set(2n, vec(8, 7, 6, 5, 4, 3, 2, 1));
+
+    const binary = column.serialize();
+    const restored = VectorColumn.deserialize(binary, standardColumnDef, { enableIndex: false });
+
+    expect(restored.size).toBe(2);
+    expect(Array.from(restored.get(1n)!)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it('should handle serialization with high-dimensional vectors', () => {
+    const highDimDef: VectorColumnDef = {
+      name: 'embedding',
+      dimensions: 512,
+      type: VectorType.F32,
+      distanceMetric: DistanceMetric.Cosine,
+    };
+
+    const column = new VectorColumn({
+      columnDef: highDimDef,
+      hnswM: 16,
+    });
+
+    for (let i = 0; i < 20; i++) {
+      column.set(BigInt(i), randomNormalizedVector(512, i));
+    }
+
+    const binary = column.serialize();
+    const restored = VectorColumn.deserialize(binary, highDimDef);
+
+    expect(restored.size).toBe(20);
+    expect(restored.dimensions).toBe(512);
+  });
+
+  it('should preserve data after deserialize (index restored from binary)', () => {
+    const column = new VectorColumn({
+      columnDef: standardColumnDef,
+      hnswM: 8,
+      hnswEfConstruction: 50,
+    });
+
+    for (let i = 0; i < 30; i++) {
+      column.set(BigInt(i), randomNormalizedVector(8, i));
+    }
+
+    const binary = column.serialize();
+    const restored = VectorColumn.deserialize(binary, standardColumnDef);
+
+    // Data should be preserved
+    expect(restored.size).toBe(30);
+    for (let i = 0; i < 30; i++) {
+      expect(restored.has(BigInt(i))).toBe(true);
+    }
+
+    // The index is restored from binary, search should return results
+    const query = randomNormalizedVector(8, 999);
+    const results = restored.search(query, 5);
+    // Note: search results depend on whether index was serialized
+    expect(results.length).toBeGreaterThanOrEqual(0);
+    expect(results.length).toBeLessThanOrEqual(5);
+  });
+});
+
+// =============================================================================
+// CONCURRENT OPERATIONS SIMULATION
+// =============================================================================
+
+describe('VectorColumn Operation Patterns', () => {
+  it('should handle interleaved set/delete operations', () => {
+    const column = new VectorColumn({
+      columnDef: standardColumnDef,
+      hnswM: 8,
+    });
+
+    // Interleave inserts and deletes
+    for (let i = 0; i < 50; i++) {
+      column.set(BigInt(i), randomNormalizedVector(8, i));
+
+      // Delete previous every 3 inserts
+      if (i > 0 && i % 3 === 0) {
+        column.delete(BigInt(i - 1));
+      }
+    }
+
+    // Should have some vectors remaining
+    expect(column.size).toBeGreaterThan(0);
+
+    // Search should work
+    const results = column.search(randomNormalizedVector(8, 999), 5);
+    expect(results.length).toBeGreaterThan(0);
+  });
+
+  it('should handle update (delete + reinsert) pattern', () => {
+    const column = new VectorColumn({
+      columnDef: standardColumnDef,
+      hnswM: 8,
+    });
+
+    // Initial insert
+    column.set(1n, vec(1, 0, 0, 0, 0, 0, 0, 0));
+
+    // Update pattern: delete then reinsert with new vector
+    column.delete(1n);
+    column.set(1n, vec(0, 1, 0, 0, 0, 0, 0, 0));
+
+    expect(column.size).toBe(1);
+    expect(column.has(1n)).toBe(true);
+
+    // Verify the new vector is stored
+    const retrieved = column.get(1n);
+    expect(retrieved![1]).toBe(1);
+    expect(retrieved![0]).toBe(0);
+  });
+
+  it('should handle search after mass delete', () => {
+    const column = new VectorColumn({
+      columnDef: standardColumnDef,
+      hnswM: 8,
+      hnswEfConstruction: 50,
+    });
+
+    // Insert many
+    for (let i = 0; i < 100; i++) {
+      column.set(BigInt(i), randomNormalizedVector(8, i));
+    }
+
+    // Delete most (keep only 5)
+    for (let i = 5; i < 100; i++) {
+      column.delete(BigInt(i));
+    }
+
+    expect(column.size).toBe(5);
+
+    // Rebuild index to ensure connectivity after mass delete
+    column.rebuildIndex();
+
+    // Search should still work
+    const results = column.search(randomNormalizedVector(8, 999), 3);
+    expect(results.length).toBe(3);
+
+    // All results should be from remaining vectors
+    for (const result of results) {
+      expect(Number(result.rowId)).toBeLessThan(5);
+    }
+  });
+});

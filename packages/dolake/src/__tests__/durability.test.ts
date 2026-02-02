@@ -1700,6 +1700,680 @@ describe('Data Integrity Verification', () => {
 });
 
 // =============================================================================
+// Event Classification Tests
+// =============================================================================
+
+describe('Event Classification', () => {
+  describe('Table-Based Classification', () => {
+    it('should classify payment-related tables as P0', async () => {
+      const writer = new DurabilityWriter();
+
+      const paymentEvent = createTestCDCEvent({ table: 'payments' });
+      const stripeEvent = createTestCDCEvent({ table: 'stripe_webhooks' });
+      const transactionEvent = createTestCDCEvent({ table: 'transactions' });
+
+      // These should all be classified as P0 based on table name
+      // We can verify this by checking the tier in the write result
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer2 = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      const result = await writer2.writeWithDurability(paymentEvent);
+      expect(result.tier).toBe(DurabilityTier.P0);
+    });
+
+    it('should classify user-related tables as P1', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      const userEvent = createTestCDCEvent({ table: 'users' });
+      const result = await writer.writeWithDurability(userEvent);
+      expect(result.tier).toBe(DurabilityTier.P1);
+    });
+
+    it('should classify analytics tables as P2', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      const analyticsEvent = createTestCDCEvent({ table: 'analytics_events' });
+      const result = await writer.writeWithDurability(analyticsEvent);
+      expect(result.tier).toBe(DurabilityTier.P2);
+    });
+
+    it('should classify tracking tables as P3', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      const trackingEvent = createTestCDCEvent({ table: 'anonymous_visits' });
+      const result = await writer.writeWithDurability(trackingEvent);
+      expect(result.tier).toBe(DurabilityTier.P3);
+    });
+
+    it('should use partial table name matching', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      // payment_history should match "payment" substring -> P0
+      const paymentHistoryEvent = createTestCDCEvent({ table: 'payment_history' });
+      const result = await writer.writeWithDurability(paymentHistoryEvent);
+      expect(result.tier).toBe(DurabilityTier.P0);
+    });
+  });
+
+  describe('Source-Based Classification', () => {
+    it('should classify stripe source as P0', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      // Unknown table with stripe source -> P0
+      const event = createTestCDCEvent({
+        table: 'unknown_table',
+        metadata: { source: 'stripe' },
+      });
+      const result = await writer.writeWithDurability(event);
+      expect(result.tier).toBe(DurabilityTier.P0);
+    });
+
+    it('should classify auth source as P1', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      const event = createTestCDCEvent({
+        table: 'unknown_table',
+        metadata: { source: 'auth' },
+      });
+      const result = await writer.writeWithDurability(event);
+      expect(result.tier).toBe(DurabilityTier.P1);
+    });
+
+    it('should classify tracking source as P3', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      const event = createTestCDCEvent({
+        table: 'unknown_table',
+        metadata: { source: 'tracking' },
+      });
+      const result = await writer.writeWithDurability(event);
+      expect(result.tier).toBe(DurabilityTier.P3);
+    });
+  });
+
+  describe('Explicit Durability Metadata', () => {
+    it('should respect explicit P0 durability metadata', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      // Even though analytics would normally be P2, explicit durability overrides
+      const event = createTestCDCEvent({
+        table: 'analytics_events',
+        metadata: { durability: 'P0' },
+      });
+      const result = await writer.writeWithDurability(event);
+      expect(result.tier).toBe(DurabilityTier.P0);
+    });
+
+    it('should respect explicit P3 durability metadata', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      // Even though payments would normally be P0, explicit durability overrides
+      const event = createTestCDCEvent({
+        table: 'payments',
+        metadata: { durability: 'P3' },
+      });
+      const result = await writer.writeWithDurability(event);
+      expect(result.tier).toBe(DurabilityTier.P3);
+    });
+
+    it('should handle case-insensitive durability metadata', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      const event = createTestCDCEvent({
+        table: 'test_table',
+        metadata: { durability: 'p1' }, // lowercase
+      });
+      const result = await writer.writeWithDurability(event);
+      expect(result.tier).toBe(DurabilityTier.P1);
+    });
+  });
+
+  describe('Default Classification', () => {
+    it('should default to P2 for unknown tables', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      const event = createTestCDCEvent({ table: 'completely_unknown_table' });
+      const result = await writer.writeWithDurability(event);
+      expect(result.tier).toBe(DurabilityTier.P2);
+    });
+  });
+});
+
+// =============================================================================
+// Advanced Error Recovery Tests
+// =============================================================================
+
+describe('Advanced Error Recovery', () => {
+  describe('Intermittent Failures', () => {
+    it('should handle alternating success/failure pattern', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter(
+        { maxP1Retries: 5, baseRetryDelayMs: 5 },
+        mockR2,
+        mockKV,
+        mockVFS
+      );
+
+      // Fail R2 writes 3 times
+      mockR2.injectFailure(3);
+
+      const event = createP1Event();
+      const result = await writer.writeWithDurability(event);
+
+      expect(result.success).toBe(true);
+      expect(result.retryCount).toBe(3);
+    });
+
+    it('should exhaust retries before fallback', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter(
+        { maxP1Retries: 2, baseRetryDelayMs: 5 },
+        mockR2,
+        mockKV,
+        mockVFS
+      );
+
+      // Fail R2 writes permanently
+      mockR2.injectFailure(10, true);
+
+      const event = createP1Event();
+      const result = await writer.writeWithDurability(event);
+
+      expect(result.success).toBe(true);
+      expect(result.usedFallback).toBe(true);
+      expect(result.writtenTo).toContain('KV');
+    });
+  });
+
+  describe('Storage Unavailability', () => {
+    it('should handle R2 unavailable during P0 write', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter(
+        { maxP0Retries: 2, baseRetryDelayMs: 5 },
+        mockR2,
+        mockKV,
+        mockVFS
+      );
+
+      mockR2.injectFailure(100, true);
+
+      const event = createP0Event();
+      const result = await writer.writeWithDurability(event);
+
+      // P0 should still succeed via KV alone
+      expect(result.success).toBe(true);
+      expect(result.writtenTo).toContain('KV');
+      expect(result.writtenTo).not.toContain('R2');
+    });
+
+    it('should handle KV unavailable during P0 write', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter(
+        { maxP0Retries: 2, baseRetryDelayMs: 5 },
+        mockR2,
+        mockKV,
+        mockVFS
+      );
+
+      mockKV.injectFailure(100, true);
+
+      const event = createP0Event();
+      const result = await writer.writeWithDurability(event);
+
+      // P0 should still succeed via R2 alone
+      expect(result.success).toBe(true);
+      expect(result.writtenTo).toContain('R2');
+      expect(result.writtenTo).not.toContain('KV');
+    });
+
+    it('should send to DLQ when both R2 and KV unavailable for P0', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter(
+        { maxP0Retries: 2, baseRetryDelayMs: 5 },
+        mockR2,
+        mockKV,
+        mockVFS
+      );
+
+      mockR2.injectFailure(100, true);
+      mockKV.injectFailure(100, true);
+
+      const event = createP0Event();
+      const result = await writer.writeWithDurability(event);
+
+      expect(result.success).toBe(false);
+      expect(result.sentToDLQ).toBe(true);
+      expect(result.dlqPath).toBeDefined();
+
+      // DLQ should be written to VFS
+      const vfsData = mockVFS.getAll();
+      expect(vfsData.size).toBe(1);
+    });
+
+    it('should handle VFS unavailable during P2 write', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      // No VFS provided
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV);
+
+      mockR2.injectFailure(1, true);
+
+      const event = createP2Event();
+      const result = await writer.writeWithDurability(event);
+
+      // P2 should fail if both R2 and VFS unavailable
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('Recovery State Persistence', () => {
+    it('should accumulate fallback events across multiple failures', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter(
+        { maxP1Retries: 1, baseRetryDelayMs: 5 },
+        mockR2,
+        mockKV,
+        mockVFS
+      );
+
+      mockR2.injectFailure(100, true);
+
+      // Write multiple P1 events that all go to KV fallback
+      await writer.writeWithDurability(createP1Event());
+      await writer.writeWithDurability(createP1Event());
+      await writer.writeWithDurability(createP1Event());
+
+      const fallbackEvents = writer.getFallbackEvents();
+      expect(fallbackEvents).toHaveLength(3);
+    });
+
+    it('should accumulate VFS pending events across multiple failures', async () => {
+      const mockR2 = new MockR2Storage();
+      const mockKV = new MockKVStorage();
+      const mockVFS = new MockVFSStorage();
+
+      const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+      mockR2.injectFailure(100, true);
+
+      // Write multiple P2 events that all go to VFS fallback
+      await writer.writeWithDurability(createP2Event());
+      await writer.writeWithDurability(createP2Event());
+      await writer.writeWithDurability(createP2Event());
+      await writer.writeWithDurability(createP2Event());
+
+      const vfsPending = writer.getVFSPendingEvents();
+      expect(vfsPending).toHaveLength(4);
+    });
+  });
+});
+
+// =============================================================================
+// Concurrent Write Handling Tests
+// =============================================================================
+
+describe('Concurrent Write Handling', () => {
+  it('should handle concurrent P0 writes', async () => {
+    const mockR2 = new MockR2Storage();
+    const mockKV = new MockKVStorage();
+    const mockVFS = new MockVFSStorage();
+
+    const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+    // Fire 10 concurrent P0 writes
+    const events = Array.from({ length: 10 }, (_, i) =>
+      createP0Event({ sequence: i })
+    );
+
+    const results = await Promise.all(
+      events.map((event) => writer.writeWithDurability(event))
+    );
+
+    // All should succeed
+    expect(results.every((r) => r.success)).toBe(true);
+
+    // All should be written to both R2 and KV
+    expect(results.every((r) => r.writtenTo.includes('R2'))).toBe(true);
+    expect(results.every((r) => r.writtenTo.includes('KV'))).toBe(true);
+  });
+
+  it('should handle concurrent writes across all tiers', async () => {
+    const mockR2 = new MockR2Storage();
+    const mockKV = new MockKVStorage();
+    const mockVFS = new MockVFSStorage();
+
+    const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+    const events = [
+      createP0Event(),
+      createP0Event(),
+      createP1Event(),
+      createP1Event(),
+      createP2Event(),
+      createP2Event(),
+      createP3Event(),
+      createP3Event(),
+    ];
+
+    const results = await Promise.all(
+      events.map((event) => writer.writeWithDurability(event))
+    );
+
+    // All should succeed
+    expect(results.every((r) => r.success)).toBe(true);
+
+    // Check tier distribution
+    const tierCounts = results.reduce(
+      (acc, r) => {
+        acc[r.tier]++;
+        return acc;
+      },
+      { P0: 0, P1: 0, P2: 0, P3: 0 } as Record<string, number>
+    );
+
+    expect(tierCounts.P0).toBe(2);
+    expect(tierCounts.P1).toBe(2);
+    expect(tierCounts.P2).toBe(2);
+    expect(tierCounts.P3).toBe(2);
+  });
+
+  it('should maintain write order tracking under concurrency', async () => {
+    const mockR2 = new MockR2Storage();
+    const mockKV = new MockKVStorage();
+    const mockVFS = new MockVFSStorage();
+
+    const writer = new DurabilityWriter({}, mockR2, mockKV, mockVFS);
+
+    const events = Array.from({ length: 5 }, (_, i) =>
+      createP0Event({ sequence: i * 10 })
+    );
+
+    await Promise.all(
+      events.map((event) => writer.writeWithDurability(event))
+    );
+
+    const writeOrder = writer.getP0WriteOrder();
+
+    // All sequence numbers should be present (order may vary due to concurrency)
+    expect(writeOrder).toHaveLength(5);
+    expect(writeOrder.sort((a, b) => a - b)).toEqual([0, 10, 20, 30, 40]);
+  });
+});
+
+// =============================================================================
+// Flush Strategy Edge Cases
+// =============================================================================
+
+describe('Flush Strategy Edge Cases', () => {
+  describe('Backoff Boundaries', () => {
+    it('should not exceed max retry delay', () => {
+      const strategy = new FlushStrategy({
+        baseRetryDelayMs: 1000,
+        maxRetryDelayMs: 5000,
+      });
+
+      // Even with high retry count, delay should be capped
+      const delay = strategy.calculateBackoff(100);
+      expect(delay).toBe(5000);
+    });
+
+    it('should calculate correct delay sequence', () => {
+      const strategy = new FlushStrategy({
+        baseRetryDelayMs: 100,
+        maxRetryDelayMs: 10000,
+      });
+
+      const delays = [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
+        strategy.calculateBackoff(i)
+      );
+
+      // 100, 200, 400, 800, 1600, 3200, 6400, 10000 (capped)
+      expect(delays).toEqual([100, 200, 400, 800, 1600, 3200, 6400, 10000]);
+    });
+  });
+
+  describe('Tier-Specific Retry Limits', () => {
+    it('should respect custom P0 retry limit', () => {
+      const strategy = new FlushStrategy({ maxP0Retries: 10 });
+
+      expect(strategy.shouldRetry(DurabilityTier.P0, 9)).toBe(true);
+      expect(strategy.shouldRetry(DurabilityTier.P0, 10)).toBe(false);
+    });
+
+    it('should respect custom P1 retry limit', () => {
+      const strategy = new FlushStrategy({ maxP1Retries: 5 });
+
+      expect(strategy.shouldRetry(DurabilityTier.P1, 4)).toBe(true);
+      expect(strategy.shouldRetry(DurabilityTier.P1, 5)).toBe(false);
+    });
+
+    it('should never retry P2 or P3', () => {
+      const strategy = new FlushStrategy({
+        maxP0Retries: 100,
+        maxP1Retries: 100,
+      });
+
+      // P2 and P3 should not retry even with high limits for other tiers
+      expect(strategy.shouldRetry(DurabilityTier.P2, 0)).toBe(false);
+      expect(strategy.shouldRetry(DurabilityTier.P3, 0)).toBe(false);
+    });
+  });
+
+  describe('Retry Context Immutability', () => {
+    it('should not mutate original context when recording retry', () => {
+      const strategy = new FlushStrategy();
+      const originalContext = strategy.createRetryContext();
+
+      const newContext = strategy.recordRetry(originalContext, DurabilityTier.P0);
+
+      // Original should be unchanged
+      expect(originalContext.retryCount).toBe(0);
+      expect(originalContext.retryDelays).toHaveLength(0);
+
+      // New context should have changes
+      expect(newContext.retryCount).toBe(1);
+      expect(newContext.retryDelays).toHaveLength(1);
+    });
+  });
+});
+
+// =============================================================================
+// Persistence Manager Edge Cases
+// =============================================================================
+
+describe('Persistence Manager Edge Cases', () => {
+  describe('Latency Window Management', () => {
+    it('should maintain bounded latency history', () => {
+      const manager = new PersistenceManager();
+
+      // Record more than 1000 latencies
+      for (let i = 0; i < 1500; i++) {
+        manager.recordLatency(DurabilityTier.P0, i);
+      }
+
+      const percentiles = manager.getLatencyPercentiles(DurabilityTier.P0);
+
+      // Percentiles should be calculated from most recent values
+      // With 1000 entries from 500-1499, p50 should be around 1000
+      expect(percentiles.p50).toBeGreaterThanOrEqual(500);
+    });
+  });
+
+  describe('Multiple Storage Configuration', () => {
+    it('should allow changing storage backends', () => {
+      const manager = new PersistenceManager();
+
+      const r2_1 = new MockR2Storage();
+      const r2_2 = new MockR2Storage();
+      const kv = new MockKVStorage();
+
+      manager.setStorages(r2_1, kv);
+      expect(manager.getR2Storage()).toBe(r2_1);
+
+      manager.setStorages(r2_2, kv);
+      expect(manager.getR2Storage()).toBe(r2_2);
+    });
+  });
+
+  describe('Failure Injection Edge Cases', () => {
+    it('should handle zero count failure injection', () => {
+      const manager = new PersistenceManager();
+
+      manager.injectFailure('R2', 0);
+
+      // Should not fail since count is 0
+      expect(manager.shouldFail('R2')).toBe(false);
+    });
+
+    it('should handle multiple different target failures', () => {
+      const manager = new PersistenceManager();
+
+      manager.injectFailure('R2', 2);
+      manager.injectFailure('KV', 3);
+      manager.injectFailure('VFS', 1);
+
+      // Each target should have independent failure counts
+      expect(manager.shouldFail('R2')).toBe(true);
+      expect(manager.shouldFail('R2')).toBe(true);
+      expect(manager.shouldFail('R2')).toBe(false);
+
+      expect(manager.shouldFail('KV')).toBe(true);
+      expect(manager.shouldFail('KV')).toBe(true);
+      expect(manager.shouldFail('KV')).toBe(true);
+      expect(manager.shouldFail('KV')).toBe(false);
+
+      expect(manager.shouldFail('VFS')).toBe(true);
+      expect(manager.shouldFail('VFS')).toBe(false);
+    });
+  });
+});
+
+// =============================================================================
+// Write Buffer Edge Cases
+// =============================================================================
+
+describe('Write Buffer Edge Cases', () => {
+  describe('Empty Buffer Operations', () => {
+    it('should handle remove on empty buffer', () => {
+      const buffer = new WriteBuffer();
+
+      // Should not throw
+      buffer.removeVFSSyncedEvents(10);
+
+      expect(buffer.getVFSPendingEvents()).toHaveLength(0);
+    });
+
+    it('should handle stats on empty buffer', () => {
+      const buffer = new WriteBuffer();
+      const stats = buffer.getStats();
+
+      expect(stats.vfsPendingCount).toBe(0);
+      expect(stats.fallbackCount).toBe(0);
+      expect(stats.p0WriteOrderCount).toBe(0);
+      expect(stats.backgroundWritesPending).toBe(0);
+    });
+  });
+
+  describe('Large Buffer Operations', () => {
+    it('should handle many pending events efficiently', () => {
+      const buffer = new WriteBuffer({ maxBufferSize: 100000 });
+
+      // Add 10000 events
+      for (let i = 0; i < 10000; i++) {
+        buffer.addVFSPendingEvent(createP2Event(), DurabilityTier.P2);
+      }
+
+      expect(buffer.getVFSPendingEvents()).toHaveLength(10000);
+
+      // Remove half
+      buffer.removeVFSSyncedEvents(5000);
+      expect(buffer.getVFSPendingEvents()).toHaveLength(5000);
+    });
+  });
+
+  describe('Background Write Counter', () => {
+    it('should handle decrement below zero gracefully', () => {
+      const buffer = new WriteBuffer();
+
+      // This could happen in error scenarios
+      buffer.decrementBackgroundWrites();
+
+      expect(buffer.getBackgroundWritesPending()).toBe(-1);
+
+      // Reset
+      buffer.incrementBackgroundWrites();
+      expect(buffer.getBackgroundWritesPending()).toBe(0);
+    });
+  });
+});
+
+// =============================================================================
 // End-to-End DoLake Integration Tests
 // =============================================================================
 
