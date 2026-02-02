@@ -203,7 +203,8 @@ export class PreparedStatement<T = unknown, P extends BindParameters = BindParam
 
     if (this.options.pluck) {
       const keys = Object.keys(row);
-      return row[keys[0]] as unknown as T;
+      const firstKey = keys[0];
+      return (firstKey !== undefined ? row[firstKey] : undefined) as unknown as T;
     }
 
     if (this.options.expand) {
@@ -212,16 +213,17 @@ export class PreparedStatement<T = unknown, P extends BindParameters = BindParam
       for (const [key, value] of Object.entries(row)) {
         const parts = key.split('.');
         if (parts.length === 2) {
-          const [table, column] = parts;
+          const table = parts[0]!;
+          const column = parts[1]!;
           if (!expanded[table]) {
             expanded[table] = {};
           }
-          expanded[table][column] = value;
+          expanded[table]![column] = value;
         } else {
           if (!expanded['']) {
             expanded[''] = {};
           }
-          expanded[''][key] = value;
+          expanded['']![key] = value;
         }
       }
       // Flatten single-table results
@@ -279,7 +281,7 @@ export class PreparedStatement<T = unknown, P extends BindParameters = BindParam
       return undefined;
     }
 
-    return this.transformRow(result.rows[0]);
+    return this.transformRow(result.rows[0]!);
   }
 
   /**
@@ -526,7 +528,7 @@ export class InMemoryEngine implements ExecutionEngine {
   getColumns(sql: string): ColumnInfo[] {
     // Parse table name from SELECT
     const match = sql.match(/FROM\s+(\w+)/i);
-    if (match) {
+    if (match && match[1]) {
       const tableName = match[1];
       const table = this.storage.tables.get(tableName);
       if (table) {
@@ -552,8 +554,8 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Table name is either in group 1 (quoted) or group 2 (unquoted)
     // Column definitions are in group 3
-    const tableName = match[1] || match[2];
-    const columnDefs = match[3];
+    const tableName = match[1] ?? match[2]!;
+    const columnDefs = match[3]!;
 
     // Parse columns
     const columns: ColumnInfo[] = [];
@@ -601,13 +603,13 @@ export class InMemoryEngine implements ExecutionEngine {
     }
 
     const table: InMemoryTable = {
-      name: tableName,
+      name: tableName!,
       columns,
       rows: [],
       autoIncrement: 1,
     };
 
-    this.storage.tables.set(tableName, table);
+    this.storage.tables.set(tableName!, table);
 
     return { rows: [], columns: [] };
   }
@@ -623,9 +625,9 @@ export class InMemoryEngine implements ExecutionEngine {
     }
 
     const isUnique = !!match[1];
-    const indexName = match[2];
-    const tableName = match[3];
-    const columnList = match[4];
+    const indexName = match[2]!;
+    const tableName = match[3]!;
+    const columnList = match[4]!;
     const ifNotExists = /IF\s+NOT\s+EXISTS/i.test(sql);
 
     // Validate table exists
@@ -662,7 +664,7 @@ export class InMemoryEngine implements ExecutionEngine {
         );
       }
 
-      const colName = colMatch[1];
+      const colName = colMatch[1]!;
       const order = (colMatch[2]?.toUpperCase() as 'ASC' | 'DESC') || 'ASC';
 
       // Validate column exists in table
@@ -680,13 +682,13 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Create the index
     const index: InMemoryIndex = {
-      name: indexName,
-      tableName,
+      name: indexName!,
+      tableName: tableName!,
       columns,
       unique: isUnique,
     };
 
-    this.storage.indexes.set(indexName, index);
+    this.storage.indexes.set(indexName!, index);
 
     return { rows: [], columns: [] };
   }
@@ -699,7 +701,7 @@ export class InMemoryEngine implements ExecutionEngine {
       throw new StatementError(StatementErrorCode.INVALID_SQL, 'Invalid DROP INDEX syntax', sql);
     }
 
-    const indexName = match[1];
+    const indexName = match[1]!;
     const ifExists = /IF\s+EXISTS/i.test(sql);
 
     // Check if index exists
@@ -774,9 +776,9 @@ export class InMemoryEngine implements ExecutionEngine {
         const placeholder = valuePlaceholders[i]!;
 
         if (placeholder === '?') {
-          row[colName] = params[paramIndex++];
+          row[colName] = params[paramIndex++] ?? null;
         } else if (placeholder.startsWith(':')) {
-          row[colName] = params[paramIndex++];
+          row[colName] = params[paramIndex++] ?? null;
         } else if (placeholder.toUpperCase() === 'DEFAULT') {
           // Use column default value
           row[colName] = columnDefaults.get(colName) ?? null;
@@ -800,7 +802,8 @@ export class InMemoryEngine implements ExecutionEngine {
       this.checkUniqueConstraints(tableName, row, sql);
 
       table.rows.push(row);
-      this.storage.lastInsertRowid = row['id'] ?? row[pkCol ?? ''] ?? table.rows.length;
+      const pkValue1 = pkCol ? row[pkCol] : undefined;
+      this.storage.lastInsertRowid = (row['id'] ?? pkValue1 ?? table.rows.length) as number | bigint;
       totalChanges++;
     }
 
@@ -849,9 +852,9 @@ export class InMemoryEngine implements ExecutionEngine {
       // Build row from SELECT result
       const row: Record<string, SqlValue> = {};
       for (let i = 0; i < columnNames.length; i++) {
-        const colName = columnNames[i];
-        const selectKey = selectKeys[i];
-        row[colName] = selectRow[selectKey];
+        const colName = columnNames[i]!;
+        const selectKey = selectKeys[i]!;
+        row[colName] = selectRow[selectKey] ?? null;
       }
 
       // Handle auto-increment for INTEGER PRIMARY KEY columns
@@ -863,7 +866,8 @@ export class InMemoryEngine implements ExecutionEngine {
       this.checkUniqueConstraints(tableName, row, sql);
 
       table.rows.push(row);
-      this.storage.lastInsertRowid = row['id'] ?? row[pkCol ?? ''] ?? table.rows.length;
+      const pkValue2 = pkCol ? row[pkCol] : undefined;
+      this.storage.lastInsertRowid = (row['id'] ?? pkValue2 ?? table.rows.length) as number | bigint;
       totalChanges++;
     }
 
@@ -893,7 +897,7 @@ export class InMemoryEngine implements ExecutionEngine {
     const headerMatch = sql.match(/^INSERT\s+INTO\s+(?:"([^"]+)"|(\w+))\s*/i);
     if (!headerMatch) return null;
 
-    const tableName = headerMatch[1] || headerMatch[2];
+    const tableName = headerMatch[1] ?? headerMatch[2]!;
     let rest = sql.slice(headerMatch[0].length);
 
     // Check for optional column list
@@ -935,7 +939,7 @@ export class InMemoryEngine implements ExecutionEngine {
       if (selectQuery.endsWith(';')) {
         selectQuery = selectQuery.slice(0, -1).trim();
       }
-      return { tableName, columnNames, selectQuery };
+      return { tableName: tableName!, columnNames, selectQuery };
     }
 
     // Now rest should start with VALUES
@@ -948,7 +952,7 @@ export class InMemoryEngine implements ExecutionEngine {
     let pos = 0;
     while (pos < rest.length) {
       // Skip whitespace and commas between tuples
-      while (pos < rest.length && (/\s/.test(rest[pos]) || rest[pos] === ',')) pos++;
+      while (pos < rest.length && (/\s/.test(rest[pos]!) || rest[pos] === ',')) pos++;
       if (pos >= rest.length) break;
 
       if (rest[pos] !== '(') break;
@@ -993,7 +997,7 @@ export class InMemoryEngine implements ExecutionEngine {
 
     if (valueTuples.length === 0) return null;
 
-    return { tableName, columnNames, valueTuples };
+    return { tableName: tableName!, columnNames, valueTuples };
   }
 
   /**
@@ -1047,7 +1051,7 @@ export class InMemoryEngine implements ExecutionEngine {
       return { rows: [{ id: 0, parent: 0, notused: 0, detail: 'SCAN' as SqlValue }], columns: [] };
     }
 
-    const tableName = selectMatch[1];
+    const tableName = selectMatch[1]!;
     const whereClause = selectMatch[2];
 
     // Check if any index could be used for the WHERE clause
@@ -1057,7 +1061,7 @@ export class InMemoryEngine implements ExecutionEngine {
       for (const cond of conditions) {
         const colMatch = cond.match(/^(\w+)\s*=/);
         if (colMatch) {
-          const colName = colMatch[1];
+          const colName = colMatch[1]!;
           // Check if any index on this table covers this column
           for (const index of this.storage.indexes.values()) {
             if (index.tableName === tableName && index.columns[0]?.name === colName) {
@@ -1155,7 +1159,7 @@ export class InMemoryEngine implements ExecutionEngine {
     const trimmed = expr.trim();
 
     // Simple literal values (fast path)
-    if (trimmed === '?') return params[_paramIndex];
+    if (trimmed === '?') return params[_paramIndex] ?? null;
     if (trimmed.toUpperCase() === 'NULL') return null;
     if (trimmed.toUpperCase().startsWith("X'") && trimmed.endsWith("'")) {
       const hex = trimmed.slice(2, -1);
@@ -1344,13 +1348,13 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Handle pragma table functions: SELECT * FROM pragma_xxx('arg')
     const pragmaMatch = sql.match(/SELECT\s+\*\s+FROM\s+pragma_(\w+)\s*\(\s*'([^']+)'\s*\)/i);
-    if (pragmaMatch) {
+    if (pragmaMatch && pragmaMatch[1] && pragmaMatch[2]) {
       return this.executePragmaTableFunction(pragmaMatch[1], pragmaMatch[2]);
     }
 
     // Handle EXPLAIN QUERY PLAN
     const explainMatch = sql.match(/^EXPLAIN\s+QUERY\s+PLAN\s+(.*)/i);
-    if (explainMatch) {
+    if (explainMatch && explainMatch[1]) {
       return this.executeExplainQueryPlan(explainMatch[1]);
     }
 
@@ -1425,7 +1429,9 @@ export class InMemoryEngine implements ExecutionEngine {
 
         for (const row of rows) {
           const groupKey = groupBy.map(col => {
-            const val = row[col] ?? row[col.split('.')[1]] ?? null;
+            const colParts = col.split('.');
+            const simpleCol = colParts[1];
+            const val = row[col] ?? (simpleCol !== undefined ? row[simpleCol] : undefined) ?? null;
             return JSON.stringify(val);
           }).join('|');
 
@@ -1458,7 +1464,10 @@ export class InMemoryEngine implements ExecutionEngine {
             } else {
               // Non-aggregate column in GROUP BY query - take value from first row
               const resolvedCol = this.resolveColumnName(expr.trim());
-              resultRow[alias] = groupRows.length > 0 ? (groupRows[0][resolvedCol] ?? groupRows[0][resolvedCol.split('.')[1]] ?? null) : null;
+              const resolvedColParts = resolvedCol.split('.');
+              const simpleCol = resolvedColParts[1];
+              const firstRow = groupRows[0];
+              resultRow[alias] = firstRow ? (firstRow[resolvedCol] ?? (simpleCol !== undefined ? firstRow[simpleCol] : undefined) ?? null) : null;
             }
           }
 
@@ -1479,7 +1488,8 @@ export class InMemoryEngine implements ExecutionEngine {
           } else {
             // For non-aggregate columns in aggregate query, resolve and take first row value
             const resolvedCol = this.resolveColumnName(expr.trim());
-            aggregateRow[alias] = rows.length > 0 ? (rows[0][resolvedCol] ?? null) : null;
+            const firstRowAgg = rows[0];
+            aggregateRow[alias] = firstRowAgg ? (firstRowAgg[resolvedCol] ?? null) : null;
           }
         }
         rows = [aggregateRow];
@@ -1504,7 +1514,7 @@ export class InMemoryEngine implements ExecutionEngine {
             if (/^\w+\.\w+$/.test(expr.trim())) {
               const parts = expr.trim().split('.');
               // Use just the column name as output key if no explicit AS alias
-              if (aliasInfo.alias === expr.trim()) {
+              if (aliasInfo.alias === expr.trim() && parts[1]) {
                 outputAlias = parts[1];
               }
             }
@@ -1535,10 +1545,11 @@ export class InMemoryEngine implements ExecutionEngine {
 
               let value: SqlValue = null;
               if (subqueryResult.rows.length > 0) {
-                const firstRow = subqueryResult.rows[0];
+                const firstRow = subqueryResult.rows[0]!;
                 const keys = Object.keys(firstRow);
-                if (keys.length > 0) {
-                  value = firstRow[keys[0]];
+                const firstKey = keys[0];
+                if (firstKey !== undefined) {
+                  value = firstRow[firstKey] ?? null;
                 }
               }
               // Only set if not already present (first column wins in collision)
@@ -1578,12 +1589,13 @@ export class InMemoryEngine implements ExecutionEngine {
       }
     } else {
       // SELECT * - return all columns without alias prefixes
-      const firstTable = aliasToTable.get(tableRefs[0].alias);
-      if (firstTable) {
+      const firstTableRef = tableRefs[0];
+      const firstTable = firstTableRef ? aliasToTable.get(firstTableRef.alias) : undefined;
+      if (firstTable && firstTableRef) {
         rows = rows.map(row => {
           const unprefixed: Record<string, SqlValue> = {};
           for (const colInfo of firstTable.columns) {
-            unprefixed[colInfo.name] = row[colInfo.name] ?? row[`${tableRefs[0].alias}.${colInfo.name}`] ?? null;
+            unprefixed[colInfo.name] = row[colInfo.name] ?? row[`${firstTableRef.alias}.${colInfo.name}`] ?? null;
           }
           return unprefixed;
         });
@@ -1616,7 +1628,7 @@ export class InMemoryEngine implements ExecutionEngine {
 
     return {
       rows,
-      columns: selectAll ? (aliasToTable.get(tableRefs[0].alias)?.columns ?? []) : [],
+      columns: selectAll ? (tableRefs[0] ? aliasToTable.get(tableRefs[0].alias)?.columns ?? [] : []) : [],
     };
   }
 
@@ -1690,13 +1702,13 @@ export class InMemoryEngine implements ExecutionEngine {
   private getColumnValue(row: Record<string, SqlValue>, colRef: string): SqlValue {
     // Try exact match first (works for alias.column)
     if (colRef in row) {
-      return row[colRef];
+      return row[colRef] ?? null;
     }
     // If it's alias.col format, try just the column name
     if (/^\w+\.\w+$/.test(colRef)) {
       const colName = colRef.split('.')[1];
-      if (colName in row) {
-        return row[colName];
+      if (colName !== undefined && colName in row) {
+        return row[colName] ?? null;
       }
     }
     return null;
@@ -1726,18 +1738,19 @@ export class InMemoryEngine implements ExecutionEngine {
       let desc = false;
       let exprPart = trimmed;
       const ascDescMatch = trimmed.match(/^([\s\S]+?)\s+(ASC|DESC)\s*$/i);
-      if (ascDescMatch) {
+      if (ascDescMatch && ascDescMatch[1] && ascDescMatch[2]) {
         exprPart = ascDescMatch[1].trim();
         desc = ascDescMatch[2].toUpperCase() === 'DESC';
       }
 
       // Resolve numeric column references (e.g., ORDER BY 1)
       const numericMatch = exprPart.match(/^(\d+)$/);
-      if (numericMatch && selectColumns) {
+      if (numericMatch && numericMatch[1] && selectColumns) {
         const colIndex = parseInt(numericMatch[1], 10) - 1; // 1-indexed to 0-indexed
-        if (colIndex >= 0 && colIndex < selectColumns.length) {
+        const selectCol = selectColumns[colIndex];
+        if (colIndex >= 0 && selectCol) {
           // Get the expression part (without alias)
-          const aliasInfo = this.parseColumnAlias(selectColumns[colIndex]);
+          const aliasInfo = this.parseColumnAlias(selectCol);
           exprPart = aliasInfo.expr;
         }
       }
@@ -1813,10 +1826,10 @@ export class InMemoryEngine implements ExecutionEngine {
       if (ch === '(') { parenDepth++; current += ch; continue; }
       if (ch === ')') { parenDepth--; current += ch; continue; }
 
-      if (upper.slice(i).startsWith('CASE') && (i + 4 >= orderBy.length || !/\w/.test(orderBy[i + 4]))) {
+      if (upper.slice(i).startsWith('CASE') && (i + 4 >= orderBy.length || !/\w/.test(orderBy[i + 4]!))) {
         caseDepth++; current += orderBy.slice(i, i + 4); i += 3; continue;
       }
-      if (upper.slice(i).startsWith('END') && (i + 3 >= orderBy.length || !/\w/.test(orderBy[i + 3]))) {
+      if (upper.slice(i).startsWith('END') && (i + 3 >= orderBy.length || !/\w/.test(orderBy[i + 3]!))) {
         if (caseDepth > 0) caseDepth--;
         current += orderBy.slice(i, i + 3); i += 2; continue;
       }
@@ -1874,10 +1887,11 @@ export class InMemoryEngine implements ExecutionEngine {
 
     let value: SqlValue = null;
     if (result.rows.length > 0) {
-      const firstRow = result.rows[0];
+      const firstRow = result.rows[0]!;
       const keys = Object.keys(firstRow);
-      if (keys.length > 0) {
-        value = firstRow[keys[0]];
+      const firstKey = keys[0];
+      if (firstKey !== undefined) {
+        value = firstRow[firstKey] ?? null;
       }
     }
 
@@ -1957,7 +1971,7 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Validate that subquery returns exactly one column
     if (subqueryResult.rows.length > 0) {
-      const columnCount = Object.keys(subqueryResult.rows[0]).length;
+      const columnCount = Object.keys(subqueryResult.rows[0]!).length;
       if (columnCount > 1) {
         throw new StatementError(
           StatementErrorCode.INVALID_SQL,
@@ -1970,7 +1984,8 @@ export class InMemoryEngine implements ExecutionEngine {
     // Extract values from subquery results
     const subqueryValues = subqueryResult.rows.map(r => {
       const keys = Object.keys(r);
-      return keys.length > 0 ? r[keys[0]] : null;
+      const firstKey = keys[0];
+      return firstKey !== undefined ? (r[firstKey] ?? null) : null;
     });
 
     // Handle empty subquery result
@@ -2172,7 +2187,7 @@ export class InMemoryEngine implements ExecutionEngine {
       // Per SQL standard R-35033-20570: "The subquery on the right of an IN or NOT IN
       // operator must be a scalar subquery if the left expression is not a row value expression."
       if (subqueryResult.rows.length > 0) {
-        const columnCount = Object.keys(subqueryResult.rows[0]).length;
+        const columnCount = Object.keys(subqueryResult.rows[0]!).length;
         if (columnCount > 1) {
           throw new StatementError(
             StatementErrorCode.INVALID_SQL,
@@ -2184,7 +2199,8 @@ export class InMemoryEngine implements ExecutionEngine {
 
       const subqueryValues = subqueryResult.rows.map(r => {
         const keys = Object.keys(r);
-        return keys.length > 0 ? r[keys[0]] : null;
+        const firstKey = keys[0];
+        return firstKey !== undefined ? (r[firstKey] ?? null) : null;
       });
 
       // Handle empty subquery result
@@ -2220,9 +2236,9 @@ export class InMemoryEngine implements ExecutionEngine {
 
       return rows.filter(row => {
         const col = inMatch.column.includes('.')
-          ? inMatch.column.split('.')[1]
+          ? inMatch.column.split('.')[1]!
           : inMatch.column;
-        const val = row[col];
+        const val = row[col] ?? null;
 
         // Handle NULL column values
         if (val === null) {
@@ -2308,9 +2324,9 @@ export class InMemoryEngine implements ExecutionEngine {
           // Use evaluateScalarSubquery which has built-in caching
           const scalarValue = this.evaluateScalarSubquery(scalarCompMatch.subquery, params, outerRow);
           const col = scalarCompMatch.column.includes('.')
-            ? scalarCompMatch.column.split('.')[1]
+            ? scalarCompMatch.column.split('.')[1]!
             : scalarCompMatch.column;
-          const rowVal = outerRow[col];
+          const rowVal = outerRow[col] ?? null;
           return this.compareValuesForSubquery(rowVal, scalarValue, scalarCompMatch.op);
         });
       } else {
@@ -2319,9 +2335,9 @@ export class InMemoryEngine implements ExecutionEngine {
 
         return rows.filter(row => {
           const col = scalarCompMatch.column.includes('.')
-            ? scalarCompMatch.column.split('.')[1]
+            ? scalarCompMatch.column.split('.')[1]!
             : scalarCompMatch.column;
-          const rowVal = row[col];
+          const rowVal = row[col] ?? null;
           return this.compareValuesForSubquery(rowVal, scalarValue, scalarCompMatch.op);
         });
       }
@@ -2339,7 +2355,7 @@ export class InMemoryEngine implements ExecutionEngine {
     if (outerRows.length === 0) return false;
 
     // Get column names from first outer row (includes alias.col format)
-    const outerRow = outerRows[0];
+    const outerRow = outerRows[0]!;
     const outerColumns = Object.keys(outerRow);
 
     // Look for references in the subquery that match outer columns
@@ -2522,7 +2538,7 @@ export class InMemoryEngine implements ExecutionEngine {
     }
 
     // Skip whitespace after EXISTS/NOT EXISTS
-    while (startPos < trimmed.length && /\s/.test(trimmed[startPos])) {
+    while (startPos < trimmed.length && /\s/.test(trimmed[startPos]!)) {
       startPos++;
     }
 
@@ -2597,7 +2613,7 @@ export class InMemoryEngine implements ExecutionEngine {
     const exprPattern = /^([\w.]+|'[^']*'|-?\d+(?:\.\d+)?)\s+(NOT\s+)?IN\s*\(\s*(SELECT[\s\S]+)\s*\)$/i;
 
     const match = whereClause.match(exprPattern);
-    if (match) {
+    if (match && match[1] && match[3]) {
       const expr = match[1];
       const isNot = !!match[2];
       const subquery = match[3].trim();
@@ -2616,7 +2632,7 @@ export class InMemoryEngine implements ExecutionEngine {
    */
   private parseScalarComparison(whereClause: string): { column: string; op: string; subquery: string } | null {
     const match = whereClause.match(/^(\w+(?:\.\w+)?)\s*(>=|<=|<>|!=|>|<|=)\s*\(\s*(SELECT[\s\S]+)\s*\)$/i);
-    if (match) {
+    if (match && match[1] && match[2] && match[3]) {
       return { column: match[1], op: match[2], subquery: match[3].trim() };
     }
     return null;
@@ -2659,7 +2675,7 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Match: aggregate(arg) op value
     const match = trimmed.match(/^(.+?)\s*(>=|<=|<>|!=|>|<|=)\s*(.+)$/);
-    if (match) {
+    if (match && match[1] && match[2] && match[3]) {
       const leftExpr = match[1].trim();
       const op = match[2];
       const rightStr = match[3].trim();
@@ -2668,7 +2684,8 @@ export class InMemoryEngine implements ExecutionEngine {
       if (this.isAggregateFunction(leftExpr)) {
         leftVal = this.evaluateAggregate(leftExpr, groupRows, params);
       } else {
-        leftVal = groupRows.length > 0 ? (groupRows[0][leftExpr] ?? null) : null;
+        const firstGroupRow = groupRows[0];
+        leftVal = firstGroupRow ? (firstGroupRow[leftExpr] ?? null) : null;
       }
 
       let rightVal: SqlValue;
@@ -2714,7 +2731,9 @@ export class InMemoryEngine implements ExecutionEngine {
     const match = expr.trim().match(/^(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT|TOTAL)\s*\(\s*(DISTINCT\s+)?(.+?)\s*\)$/i);
     if (!match) return null;
 
-    const [, fn, distinctMod, argWithSeparator] = match;
+    const fn = match[1]!;
+    const distinctMod = match[2];
+    const argWithSeparator = match[3]!;
     const fnUpper = fn.toUpperCase();
     const isDistinct = !!distinctMod;
 
@@ -2725,7 +2744,7 @@ export class InMemoryEngine implements ExecutionEngine {
     if (fnUpper === 'GROUP_CONCAT') {
       // Check for custom separator
       const sepMatch = argTrimmed.match(/^(.+?),\s*'([^']*)'$/);
-      if (sepMatch) {
+      if (sepMatch && sepMatch[1] && sepMatch[2] !== undefined) {
         argTrimmed = sepMatch[1].trim();
         separator = sepMatch[2];
       }
@@ -2745,7 +2764,8 @@ export class InMemoryEngine implements ExecutionEngine {
       }
       // Check for table.column format
       if (/^\w+\.\w+$/.test(argTrimmed)) {
-        return row[argTrimmed.split('.')[1]] ?? row[argTrimmed] ?? null;
+        const simpleColName = argTrimmed.split('.')[1];
+        return (simpleColName !== undefined ? row[simpleColName] : undefined) ?? row[argTrimmed] ?? null;
       }
       // Otherwise evaluate as expression (arithmetic, CASE, etc.)
       return evaluateCaseExpr(argTrimmed, row, params, pIdx);
@@ -2772,18 +2792,18 @@ export class InMemoryEngine implements ExecutionEngine {
 
       case 'SUM': {
         if (nonNullValues.length === 0) return null;
-        return nonNullValues.reduce((sum, v) => sum + Number(v), 0);
+        return nonNullValues.reduce((sum: number, v) => sum + Number(v), 0);
       }
 
       case 'TOTAL': {
         // TOTAL is like SUM but returns 0.0 for empty set instead of NULL
         if (nonNullValues.length === 0) return 0.0;
-        return nonNullValues.reduce((sum, v) => sum + Number(v), 0);
+        return nonNullValues.reduce((sum: number, v) => sum + Number(v), 0);
       }
 
       case 'AVG': {
         if (nonNullValues.length === 0) return null;
-        const sum = nonNullValues.reduce((s, v) => s + Number(v), 0);
+        const sum = nonNullValues.reduce((s: number, v) => s + Number(v), 0);
         return sum / nonNullValues.length;
       }
 
@@ -2866,7 +2886,7 @@ export class InMemoryEngine implements ExecutionEngine {
     // After each JOIN keyword, the next segment is a table reference (possibly with ON clause)
 
     for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i];
+      const seg = segments[i]!;
 
       if (seg.isJoin) {
         // This is a JOIN keyword, skip it - the next segment has the table
@@ -2874,7 +2894,8 @@ export class InMemoryEngine implements ExecutionEngine {
       }
 
       // Check if this segment follows a JOIN keyword
-      const prevIsJoin = i > 0 && segments[i - 1].isJoin;
+      const prevSeg = segments[i - 1];
+      const prevIsJoin = i > 0 && prevSeg !== undefined && prevSeg.isJoin;
 
       if (prevIsJoin) {
         // This is a table reference after a JOIN - extract table part (before ON clause)
@@ -2972,13 +2993,13 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Match: "tableName" AS alias (quoted table with explicit alias)
     const quotedAsMatch = trimmed.match(/^"([^"]+)"\s+AS\s+(\w+)$/i);
-    if (quotedAsMatch) {
+    if (quotedAsMatch && quotedAsMatch[1] && quotedAsMatch[2]) {
       return { tableName: quotedAsMatch[1], alias: quotedAsMatch[2] };
     }
 
     // Match: "tableName" alias (quoted table with implicit alias)
     const quotedImplicitMatch = trimmed.match(/^"([^"]+)"\s+(\w+)$/);
-    if (quotedImplicitMatch) {
+    if (quotedImplicitMatch && quotedImplicitMatch[1] && quotedImplicitMatch[2]) {
       const possibleAlias = quotedImplicitMatch[2].toUpperCase();
       const keywords = ['WHERE', 'ORDER', 'LIMIT', 'GROUP', 'HAVING', 'JOIN', 'ON', 'AND', 'OR'];
       if (!keywords.includes(possibleAlias)) {
@@ -2988,18 +3009,18 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Match: "tableName" (just quoted table name)
     const quotedSimpleMatch = trimmed.match(/^"([^"]+)"$/);
-    if (quotedSimpleMatch) {
+    if (quotedSimpleMatch && quotedSimpleMatch[1]) {
       return { tableName: quotedSimpleMatch[1], alias: quotedSimpleMatch[1] };
     }
 
     // Match: tableName AS alias (unquoted table with explicit alias)
     const asMatch = trimmed.match(/^(\w+)\s+AS\s+(\w+)$/i);
-    if (asMatch) {
+    if (asMatch && asMatch[1] && asMatch[2]) {
       return { tableName: asMatch[1], alias: asMatch[2] };
     }
     // Match: tableName alias (unquoted table with implicit alias, no AS keyword)
     const implicitMatch = trimmed.match(/^(\w+)\s+(\w+)$/);
-    if (implicitMatch) {
+    if (implicitMatch && implicitMatch[1] && implicitMatch[2]) {
       // Make sure the second word is not a keyword
       const possibleAlias = implicitMatch[2].toUpperCase();
       const keywords = ['WHERE', 'ORDER', 'LIMIT', 'GROUP', 'HAVING', 'JOIN', 'ON', 'AND', 'OR'];
@@ -3009,7 +3030,7 @@ export class InMemoryEngine implements ExecutionEngine {
     }
     // Just table name, use table name as alias too
     const simpleMatch = trimmed.match(/^(\w+)$/);
-    if (simpleMatch) {
+    if (simpleMatch && simpleMatch[1]) {
       return { tableName: simpleMatch[1], alias: simpleMatch[1] };
     }
     return { tableName: trimmed, alias: trimmed };
@@ -3051,11 +3072,6 @@ export class InMemoryEngine implements ExecutionEngine {
         columnList,
         tableName: '',
         tableRefs: [],
-        whereClause: undefined,
-        groupBy: undefined,
-        havingClause: undefined,
-        orderBy: undefined,
-        limit: undefined,
       };
     }
 
@@ -3085,7 +3101,7 @@ export class InMemoryEngine implements ExecutionEngine {
     if (tableRefs.length === 0) return null;
 
     // For backwards compatibility, tableName is the first table
-    const tableName = tableRefs[0].tableName;
+    const tableName = tableRefs[0]!.tableName;
 
     let whereClause: string | undefined;
     let groupBy: string[] | undefined;
@@ -3107,7 +3123,7 @@ export class InMemoryEngine implements ExecutionEngine {
     // Extract GROUP BY clause
     if (groupPos !== -1) {
       const groupMatch = sql.slice(groupPos).match(/^GROUP\s+BY\s+(.+?)(?:\s+HAVING\s+|\s+ORDER\s+|\s+LIMIT\s+|\s*$)/i);
-      if (groupMatch) {
+      if (groupMatch && groupMatch[1]) {
         groupBy = groupMatch[1].split(',').map(c => c.trim());
       }
     }
@@ -3124,7 +3140,7 @@ export class InMemoryEngine implements ExecutionEngine {
     // Extract ORDER BY clause
     if (orderPos !== -1) {
       const orderMatch = sql.slice(orderPos).match(/^ORDER\s+BY\s+(.+?)(?:\s+LIMIT\s+|\s*$)/i);
-      if (orderMatch) {
+      if (orderMatch && orderMatch[1]) {
         orderBy = orderMatch[1].trim();
       }
     }
@@ -3132,12 +3148,27 @@ export class InMemoryEngine implements ExecutionEngine {
     // Extract LIMIT
     if (limitPos !== -1) {
       const limitMatch = sql.slice(limitPos).match(/^LIMIT\s+(\d+)/i);
-      if (limitMatch) {
+      if (limitMatch && limitMatch[1]) {
         limit = parseInt(limitMatch[1], 10);
       }
     }
 
-    return { columnList, tableName, tableRefs, whereClause, groupBy, havingClause, orderBy, limit };
+    const result: {
+      columnList: string;
+      tableName: string;
+      tableRefs: Array<{ tableName: string; alias: string }>;
+      whereClause?: string;
+      groupBy?: string[];
+      havingClause?: string;
+      orderBy?: string;
+      limit?: number;
+    } = { columnList, tableName, tableRefs };
+    if (whereClause !== undefined) result.whereClause = whereClause;
+    if (groupBy !== undefined) result.groupBy = groupBy;
+    if (havingClause !== undefined) result.havingClause = havingClause;
+    if (orderBy !== undefined) result.orderBy = orderBy;
+    if (limit !== undefined) result.limit = limit;
+    return result;
   }
 
   /**
@@ -3154,7 +3185,7 @@ export class InMemoryEngine implements ExecutionEngine {
       // Find where 'AS' actually starts (skip leading whitespace)
       const afterExpr = col.slice(asPos);
       const asMatch = afterExpr.match(/^\s+AS\s+(\w+)/i);
-      if (asMatch) {
+      if (asMatch && asMatch[1]) {
         return { expr, alias: asMatch[1] };
       }
     }
@@ -3194,10 +3225,10 @@ export class InMemoryEngine implements ExecutionEngine {
       if (ch === ')') { parenDepth--; continue; }
 
       // Track CASE depth
-      if (upper.slice(i).startsWith('CASE') && (i + 4 >= col.length || !/\w/.test(col[i + 4]))) {
+      if (upper.slice(i).startsWith('CASE') && (i + 4 >= col.length || !/\w/.test(col[i + 4]!))) {
         caseDepth++; i += 3; continue;
       }
-      if (upper.slice(i).startsWith('END') && (i + 3 >= col.length || !/\w/.test(col[i + 3]))) {
+      if (upper.slice(i).startsWith('END') && (i + 3 >= col.length || !/\w/.test(col[i + 3]!))) {
         if (caseDepth > 0) caseDepth--;
         i += 2; continue;
       }
@@ -3221,13 +3252,13 @@ export class InMemoryEngine implements ExecutionEngine {
     }
 
     // Table name is either in group 1 (quoted) or group 2 (unquoted)
-    const tableName = match[1] || match[2];
-    const setClause = match[3];
+    const tableName = match[1] ?? match[2]!;
+    const setClause = match[3]!;
     const whereClause = match[4];
 
     const table = this.storage.tables.get(tableName);
     if (!table) {
-      throw createTableNotFoundError(tableName, sql);
+      throw createTableNotFoundError(tableName!, sql);
     }
 
     // Parse SET clause - handle expressions like "col = col + ?"
@@ -3288,7 +3319,7 @@ export class InMemoryEngine implements ExecutionEngine {
   ): SqlValue {
     // Simple parameter
     if (expr === '?') {
-      return params[startParamIndex];
+      return params[startParamIndex] ?? null;
     }
 
     // String literal
@@ -3313,8 +3344,10 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Arithmetic expression: column +/- value
     const arithMatch = expr.match(/^(\w+)\s*([\+\-\*\/])\s*(.+)$/);
-    if (arithMatch) {
-      const [, leftCol, op, rightExpr] = arithMatch;
+    if (arithMatch && arithMatch[1] && arithMatch[2] && arithMatch[3]) {
+      const leftCol = arithMatch[1];
+      const op = arithMatch[2];
+      const rightExpr = arithMatch[3];
       const leftVal = Number(row[leftCol] ?? 0);
       let rightVal: number;
 
@@ -3348,7 +3381,7 @@ export class InMemoryEngine implements ExecutionEngine {
     }
 
     // Table name is either in group 1 (quoted) or group 2 (unquoted)
-    const tableName = match[1] || match[2];
+    const tableName = match[1] ?? match[2]!;
     const whereClause = match[3];
 
     const table = this.storage.tables.get(tableName);
@@ -3397,8 +3430,9 @@ export class InMemoryEngine implements ExecutionEngine {
       const literalNotInMatch = cond.match(
         /^(-?\d+(?:\.\d+)?|'[^']*'|NULL)\s+NOT\s+IN\s*\(([^)]*)\)$/i
       );
-      if (literalNotInMatch) {
-        const [, literalStr, valueList] = literalNotInMatch;
+      if (literalNotInMatch && literalNotInMatch[1] && literalNotInMatch[2] !== undefined) {
+        const literalStr = literalNotInMatch[1];
+        const valueList = literalNotInMatch[2];
         // Parse the literal value, handling NULL, strings, and numbers
         let literalValue: SqlValue;
         if (literalStr.toUpperCase() === 'NULL') {
@@ -3439,8 +3473,9 @@ export class InMemoryEngine implements ExecutionEngine {
 
       // Check for NOT IN pattern: column NOT IN (value1, value2, ...)
       const notInMatch = cond.match(/^(\w+)\s+NOT\s+IN\s*\(([^)]*)\)$/i);
-      if (notInMatch) {
-        const [, col, valueList] = notInMatch;
+      if (notInMatch && notInMatch[1] && notInMatch[2] !== undefined) {
+        const col = notInMatch[1];
+        const valueList = notInMatch[2];
         const values: SqlValue[] = [];
         let hasNull = false;
         if (valueList.trim()) {
@@ -3457,13 +3492,15 @@ export class InMemoryEngine implements ExecutionEngine {
 
       // Standard comparison operators
       const match = cond.match(/^(\w+)\s*(>=|<=|<>|!=|>|<|=|LIKE|IS)\s*(.+)$/i);
-      if (!match) continue;
+      if (!match || !match[1] || !match[2] || !match[3]) continue;
 
-      const [, col, op, valStr] = match;
+      const col = match[1];
+      const op = match[2];
+      const valStr = match[3];
       let val: SqlValue;
 
       if (valStr.trim() === '?') {
-        val = params[paramIndex++];
+        val = params[paramIndex++] ?? null;
       } else if (valStr.startsWith("'") && valStr.endsWith("'")) {
         val = valStr.slice(1, -1);
       } else if (!isNaN(Number(valStr))) {
@@ -3480,7 +3517,7 @@ export class InMemoryEngine implements ExecutionEngine {
     const filtered = rows.filter(row => {
       for (const cond of parsedConditions) {
         if (cond.type === 'not_in') {
-          const rowVal = row[cond.col];
+          const rowVal = row[cond.col] ?? null;
           // Per SQL standard (R-52275-55503): Empty list: NOT IN () is always TRUE
           if (cond.values.length === 0) {
             continue; // TRUE, proceed to next condition
@@ -3506,7 +3543,7 @@ export class InMemoryEngine implements ExecutionEngine {
 
         // Handle simple conditions
         const { col, op, val } = cond;
-        const rowVal = row[col];
+        const rowVal = row[col] ?? null;
 
         switch (op) {
           case '=':
@@ -3584,7 +3621,7 @@ export class InMemoryEngine implements ExecutionEngine {
 
     for (const item of items) {
       if (item === '?') {
-        values.push(params[paramIndex++]);
+        values.push(params[paramIndex++] ?? null);
       } else if (
         (item.startsWith("'") && item.endsWith("'")) ||
         (item.startsWith('"') && item.endsWith('"'))
@@ -3630,7 +3667,7 @@ export class InMemoryEngine implements ExecutionEngine {
   ): Record<string, SqlValue>[] {
     const parts = orderBy.split(',').map(p => {
       const match = p.trim().match(/^(\w+)(?:\s+(ASC|DESC))?$/i);
-      if (match) {
+      if (match && match[1]) {
         return { col: match[1], desc: match[2]?.toUpperCase() === 'DESC' };
       }
       return null;
@@ -3638,8 +3675,8 @@ export class InMemoryEngine implements ExecutionEngine {
 
     return [...rows].sort((a, b) => {
       for (const { col, desc } of parts) {
-        const aVal = a[col];
-        const bVal = b[col];
+        const aVal = a[col] ?? null;
+        const bVal = b[col] ?? null;
 
         if (aVal === bVal) continue;
         if (aVal === null) return desc ? -1 : 1;

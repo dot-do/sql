@@ -69,8 +69,8 @@ class MinHeap {
   private bubbleUp(index: number): void {
     while (index > 0) {
       const parentIndex = Math.floor((index - 1) / 2);
-      if (this.heap[parentIndex].distance <= this.heap[index].distance) break;
-      [this.heap[parentIndex], this.heap[index]] = [this.heap[index], this.heap[parentIndex]];
+      if (this.heap[parentIndex]!.distance <= this.heap[index]!.distance) break;
+      [this.heap[parentIndex], this.heap[index]] = [this.heap[index]!, this.heap[parentIndex]!];
       index = parentIndex;
     }
   }
@@ -82,15 +82,15 @@ class MinHeap {
       const right = 2 * index + 2;
       let smallest = index;
 
-      if (left < length && this.heap[left].distance < this.heap[smallest].distance) {
+      if (left < length && this.heap[left]!.distance < this.heap[smallest]!.distance) {
         smallest = left;
       }
-      if (right < length && this.heap[right].distance < this.heap[smallest].distance) {
+      if (right < length && this.heap[right]!.distance < this.heap[smallest]!.distance) {
         smallest = right;
       }
 
       if (smallest === index) break;
-      [this.heap[index], this.heap[smallest]] = [this.heap[smallest], this.heap[index]];
+      [this.heap[index], this.heap[smallest]] = [this.heap[smallest]!, this.heap[index]!];
       index = smallest;
     }
   }
@@ -138,8 +138,8 @@ class MaxHeap {
   private bubbleUp(index: number): void {
     while (index > 0) {
       const parentIndex = Math.floor((index - 1) / 2);
-      if (this.heap[parentIndex].distance >= this.heap[index].distance) break;
-      [this.heap[parentIndex], this.heap[index]] = [this.heap[index], this.heap[parentIndex]];
+      if (this.heap[parentIndex]!.distance >= this.heap[index]!.distance) break;
+      [this.heap[parentIndex], this.heap[index]] = [this.heap[index]!, this.heap[parentIndex]!];
       index = parentIndex;
     }
   }
@@ -151,15 +151,15 @@ class MaxHeap {
       const right = 2 * index + 2;
       let largest = index;
 
-      if (left < length && this.heap[left].distance > this.heap[largest].distance) {
+      if (left < length && this.heap[left]!.distance > this.heap[largest]!.distance) {
         largest = left;
       }
-      if (right < length && this.heap[right].distance > this.heap[largest].distance) {
+      if (right < length && this.heap[right]!.distance > this.heap[largest]!.distance) {
         largest = right;
       }
 
       if (largest === index) break;
-      [this.heap[index], this.heap[largest]] = [this.heap[largest], this.heap[index]];
+      [this.heap[index], this.heap[largest]] = [this.heap[largest]!, this.heap[index]!];
       index = largest;
     }
   }
@@ -368,13 +368,13 @@ export class HnswIndex {
         }
 
         // Add connection from neighbor to new node
-        neighborNode.neighbors[lc].push(id);
+        neighborNode.neighbors[lc]!.push(id);
 
         // Prune if too many connections
-        if (neighborNode.neighbors[lc].length > maxNeighbors) {
+        if (neighborNode.neighbors[lc]!.length > maxNeighbors) {
           // Keep the closest neighbors
           const neighborVector = neighborNode.vector;
-          neighborNode.neighbors[lc] = neighborNode.neighbors[lc]
+          neighborNode.neighbors[lc] = neighborNode.neighbors[lc]!
             .map((nid) => {
               // The new node may not be in this.nodes yet, use its vector directly
               const nidVector = nid === id ? node.vector : this.nodes.get(nid)?.vector;
@@ -391,7 +391,7 @@ export class HnswIndex {
 
       // Update entry point for next level
       if (selectedNeighbors.length > 0) {
-        currId = selectedNeighbors[0].id;
+        currId = selectedNeighbors[0]!.id;
       }
     }
 
@@ -497,7 +497,7 @@ export class HnswIndex {
     for (let lc = this.maxLevel; lc > 0; lc--) {
       const result = this.searchLayer(query, currId, 1, lc);
       if (result.length > 0) {
-        currId = result[0].id;
+        currId = result[0]!.id;
       }
     }
 
@@ -543,10 +543,10 @@ export class HnswIndex {
 
     // Remove connections from neighbors
     for (let level = 0; level < node.neighbors.length; level++) {
-      for (const neighborId of node.neighbors[level]) {
+      for (const neighborId of node.neighbors[level]!) {
         const neighborNode = this.nodes.get(neighborId);
         if (neighborNode && neighborNode.neighbors[level]) {
-          neighborNode.neighbors[level] = neighborNode.neighbors[level].filter(
+          neighborNode.neighbors[level] = neighborNode.neighbors[level]!.filter(
             (nid) => nid !== id,
           );
         }
@@ -665,13 +665,13 @@ export class HnswIndex {
 
       // Write vector
       for (let i = 0; i < node.vector.length; i++) {
-        view.setFloat32(offset, node.vector[i], true);
+        view.setFloat32(offset, node.vector[i]!, true);
         offset += 4;
       }
 
       // Write neighbor counts and neighbors
       for (let l = 0; l <= node.level; l++) {
-        view.setUint32(offset, neighborCounts[l], true);
+        view.setUint32(offset, neighborCounts[l]!, true);
         offset += 4;
         for (const neighborId of node.neighbors[l] ?? []) {
           view.setBigUint64(offset, neighborId, true);

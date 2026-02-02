@@ -260,7 +260,7 @@ export class VectorColumn {
 
     for (let i = 0; i < vector.length; i++) {
       // Map from [minVal, maxVal] to [-128, 127]
-      const normalized = (vector[i] - stats.zeroPoint) * stats.scale;
+      const normalized = (vector[i]! - stats.zeroPoint) * stats.scale;
       result[i] = Math.max(-128, Math.min(127, Math.round(normalized)));
     }
 
@@ -275,7 +275,7 @@ export class VectorColumn {
     const result = new Float32Array(quantized.length);
 
     for (let i = 0; i < quantized.length; i++) {
-      result[i] = quantized[i] / stats.scale + stats.zeroPoint;
+      result[i] = quantized[i]! / stats.scale + stats.zeroPoint;
     }
 
     return result;
@@ -297,8 +297,8 @@ export class VectorColumn {
       // Compute from actual data
       for (const vector of this.vectors.values()) {
         for (let i = 0; i < vector.length; i++) {
-          minVal = Math.min(minVal, vector[i]);
-          maxVal = Math.max(maxVal, vector[i]);
+          minVal = Math.min(minVal, vector[i]!);
+          maxVal = Math.max(maxVal, vector[i]!);
         }
       }
     }
@@ -416,7 +416,7 @@ export class VectorColumn {
     for (const [rowId, vector] of this.vectors) {
       view.setBigUint64(offset, rowId, true); offset += 8;
       for (let i = 0; i < vector.length; i++) {
-        view.setFloat32(offset, vector[i], true);
+        view.setFloat32(offset, vector[i]!, true);
         offset += 4;
       }
     }

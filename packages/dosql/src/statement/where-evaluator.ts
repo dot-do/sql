@@ -47,7 +47,7 @@ export function evaluateWhereCondition(
 
   // Handle parenthesized expression: NOT (...)
   const notParenMatch = trimmed.match(/^NOT\s*\((.+)\)$/is);
-  if (notParenMatch) {
+  if (notParenMatch && notParenMatch[1]) {
     return !evaluateWhereCondition(notParenMatch[1], row, params, pIdx, deps, _depth + 1);
   }
 
@@ -92,7 +92,7 @@ export function evaluateWhereCondition(
 
   // Handle NOT BETWEEN: col NOT BETWEEN low AND high
   const notBetweenMatch = trimmed.match(/^(.+?)\s+NOT\s+BETWEEN\s+(.+?)\s+AND\s+(.+)$/i);
-  if (notBetweenMatch) {
+  if (notBetweenMatch && notBetweenMatch[1] && notBetweenMatch[2] && notBetweenMatch[3]) {
     const exprStr = notBetweenMatch[1].trim();
     const lowStr = notBetweenMatch[2].trim();
     const highStr = notBetweenMatch[3].trim();
@@ -112,7 +112,7 @@ export function evaluateWhereCondition(
 
   // Handle BETWEEN: expr BETWEEN low AND high (supports expressions like col, b-2, d+2)
   const betweenMatch = trimmed.match(/^(.+?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+)$/i);
-  if (betweenMatch) {
+  if (betweenMatch && betweenMatch[1] && betweenMatch[2] && betweenMatch[3]) {
     const exprStr = betweenMatch[1].trim();
     const lowStr = betweenMatch[2].trim();
     const highStr = betweenMatch[3].trim();
@@ -132,7 +132,7 @@ export function evaluateWhereCondition(
   // Handle literal NOT IN: 1 NOT IN (2, 3), NULL NOT IN ()
   // Now includes NULL as a valid literal
   const literalNotInMatch = trimmed.match(/^(-?\d+(?:\.\d+)?|'[^']*'|NULL)\s+NOT\s+IN\s*\(([^)]*)\)$/i);
-  if (literalNotInMatch) {
+  if (literalNotInMatch && literalNotInMatch[1] && literalNotInMatch[2] !== undefined) {
     const literalStr = literalNotInMatch[1];
     const valueList = literalNotInMatch[2];
     // Parse the literal value, handling NULL, strings, and numbers
@@ -168,7 +168,7 @@ export function evaluateWhereCondition(
   // Must come before column IN to catch numeric/string literals
   // Now includes NULL as a valid literal
   const literalInMatch = trimmed.match(/^(-?\d+(?:\.\d+)?|'[^']*'|NULL)\s+IN\s*\(([^)]*)\)$/i);
-  if (literalInMatch) {
+  if (literalInMatch && literalInMatch[1] && literalInMatch[2] !== undefined) {
     const literalStr = literalInMatch[1];
     const valueList = literalInMatch[2];
     // Parse the literal value, handling NULL, strings, and numbers
@@ -197,7 +197,7 @@ export function evaluateWhereCondition(
 
   // Handle column NOT IN: col NOT IN (1, 2, 3)
   const notInMatch = trimmed.match(/^(\w+(?:\.\w+)?)\s+NOT\s+IN\s*\(([^)]*)\)$/i);
-  if (notInMatch) {
+  if (notInMatch && notInMatch[1] && notInMatch[2] !== undefined) {
     const col = notInMatch[1];
     const valueList = notInMatch[2];
     const colVal = deps.getColumnValue(row, col);
@@ -220,7 +220,7 @@ export function evaluateWhereCondition(
 
   // Handle column IN: col IN (1, 2, 3)
   const inMatch = trimmed.match(/^(\w+(?:\.\w+)?)\s+IN\s*\(([^)]*)\)$/i);
-  if (inMatch) {
+  if (inMatch && inMatch[1] && inMatch[2] !== undefined) {
     const col = inMatch[1];
     const valueList = inMatch[2];
     const colVal = deps.getColumnValue(row, col);
@@ -238,7 +238,7 @@ export function evaluateWhereCondition(
 
   // Handle IS NULL / IS NOT NULL
   const isNullMatch = trimmed.match(/^(\w+(?:\.\w+)?)\s+IS\s+(NOT\s+)?NULL$/i);
-  if (isNullMatch) {
+  if (isNullMatch && isNullMatch[1]) {
     const col = isNullMatch[1];
     const isNot = !!isNullMatch[2];
     const colVal = deps.getColumnValue(row, col);
@@ -263,10 +263,10 @@ export function evaluateWhereCondition(
       if (inStr) continue;
       if (ch === '(') { parenDep++; continue; }
       if (ch === ')') { parenDep--; continue; }
-      if (upperTrimmed.slice(i).startsWith('CASE') && (i + 4 >= trimmed.length || !/\w/.test(trimmed[i + 4]))) {
+      if (upperTrimmed.slice(i).startsWith('CASE') && (i + 4 >= trimmed.length || !/\w/.test(trimmed[i + 4]!))) {
         caseDepth++; i += 3; continue;
       }
-      if (upperTrimmed.slice(i).startsWith('END') && (i + 3 >= trimmed.length || !/\w/.test(trimmed[i + 3]))) {
+      if (upperTrimmed.slice(i).startsWith('END') && (i + 3 >= trimmed.length || !/\w/.test(trimmed[i + 3]!))) {
         if (caseDepth > 0) caseDepth--;
         i += 2; continue;
       }
@@ -306,7 +306,7 @@ export function evaluateWhereCondition(
   // Handle function call comparison: func(args) op val
   // This matches patterns like: coalesce(a,b,c)<>0, abs(b-c)>5
   const funcCompMatch = trimmed.match(/^(\w+\s*\([^)]*\))\s*(>=|<=|<>|!=|>|<|=)\s*(.+)$/i);
-  if (funcCompMatch) {
+  if (funcCompMatch && funcCompMatch[1] && funcCompMatch[2] && funcCompMatch[3]) {
     const funcExpr = funcCompMatch[1];
     const op = funcCompMatch[2].toUpperCase();
     const rightStr = funcCompMatch[3].trim();
@@ -320,7 +320,7 @@ export function evaluateWhereCondition(
 
   // Handle comparison: col op val
   const compMatch = trimmed.match(/^(\w+(?:\.\w+)?)\s*(>=|<=|<>|!=|>|<|=|LIKE)\s*(.+)$/i);
-  if (compMatch) {
+  if (compMatch && compMatch[1] && compMatch[2] && compMatch[3]) {
     const col = compMatch[1];
     const op = compMatch[2].toUpperCase();
     const rightStr = compMatch[3].trim();
@@ -338,7 +338,7 @@ export function evaluateWhereCondition(
 
     // Check if right side is an arithmetic expression involving columns (e.g., b-2, b+2)
     const arithMatch = rightStr.match(/^([a-zA-Z_]\w*(?:\.\w+)?)\s*([+\-])\s*(\d+(?:\.\d+)?)$/);
-    if (arithMatch) {
+    if (arithMatch && arithMatch[1] && arithMatch[2] && arithMatch[3]) {
       const rightColName = arithMatch[1];
       const arithOp = arithMatch[2];
       const arithNum = Number(arithMatch[3]);
@@ -473,7 +473,7 @@ function splitByLogicalOpNotBetween(condition: string, op: string): string[] {
  */
 function parseConditionValue(str: string, params: SqlValue[], pIdx: { value: number }): SqlValue {
   const trimmed = str.trim();
-  if (trimmed === '?') return params[pIdx.value++];
+  if (trimmed === '?') return params[pIdx.value++] ?? null;
   if (trimmed.startsWith("'") && trimmed.endsWith("'")) return trimmed.slice(1, -1).replace(/''/g, "'");
   if (trimmed.toUpperCase() === 'NULL') return null;
   if (!isNaN(Number(trimmed))) return Number(trimmed);
@@ -503,7 +503,7 @@ function evaluateSimpleExpr(
 
   // Parameter
   if (trimmed === '?') {
-    return params[pIdx.value++];
+    return params[pIdx.value++] ?? null;
   }
 
   // String literal
@@ -528,7 +528,7 @@ function evaluateSimpleExpr(
 
   // Handle addition: left + right
   const addMatch = trimmed.match(/^(.+?)\s*\+\s*(.+)$/);
-  if (addMatch) {
+  if (addMatch && addMatch[1] && addMatch[2]) {
     const leftVal = evaluateSimpleExpr(addMatch[1], row, params, pIdx, deps, _depth + 1);
     const rightVal = evaluateSimpleExpr(addMatch[2], row, params, pIdx, deps, _depth + 1);
     if (leftVal === null || rightVal === null) return null;
@@ -538,7 +538,7 @@ function evaluateSimpleExpr(
   // Handle subtraction: left - right (be careful with negative numbers)
   // Match from the end to handle cases like "col-2" vs "-2"
   const subMatch = trimmed.match(/^(.+?)\s*-\s*(\d+(?:\.\d+)?|\w+(?:\.\w+)?)$/);
-  if (subMatch) {
+  if (subMatch && subMatch[1] && subMatch[2]) {
     const leftVal = evaluateSimpleExpr(subMatch[1], row, params, pIdx, deps, _depth + 1);
     const rightVal = evaluateSimpleExpr(subMatch[2], row, params, pIdx, deps, _depth + 1);
     if (leftVal === null || rightVal === null) return null;
@@ -547,7 +547,7 @@ function evaluateSimpleExpr(
 
   // Handle multiplication: left * right
   const mulMatch = trimmed.match(/^(.+?)\s*\*\s*(.+)$/);
-  if (mulMatch) {
+  if (mulMatch && mulMatch[1] && mulMatch[2]) {
     const leftVal = evaluateSimpleExpr(mulMatch[1], row, params, pIdx, deps, _depth + 1);
     const rightVal = evaluateSimpleExpr(mulMatch[2], row, params, pIdx, deps, _depth + 1);
     if (leftVal === null || rightVal === null) return null;
@@ -556,7 +556,7 @@ function evaluateSimpleExpr(
 
   // Handle division: left / right
   const divMatch = trimmed.match(/^(.+?)\s*\/\s*(.+)$/);
-  if (divMatch) {
+  if (divMatch && divMatch[1] && divMatch[2]) {
     const leftVal = evaluateSimpleExpr(divMatch[1], row, params, pIdx, deps, _depth + 1);
     const rightVal = evaluateSimpleExpr(divMatch[2], row, params, pIdx, deps, _depth + 1);
     if (leftVal === null || rightVal === null) return null;
