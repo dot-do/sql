@@ -111,3 +111,88 @@ export {
   safeLikeMatchWithEscape,
   safeGlobMatch,
 } from './safe-like.js';
+
+export {
+  // Hash functions
+  fnv1a,
+  fnv1aString,
+  fnv1aNumber,
+  fnv1aBigInt,
+  fnv1aBytes,
+  xxhash,
+  getHashFunction,
+
+  // Hash constants
+  FNV_OFFSET_BASIS,
+  FNV_PRIME,
+
+  // Types
+  type HashAlgorithm,
+} from './hash.js';
+
+export {
+  // Type guards for Record<string, unknown>
+  isObject,
+  isObjectOrArray,
+  isArray,
+  isTypedArray,
+
+  // Property type guards
+  hasProperty,
+  hasPropertyOfType,
+  hasStringProperty,
+  hasNumberProperty,
+  hasBooleanProperty,
+  hasArrayProperty,
+  hasTypedArrayProperty,
+  hasObjectProperty,
+  hasFunctionProperty,
+  hasStringProperties,
+  hasProperties,
+
+  // Optional property accessors
+  getStringProperty,
+  getNumberProperty,
+  getBooleanProperty,
+  getArrayProperty,
+  getObjectProperty,
+  getTypedProperty,
+
+  // Common object shape guards
+  hasErrorCode,
+  hasTypeProperty,
+  isErrorLike,
+  hasTypeDiscriminator,
+
+  // Record iteration helpers
+  iterateRecord,
+  getKeys,
+  getValues,
+  getEntries,
+
+  // Primitive type guards
+  isString,
+  isNumber,
+  isBoolean,
+  isBigInt,
+  isFunction,
+  isNullish,
+  isDefined,
+
+  // Casting helpers
+  asRecord,
+  asRecordOrThrow,
+  asArray,
+  asTypedArray,
+
+  // SQL value guards
+  isSqlValue,
+  isRow,
+
+  // Utility types
+  type RecordWithRequired,
+  type RecordWith,
+  type PartialRecord,
+  type SqlValue as TypeGuardSqlValue,
+  type Row,
+} from './type-guards.js';

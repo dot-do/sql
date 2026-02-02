@@ -30,6 +30,22 @@ import type {
   Trim,
 } from './types.js';
 
+// Import branded types from @dotdo/sql-types (via sql.do)
+// These follow the standardized unique symbol pattern for type safety
+export type { UUID, Email, Timestamp } from 'sql.do';
+export {
+  createUUID,
+  createEmail,
+  createTimestamp,
+  isValidUUID,
+  isValidEmail,
+  isValidTimestamp,
+  timestampValue,
+  timestampToMillis,
+  timestampToISO,
+  compareTimestamp,
+} from 'sql.do';
+
 // =============================================================================
 // TYPE-LEVEL STRING UTILITIES
 // =============================================================================
@@ -420,32 +436,6 @@ export type RelationFields<T extends TableDefinition> = {
 export type DataFields<T extends TableDefinition> = {
   [K in keyof T]: IsRelation<T[K] & string> extends true ? never : K;
 }[keyof T];
-
-// =============================================================================
-// BRANDED TYPES FOR BETTER TYPE SAFETY
-// =============================================================================
-
-/**
- * Brand a type with a unique identifier
- */
-declare const brand: unique symbol;
-
-export type Brand<T, B extends string> = T & { readonly [brand]: B };
-
-/**
- * UUID type (branded string)
- */
-export type UUID = Brand<string, 'UUID'>;
-
-/**
- * Email type (branded string)
- */
-export type Email = Brand<string, 'Email'>;
-
-/**
- * Timestamp type (branded Date)
- */
-export type Timestamp = Brand<Date, 'Timestamp'>;
 
 // =============================================================================
 // TYPE ASSERTION HELPERS

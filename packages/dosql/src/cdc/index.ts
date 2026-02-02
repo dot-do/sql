@@ -132,3 +132,18 @@ export {
   type ConsumerState,
   DEFAULT_CDC_POOL_CONFIG,
 } from './pool.js';
+
+// Backpressure module
+export {
+  BackpressureController,
+  createBackpressureController,
+  ackToBackpressureSignal,
+  nackToBackpressureSignal,
+  type BackpressureConfig,
+  type BackpressureState,
+  type BackpressureMetrics,
+  type BackpressureStateChangeCallback,
+  type BatchParameterChangeCallback,
+  type LakehouseAckWithBackpressure,
+  DEFAULT_BACKPRESSURE_CONFIG,
+} from './backpressure.js';

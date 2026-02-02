@@ -1,12 +1,43 @@
 /**
- * LRU Cache Implementation for B-tree Page Manager
+ * LRU/LFU Cache Implementation for B-tree Page Manager
  *
- * A generic Least Recently Used (LRU) cache with:
+ * A generic cache with configurable eviction policies:
+ * - LRU (Least Recently Used) - evicts entries not accessed recently
+ * - LFU (Least Frequently Used) - evicts entries accessed least often
+ *
+ * Features:
  * - Configurable max size (by entry count or bytes)
  * - O(1) get, set, delete operations
  * - Optional eviction callback for dirty page handling
  * - Dirty page tracking for write-back
+ * - Memory pressure callbacks for proactive eviction
  */
+
+/**
+ * Eviction policy for the cache
+ */
+export type EvictionPolicy = 'lru' | 'lfu';
+
+/**
+ * Memory pressure levels for callbacks
+ */
+export type MemoryPressureLevel = 'low' | 'medium' | 'high' | 'critical';
+
+/**
+ * Memory pressure callback info
+ */
+export interface MemoryPressureInfo {
+  /** Current memory usage in bytes */
+  currentBytes: number;
+  /** Maximum memory limit in bytes */
+  maxBytes: number;
+  /** Usage ratio (0-1) */
+  usageRatio: number;
+  /** Pressure level */
+  level: MemoryPressureLevel;
+  /** Number of entries in cache */
+  entryCount: number;
+}
 
 /**
  * Options for creating an LRU cache
@@ -38,6 +69,29 @@ export interface LRUCacheOptions<K, V> {
    * Default: false
    */
   evictOnClear?: boolean;
+
+  /**
+   * Eviction policy to use.
+   * - 'lru': Least Recently Used (default) - evicts entries not accessed recently
+   * - 'lfu': Least Frequently Used - evicts entries accessed least often
+   */
+  evictionPolicy?: EvictionPolicy;
+
+  /**
+   * Callback invoked when memory pressure changes.
+   * Can be used to trigger proactive eviction or other memory management.
+   */
+  onMemoryPressure?: (info: MemoryPressureInfo) => void;
+
+  /**
+   * Thresholds for memory pressure levels (as ratios of maxSize).
+   * Default: { low: 0.5, medium: 0.75, high: 0.9 }
+   */
+  pressureThresholds?: {
+    low?: number;
+    medium?: number;
+    high?: number;
+  };
 }
 
 /**
@@ -51,6 +105,15 @@ export interface SetOptions {
 }
 
 /**
+ * Default memory pressure thresholds
+ */
+const DEFAULT_PRESSURE_THRESHOLDS = {
+  low: 0.5,
+  medium: 0.75,
+  high: 0.9,
+};
+
+/**
  * Internal node for the doubly-linked list
  */
 interface LRUNode<K, V> {
@@ -60,18 +123,23 @@ interface LRUNode<K, V> {
   dirty: boolean;
   prev: LRUNode<K, V> | null;
   next: LRUNode<K, V> | null;
+  /** Access frequency for LFU policy */
+  frequency: number;
 }
 
 /**
- * LRU Cache implementation using a Map and doubly-linked list.
+ * LRU/LFU Cache implementation using a Map and doubly-linked list.
  *
- * The doubly-linked list maintains LRU order:
+ * For LRU policy, the doubly-linked list maintains LRU order:
  * - Head is the least recently used (oldest)
  * - Tail is the most recently used (newest)
  *
+ * For LFU policy, nodes track access frequency and eviction selects
+ * the node with the lowest frequency (ties broken by LRU order).
+ *
  * Operations:
- * - get: O(1) - looks up in map, moves node to tail
- * - set: O(1) - adds to map and tail, evicts from head if needed
+ * - get: O(1) - looks up in map, updates position/frequency
+ * - set: O(1) for LRU, O(n) for LFU - adds to map, evicts if needed
  * - delete: O(1) - removes from map and list
  */
 export class LRUCache<K, V> {
@@ -79,22 +147,40 @@ export class LRUCache<K, V> {
   private readonly sizeCalculator?: (value: V, key: K) => number;
   private readonly onEvict?: (key: K, value: V, dirty: boolean) => void | Promise<void>;
   private readonly evictOnClear: boolean;
+  private readonly evictionPolicy: EvictionPolicy;
+  private readonly onMemoryPressure?: (info: MemoryPressureInfo) => void;
+  private readonly pressureThresholds: { low: number; medium: number; high: number };
 
   private readonly map = new Map<K, LRUNode<K, V>>();
   private head: LRUNode<K, V> | null = null;
   private tail: LRUNode<K, V> | null = null;
   private _currentBytes = 0;
 
+  // For LFU: track minimum frequency for O(1) eviction candidate finding
+  private _minFrequency = 0;
+  // For LFU: map from frequency to doubly-linked list of nodes with that frequency
+  private readonly frequencyLists = new Map<number, { head: LRUNode<K, V> | null; tail: LRUNode<K, V> | null }>();
+
   // Statistics tracking
   private _hits = 0;
   private _misses = 0;
   private _evictions = 0;
+
+  // Memory pressure tracking
+  private _lastPressureLevel: MemoryPressureLevel = 'low';
 
   constructor(options: LRUCacheOptions<K, V>) {
     this.maxSize = options.maxSize;
     this.sizeCalculator = options.sizeCalculator;
     this.onEvict = options.onEvict;
     this.evictOnClear = options.evictOnClear ?? false;
+    this.evictionPolicy = options.evictionPolicy ?? 'lru';
+    this.onMemoryPressure = options.onMemoryPressure;
+    this.pressureThresholds = {
+      low: options.pressureThresholds?.low ?? DEFAULT_PRESSURE_THRESHOLDS.low,
+      medium: options.pressureThresholds?.medium ?? DEFAULT_PRESSURE_THRESHOLDS.medium,
+      high: options.pressureThresholds?.high ?? DEFAULT_PRESSURE_THRESHOLDS.high,
+    };
   }
 
   /**
@@ -148,6 +234,28 @@ export class LRUCache<K, V> {
   }
 
   /**
+   * Current eviction policy
+   */
+  get policy(): EvictionPolicy {
+    return this.evictionPolicy;
+  }
+
+  /**
+   * Current memory pressure level
+   */
+  get memoryPressureLevel(): MemoryPressureLevel {
+    return this._lastPressureLevel;
+  }
+
+  /**
+   * Get memory usage ratio (0-1)
+   */
+  get memoryUsageRatio(): number {
+    if (this.maxSize === 0) return 0;
+    return this._currentBytes / this.maxSize;
+  }
+
+  /**
    * Reset statistics counters
    */
   resetStats(): void {
@@ -164,7 +272,7 @@ export class LRUCache<K, V> {
   }
 
   /**
-   * Get a value from the cache, updating its LRU position
+   * Get a value from the cache, updating its LRU position or LFU frequency
    * @param key - The key to look up
    * @returns The value or undefined if not found
    */
@@ -178,8 +286,13 @@ export class LRUCache<K, V> {
     // Track cache hit
     this._hits++;
 
-    // Move to tail (most recently used)
-    this.moveToTail(node);
+    if (this.evictionPolicy === 'lfu') {
+      // Update frequency for LFU policy
+      this.incrementFrequency(node);
+    } else {
+      // Move to tail (most recently used) for LRU policy
+      this.moveToTail(node);
+    }
     return node.value;
   }
 

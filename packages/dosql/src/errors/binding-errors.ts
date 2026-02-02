@@ -14,6 +14,7 @@ import {
   type SerializedError,
 } from './base.js';
 import { BindingErrorCode } from './codes.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // Binding Error
@@ -64,6 +65,14 @@ export class BindingError extends DoSQLError {
       case BindingErrorCode.NAMED_EXPECTED:
         this.recoveryHint = 'Use an object with named parameters instead of positional arguments';
         break;
+      case BindingErrorCode.TYPE_MISMATCH:
+        this.recoveryHint = 'Ensure the parameter type matches the expected column type';
+        break;
+      case BindingErrorCode.MIXED_PARAMS:
+        this.recoveryHint = 'Use either positional (?) or named (:name) parameters, not both';
+        break;
+      default:
+        assertNever(this.code);
     }
   }
 
@@ -84,8 +93,10 @@ export class BindingError extends DoSQLError {
         return 'The number of parameters does not match the SQL statement.';
       case BindingErrorCode.NAMED_EXPECTED:
         return 'This query uses named parameters. Please provide an object.';
+      case BindingErrorCode.MIXED_PARAMS:
+        return 'Cannot mix positional (?) and named (:name) parameter styles.';
       default:
-        return this.message;
+        return assertNever(this.code);
     }
   }
 

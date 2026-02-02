@@ -19,8 +19,17 @@ import {
   type QueryPlan,
   type BasePlanNode,
   type SortSpec,
+  type SqlValue,
 } from '../types.js';
 import { assertNever } from '../../utils/assert-never.js';
+import {
+  FNV_OFFSET_BASIS,
+  FNV_PRIME,
+  fnv1aString,
+  fnv1aNumber,
+  fnv1aBigInt,
+  fnv1aBytes,
+} from '../../utils/hash.js';
 
 // =============================================================================
 // PLAN NODE TYPES
@@ -63,22 +72,200 @@ export interface CompoundSelectPlan extends BasePlanNode {
 // =============================================================================
 
 /**
- * Create a hash key for a row (for deduplication)
- * Uses JSON.stringify for simplicity, could be optimized with FNV or xxHash
+ * Hash a single SQL value
+ */
+function hashValue(value: SqlValue, hash: number): number {
+  if (value === null) {
+    hash ^= 0x00; // null marker
+    return Math.imul(hash, FNV_PRIME) >>> 0;
+  }
+
+  switch (typeof value) {
+    case 'string':
+      hash ^= 0x53; // 'S' for string
+      hash = Math.imul(hash, FNV_PRIME) >>> 0;
+      return fnv1aString(value, hash);
+
+    case 'number':
+      return fnv1aNumber(value, hash);
+
+    case 'bigint':
+      return fnv1aBigInt(value, hash);
+
+    case 'boolean':
+      hash ^= 0x4C; // 'L' for logical/boolean
+      hash = Math.imul(hash, FNV_PRIME) >>> 0;
+      hash ^= value ? 1 : 0;
+      return Math.imul(hash, FNV_PRIME) >>> 0;
+
+    default:
+      // Date or Uint8Array
+      if (value instanceof Date) {
+        hash ^= 0x44; // 'D' for date
+        hash = Math.imul(hash, FNV_PRIME) >>> 0;
+        return fnv1aNumber(value.getTime(), hash);
+      }
+      if (value instanceof Uint8Array) {
+        return fnv1aBytes(value, hash);
+      }
+      // Fallback: shouldn't happen with proper types
+      hash ^= 0x55; // 'U' for unknown
+      hash = Math.imul(hash, FNV_PRIME) >>> 0;
+      return fnv1aString(String(value), hash);
+  }
+}
+
+/**
+ * Row identity type for deduplication.
+ * Combines a numeric hash for fast comparison with a canonical string key
+ * to handle hash collisions.
+ */
+interface RowIdentity {
+  hash: number;
+  key: string;
+}
+
+/**
+ * Build a canonical string key for a row (for collision handling)
+ * This is only used when there's a hash collision
+ */
+function buildCanonicalKey(row: Row, sortedKeys: string[]): string {
+  const parts: string[] = [];
+  for (const k of sortedKeys) {
+    const v = row[k];
+    if (v === null) {
+      parts.push('N');
+    } else if (typeof v === 'string') {
+      // Escape special chars to avoid ambiguity
+      parts.push('S' + v.length + ':' + v);
+    } else if (typeof v === 'number') {
+      parts.push('n' + v);
+    } else if (typeof v === 'bigint') {
+      parts.push('B' + v.toString());
+    } else if (typeof v === 'boolean') {
+      parts.push(v ? 'T' : 'F');
+    } else if (v instanceof Date) {
+      parts.push('D' + v.getTime());
+    } else if (v instanceof Uint8Array) {
+      // Base64-like encoding would be better but for now use hex
+      parts.push('Y' + Array.from(v).map(b => b.toString(16).padStart(2, '0')).join(''));
+    }
+    parts.push('|');
+  }
+  return parts.join('');
+}
+
+/**
+ * Create a row identity for deduplication
+ * Uses FNV-1a hash for fast comparison with collision fallback
+ */
+function rowIdentity(row: Row): RowIdentity {
+  // Sort keys for consistent ordering
+  const sortedKeys = Object.keys(row).sort();
+
+  // Compute hash
+  let hash = FNV_OFFSET_BASIS;
+  for (const k of sortedKeys) {
+    // Hash the key name
+    hash = fnv1aString(k, hash);
+    // Hash the value
+    hash = hashValue(row[k], hash);
+  }
+
+  return {
+    hash,
+    key: buildCanonicalKey(row, sortedKeys),
+  };
+}
+
+/**
+ * Hash set with collision handling for row deduplication
+ */
+class RowHashSet {
+  private buckets = new Map<number, string[]>();
+
+  has(identity: RowIdentity): boolean {
+    const bucket = this.buckets.get(identity.hash);
+    if (!bucket) return false;
+    return bucket.includes(identity.key);
+  }
+
+  add(identity: RowIdentity): void {
+    const bucket = this.buckets.get(identity.hash);
+    if (bucket) {
+      if (!bucket.includes(identity.key)) {
+        bucket.push(identity.key);
+      }
+    } else {
+      this.buckets.set(identity.hash, [identity.key]);
+    }
+  }
+
+  clear(): void {
+    this.buckets.clear();
+  }
+}
+
+/**
+ * Hash map with collision handling for row counts
+ */
+class RowHashMap {
+  private buckets = new Map<number, Map<string, number>>();
+
+  get(identity: RowIdentity): number | undefined {
+    const bucket = this.buckets.get(identity.hash);
+    if (!bucket) return undefined;
+    return bucket.get(identity.key);
+  }
+
+  set(identity: RowIdentity, count: number): void {
+    let bucket = this.buckets.get(identity.hash);
+    if (!bucket) {
+      bucket = new Map();
+      this.buckets.set(identity.hash, bucket);
+    }
+    bucket.set(identity.key, count);
+  }
+
+  clear(): void {
+    this.buckets.clear();
+  }
+}
+
+/**
+ * Legacy rowKey function for backward compatibility
+ * @deprecated Use rowIdentity() with RowHashSet for better performance
  */
 function rowKey(row: Row): string {
-  // Sort keys for consistent ordering
-  const sorted = Object.keys(row).sort();
-  const values = sorted.map(k => row[k]);
-  return JSON.stringify(values);
+  return rowIdentity(row).key;
 }
 
 /**
  * Create a hash key for specific columns only
+ * @deprecated Use rowIdentity approach for better performance
  */
 function rowKeyColumns(row: Row, columns: string[]): string {
-  const values = columns.map(k => row[k]);
-  return JSON.stringify(values);
+  const parts: string[] = [];
+  for (const k of columns) {
+    const v = row[k];
+    if (v === null) {
+      parts.push('N');
+    } else if (typeof v === 'string') {
+      parts.push('S' + v.length + ':' + v);
+    } else if (typeof v === 'number') {
+      parts.push('n' + v);
+    } else if (typeof v === 'bigint') {
+      parts.push('B' + v.toString());
+    } else if (typeof v === 'boolean') {
+      parts.push(v ? 'T' : 'F');
+    } else if (v instanceof Date) {
+      parts.push('D' + v.getTime());
+    } else if (v instanceof Uint8Array) {
+      parts.push('Y' + Array.from(v).map(b => b.toString(16).padStart(2, '0')).join(''));
+    }
+    parts.push('|');
+  }
+  return parts.join('');
 }
 
 // =============================================================================
@@ -98,14 +285,14 @@ export class UnionOperator implements Operator {
   private ctx!: ExecutionContext;
   private outputColumns: string[] = [];
   private readingLeft = true;
-  private seen: Set<string> | null = null;
+  private seen: RowHashSet | null = null;
 
   constructor(left: Operator, right: Operator, all: boolean) {
     this.left = left;
     this.right = right;
     this.all = all;
     if (!this.all) {
-      this.seen = new Set();
+      this.seen = new RowHashSet();
     }
   }
 
@@ -135,13 +322,13 @@ export class UnionOperator implements Operator {
         return null;
       }
 
-      // For UNION (not ALL), deduplicate
+      // For UNION (not ALL), deduplicate using hash-based set
       if (!this.all && this.seen) {
-        const key = rowKey(row);
-        if (this.seen.has(key)) {
+        const identity = rowIdentity(row);
+        if (this.seen.has(identity)) {
           continue;
         }
-        this.seen.add(key);
+        this.seen.add(identity);
       }
 
       return row;
@@ -151,7 +338,10 @@ export class UnionOperator implements Operator {
   async close(): Promise<void> {
     await this.left.close();
     await this.right.close();
-    this.seen = null;
+    if (this.seen) {
+      this.seen.clear();
+      this.seen = null;
+    }
   }
 
   columns(): string[] {
@@ -177,11 +367,11 @@ export class IntersectOperator implements Operator {
   private outputColumns: string[] = [];
 
   // For INTERSECT: set of right-side row keys
-  private rightSet: Set<string> | null = null;
-  private leftSeen: Set<string> | null = null;
+  private rightSet: RowHashSet | null = null;
+  private leftSeen: RowHashSet | null = null;
 
   // For INTERSECT ALL: count of right-side rows
-  private rightCounts: Map<string, number> | null = null;
+  private rightCounts: RowHashMap | null = null;
 
   constructor(left: Operator, right: Operator, all: boolean) {
     this.left = left;
@@ -199,21 +389,21 @@ export class IntersectOperator implements Operator {
     // Materialize right side into hash structure
     if (this.all) {
       // INTERSECT ALL: count occurrences
-      this.rightCounts = new Map();
+      this.rightCounts = new RowHashMap();
       while (true) {
         const row = await this.right.next();
         if (row === null) break;
-        const key = rowKey(row);
-        this.rightCounts.set(key, (this.rightCounts.get(key) || 0) + 1);
+        const identity = rowIdentity(row);
+        this.rightCounts.set(identity, (this.rightCounts.get(identity) || 0) + 1);
       }
     } else {
       // INTERSECT: just track presence
-      this.rightSet = new Set();
-      this.leftSeen = new Set();
+      this.rightSet = new RowHashSet();
+      this.leftSeen = new RowHashSet();
       while (true) {
         const row = await this.right.next();
         if (row === null) break;
-        this.rightSet.add(rowKey(row));
+        this.rightSet.add(rowIdentity(row));
       }
     }
   }
@@ -223,19 +413,19 @@ export class IntersectOperator implements Operator {
       const row = await this.left.next();
       if (row === null) return null;
 
-      const key = rowKey(row);
+      const identity = rowIdentity(row);
 
       if (this.all && this.rightCounts) {
         // INTERSECT ALL: decrement count if present
-        const count = this.rightCounts.get(key);
+        const count = this.rightCounts.get(identity);
         if (count && count > 0) {
-          this.rightCounts.set(key, count - 1);
+          this.rightCounts.set(identity, count - 1);
           return row;
         }
       } else if (this.rightSet && this.leftSeen) {
         // INTERSECT: return if in right set and not already returned
-        if (this.rightSet.has(key) && !this.leftSeen.has(key)) {
-          this.leftSeen.add(key);
+        if (this.rightSet.has(identity) && !this.leftSeen.has(identity)) {
+          this.leftSeen.add(identity);
           return row;
         }
       }
@@ -245,9 +435,18 @@ export class IntersectOperator implements Operator {
   async close(): Promise<void> {
     await this.left.close();
     await this.right.close();
-    this.rightSet = null;
-    this.rightCounts = null;
-    this.leftSeen = null;
+    if (this.rightSet) {
+      this.rightSet.clear();
+      this.rightSet = null;
+    }
+    if (this.rightCounts) {
+      this.rightCounts.clear();
+      this.rightCounts = null;
+    }
+    if (this.leftSeen) {
+      this.leftSeen.clear();
+      this.leftSeen = null;
+    }
   }
 
   columns(): string[] {
@@ -273,11 +472,11 @@ export class ExceptOperator implements Operator {
   private outputColumns: string[] = [];
 
   // For EXCEPT: set of right-side row keys
-  private rightSet: Set<string> | null = null;
-  private leftSeen: Set<string> | null = null;
+  private rightSet: RowHashSet | null = null;
+  private leftSeen: RowHashSet | null = null;
 
   // For EXCEPT ALL: count of right-side rows
-  private rightCounts: Map<string, number> | null = null;
+  private rightCounts: RowHashMap | null = null;
 
   constructor(left: Operator, right: Operator, all: boolean) {
     this.left = left;
@@ -295,21 +494,21 @@ export class ExceptOperator implements Operator {
     // Materialize right side into hash structure
     if (this.all) {
       // EXCEPT ALL: count occurrences
-      this.rightCounts = new Map();
+      this.rightCounts = new RowHashMap();
       while (true) {
         const row = await this.right.next();
         if (row === null) break;
-        const key = rowKey(row);
-        this.rightCounts.set(key, (this.rightCounts.get(key) || 0) + 1);
+        const identity = rowIdentity(row);
+        this.rightCounts.set(identity, (this.rightCounts.get(identity) || 0) + 1);
       }
     } else {
       // EXCEPT: just track presence
-      this.rightSet = new Set();
-      this.leftSeen = new Set();
+      this.rightSet = new RowHashSet();
+      this.leftSeen = new RowHashSet();
       while (true) {
         const row = await this.right.next();
         if (row === null) break;
-        this.rightSet.add(rowKey(row));
+        this.rightSet.add(rowIdentity(row));
       }
     }
   }
@@ -319,20 +518,20 @@ export class ExceptOperator implements Operator {
       const row = await this.left.next();
       if (row === null) return null;
 
-      const key = rowKey(row);
+      const identity = rowIdentity(row);
 
       if (this.all && this.rightCounts) {
         // EXCEPT ALL: decrement count if present in right, skip if count > 0
-        const count = this.rightCounts.get(key);
+        const count = this.rightCounts.get(identity);
         if (count && count > 0) {
-          this.rightCounts.set(key, count - 1);
+          this.rightCounts.set(identity, count - 1);
           continue; // Skip this row
         }
         return row;
       } else if (this.rightSet !== null && this.leftSeen !== null) {
         // EXCEPT: return if not in right set and not already returned
-        if (!this.rightSet.has(key) && !this.leftSeen.has(key)) {
-          this.leftSeen.add(key);
+        if (!this.rightSet.has(identity) && !this.leftSeen.has(identity)) {
+          this.leftSeen.add(identity);
           return row;
         }
       }
@@ -342,9 +541,18 @@ export class ExceptOperator implements Operator {
   async close(): Promise<void> {
     await this.left.close();
     await this.right.close();
-    this.rightSet = null;
-    this.rightCounts = null;
-    this.leftSeen = null;
+    if (this.rightSet) {
+      this.rightSet.clear();
+      this.rightSet = null;
+    }
+    if (this.rightCounts) {
+      this.rightCounts.clear();
+      this.rightCounts = null;
+    }
+    if (this.leftSeen) {
+      this.leftSeen.clear();
+      this.leftSeen = null;
+    }
   }
 
   columns(): string[] {

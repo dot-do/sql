@@ -473,11 +473,12 @@ export class Database implements IDatabase {
    * @param fn - Function to wrap in transaction
    * @returns Transaction-wrapped function
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for proper type inference of arbitrary functions
-  transaction<F extends (...args: any[]) => any>(fn: F): TransactionFunction<F> {
+  transaction<TArgs extends readonly unknown[], TReturn>(
+    fn: (...args: TArgs) => TReturn
+  ): TransactionFunction<TArgs, TReturn> {
     const self = this;
 
-    const runTransaction = (mode: TransactionMode, ...args: Parameters<F>): ReturnType<F> => {
+    const runTransaction = (mode: TransactionMode, ...args: TArgs): TReturn => {
       self.checkWritable();
 
       const beginSql = mode === 'immediate'
@@ -512,19 +513,19 @@ export class Database implements IDatabase {
       }
     };
 
-    const transactionFn = ((...args: Parameters<F>) => {
+    const transactionFn = ((...args: TArgs) => {
       return runTransaction('deferred', ...args);
-    }) as TransactionFunction<F>;
+    }) as TransactionFunction<TArgs, TReturn>;
 
-    transactionFn.deferred = (...args: Parameters<F>) => {
+    transactionFn.deferred = (...args: TArgs) => {
       return runTransaction('deferred', ...args);
     };
 
-    transactionFn.immediate = (...args: Parameters<F>) => {
+    transactionFn.immediate = (...args: TArgs) => {
       return runTransaction('immediate', ...args);
     };
 
-    transactionFn.exclusive = (...args: Parameters<F>) => {
+    transactionFn.exclusive = (...args: TArgs) => {
       return runTransaction('exclusive', ...args);
     };
 

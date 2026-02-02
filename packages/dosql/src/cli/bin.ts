@@ -8,8 +8,11 @@
 
 import * as fs from 'node:fs';
 import * as readline from 'node:readline';
-import { main, setFileSystem, loadConfig, query as runQuery } from './index.js';
+import { main, setFileSystem, loadConfig, query as runQuery, createCLILogger, type CLILogger } from './index.js';
 import { Database } from '../database.js';
+
+// Create CLI logger for the binary
+const logger: CLILogger = createCLILogger();
 
 // Set up Node.js file system
 setFileSystem({
@@ -28,9 +31,9 @@ async function interactiveShell(configPath?: string): Promise<void> {
 
   const db = new Database(config.database.path ?? ':memory:');
 
-  console.log('DoSQL Shell');
-  console.log(`Connected to: ${config.database.path ?? ':memory:'}`);
-  console.log('Type ".exit" to quit, ".tables" to list tables, ".help" for help\n');
+  logger.output('DoSQL Shell');
+  logger.output(`Connected to: ${config.database.path ?? ':memory:'}`);
+  logger.output('Type ".exit" to quit, ".tables" to list tables, ".help" for help\n');
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -56,7 +59,7 @@ async function interactiveShell(configPath?: string): Promise<void> {
     }
 
     if (input === '.help') {
-      console.log(`
+      logger.output(`
 Special commands:
   .exit      Exit the shell
   .quit      Exit the shell
@@ -75,15 +78,15 @@ SQL commands:
       try {
         const tables = db.getTables();
         if (tables.length === 0) {
-          console.log('No tables found');
+          logger.info('No tables found', { operation: 'shell', command: '.tables' });
         } else {
-          console.log('Tables:');
+          logger.output('Tables:');
           for (const table of tables) {
-            console.log(`  ${table}`);
+            logger.output(`  ${table}`);
           }
         }
       } catch (err) {
-        console.error('Error listing tables:', err instanceof Error ? err.message : err);
+        logger.error('Error listing tables', err instanceof Error ? err : undefined, { operation: 'shell', command: '.tables' });
       }
       rl.prompt();
       return;
@@ -94,15 +97,15 @@ SQL commands:
         const tables = db.getTables();
         for (const table of tables) {
           const info = db.pragma('table_info', table);
-          console.log(`\nTable: ${table}`);
+          logger.output(`\nTable: ${table}`);
           if (Array.isArray(info)) {
             for (const col of info) {
-              console.log(`  ${col.name} ${col.type}${col.notnull ? ' NOT NULL' : ''}${col.pk ? ' PRIMARY KEY' : ''}`);
+              logger.output(`  ${col.name} ${col.type}${col.notnull ? ' NOT NULL' : ''}${col.pk ? ' PRIMARY KEY' : ''}`);
             }
           }
         }
       } catch (err) {
-        console.error('Error getting schema:', err instanceof Error ? err.message : err);
+        logger.error('Error getting schema', err instanceof Error ? err : undefined, { operation: 'shell', command: '.schema' });
       }
       rl.prompt();
       return;
@@ -114,24 +117,24 @@ SQL commands:
         const stmt = db.prepare(input);
         const results = stmt.all();
         if (results.length === 0) {
-          console.log('No results');
+          logger.info('No results', { operation: 'shell', sql: input });
         } else {
-          console.table(results);
+          logger.outputData(results);
         }
       } else {
         const stmt = db.prepare(input);
         const result = stmt.run();
-        console.log(`OK, ${result.changes} row(s) affected`);
+        logger.success(`OK, ${result.changes} row(s) affected`, { operation: 'shell', changes: result.changes });
       }
     } catch (err) {
-      console.error('Error:', err instanceof Error ? err.message : err);
+      logger.error(err instanceof Error ? err.message : String(err), err instanceof Error ? err : undefined, { operation: 'shell', sql: input });
     }
 
     rl.prompt();
   });
 
   rl.on('close', () => {
-    console.log('\nGoodbye!');
+    logger.output('\nGoodbye!');
     process.exit(0);
   });
 }
@@ -149,13 +152,13 @@ if (isShellCommand) {
   }
 
   interactiveShell(configPath).catch((err) => {
-    console.error('Error:', err instanceof Error ? err.message : err);
+    logger.error(err instanceof Error ? err.message : String(err), err instanceof Error ? err : undefined, { operation: 'shell' });
     process.exit(1);
   });
 } else {
   // Run main CLI
   main(args).catch((err) => {
-    console.error('Error:', err instanceof Error ? err.message : err);
+    logger.error(err instanceof Error ? err.message : String(err), err instanceof Error ? err : undefined, { operation: 'cli' });
     process.exit(1);
   });
 }

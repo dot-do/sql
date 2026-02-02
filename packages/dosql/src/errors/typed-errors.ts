@@ -25,6 +25,7 @@ import {
   ParserErrorCode,
   StorageErrorCode,
 } from './codes.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // PLANNER ERROR
@@ -68,6 +69,17 @@ export class PlannerError extends DoSQLError {
       case PlannerErrorCode.INVALID_PLAN:
         this.recoveryHint = 'Check the query syntax and table references';
         break;
+      case PlannerErrorCode.COST_ESTIMATION_FAILED:
+        this.recoveryHint = 'Ensure table statistics are up to date';
+        break;
+      case PlannerErrorCode.INDEX_SELECTION_FAILED:
+        this.recoveryHint = 'Check available indexes for the query';
+        break;
+      case PlannerErrorCode.OPTIMIZATION_FAILED:
+        this.recoveryHint = 'Try simplifying the query';
+        break;
+      default:
+        assertNever(this.code);
     }
   }
 
@@ -84,8 +96,14 @@ export class PlannerError extends DoSQLError {
         return 'Could not determine the optimal order for joining tables. Please simplify the query.';
       case PlannerErrorCode.INVALID_PLAN:
         return 'The query plan is invalid. Please check the query syntax.';
+      case PlannerErrorCode.COST_ESTIMATION_FAILED:
+        return 'Failed to estimate query cost. Please ensure table statistics are available.';
+      case PlannerErrorCode.INDEX_SELECTION_FAILED:
+        return 'Failed to select an appropriate index for the query.';
+      case PlannerErrorCode.OPTIMIZATION_FAILED:
+        return 'Query optimization failed. Please try simplifying the query.';
       default:
-        return this.message;
+        return assertNever(this.code);
     }
   }
 
@@ -143,6 +161,23 @@ export class ExecutorError extends DoSQLError {
       case ExecutorErrorCode.OPERATOR_ERROR:
         this.recoveryHint = 'Check the query for invalid operations';
         break;
+      case ExecutorErrorCode.SUBQUERY_ERROR:
+        this.recoveryHint = 'Check the subquery for errors';
+        break;
+      case ExecutorErrorCode.CTE_NOT_MATERIALIZED:
+        this.recoveryHint = 'Ensure CTEs are executed before being referenced';
+        break;
+      case ExecutorErrorCode.AGGREGATE_ERROR:
+        this.recoveryHint = 'Check aggregate function usage';
+        break;
+      case ExecutorErrorCode.WINDOW_FUNCTION_ERROR:
+        this.recoveryHint = 'Check window function syntax and usage';
+        break;
+      case ExecutorErrorCode.TRANSACTION_ERROR:
+        this.recoveryHint = 'Check transaction state and retry if needed';
+        break;
+      default:
+        assertNever(this.code);
     }
   }
 
@@ -163,8 +198,14 @@ export class ExecutorError extends DoSQLError {
         return 'An error occurred in a subquery.';
       case ExecutorErrorCode.CTE_NOT_MATERIALIZED:
         return 'A common table expression (CTE) was referenced before it was executed.';
+      case ExecutorErrorCode.AGGREGATE_ERROR:
+        return 'An error occurred while executing an aggregate function.';
+      case ExecutorErrorCode.WINDOW_FUNCTION_ERROR:
+        return 'An error occurred while executing a window function.';
+      case ExecutorErrorCode.TRANSACTION_ERROR:
+        return 'A transaction error occurred.';
       default:
-        return this.message;
+        return assertNever(this.code);
     }
   }
 
@@ -221,6 +262,26 @@ export class ParserError extends DoSQLError {
       case ParserErrorCode.INVALID_STATEMENT:
         this.recoveryHint = 'Check the SQL syntax';
         break;
+      case ParserErrorCode.UNKNOWN_OPERATION:
+        this.recoveryHint = 'Use a recognized SQL operation';
+        break;
+      case ParserErrorCode.INVALID_DATA_TYPE:
+        this.recoveryHint = 'Use a valid SQL data type';
+        break;
+      case ParserErrorCode.INVALID_REFERENCE_ACTION:
+        this.recoveryHint = 'Use a valid reference action (CASCADE, SET NULL, etc.)';
+        break;
+      case ParserErrorCode.UNKNOWN_WINDOW_NAME:
+        this.recoveryHint = 'Define the window before referencing it';
+        break;
+      case ParserErrorCode.INVALID_FRAME_SPEC:
+        this.recoveryHint = 'Check the window frame specification syntax';
+        break;
+      case ParserErrorCode.UNKNOWN_FUNCTION:
+        this.recoveryHint = 'Use a supported function';
+        break;
+      default:
+        assertNever(this.code);
     }
   }
 

@@ -25,6 +25,8 @@ import type {
   WithClause,
   RecursiveCTELimits,
 } from '../../parser/cte-types.js';
+import { createCteNotMaterializedError, ExecutorError } from '../../errors/index.js';
+import { ExecutorErrorCode } from '../../errors/codes.js';
 
 // =============================================================================
 // CONSTANTS
@@ -111,7 +113,7 @@ export class CTEScanOperator implements Operator {
     // Get materialized CTE
     const materialized = this.ctx.materializedCTEs?.get(this.cteName.toLowerCase());
     if (!materialized) {
-      throw new Error(`CTE '${this.cteName}' is not materialized. Ensure CTEs are executed before referencing them.`);
+      throw createCteNotMaterializedError(this.cteName);
     }
 
     this.rows = materialized.rows;

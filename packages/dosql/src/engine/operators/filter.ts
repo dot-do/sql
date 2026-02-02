@@ -15,6 +15,8 @@ import {
 } from '../types.js';
 import { assertNever } from '../../utils/assert-never.js';
 import { likeMatch } from '../../utils/like.js';
+import { ExecutorError, createUnknownFunctionError } from '../../errors/index.js';
+import { ExecutorErrorCode } from '../../errors/codes.js';
 
 // =============================================================================
 // HELPER FUNCTIONS
@@ -199,7 +201,7 @@ export function evaluateExpression(expr: Expression, row: Row): SqlValue {
 
     case 'subquery':
       // Subqueries are handled during planning, not execution
-      throw new Error('Subquery evaluation not supported in expression context');
+      throw new ExecutorError(ExecutorErrorCode.SUBQUERY_ERROR, 'Subquery evaluation not supported in expression context');
 
     default:
       return assertNever(expr, `Unknown expression type: ${(expr as unknown as { type: string }).type}`);
@@ -309,7 +311,7 @@ function evaluateFunction(name: string, args: SqlValue[]): SqlValue {
       return args[0];
 
     default:
-      throw new Error(`Unknown function: ${name}`);
+      throw createUnknownFunctionError(name);
   }
 }
 
@@ -414,7 +416,7 @@ export function evaluatePredicate(predicate: Predicate, row: Row): boolean {
       }
 
       // Subquery needs to be executed during planning/materialization phase
-      throw new Error('IN with subquery requires subquery to be materialized first');
+      throw new ExecutorError(ExecutorErrorCode.SUBQUERY_ERROR, 'IN with subquery requires subquery to be materialized first');
     }
 
     case 'isNull': {

@@ -635,8 +635,12 @@ export interface ExecutionOptions {
 /**
  * Pull-based operator interface
  * Each operator produces rows on demand
+ *
+ * Operators also implement AsyncIterable for use with `for await...of` syntax.
+ * When using the async iterator pattern, the operator will be automatically
+ * opened and closed.
  */
-export interface Operator {
+export interface Operator extends AsyncIterable<Row> {
   /** Open the operator (initialize state) */
   open(ctx: ExecutionContext): Promise<void>;
   /** Get the next row (null = no more rows) */
@@ -645,6 +649,8 @@ export interface Operator {
   close(): Promise<void>;
   /** Get output columns */
   columns(): string[];
+  /** Async iterator support - enables `for await (const row of operator)` */
+  [Symbol.asyncIterator](): AsyncIterator<Row>;
 }
 
 /**

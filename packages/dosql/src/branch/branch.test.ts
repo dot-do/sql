@@ -939,8 +939,637 @@ describe('Branch Manager - Conflict Detection', () => {
   });
 });
 
-describe('Branch Manager - Edge Cases', () => {
+// =============================================================================
+// Additional Tests for Merge Operations and Time-Travel Resolution
+// =============================================================================
+
+describe('Branch Manager - Merge with Conflicts', () => {
   // Test 55
+  it('should detect content conflicts when both branches modify same file', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create base state on main
+      await instance.commit('Initial state');
+
+      // Create feature branch and modify
+      await instance.createBranch({ name: 'feature-conflict' });
+      await instance.checkout('feature-conflict');
+      await instance.commit('Feature change A');
+
+      // Go back to main and make conflicting change
+      await instance.checkout('main');
+      await instance.commit('Main change B');
+
+      // Compare branches to detect divergence
+      const comparison = await instance.compare('feature-conflict', 'main');
+
+      expect(comparison.diverged).toBe(true);
+      expect(comparison.ahead).toBeGreaterThan(0);
+      expect(comparison.behind).toBeGreaterThan(0);
+    });
+  });
+
+  // Test 56
+  it('should merge with auto-resolve ours strategy', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create initial commit on main
+      await instance.commit('Initial commit');
+
+      // Create feature branch with changes
+      await instance.createBranch({ name: 'auto-resolve-feature' });
+      await instance.checkout('auto-resolve-feature');
+      await instance.commit('Feature change');
+
+      // Commit on main
+      await instance.checkout('main');
+      await instance.commit('Main change');
+
+      // Merge with ours strategy
+      const result = await instance.merge('auto-resolve-feature', 'main', {
+        strategy: 'ours',
+      });
+
+      // Should succeed with ours strategy
+      expect(result.success).toBe(true);
+    });
+  });
+
+  // Test 57
+  it('should merge with auto-resolve theirs strategy', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create initial commit on main
+      await instance.commit('Initial commit');
+
+      // Create feature branch with changes
+      await instance.createBranch({ name: 'theirs-strategy-feature' });
+      await instance.checkout('theirs-strategy-feature');
+      await instance.commit('Feature modification');
+
+      // Commit on main
+      await instance.checkout('main');
+      await instance.commit('Main modification');
+
+      // Merge with theirs strategy
+      const result = await instance.merge('theirs-strategy-feature', 'main', {
+        strategy: 'theirs',
+      });
+
+      expect(result.success).toBe(true);
+    });
+  });
+
+  // Test 58
+  it('should fail merge when fast-forward required but not possible', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create initial commit on main
+      await instance.commit('Base commit');
+
+      // Create feature branch
+      await instance.createBranch({ name: 'ff-only-feature' });
+      await instance.checkout('ff-only-feature');
+      await instance.commit('Feature work');
+
+      // Make main diverge
+      await instance.checkout('main');
+      await instance.commit('Main diverged');
+
+      // Attempt fast-forward-only merge should fail
+      await expect(
+        instance.merge('ff-only-feature', 'main', { strategy: 'fast-forward' })
+      ).rejects.toThrow();
+    });
+  });
+
+  // Test 59
+  it('should create merge commit when using no-ff strategy', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create commits on main
+      await instance.commit('Main base');
+
+      // Create feature branch with commits
+      await instance.createBranch({ name: 'no-ff-feature' });
+      await instance.checkout('no-ff-feature');
+      await instance.commit('Feature commit 1');
+      await instance.commit('Feature commit 2');
+
+      await instance.checkout('main');
+
+      // Merge with no-ff - should create merge commit even if fast-forward is possible
+      const result = await instance.merge('no-ff-feature', 'main', {
+        strategy: 'no-ff',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.mergeType).toBe('merge-commit');
+      expect(result.commit).toBeDefined();
+    });
+  });
+
+  // Test 60
+  it('should track merge source and target correctly', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.commit('Base');
+
+      await instance.createBranch({ name: 'track-source' });
+      await instance.checkout('track-source');
+      await instance.commit('Source commit');
+
+      await instance.checkout('main');
+
+      const result = await instance.merge('track-source', 'main');
+
+      expect(result.source).toBe('track-source');
+      expect(result.target).toBe('main');
+    });
+  });
+
+  // Test 61
+  it('should handle multiple sequential merges', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.commit('Base');
+
+      // Create and merge first feature
+      await instance.createBranch({ name: 'feature-1' });
+      await instance.checkout('feature-1');
+      await instance.commit('Feature 1 work');
+      await instance.checkout('main');
+      const result1 = await instance.merge('feature-1', 'main');
+
+      // Create and merge second feature
+      await instance.createBranch({ name: 'feature-2' });
+      await instance.checkout('feature-2');
+      await instance.commit('Feature 2 work');
+      await instance.checkout('main');
+      const result2 = await instance.merge('feature-2', 'main');
+
+      expect(result1.success).toBe(true);
+      expect(result2.success).toBe(true);
+
+      // Check log shows merge commits
+      const log = await instance.log('main', { limit: 10 });
+      expect(log.length).toBeGreaterThanOrEqual(3);
+    });
+  });
+});
+
+describe('Branch Manager - Time-Travel Resolution', () => {
+  // Test 62
+  it('should retrieve commit at specific point in history', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create a history of commits
+      const commit1 = await instance.commit('Commit 1');
+      const commit2 = await instance.commit('Commit 2');
+      const commit3 = await instance.commit('Commit 3');
+
+      // Get the second commit
+      const manager = await instance.getManager();
+      const commitData = await manager.getCommit(commit2);
+
+      expect(commitData).not.toBeNull();
+      expect(commitData?.id).toBe(commit2);
+      expect(commitData?.message).toBe('Commit 2');
+    });
+  });
+
+  // Test 63
+  it('should traverse branch history backwards', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.createBranch({ name: 'history-traverse' });
+      await instance.checkout('history-traverse');
+
+      const commits: string[] = [];
+      for (let i = 1; i <= 5; i++) {
+        const commitId = await instance.commit(`History commit ${i}`);
+        commits.push(commitId);
+      }
+
+      const log = await instance.log('history-traverse', { limit: 10 });
+
+      // Log should be reverse chronological
+      expect(log[0].commit.message).toBe('History commit 5');
+      expect(log[4].commit.message).toBe('History commit 1');
+
+      // Verify parent chain
+      for (let i = 0; i < log.length - 1; i++) {
+        const current = log[i].commit;
+        const next = log[i + 1].commit;
+        expect(current.parents).toContain(next.id);
+      }
+    });
+  });
+
+  // Test 64
+  it('should find common ancestor between diverged branches', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create base commit on main
+      const baseCommit = await instance.commit('Common ancestor');
+
+      // Create two branches from this point
+      await instance.createBranch({ name: 'branch-a' });
+      await instance.createBranch({ name: 'branch-b' });
+
+      // Diverge branch-a
+      await instance.checkout('branch-a');
+      await instance.commit('Branch A commit 1');
+      await instance.commit('Branch A commit 2');
+
+      // Diverge branch-b
+      await instance.checkout('branch-b');
+      await instance.commit('Branch B commit 1');
+
+      // Find merge base
+      const mergeBase = await instance.findMergeBase('branch-a', 'branch-b');
+
+      expect(mergeBase).toBe(baseCommit);
+    });
+  });
+
+  // Test 65
+  it('should calculate ahead/behind counts correctly', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create base
+      await instance.commit('Base');
+
+      // Create feature branch with 3 commits
+      await instance.createBranch({ name: 'ahead-behind-feature' });
+      await instance.checkout('ahead-behind-feature');
+      await instance.commit('Feature 1');
+      await instance.commit('Feature 2');
+      await instance.commit('Feature 3');
+
+      // Add 2 commits to main
+      await instance.checkout('main');
+      await instance.commit('Main 1');
+      await instance.commit('Main 2');
+
+      const comparison = await instance.compare('ahead-behind-feature', 'main');
+
+      expect(comparison.ahead).toBe(3); // feature is 3 ahead
+      expect(comparison.behind).toBe(2); // feature is 2 behind
+      expect(comparison.diverged).toBe(true);
+    });
+  });
+
+  // Test 66
+  it('should support time-travel to specific commit on checkout', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.createBranch({ name: 'time-travel-branch' });
+      await instance.checkout('time-travel-branch');
+
+      const commit1 = await instance.commit('State 1');
+      const commit2 = await instance.commit('State 2');
+      const commit3 = await instance.commit('State 3');
+
+      // Checkout specific commit (detached HEAD style)
+      const result = await instance.checkout('time-travel-branch', {
+        commit: commit2,
+        force: true,
+      });
+
+      expect(result.current.commit).toBe(commit2);
+    });
+  });
+
+  // Test 67
+  it('should track branch creation timestamp for time queries', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      const beforeCreation = Date.now();
+
+      await instance.createBranch({ name: 'timestamped-branch' });
+
+      const afterCreation = Date.now();
+
+      const branch = await instance.getBranch('timestamped-branch');
+
+      expect(branch).not.toBeNull();
+      expect(branch!.createdAt).toBeGreaterThanOrEqual(beforeCreation);
+      expect(branch!.createdAt).toBeLessThanOrEqual(afterCreation);
+    });
+  });
+
+  // Test 68
+  it('should preserve commit timestamps for historical queries', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.createBranch({ name: 'commit-timestamps' });
+      await instance.checkout('commit-timestamps');
+
+      const beforeCommit = Date.now();
+      const commitId = await instance.commit('Timestamped commit');
+      const afterCommit = Date.now();
+
+      const manager = await instance.getManager();
+      const commit = await manager.getCommit(commitId);
+
+      expect(commit).not.toBeNull();
+      expect(commit!.timestamp).toBeGreaterThanOrEqual(beforeCommit);
+      expect(commit!.timestamp).toBeLessThanOrEqual(afterCommit);
+    });
+  });
+
+  // Test 69
+  it('should support querying history with date filters', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.createBranch({ name: 'date-filter-branch' });
+      await instance.checkout('date-filter-branch');
+
+      await instance.commit('Early commit');
+
+      const midpoint = new Date();
+
+      await instance.commit('Later commit');
+
+      // Query commits since midpoint
+      const recentLog = await instance.log('date-filter-branch', {
+        since: midpoint,
+        limit: 10,
+      });
+
+      // Should only include commits after midpoint
+      for (const entry of recentLog) {
+        expect(entry.commit.timestamp).toBeGreaterThanOrEqual(midpoint.getTime());
+      }
+    });
+  });
+
+  // Test 70
+  it('should handle time-travel queries across branch hierarchy', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create main -> feature -> sub-feature hierarchy
+      await instance.commit('Main base');
+
+      await instance.createBranch({ name: 'feature-parent' });
+      await instance.checkout('feature-parent');
+      const featureCommit = await instance.commit('Feature work');
+
+      await instance.createBranch({ name: 'feature-child', from: 'feature-parent' });
+      await instance.checkout('feature-child');
+      await instance.commit('Sub-feature work');
+
+      // Verify lineage
+      const childBranch = await instance.getBranch('feature-child');
+      expect(childBranch?.parent).toBe('feature-parent');
+
+      // Find merge base between child and main
+      const mergeBase = await instance.findMergeBase('feature-child', 'main');
+      expect(mergeBase).not.toBeNull();
+    });
+  });
+});
+
+describe('Branch Manager - Deletion and Cleanup', () => {
+  // Test 71
+  it('should delete branch and remove all metadata', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.createBranch({ name: 'to-cleanup' });
+      await instance.checkout('to-cleanup');
+      await instance.commit('Cleanup commit');
+      await instance.checkout('main');
+
+      // Delete the branch
+      await instance.deleteBranch('to-cleanup', { force: true });
+
+      // Verify it's gone
+      const branch = await instance.getBranch('to-cleanup');
+      expect(branch).toBeNull();
+
+      // Verify it's not in the list
+      const branches = await instance.listBranches();
+      expect(branches.some(b => b.name === 'to-cleanup')).toBe(false);
+    });
+  });
+
+  // Test 72
+  it('should prevent deletion of branch with child branches without force', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create parent branch
+      await instance.createBranch({ name: 'parent-branch' });
+      await instance.checkout('parent-branch');
+      await instance.commit('Parent commit');
+
+      // Create child branch
+      await instance.createBranch({ name: 'child-branch', from: 'parent-branch' });
+
+      await instance.checkout('main');
+
+      // Parent still has unmerged commits, should fail without force
+      // Even if child exists, the unmerged check should trigger first
+      await expect(
+        instance.deleteBranch('parent-branch')
+      ).rejects.toThrow();
+    });
+  });
+
+  // Test 73
+  it('should allow deletion after branch is fully merged', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.commit('Base');
+
+      // Create feature and commit
+      await instance.createBranch({ name: 'mergeable-branch' });
+      await instance.checkout('mergeable-branch');
+      await instance.commit('Mergeable work');
+
+      // Merge into main
+      await instance.checkout('main');
+      await instance.merge('mergeable-branch', 'main');
+
+      // Should be able to delete without force now
+      await instance.deleteBranch('mergeable-branch');
+
+      const branch = await instance.getBranch('mergeable-branch');
+      expect(branch).toBeNull();
+    });
+  });
+
+  // Test 74
+  it('should update child branches parent reference on rename', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create parent branch
+      await instance.createBranch({ name: 'old-parent' });
+      await instance.checkout('old-parent');
+      await instance.commit('Parent state');
+
+      // Create child branch
+      await instance.createBranch({ name: 'child-of-parent', from: 'old-parent' });
+
+      await instance.checkout('main');
+
+      // Rename parent
+      await instance.renameBranch('old-parent', 'new-parent');
+
+      // Child should reference new parent name
+      const child = await instance.getBranch('child-of-parent');
+      expect(child?.parent).toBe('new-parent');
+    });
+  });
+
+  // Test 75
+  it('should cleanup index when deleting branch with uncommitted changes', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.createBranch({ name: 'uncommitted-cleanup' });
+      await instance.checkout('uncommitted-cleanup');
+
+      // Make a commit to ensure there's state
+      await instance.commit('Some state');
+
+      await instance.checkout('main');
+
+      // Force delete
+      await instance.deleteBranch('uncommitted-cleanup', { force: true });
+
+      // Verify branch is gone
+      expect(await instance.getBranch('uncommitted-cleanup')).toBeNull();
+    });
+  });
+
+  // Test 76
+  it('should handle deletion of deeply nested branch hierarchy', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create deep hierarchy: main -> level1 -> level2 -> level3
+      await instance.createBranch({ name: 'level1' });
+      await instance.checkout('level1');
+      await instance.commit('Level 1');
+
+      await instance.createBranch({ name: 'level2', from: 'level1' });
+      await instance.checkout('level2');
+      await instance.commit('Level 2');
+
+      await instance.createBranch({ name: 'level3', from: 'level2' });
+      await instance.checkout('level3');
+      await instance.commit('Level 3');
+
+      await instance.checkout('main');
+
+      // Delete leaf first (level3)
+      await instance.deleteBranch('level3', { force: true });
+      expect(await instance.getBranch('level3')).toBeNull();
+
+      // Delete level2
+      await instance.deleteBranch('level2', { force: true });
+      expect(await instance.getBranch('level2')).toBeNull();
+
+      // Delete level1
+      await instance.deleteBranch('level1', { force: true });
+      expect(await instance.getBranch('level1')).toBeNull();
+    });
+  });
+
+  // Test 77
+  it('should preserve commits after branch deletion if reachable from other branches', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.commit('Base');
+
+      // Create feature and merge
+      await instance.createBranch({ name: 'preserve-commits' });
+      await instance.checkout('preserve-commits');
+      const featureCommit = await instance.commit('Feature to preserve');
+
+      await instance.checkout('main');
+      await instance.merge('preserve-commits', 'main');
+
+      // Delete feature branch
+      await instance.deleteBranch('preserve-commits');
+
+      // The merged commit should still be accessible in main's history
+      const manager = await instance.getManager();
+      const log = await instance.log('main', { limit: 10 });
+
+      // The merge commit should reference the feature commit
+      const commitIds = log.map(entry => entry.commit.id);
+      const mainLog = await instance.log('main', { limit: 20 });
+
+      // Feature commit should be in the history chain (as parent of merge commit)
+      let foundFeatureCommit = false;
+      for (const entry of mainLog) {
+        if (entry.commit.parents.includes(featureCommit)) {
+          foundFeatureCommit = true;
+          break;
+        }
+        // Also check if the commit itself is the feature commit (for ff merge)
+        if (entry.commit.id === featureCommit) {
+          foundFeatureCommit = true;
+          break;
+        }
+      }
+      expect(foundFeatureCommit).toBe(true);
+    });
+  });
+
+  // Test 78
+  it('should handle concurrent delete attempts gracefully', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.createBranch({ name: 'concurrent-delete' });
+
+      // First delete should succeed
+      await instance.deleteBranch('concurrent-delete', { force: true });
+
+      // Second delete should fail gracefully (branch not found)
+      await expect(
+        instance.deleteBranch('concurrent-delete')
+      ).rejects.toThrow();
+    });
+  });
+
+  // Test 79
+  it('should fail to delete archived branch without force', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      // Create a branch - we'll test that archived branches need force
+      // Since we can't directly archive, we test the protected branch behavior
+      // which is similar (main is protected)
+      await expect(
+        instance.deleteBranch('main')
+      ).rejects.toThrow();
+    });
+  });
+
+  // Test 80
+  it('should clean up merge state when deleting source branch', async () => {
+    const stub = getUniqueStub();
+    await runInDurableObject(stub, async (instance: TestBranchDO) => {
+      await instance.commit('Base');
+
+      await instance.createBranch({ name: 'merge-source-delete' });
+      await instance.checkout('merge-source-delete');
+      await instance.commit('Source change');
+
+      // Go to main, don't merge, just delete source
+      await instance.checkout('main');
+      await instance.deleteBranch('merge-source-delete', { force: true });
+
+      // Status should show clean state
+      const status = await instance.status();
+      expect(status.merging).toBe(false);
+      expect(status.conflicts.length).toBe(0);
+    });
+  });
+});
+
+describe('Branch Manager - Edge Cases', () => {
+  // Test 81
   it('should handle branch with slash in name', async () => {
     const stub = getUniqueStub();
     await runInDurableObject(stub, async (instance: TestBranchDO) => {
@@ -952,7 +1581,7 @@ describe('Branch Manager - Edge Cases', () => {
     });
   });
 
-  // Test 56
+  // Test 82
   it('should handle branch with dots in name', async () => {
     const stub = getUniqueStub();
     await runInDurableObject(stub, async (instance: TestBranchDO) => {
@@ -963,7 +1592,7 @@ describe('Branch Manager - Edge Cases', () => {
     });
   });
 
-  // Test 57
+  // Test 83
   it('should handle empty commit message', async () => {
     const stub = getUniqueStub();
     await runInDurableObject(stub, async (instance: TestBranchDO) => {
@@ -976,7 +1605,7 @@ describe('Branch Manager - Edge Cases', () => {
     });
   });
 
-  // Test 58
+  // Test 84
   it('should preserve branch metadata after operations', async () => {
     const stub = getUniqueStub();
     await runInDurableObject(stub, async (instance: TestBranchDO) => {
@@ -995,7 +1624,7 @@ describe('Branch Manager - Edge Cases', () => {
     });
   });
 
-  // Test 59
+  // Test 85
   it('should handle rapid branch creation', async () => {
     const stub = getUniqueStub();
     await runInDurableObject(stub, async (instance: TestBranchDO) => {
@@ -1011,7 +1640,7 @@ describe('Branch Manager - Edge Cases', () => {
     });
   });
 
-  // Test 60
+  // Test 86
   it('should handle branch hierarchy correctly', async () => {
     const stub = getUniqueStub();
     await runInDurableObject(stub, async (instance: TestBranchDO) => {

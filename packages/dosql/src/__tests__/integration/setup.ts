@@ -54,9 +54,10 @@ import {
   createDatabaseContext,
   type StorageAdapter,
   type DatabaseContext,
+  type DatabaseContextOptions,
 } from '../../proc/context.js';
 
-import type { DatabaseSchema, TableSchema } from '../../parser.js';
+import type { DatabaseSchema, TableSchema, TableSchemaToRecord } from '../../parser.js';
 
 // =============================================================================
 // Test Schema Definitions (using camelCase)
@@ -319,7 +320,12 @@ export async function createTestHarness(): Promise<TestHarness> {
   const orderItemsAdapter = createInMemoryAdapter<OrderItemRecord>([]);
   const categoriesAdapter = createInMemoryAdapter<CategoryRecord>([]);
 
-  const adapters = {
+  // Type for adapters that matches DatabaseContextOptions<TestDBSchema>
+  // The concrete record types (UserRecord, etc.) are structurally equivalent
+  // to TableSchemaToRecord<TestDBSchema[table]> after type conversion
+  type TestDBAdapters = DatabaseContextOptions<TestDBSchema>['adapters'];
+
+  const adapters: TestDBAdapters = {
     users: usersAdapter,
     orders: ordersAdapter,
     products: productsAdapter,
@@ -334,7 +340,7 @@ export async function createTestHarness(): Promise<TestHarness> {
 
   // Create database context
   const dbContext = createDatabaseContext<TestDBSchema>({
-    adapters: adapters as any,
+    adapters,
     sqlExecutor: createInMemorySqlExecutor(adapterMap),
     transactionManager: createInMemoryTransactionManager(),
   });

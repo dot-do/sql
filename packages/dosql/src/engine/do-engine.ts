@@ -41,8 +41,8 @@ import { parseDML, parseInsert, parseUpdate, parseDelete } from '../parser/dml.j
 import { isParseSuccess } from '../parser/dml-types.js';
 import type { ReturningClause, Expression } from '../parser/dml-types.js';
 import { evaluateReturning, evaluateExpression } from '../parser/returning.js';
-import { StatementError, createTransactionStateError } from '../errors/index.js';
-import { StatementErrorCode } from '../errors/codes.js';
+import { StatementError, createTransactionStateError, DatabaseError, BindingError } from '../errors/index.js';
+import { StatementErrorCode, DatabaseErrorCode, BindingErrorCode } from '../errors/codes.js';
 import { parseDDL, isParseSuccess as isDDLParseSuccess } from '../parser/ddl.js';
 import type { CreateTriggerStatement, DropTriggerStatement } from '../parser/ddl-types.js';
 import { createTriggerRegistry } from '../triggers/registry.js';
@@ -568,7 +568,7 @@ export class DOQueryEngine {
     const beforeResult = await executor.executeBefore(tableName, 'insert', undefined, row);
     if (!beforeResult.proceed) {
       const errorMsg = beforeResult.error?.message ?? 'BEFORE INSERT trigger rejected operation';
-      throw new Error(errorMsg);
+      throw new DatabaseError(DatabaseErrorCode.CONSTRAINT_VIOLATION, errorMsg);
     }
     // Use potentially modified row from BEFORE trigger
     if (beforeResult.row) {
@@ -680,7 +680,7 @@ export class DOQueryEngine {
         const beforeResult = await executor.executeBefore(tableName, 'update', before, proposedRow);
         if (!beforeResult.proceed) {
           const errorMsg = beforeResult.error?.message ?? 'BEFORE UPDATE trigger rejected operation';
-          throw new Error(errorMsg);
+          throw new DatabaseError(DatabaseErrorCode.CONSTRAINT_VIOLATION, errorMsg);
         }
         // Use potentially modified row from BEFORE trigger
         const finalRow = (beforeResult.row ?? proposedRow) as Row;
@@ -789,7 +789,7 @@ export class DOQueryEngine {
       const beforeResult = await executor.executeBefore(tableName, 'delete', row, undefined);
       if (!beforeResult.proceed) {
         const errorMsg = beforeResult.error?.message ?? 'BEFORE DELETE trigger rejected operation';
-        throw new Error(errorMsg);
+        throw new DatabaseError(DatabaseErrorCode.CONSTRAINT_VIOLATION, errorMsg);
       }
 
       await this.config.storage.delete(`${tableName}:${key}`);
@@ -950,7 +950,7 @@ export class DOQueryEngine {
       // Check for duplicate
       const existing = this.triggerRegistry.get(parsed.name);
       if (existing) {
-        throw new Error(`trigger ${parsed.name} already exists`);
+        throw new StatementError(StatementErrorCode.CONSTRAINT_VIOLATION, `trigger ${parsed.name} already exists`);
       }
 
       // Register the trigger
@@ -964,7 +964,7 @@ export class DOQueryEngine {
       if (error instanceof Error && error.message.includes('already exists')) {
         throw error;
       }
-      throw new Error(`Failed to create trigger: ${error instanceof Error ? error.message : String(error)}`);
+      throw new StatementError(StatementErrorCode.EXECUTION_ERROR, `Failed to create trigger: ${error instanceof Error ? error.message : String(error)}`, sql);
     }
   }
 
@@ -981,7 +981,7 @@ export class DOQueryEngine {
         if (parsed.ifExists) {
           return { success: true, rowsAffected: 0 };
         }
-        throw new Error(`no such trigger: ${parsed.name}`);
+        throw new StatementError(StatementErrorCode.TABLE_NOT_FOUND, `no such trigger: ${parsed.name}`);
       }
 
       // Remove from registry
@@ -995,7 +995,7 @@ export class DOQueryEngine {
       if (error instanceof Error && (error.message.includes('no such trigger') || error.message.includes('already exists'))) {
         throw error;
       }
-      throw new Error(`Failed to drop trigger: ${error instanceof Error ? error.message : String(error)}`);
+      throw new StatementError(StatementErrorCode.EXECUTION_ERROR, `Failed to drop trigger: ${error instanceof Error ? error.message : String(error)}`, sql);
     }
   }
 
@@ -1150,7 +1150,7 @@ export class DOQueryEngine {
     } else if (valueStr.startsWith('$') && params) {
       const paramIndex = parseInt(valueStr.slice(1), 10) - 1;
       if (paramIndex < 0 || paramIndex >= params.length) {
-        throw new Error(`Parameter index $${paramIndex + 1} out of bounds (${params.length} params provided)`);
+        throw new BindingError(BindingErrorCode.COUNT_MISMATCH, `Parameter index $${paramIndex + 1} out of bounds (${params.length} params provided)`);
       }
       compareValue = params[paramIndex];
     } else {

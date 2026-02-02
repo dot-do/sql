@@ -615,4 +615,133 @@ describe('BTree', () => {
       expect(stats.pageCount).toBeGreaterThan(1); // Should have multiple pages
     });
   });
+
+  describe('page reclamation', () => {
+    it('should delete orphaned pages after node merges', async () => {
+      const tree = createBTree(fsx, NumberKeyCodec, JsonValueCodec, {
+        minKeys: 2,
+        maxKeys: 4,
+        pagePrefix: 'reclaim/',
+      });
+      await tree.init();
+
+      // Insert entries to create multiple pages (force splits)
+      const keys = Array.from({ length: 30 }, (_, i) => i);
+      for (const key of keys) {
+        await tree.set(key, `value_${key}`);
+      }
+
+      // Count pages in storage after insertions
+      const pagesBeforeDelete = await fsx.list('reclaim/page_');
+      const pageCountBefore = pagesBeforeDelete.length;
+      expect(pageCountBefore).toBeGreaterThan(1);
+
+      // Delete most entries to trigger merges
+      for (let i = 0; i < 25; i++) {
+        await tree.delete(i);
+      }
+
+      // Count pages in storage after deletions - should be fewer
+      const pagesAfterDelete = await fsx.list('reclaim/page_');
+      const pageCountAfter = pagesAfterDelete.length;
+
+      // Verify orphaned pages were reclaimed (fewer pages than before)
+      expect(pageCountAfter).toBeLessThan(pageCountBefore);
+
+      // Verify remaining entries are still accessible
+      for (let i = 25; i < 30; i++) {
+        expect(await tree.get(i)).toBe(`value_${i}`);
+      }
+      expect(await tree.count()).toBe(5);
+    });
+
+    it('should delete old root page when tree shrinks', async () => {
+      const tree = createBTree(fsx, NumberKeyCodec, JsonValueCodec, {
+        minKeys: 2,
+        maxKeys: 4,
+        pagePrefix: 'shrink/',
+      });
+      await tree.init();
+
+      // Insert enough entries to create a multi-level tree
+      for (let i = 0; i < 20; i++) {
+        await tree.set(i, `value_${i}`);
+      }
+
+      let stats = await tree.stats();
+      const heightBefore = stats.height;
+      expect(heightBefore).toBeGreaterThan(1);
+
+      const pagesBeforeDelete = await fsx.list('shrink/page_');
+      const pageCountBefore = pagesBeforeDelete.length;
+
+      // Delete enough entries to cause the tree to shrink in height
+      for (let i = 0; i < 18; i++) {
+        await tree.delete(i);
+      }
+
+      stats = await tree.stats();
+      const heightAfter = stats.height;
+
+      // Tree should have shrunk or stayed same height
+      expect(heightAfter).toBeLessThanOrEqual(heightBefore);
+
+      // Pages should have been reclaimed
+      const pagesAfterDelete = await fsx.list('shrink/page_');
+      const pageCountAfter = pagesAfterDelete.length;
+      expect(pageCountAfter).toBeLessThan(pageCountBefore);
+
+      // Verify remaining entries are still accessible
+      expect(await tree.get(18)).toBe('value_18');
+      expect(await tree.get(19)).toBe('value_19');
+      expect(await tree.count()).toBe(2);
+    });
+
+    it('should properly reclaim pages during random delete operations', async () => {
+      const tree = createBTree(fsx, NumberKeyCodec, JsonValueCodec, {
+        minKeys: 2,
+        maxKeys: 4,
+        pagePrefix: 'random/',
+      });
+      await tree.init();
+
+      // Insert entries in random order
+      const insertOrder = Array.from({ length: 50 }, (_, i) => i);
+      for (let i = insertOrder.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [insertOrder[i], insertOrder[j]] = [insertOrder[j], insertOrder[i]];
+      }
+
+      for (const key of insertOrder) {
+        await tree.set(key, `value_${key}`);
+      }
+
+      // Delete entries in random order
+      const deleteOrder = [...insertOrder];
+      for (let i = deleteOrder.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [deleteOrder[i], deleteOrder[j]] = [deleteOrder[j], deleteOrder[i]];
+      }
+
+      // Delete half the entries
+      const toDelete = deleteOrder.slice(0, 25);
+      const toKeep = new Set(deleteOrder.slice(25));
+
+      for (const key of toDelete) {
+        await tree.delete(key);
+      }
+
+      // Verify remaining entries
+      expect(await tree.count()).toBe(25);
+      for (const key of toKeep) {
+        expect(await tree.get(key)).toBe(`value_${key}`);
+      }
+
+      // Verify pages were reclaimed (storage should have fewer pages)
+      const pages = await fsx.list('random/page_');
+      // With 25 entries and maxKeys=4, we need at least ceil(25/4)=7 leaf pages
+      // plus some internal nodes, but should be much fewer than before
+      expect(pages.length).toBeLessThan(30); // Should not have excessive orphaned pages
+    });
+  });
 });

@@ -53,6 +53,7 @@ import {
   estimateLikeSelectivity,
 } from './stats.js';
 import { CostEstimator, createCostEstimator, isBetterCost } from './cost.js';
+import { createNoTablesToJoinError, createJoinOrderFailedError } from '../errors/index.js';
 
 // =============================================================================
 // QUERY OPTIMIZER
@@ -881,7 +882,7 @@ export function findOptimalJoinOrder(
   costEstimator: CostEstimator
 ): PhysicalPlanNode {
   if (tables.length === 0) {
-    throw new Error('No tables to join');
+    throw createNoTablesToJoinError();
   }
 
   if (tables.length === 1) {
@@ -940,7 +941,7 @@ export function findOptimalJoinOrder(
   const result = memo.get(allTablesMask);
 
   if (!result) {
-    throw new Error('Failed to find join order');
+    throw createJoinOrderFailedError(tables.map(t => t.name));
   }
 
   return result.plan;

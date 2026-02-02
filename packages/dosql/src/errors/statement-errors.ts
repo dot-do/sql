@@ -14,6 +14,7 @@ import {
   type SerializedError,
 } from './base.js';
 import { StatementErrorCode } from './codes.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // Statement Error
@@ -72,6 +73,23 @@ export class StatementError extends DoSQLError {
       case StatementErrorCode.SYNTAX_ERROR:
         this.recoveryHint = 'Check the SQL syntax for errors';
         break;
+      case StatementErrorCode.COLUMN_NOT_FOUND:
+        this.recoveryHint = 'Check that the column exists in the table';
+        break;
+      case StatementErrorCode.EXECUTION_ERROR:
+        this.recoveryHint = 'Review the statement and its parameters';
+        break;
+      case StatementErrorCode.INVALID_SQL:
+        this.recoveryHint = 'Check the SQL syntax for errors';
+        break;
+      case StatementErrorCode.UNSUPPORTED:
+        this.recoveryHint = 'This operation is not supported';
+        break;
+      case StatementErrorCode.CONSTRAINT_VIOLATION:
+        this.recoveryHint = 'Check that the data satisfies all table constraints';
+        break;
+      default:
+        assertNever(this.code);
     }
   }
 
@@ -85,15 +103,21 @@ export class StatementError extends DoSQLError {
       case StatementErrorCode.FINALIZED:
         return 'This statement has already been closed and cannot be used.';
       case StatementErrorCode.TABLE_NOT_FOUND:
-        return `The specified table could not be found.`;
+        return 'The specified table could not be found.';
       case StatementErrorCode.COLUMN_NOT_FOUND:
-        return `The specified column could not be found.`;
+        return 'The specified column could not be found.';
       case StatementErrorCode.SYNTAX_ERROR:
         return 'There is a syntax error in the SQL statement.';
       case StatementErrorCode.UNSUPPORTED:
         return 'This SQL operation is not supported.';
+      case StatementErrorCode.EXECUTION_ERROR:
+        return 'An error occurred while executing the statement.';
+      case StatementErrorCode.INVALID_SQL:
+        return 'The SQL statement is invalid.';
+      case StatementErrorCode.CONSTRAINT_VIOLATION:
+        return 'The operation violates a constraint.';
       default:
-        return this.message;
+        return assertNever(this.code);
     }
   }
 

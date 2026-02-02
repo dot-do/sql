@@ -104,9 +104,13 @@ type ExtractParams<F> = F extends (ctx: FunctionalContext<any>) => any
 
 /**
  * Extracts the return type from a procedure function.
+ * Uses a constrained function type to avoid explicit `any`.
+ *
+ * @template F - Function type to extract return from
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for proper type inference of arbitrary functions
-type ExtractReturn<F> = F extends (...args: any[]) => infer R
+type ExtractReturn<F> = F extends (...args: readonly unknown[]) => infer R
+  ? R extends Promise<infer T> ? T : R
+  : F extends (...args: never[]) => infer R
   ? R extends Promise<infer T> ? T : R
   : never;
 

@@ -533,6 +533,50 @@ export interface ReplicaDO {
    * Demote to replica (during failover)
    */
   demoteToReplica(newPrimaryUrl: string): Promise<void>;
+
+  // ==========================================================================
+  // AUTO-PROMOTION & LEADER ELECTION
+  // ==========================================================================
+
+  /**
+   * Check if this replica is eligible for auto-promotion
+   */
+  checkPromotionEligibility(): Promise<PromotionEligibility>;
+
+  /**
+   * Start leader election process
+   */
+  startElection(): Promise<LeaderElectionState>;
+
+  /**
+   * Handle vote request from another candidate
+   */
+  handleVoteRequest(request: VoteRequest): Promise<VoteResponse>;
+
+  /**
+   * Handle leader heartbeat
+   */
+  handleLeaderHeartbeat(heartbeat: LeaderHeartbeat): Promise<void>;
+
+  /**
+   * Get current leader election state
+   */
+  getElectionState(): Promise<LeaderElectionState>;
+
+  /**
+   * Validate fencing token
+   */
+  validateFencingToken(token: FencingToken): Promise<boolean>;
+
+  /**
+   * Detect split-brain scenario
+   */
+  detectSplitBrain(): Promise<SplitBrainDetection>;
+
+  /**
+   * Auto-promote with split-brain detection
+   */
+  autoPromote(): Promise<{ success: boolean; fencingToken: FencingToken | null; error?: string }>;
 }
 
 // =============================================================================
@@ -592,6 +636,119 @@ export interface RouterMetrics {
 }
 
 // =============================================================================
+// FENCING TOKENS & LEADER ELECTION
+// =============================================================================
+
+/**
+ * Fencing token for split-brain prevention
+ * Monotonically increasing token that invalidates stale leaders
+ */
+export interface FencingToken {
+  /** Token epoch - increments on each leadership change */
+  epoch: bigint;
+  /** Token generation timestamp */
+  generatedAt: number;
+  /** Node ID that generated this token */
+  generatedBy: ReplicaId;
+  /** Cryptographic signature for token validation */
+  signature: string;
+}
+
+/**
+ * Leader election state
+ */
+export interface LeaderElectionState {
+  /** Current leader */
+  leader: ReplicaId | null;
+  /** Current fencing token */
+  fencingToken: FencingToken | null;
+  /** Election term (increments with each election) */
+  term: bigint;
+  /** Nodes that voted in current term */
+  votedFor: ReplicaId | null;
+  /** Votes received in current election */
+  votes: Map<string, boolean>;
+  /** Election start timestamp */
+  electionStartedAt: number | null;
+  /** Last heartbeat from leader */
+  lastLeaderHeartbeat: number;
+}
+
+/**
+ * Vote request for leader election
+ */
+export interface VoteRequest {
+  /** Candidate requesting votes */
+  candidateId: ReplicaId;
+  /** Election term */
+  term: bigint;
+  /** Candidate's last LSN */
+  lastLSN: bigint;
+  /** Candidate's fencing token */
+  fencingToken: FencingToken;
+}
+
+/**
+ * Vote response
+ */
+export interface VoteResponse {
+  /** Voter's replica ID */
+  voterId: ReplicaId;
+  /** Election term */
+  term: bigint;
+  /** Whether vote was granted */
+  voteGranted: boolean;
+  /** Reason for vote decision */
+  reason: string;
+}
+
+/**
+ * Leader heartbeat message
+ */
+export interface LeaderHeartbeat {
+  /** Leader's replica ID */
+  leaderId: ReplicaId;
+  /** Current term */
+  term: bigint;
+  /** Current fencing token */
+  fencingToken: FencingToken;
+  /** Leader's current LSN */
+  currentLSN: bigint;
+  /** Timestamp */
+  timestamp: number;
+}
+
+/**
+ * Split-brain detection result
+ */
+export interface SplitBrainDetection {
+  /** Whether split-brain was detected */
+  detected: boolean;
+  /** Conflicting leaders (if detected) */
+  conflictingLeaders: ReplicaId[];
+  /** Resolution action taken */
+  resolution: 'none' | 'fencing' | 'rollback' | 'manual';
+  /** Details about the detection */
+  details: string;
+}
+
+/**
+ * Auto-promotion eligibility
+ */
+export interface PromotionEligibility {
+  /** Whether this replica is eligible for promotion */
+  eligible: boolean;
+  /** Priority score (higher is better) */
+  priority: number;
+  /** Reason for eligibility decision */
+  reason: string;
+  /** Current LSN lag from last known primary LSN */
+  lsnLag: bigint;
+  /** Time since last primary heartbeat */
+  timeSinceLastHeartbeat: number;
+}
+
+// =============================================================================
 // CONFIGURATION
 // =============================================================================
 
@@ -617,6 +774,18 @@ export interface ReplicationConfig {
   conflictStrategy: ConflictResolutionStrategy;
   /** Bounded staleness window (ms) for 'bounded' consistency */
   boundedStalenessMs: number;
+  /** Election timeout (ms) - time to wait before starting new election */
+  electionTimeoutMs: number;
+  /** Election timeout randomization range (ms) */
+  electionTimeoutJitterMs: number;
+  /** Minimum votes required for quorum (0 = automatic based on replica count) */
+  quorumSize: number;
+  /** Maximum allowed clock skew between nodes (ms) */
+  maxClockSkewMs: number;
+  /** Enable split-brain detection */
+  splitBrainDetection: boolean;
+  /** Fencing token TTL (ms) */
+  fencingTokenTtlMs: number;
 }
 
 /**
@@ -632,6 +801,12 @@ export const DEFAULT_REPLICATION_CONFIG: Readonly<ReplicationConfig> = {
   autoFailover: true,
   conflictStrategy: 'last_write_wins',
   boundedStalenessMs: 5000,
+  electionTimeoutMs: 10000,
+  electionTimeoutJitterMs: 5000,
+  quorumSize: 0, // Auto-calculate based on replica count
+  maxClockSkewMs: 5000,
+  splitBrainDetection: true,
+  fencingTokenTtlMs: 60000, // 1 minute
 };
 
 // =============================================================================
@@ -662,6 +837,18 @@ export enum ReplicationErrorCode {
   REGISTRATION_FAILED = 'REPL_REGISTRATION_FAILED',
   /** Streaming error */
   STREAMING_ERROR = 'REPL_STREAMING_ERROR',
+  /** Split-brain detected */
+  SPLIT_BRAIN_DETECTED = 'REPL_SPLIT_BRAIN_DETECTED',
+  /** Invalid fencing token */
+  INVALID_FENCING_TOKEN = 'REPL_INVALID_FENCING_TOKEN',
+  /** Election in progress */
+  ELECTION_IN_PROGRESS = 'REPL_ELECTION_IN_PROGRESS',
+  /** Not eligible for promotion */
+  NOT_ELIGIBLE_FOR_PROMOTION = 'REPL_NOT_ELIGIBLE_FOR_PROMOTION',
+  /** Stale leader detected */
+  STALE_LEADER = 'REPL_STALE_LEADER',
+  /** Quorum not reached */
+  QUORUM_NOT_REACHED = 'REPL_QUORUM_NOT_REACHED',
 }
 
 /**

@@ -21,6 +21,7 @@ import {
   type MigrationResult,
   calculateChecksumSync,
 } from '../migrations/types.js';
+import { createCLILogger, type CLILogger } from './logger.js';
 
 // =============================================================================
 // TYPES
@@ -64,6 +65,9 @@ const DEFAULT_CONFIG_FILE = 'dosql.config.json';
 const DEFAULT_MIGRATIONS_DIR = 'migrations';
 
 const VERSION = '0.1.0';
+
+// Default CLI logger instance
+let cliLogger: CLILogger = createCLILogger();
 
 const HELP_TEXT = `
 DoSQL CLI v${VERSION}
@@ -396,8 +400,8 @@ export async function init(options?: { configPath?: string }): Promise<void> {
     fsImpl.mkdirSync(migrationsDir, { recursive: true });
   }
 
-  console.log(`Created ${configPath}`);
-  console.log(`Created ${migrationsDir}/`);
+  cliLogger.success(`Created ${configPath}`, { operation: 'init', path: configPath });
+  cliLogger.success(`Created ${migrationsDir}/`, { operation: 'init', path: migrationsDir });
 }
 
 /**
@@ -414,7 +418,7 @@ export async function migrate(options?: {
   const migrations = await loadMigrations(config);
 
   if (migrations.length === 0 && !options?.dryRun) {
-    console.log('No migrations found');
+    cliLogger.info('No migrations found', { operation: 'migrate', directory: config.migrations?.directory ?? DEFAULT_MIGRATIONS_DIR });
     return { applied: [], pending: [] };
   }
 
@@ -425,20 +429,20 @@ export async function migrate(options?: {
     const runner = new MigrationRunner(executor, {
       dryRun: options?.dryRun ?? false,
       logger: {
-        info: (msg) => console.log(msg),
-        warn: (msg) => console.warn(msg),
-        error: (msg) => console.error(msg),
-        debug: () => {},
+        info: (msg) => cliLogger.info(msg, { operation: 'migrate' }),
+        warn: (msg) => cliLogger.warn(msg, { operation: 'migrate' }),
+        error: (msg) => cliLogger.error(msg, undefined, { operation: 'migrate' }),
+        debug: (msg) => cliLogger.debug(msg, { operation: 'migrate' }),
       },
     });
 
     if (options?.dryRun) {
       // In dry-run mode, just show what would be applied
       const status = await runner.getStatus(migrations);
-      console.log('\nDry run - migrations that would be applied:');
+      cliLogger.output('\nDry run - migrations that would be applied:');
       for (const m of status.pending) {
-        console.log(`\n--- ${m.id} ---`);
-        console.log(m.sql);
+        cliLogger.output(`\n--- ${m.id} ---`);
+        cliLogger.output(m.sql);
       }
       return {
         applied: [],
@@ -474,9 +478,9 @@ export async function shell(options?: { configPath?: string }): Promise<void> {
   const config = await loadConfig(options?.configPath);
   const db = await createDatabaseConnection(config);
 
-  console.log('DoSQL Shell');
-  console.log(`Connected to: ${config.database.path ?? ':memory:'}`);
-  console.log('Type ".exit" to quit, ".tables" to list tables\n');
+  cliLogger.output('DoSQL Shell');
+  cliLogger.output(`Connected to: ${config.database.path ?? ':memory:'}`);
+  cliLogger.output('Type ".exit" to quit, ".tables" to list tables\n');
 
   // In Node.js environment, we'd use readline here
   // For now, this is a placeholder that would be implemented
@@ -521,7 +525,7 @@ export async function query(
       case 'table':
         // Table format - print to console
         if (results.length > 0) {
-          console.table(results);
+          cliLogger.outputData(results);
         }
         break;
 
@@ -529,7 +533,7 @@ export async function query(
         // CSV format - print to console
         if (results.length > 0) {
           const headers = Object.keys(results[0] as object);
-          console.log(headers.join(','));
+          cliLogger.output(headers.join(','));
           for (const row of results) {
             const values = headers.map(h => {
               const val = (row as Record<string, unknown>)[h];
@@ -538,7 +542,7 @@ export async function query(
               }
               return String(val ?? '');
             });
-            console.log(values.join(','));
+            cliLogger.output(values.join(','));
           }
         }
         break;
@@ -583,12 +587,12 @@ export async function main(args: string[]): Promise<void> {
 
     // Handle global flags
     if (parsed.options.help) {
-      console.log(HELP_TEXT);
+      cliLogger.output(HELP_TEXT);
       return;
     }
 
     if (parsed.options.version) {
-      console.log(`dosql v${VERSION}`);
+      cliLogger.output(`dosql v${VERSION}`);
       return;
     }
 
@@ -619,12 +623,12 @@ export async function main(args: string[]): Promise<void> {
         });
         // Print JSON results to stdout
         if (parsed.options.format !== 'table' && parsed.options.format !== 'csv') {
-          console.log(JSON.stringify(results, null, 2));
+          cliLogger.outputData(results);
         }
         break;
 
       case '':
-        console.log(HELP_TEXT);
+        cliLogger.output(HELP_TEXT);
         break;
 
       default:
@@ -632,12 +636,31 @@ export async function main(args: string[]): Promise<void> {
     }
   } catch (error) {
     if (error instanceof Error) {
-      console.error(`Error: ${error.message}`);
+      cliLogger.error(error.message, error, { operation: 'cli' });
     } else {
-      console.error('An unknown error occurred');
+      cliLogger.error('An unknown error occurred', undefined, { operation: 'cli' });
     }
     process.exitCode = 1;
   }
+}
+
+// =============================================================================
+// LOGGER CONFIGURATION
+// =============================================================================
+
+/**
+ * Set the CLI logger instance
+ * Useful for testing or custom logging configurations
+ */
+export function setCLILogger(logger: CLILogger): void {
+  cliLogger = logger;
+}
+
+/**
+ * Get the current CLI logger instance
+ */
+export function getCLILogger(): CLILogger {
+  return cliLogger;
 }
 
 // =============================================================================
@@ -650,3 +673,6 @@ export {
   DEFAULT_CONFIG_FILE,
   DEFAULT_MIGRATIONS_DIR,
 };
+
+// Re-export logger types and factories
+export { createCLILogger, type CLILogger, type CLILoggerConfig } from './logger.js';

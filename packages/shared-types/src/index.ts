@@ -62,6 +62,9 @@ declare const TransactionIdBrand: unique symbol;
 declare const LSNBrand: unique symbol;
 declare const StatementHashBrand: unique symbol;
 declare const ShardIdBrand: unique symbol;
+declare const UUIDBrand: unique symbol;
+declare const EmailBrand: unique symbol;
+declare const TimestampBrand: unique symbol;
 
 /**
  * Branded type for transaction IDs
@@ -174,6 +177,89 @@ export type StatementHash = string & { readonly [StatementHashBrand]: never };
  * ```
  */
 export type ShardId = string & { readonly [ShardIdBrand]: never };
+
+/**
+ * Branded type for UUIDs
+ *
+ * UUID is a string branded type representing a Universally Unique Identifier.
+ * Use `createUUID()` to create validated instances, or `isValidUUID()` as a type guard.
+ *
+ * @example
+ * ```typescript
+ * import { createUUID, UUID, isValidUUID } from '@dotdo/sql-types';
+ *
+ * // Create a validated UUID
+ * const id: UUID = createUUID('550e8400-e29b-41d4-a716-446655440000');
+ *
+ * // Use as primary key in entities
+ * interface User {
+ *   id: UUID;
+ *   name: string;
+ * }
+ *
+ * // Validate unknown input
+ * if (isValidUUID(input)) {
+ *   // input is narrowed to UUID
+ * }
+ * ```
+ */
+export type UUID = string & { readonly [UUIDBrand]: never };
+
+/**
+ * Branded type for email addresses
+ *
+ * Email is a string branded type representing a valid email address.
+ * Use `createEmail()` to create validated instances, or `isValidEmail()` as a type guard.
+ *
+ * @example
+ * ```typescript
+ * import { createEmail, Email, isValidEmail } from '@dotdo/sql-types';
+ *
+ * // Create a validated email
+ * const email: Email = createEmail('user@example.com');
+ *
+ * // Use in user entities
+ * interface User {
+ *   id: UUID;
+ *   email: Email;
+ * }
+ *
+ * // Validate unknown input
+ * if (isValidEmail(input)) {
+ *   // input is narrowed to Email
+ * }
+ * ```
+ */
+export type Email = string & { readonly [EmailBrand]: never };
+
+/**
+ * Branded type for timestamps
+ *
+ * Timestamp is a Date branded type representing a point in time with
+ * explicit typing to distinguish from regular Date objects.
+ * Use `createTimestamp()` to create validated instances.
+ *
+ * @example
+ * ```typescript
+ * import { createTimestamp, Timestamp } from '@dotdo/sql-types';
+ *
+ * // Create a timestamp from a Date
+ * const ts: Timestamp = createTimestamp(new Date());
+ *
+ * // Create a timestamp from a number (Unix milliseconds)
+ * const ts2: Timestamp = createTimestamp(Date.now());
+ *
+ * // Create a timestamp from an ISO string
+ * const ts3: Timestamp = createTimestamp('2024-01-15T12:00:00Z');
+ *
+ * // Use in entities
+ * interface AuditLog {
+ *   action: string;
+ *   timestamp: Timestamp;
+ * }
+ * ```
+ */
+export type Timestamp = Date & { readonly [TimestampBrand]: never };
 
 // =============================================================================
 // Generic Branded Type Factory Pattern
@@ -568,6 +654,52 @@ export function isValidStatementHash<T>(value: T | unknown): value is T extends 
   return typeof value === 'string' && value.length > 0;
 }
 
+// UUID regex: 8-4-4-4-12 hex format
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Check if a value is a valid UUID (standard UUID format).
+ * @template T - The input type (defaults to unknown)
+ * @public
+ * @stability stable
+ */
+export function isValidUUID<T>(value: T | unknown): value is T extends string ? UUID : UUID {
+  return typeof value === 'string' && UUID_REGEX.test(value);
+}
+
+// Simple email regex - covers most common cases without being overly complex
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Check if a value is a valid email address (basic format validation).
+ * @template T - The input type (defaults to unknown)
+ * @public
+ * @stability stable
+ */
+export function isValidEmail<T>(value: T | unknown): value is T extends string ? Email : Email {
+  return typeof value === 'string' && EMAIL_REGEX.test(value);
+}
+
+/**
+ * Check if a value is a valid Timestamp (Date object or convertible value).
+ * @template T - The input type (defaults to unknown)
+ * @public
+ * @stability stable
+ */
+export function isValidTimestamp<T>(value: T | unknown): value is T extends Date ? Timestamp : Timestamp {
+  if (value instanceof Date) {
+    return !isNaN(value.getTime());
+  }
+  if (typeof value === 'number') {
+    return !isNaN(value) && isFinite(value);
+  }
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return !isNaN(parsed);
+  }
+  return false;
+}
+
 // =============================================================================
 // Factory Functions with Validation
 // =============================================================================
@@ -784,6 +916,152 @@ export function createShardId(id: string): ShardId {
   }
 
   return id as ShardId;
+}
+
+/**
+ * Create a typed UUID from a string.
+ * @throws Error if id is not a valid UUID format (in dev/strict mode)
+ * @public
+ * @stability stable
+ */
+export function createUUID(id: string): UUID {
+  if (_isDevModeInternal() || _isStrictModeInternal()) {
+    if (typeof id !== 'string') {
+      throw new Error('UUID must be a string');
+    }
+    if (!UUID_REGEX.test(id)) {
+      throw new Error(`Invalid UUID format: ${id}`);
+    }
+  }
+  return id as UUID;
+}
+
+/**
+ * Create a typed Email from a string.
+ * @throws Error if email is not a valid email format (in dev/strict mode)
+ * @public
+ * @stability stable
+ */
+export function createEmail(email: string): Email {
+  if (_isDevModeInternal() || _isStrictModeInternal()) {
+    if (typeof email !== 'string') {
+      throw new Error('Email must be a string');
+    }
+    if (!EMAIL_REGEX.test(email)) {
+      throw new Error(`Invalid email format: ${email}`);
+    }
+  }
+  return email as Email;
+}
+
+/**
+ * Create a typed Timestamp from a Date, number (Unix milliseconds), or ISO string.
+ * @throws Error if value cannot be converted to a valid Date (in dev/strict mode)
+ * @public
+ * @stability stable
+ * @overload
+ */
+export function createTimestamp(value: Date): Timestamp;
+/**
+ * Create a typed Timestamp from a Unix timestamp in milliseconds.
+ * @throws Error if value is not a finite number (in dev/strict mode)
+ * @public
+ * @stability stable
+ * @overload
+ */
+export function createTimestamp(value: number): Timestamp;
+/**
+ * Create a typed Timestamp from an ISO 8601 date string.
+ * @throws Error if string cannot be parsed as a valid date (in dev/strict mode)
+ * @public
+ * @stability stable
+ * @overload
+ */
+export function createTimestamp(value: string): Timestamp;
+/**
+ * Create a typed Timestamp from a Date, number (Unix milliseconds), or ISO string.
+ *
+ * @param value - The value to convert to a Timestamp
+ * @returns A branded Timestamp value
+ * @throws Error if value cannot be converted to a valid Date (in dev/strict mode)
+ *
+ * @example
+ * ```typescript
+ * // From Date (preferred)
+ * const ts1 = createTimestamp(new Date());
+ *
+ * // From Unix milliseconds
+ * const ts2 = createTimestamp(Date.now());
+ *
+ * // From ISO string
+ * const ts3 = createTimestamp('2024-01-15T12:00:00Z');
+ * ```
+ *
+ * @public
+ * @stability stable
+ */
+export function createTimestamp(value: Date | number | string): Timestamp;
+export function createTimestamp(value: Date | number | string): Timestamp {
+  let date: Date;
+
+  if (value instanceof Date) {
+    date = value;
+  } else if (typeof value === 'number') {
+    if (_isDevModeInternal() || _isStrictModeInternal()) {
+      if (!isFinite(value)) {
+        throw new Error(`Timestamp number must be finite: ${value}`);
+      }
+    }
+    date = new Date(value);
+  } else {
+    // string
+    date = new Date(value);
+  }
+
+  if (_isDevModeInternal() || _isStrictModeInternal()) {
+    if (isNaN(date.getTime())) {
+      throw new Error(`Invalid timestamp value: ${value}`);
+    }
+  }
+
+  return date as Timestamp;
+}
+
+/**
+ * Extract the raw Date value from a Timestamp.
+ * @public
+ * @stability stable
+ */
+export function timestampValue(ts: Timestamp): Date {
+  return ts as Date;
+}
+
+/**
+ * Convert a Timestamp to Unix milliseconds.
+ * @public
+ * @stability stable
+ */
+export function timestampToMillis(ts: Timestamp): number {
+  return (ts as Date).getTime();
+}
+
+/**
+ * Convert a Timestamp to an ISO 8601 string.
+ * @public
+ * @stability stable
+ */
+export function timestampToISO(ts: Timestamp): string {
+  return (ts as Date).toISOString();
+}
+
+/**
+ * Compare two Timestamps.
+ * @returns negative if a < b, 0 if equal, positive if a > b
+ * @public
+ * @stability stable
+ */
+export function compareTimestamp(a: Timestamp, b: Timestamp): number {
+  return (a as Date).getTime() - (b as Date).getTime();
 }
 
 // =============================================================================

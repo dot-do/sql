@@ -22,6 +22,7 @@ import {
   type FunctionCall,
   type SortSpec,
 } from '../types.js';
+import { createUnknownWindowFunctionError } from '../../errors/index.js';
 
 /** FunctionCall extended with window OVER clause */
 interface WindowFunctionExpr extends FunctionCall {
@@ -258,7 +259,7 @@ function evaluateWindowFunction(
     }
 
     default:
-      throw new Error(`Unknown window function: ${name}`);
+      throw createUnknownWindowFunctionError(name);
   }
 }
 

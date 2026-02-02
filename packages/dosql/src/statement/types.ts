@@ -269,29 +269,46 @@ export interface Statement<T = unknown, P extends BindParameters = BindParameter
 export type TransactionMode = 'deferred' | 'immediate' | 'exclusive';
 
 /**
- * Transaction function wrapper
+ * Constraint for transaction callback functions.
+ * Accepts functions with arbitrary parameters and return types.
+ *
+ * @template TArgs - Tuple type representing function parameter types
+ * @template TReturn - Function return type
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for proper type inference of arbitrary functions
-export interface TransactionFunction<F extends (...args: any[]) => any> {
+export type TransactionCallback<
+  TArgs extends readonly unknown[] = readonly unknown[],
+  TReturn = unknown
+> = (...args: TArgs) => TReturn;
+
+/**
+ * Transaction function wrapper with full type inference.
+ *
+ * @template TArgs - Tuple type representing function parameter types
+ * @template TReturn - Function return type
+ */
+export interface TransactionFunction<
+  TArgs extends readonly unknown[] = readonly unknown[],
+  TReturn = unknown
+> {
   /**
    * Execute the function within a transaction
    */
-  (...args: Parameters<F>): ReturnType<F>;
+  (...args: TArgs): TReturn;
 
   /**
    * Execute with deferred transaction mode
    */
-  deferred(...args: Parameters<F>): ReturnType<F>;
+  deferred(...args: TArgs): TReturn;
 
   /**
    * Execute with immediate transaction mode
    */
-  immediate(...args: Parameters<F>): ReturnType<F>;
+  immediate(...args: TArgs): TReturn;
 
   /**
    * Execute with exclusive transaction mode
    */
-  exclusive(...args: Parameters<F>): ReturnType<F>;
+  exclusive(...args: TArgs): TReturn;
 }
 
 // =============================================================================
@@ -566,8 +583,9 @@ export interface Database {
    * transfer(1, 2, 100);
    * ```
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for proper type inference of arbitrary functions
-  transaction<F extends (...args: any[]) => any>(fn: F): TransactionFunction<F>;
+  transaction<TArgs extends readonly unknown[], TReturn>(
+    fn: TransactionCallback<TArgs, TReturn>
+  ): TransactionFunction<TArgs, TReturn>;
 
   /**
    * Execute a PRAGMA statement

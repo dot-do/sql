@@ -13,6 +13,7 @@ import {
 import {
   type TransactionContext,
   type TransactionId,
+  type DurableObjectState,
   TransactionState,
   TransactionMode,
   IsolationLevel,
@@ -23,6 +24,23 @@ import {
   DEFAULT_TIMEOUT_CONFIG,
   createTransactionId,
 } from './types.js';
+
+// =============================================================================
+// Mock Helpers
+// =============================================================================
+
+/**
+ * Create a mock DurableObjectState for testing
+ */
+function createMockDoState(): DurableObjectState {
+  return {
+    storage: {
+      setAlarm: vi.fn().mockResolvedValue(undefined),
+      deleteAlarm: vi.fn().mockResolvedValue(undefined),
+      getAlarm: vi.fn().mockResolvedValue(null),
+    },
+  };
+}
 
 // =============================================================================
 // Test Helpers
@@ -76,15 +94,10 @@ describe('createTimeoutEnforcer', () => {
   });
 
   it('should indicate alarm support when doState provided', () => {
-    const mockDoState = {
-      storage: {
-        setAlarm: vi.fn(),
-        deleteAlarm: vi.fn(),
-      },
-    };
+    const mockDoState = createMockDoState();
 
     const enforcer = createTimeoutEnforcer({
-      doState: mockDoState as any,
+      doState: mockDoState,
     });
 
     expect(enforcer.hasAlarmSupport()).toBe(true);

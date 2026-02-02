@@ -29,3 +29,6 @@ export * from './optimizer.js';
 
 // EXPLAIN output
 export * from './explain.js';
+
+// Query plan cache
+export * from './cache.js';

@@ -178,6 +178,16 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   }
 
   /**
+   * Delete a page from storage and cache (for orphaned pages after merges)
+   */
+  private async deletePage(pageId: number): Promise<void> {
+    // Remove from cache first (don't write back since we're deleting)
+    this.pageCache.delete(pageId);
+    // Delete from persistent storage
+    await this.fsx.delete(this.pageKey(pageId));
+  }
+
+  /**
    * Flush all dirty pages to storage
    */
   private async flush(): Promise<void> {
@@ -550,9 +560,11 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     if (node.id === this.metadata.rootPageId) {
       // If root is internal and has only one child, shrink the tree
       if (node.type === PageType.INTERNAL && node.keys.length === 0 && node.children.length === 1) {
+        const oldRootId = node.id;
         this.metadata.rootPageId = node.children[0];
         this.metadata.height--;
-        // The old root page can be freed (in a full impl, we'd add to free list)
+        // Delete the old root page from storage
+        await this.deletePage(oldRootId);
       }
       return;
     }
@@ -601,8 +613,11 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     } else if (parent.id === this.metadata.rootPageId && parent.keys.length === 0) {
       // Root has become empty after merge - shrink tree
       if (parent.type === PageType.INTERNAL && parent.children.length === 1) {
+        const oldRootId = parent.id;
         this.metadata.rootPageId = parent.children[0];
         this.metadata.height--;
+        // Delete the old root page from storage
+        await this.deletePage(oldRootId);
       }
     }
   }
@@ -731,7 +746,9 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
 
     this.markDirty(parent);
     this.markDirty(leftNode);
-    // Note: rightNode is now orphaned and could be freed
+
+    // Delete the orphaned right node from storage
+    await this.deletePage(rightNode.id);
   }
 
   /**

@@ -16,6 +16,7 @@ import {
   type Expression,
 } from './types.js';
 import { assertNever } from '../utils/assert-never.js';
+import { createQueryTimeoutError } from '../errors/index.js';
 
 import { ScanOperator } from './operators/scan.js';
 import { FilterOperator } from './operators/filter.js';
@@ -321,7 +322,7 @@ export async function executePlan<T = Row>(
       if (ctx.options?.timeout) {
         const elapsed = performance.now() - startTime;
         if (elapsed > ctx.options.timeout) {
-          throw new Error(`Query timeout after ${elapsed}ms`);
+          throw createQueryTimeoutError(elapsed, ctx.options.timeout);
         }
       }
     }

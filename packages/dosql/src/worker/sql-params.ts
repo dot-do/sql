@@ -29,7 +29,8 @@ export function escapeSqlValue(value: unknown): string {
 
 /**
  * Substitute named parameters (:name) in a SQL string with safely escaped values.
- * Only substitutes outside of string literals to avoid corrupting literal content.
+ * Only substitutes outside of string literals and quoted identifiers to avoid
+ * corrupting literal content or identifier names.
  */
 export function substituteParams(sql: string, params: Record<string, unknown>): string {
   let result = '';
@@ -56,7 +57,28 @@ export function substituteParams(sql: string, params: Record<string, unknown>): 
       continue;
     }
 
-    // Handle named parameters outside of string literals
+    // Handle double-quoted identifiers - skip over them
+    if (sql[i] === '"') {
+      result += '"';
+      i++;
+      while (i < sql.length) {
+        if (sql[i] === '"' && sql[i + 1] === '"') {
+          // Escaped double quote inside identifier
+          result += '""';
+          i += 2;
+        } else if (sql[i] === '"') {
+          result += '"';
+          i++;
+          break;
+        } else {
+          result += sql[i];
+          i++;
+        }
+      }
+      continue;
+    }
+
+    // Handle named parameters outside of string literals and quoted identifiers
     if (sql[i] === ':') {
       const paramMatch = sql.substring(i).match(/^:(\w+)/);
       if (paramMatch) {
