@@ -23,8 +23,9 @@
  * - The Node.js client with a file-based or in-memory database
  */
 
-import { createClient, Client, ResultSet, InStatement, InValue } from '@libsql/client/web';
-import {
+import { createClient } from '@libsql/client/web';
+import type { Client, ResultSet, InStatement, InValue } from '@libsql/client/web';
+import type {
   BenchmarkAdapter,
   BenchmarkOperation,
   TableSchemaConfig,

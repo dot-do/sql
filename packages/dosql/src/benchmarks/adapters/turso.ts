@@ -5,8 +5,9 @@
  * Supports both HTTP connections and embedded replicas with sync capabilities.
  */
 
-import { createClient, Client, InValue, InStatement } from '@libsql/client';
-import {
+import { createClient } from '@libsql/client';
+import type { Client, InValue, InStatement } from '@libsql/client';
+import type {
   BenchmarkAdapter,
   BenchmarkOperation,
   TableSchemaConfig,

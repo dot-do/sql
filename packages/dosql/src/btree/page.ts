@@ -35,7 +35,8 @@
  *   Variable-length value data packed contiguously
  */
 
-import { Page, PageType, createInternalPage, createLeafPage } from './types.js';
+import type { Page } from './types.js';
+import { PageType, createInternalPage, createLeafPage } from './types.js';
 
 /** Magic number for page files */
 const PAGE_MAGIC = 0x42545045; // "BTPE" in ASCII

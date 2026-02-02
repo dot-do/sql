@@ -7,7 +7,7 @@
 
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types';
 
-import {
+import type {
   BenchmarkAdapter,
   BenchmarkOperation,
   TableSchemaConfig,

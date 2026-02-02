@@ -20,18 +20,20 @@ import {
   DatabaseErrorCode,
 } from '../errors/index.js';
 import {
-  Page,
   PageType,
+  DEFAULT_BTREE_CONFIG,
+  DEFAULT_PAGE_CACHE_CONFIG,
+  createInternalPage,
+  createLeafPage,
+} from './types.js';
+import type {
+  Page,
   BTree,
   BTreeConfig,
   BTreeMetadata,
   KeyCodec,
   ValueCodec,
-  DEFAULT_BTREE_CONFIG,
-  DEFAULT_PAGE_CACHE_CONFIG,
   SplitResult,
-  createInternalPage,
-  createLeafPage,
   CacheStats,
 } from './types.js';
 import {

@@ -5,17 +5,14 @@
  * Uses SQLite's query compiler since DoSQL is SQLite-compatible.
  */
 
-import {
+import type {
   Dialect,
   DialectAdapter,
   Driver,
-  Kysely,
   QueryCompiler,
   DatabaseIntrospector,
-  SqliteAdapter,
-  SqliteIntrospector,
-  SqliteQueryCompiler,
 } from 'kysely';
+import { Kysely, SqliteAdapter, SqliteIntrospector, SqliteQueryCompiler } from 'kysely';
 
 import { DoSQLDriver } from './driver.js';
 import type { DoSQLDialectConfig, DoSQLBackend } from './types.js';
