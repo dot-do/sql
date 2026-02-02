@@ -879,7 +879,7 @@ export function createReplicaDO(
     // In production: broadcast voteRequest to all known replicas and collect responses
 
     // Check if we won the election (have quorum)
-    if (role === 'leader') {
+    if (electionStateMachine.getRole() === 'leader') {
       const newToken = electionStateMachine.getFencingToken();
       state.currentFencingToken = newToken;
 
