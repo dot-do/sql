@@ -110,6 +110,10 @@ export function createReplicaDO(
   // State
   let state: ReplicaState | null = null;
 
+  // Leader election state machine (initialized when replica initializes)
+  let electionStateMachine: LeaderElectionStateMachine | null = null;
+  const splitBrainResolver = new SplitBrainResolver(fullConfig);
+
   // ==========================================================================
   // INITIALIZATION
   // ==========================================================================
@@ -129,7 +133,13 @@ export function createReplicaDO(
       streamingActive: false,
       appliedLSNs: new Set(),
       sessions: new Map(),
+      lastKnownPrimaryLSN: replicaInfo.lastLSN,
+      knownReplicas: new Map(),
+      observedLeaders: [],
     };
+
+    // Initialize leader election state machine
+    electionStateMachine = new LeaderElectionStateMachine(replicaInfo.id, fullConfig);
 
     // Persist state
     await persistState();

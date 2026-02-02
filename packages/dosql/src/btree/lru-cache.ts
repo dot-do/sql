@@ -437,7 +437,11 @@ export class LRUCache<K, V> {
     const node = this.map.get(key);
     if (!node) return false;
 
-    this.removeNode(node);
+    if (this.evictionPolicy === 'lfu') {
+      this.removeFromFrequencyList(node, node.frequency);
+    } else {
+      this.removeNode(node);
+    }
     this.map.delete(key);
     this._currentBytes -= node.size;
     return true;

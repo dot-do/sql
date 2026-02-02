@@ -122,7 +122,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
         // Write back dirty pages before eviction
         if (dirty) {
           const data = serializePage(page);
-          await this.fsx.write(this.pageKey(pageId), data);
+          await this.storage.write(this.pageKey(pageId), data);
         }
         // Call user-provided eviction callback
         if (this.userOnEvict) {
@@ -144,7 +144,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   private async loadMetadata(): Promise<void> {
     const key = this.config.pagePrefix + METADATA_KEY;
-    const data = await this.fsx.read(key);
+    const data = await this.storage.read(key);
 
     if (data) {
       const json = new TextDecoder().decode(data);
@@ -172,7 +172,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     if (!this.metadata) return;
     const key = this.config.pagePrefix + METADATA_KEY;
     const data = new TextEncoder().encode(JSON.stringify(this.metadata));
-    await this.fsx.write(key, data);
+    await this.storage.write(key, data);
   }
 
   /**

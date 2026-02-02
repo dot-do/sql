@@ -83,6 +83,7 @@ export {
   createInvalidSnapshotIdError,
   createStorageReadError,
   createStorageWriteError,
+  createCteNotMaterializedError,
 } from './typed-errors.js';
 
 // Syntax errors

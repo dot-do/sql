@@ -6,6 +6,7 @@
  */
 
 import { FSXError, FSXErrorCode } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // R2-Specific Error Codes

@@ -67,11 +67,18 @@ export interface CLILogger {
 
 /**
  * Create a CLI logger instance
+ *
+ * Note: Uses console.log/console.error at call time (not creation time)
+ * to support test mocking.
  */
 export function createCLILogger(config: CLILoggerConfig = {}): CLILogger {
-  const outputFn = config.outputFn ?? console.log;
-  const errorFn = config.errorFn ?? console.error;
+  const customOutputFn = config.outputFn;
+  const customErrorFn = config.errorFn;
   const jsonOutput = config.jsonOutput ?? false;
+
+  // Helper to get output function at call time (allows test mocking)
+  const getOutputFn = (): ((msg: string) => void) => customOutputFn ?? console.log;
+  const getErrorFn = (): ((msg: string) => void) => customErrorFn ?? console.error;
 
   // Create underlying structured logger for operational logging
   const structuredLogger = createLogger({
@@ -81,16 +88,16 @@ export function createCLILogger(config: CLILoggerConfig = {}): CLILogger {
 
   return {
     output(message: string): void {
-      outputFn(message);
+      getOutputFn()(message);
     },
 
     outputData(data: unknown): void {
       if (jsonOutput) {
-        outputFn(JSON.stringify(data, null, 2));
+        getOutputFn()(JSON.stringify(data, null, 2));
       } else if (Array.isArray(data) && data.length > 0) {
         console.table(data);
       } else {
-        outputFn(JSON.stringify(data, null, 2));
+        getOutputFn()(JSON.stringify(data, null, 2));
       }
     },
 
@@ -98,7 +105,7 @@ export function createCLILogger(config: CLILoggerConfig = {}): CLILogger {
       if (jsonOutput) {
         structuredLogger.info(message, { ...context, operation: 'cli' });
       } else {
-        outputFn(message);
+        getOutputFn()(message);
         if (context && Object.keys(context).length > 0) {
           structuredLogger.debug(message, context);
         }
@@ -109,7 +116,7 @@ export function createCLILogger(config: CLILoggerConfig = {}): CLILogger {
       if (jsonOutput) {
         structuredLogger.info(message, { ...context, operation: 'cli', status: 'success' });
       } else {
-        outputFn(message);
+        getOutputFn()(message);
         if (context && Object.keys(context).length > 0) {
           structuredLogger.debug(message, context);
         }
@@ -120,7 +127,7 @@ export function createCLILogger(config: CLILoggerConfig = {}): CLILogger {
       if (jsonOutput) {
         structuredLogger.warn(message, { ...context, operation: 'cli' });
       } else {
-        errorFn(`Warning: ${message}`);
+        getErrorFn()(`Warning: ${message}`);
         if (context && Object.keys(context).length > 0) {
           structuredLogger.warn(message, context);
         }
@@ -131,7 +138,7 @@ export function createCLILogger(config: CLILoggerConfig = {}): CLILogger {
       if (jsonOutput) {
         structuredLogger.error(message, error, { ...context, operation: 'cli' });
       } else {
-        errorFn(`Error: ${message}`);
+        getErrorFn()(`Error: ${message}`);
         if (error || (context && Object.keys(context).length > 0)) {
           structuredLogger.error(message, error, context);
         }

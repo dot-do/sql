@@ -755,8 +755,16 @@ export class TransactionError extends DoSQLError {
         return 'A write-ahead log error occurred. Please retry.';
       case TransactionErrorCode.ROLLBACK_FAILED:
         return 'Failed to rollback the transaction. Database integrity may be affected.';
+      case TransactionErrorCode.DUPLICATE_SAVEPOINT:
+        return 'A savepoint with this name already exists.';
+      case TransactionErrorCode.LOCK_FAILED:
+        return 'Failed to acquire the requested lock.';
+      case TransactionErrorCode.INVALID_STATE:
+        return 'The transaction is in an invalid state for this operation.';
+      case TransactionErrorCode.IO_TIMEOUT:
+        return 'An I/O operation timed out. Please retry.';
       default:
-        return this.message;
+        return assertNever(this.code);
     }
   }
 

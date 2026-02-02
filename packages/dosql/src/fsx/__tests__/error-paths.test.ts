@@ -710,13 +710,16 @@ describe('DO Storage Limit Exceeded', () => {
   describe('Total storage quota', () => {
     it('should throw error when storage quota is exceeded', async () => {
       const storage = createFailingDOStorage({
-        failureMode: 'quota_exceeded',
+        failureMode: 'none',
         sizeLimit: 1024, // Very small 1KB limit
       });
       const backend = createDOBackend(storage);
 
       // First write should succeed
       await backend.write('small1.bin', generateTestData(500));
+
+      // Now enable quota checking
+      storage._setFailureMode('quota_exceeded');
 
       // Second write should fail (exceeds quota)
       await expect(

@@ -136,13 +136,20 @@ interface HibernatableWebSocket extends WebSocket {
 // =============================================================================
 
 /**
- * Constructor type for mixin patterns.
- * Uses DurableObjectState and unknown env as the standard DO constructor signature.
+ * Generic constructor type for mixin patterns.
+ *
+ * TypeScript mixin pattern requires rest parameter `...args: ConstructorArgs`
+ * to allow extending arbitrary base classes. We use `unknown[]` with explicit
+ * documentation that the actual constructor signature is preserved from the
+ * base class at runtime.
+ *
+ * @template T - The instance type produced by the constructor
+ * @template TArgs - Constructor argument types (defaults to unknown[] for flexibility)
  */
-type DurableObjectConstructor<T extends DurableObject = DurableObject> = new (
-  ctx: DurableObjectState,
-  env: unknown
-) => T;
+type MixinConstructor<
+  T = object,
+  TArgs extends unknown[] = unknown[]
+> = abstract new (...args: TArgs) => T;
 
 /**
  * Mixin to add hibernation support to any Durable Object class.
@@ -156,8 +163,12 @@ type DurableObjectConstructor<T extends DurableObject = DurableObject> = new (
  *
  * @param Base - The base Durable Object class to extend
  * @returns A class with hibernation support
+ *
+ * @remarks
+ * The mixin pattern requires accepting constructor arguments as a rest parameter.
+ * The actual constructor signature is preserved from the base class.
  */
-export function HibernationMixin<T extends DurableObjectConstructor>(Base: T) {
+export function HibernationMixin<T extends MixinConstructor<DurableObject>>(Base: T) {
   return class extends Base {
     /** @internal Hibernation statistics */
     private hibernationStats: HibernationStats = {
