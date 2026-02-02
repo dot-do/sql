@@ -1067,20 +1067,32 @@ describe('CDC Stream - Error Handling', () => {
 describe('CDC Stream - Edge Cases', () => {
   it('should handle empty reader', async () => {
     const reader = createMockWALReader([]);
-    const subscription = createCDCSubscription(reader);
+    const subscription = createCDCSubscription(reader, {
+      pollInterval: 50, // Fast polling for test
+    });
 
     const events: WALEntry[] = [];
-    const timeout = setTimeout(() => subscription.stop(), 500);
 
-    try {
-      for await (const entry of subscription.subscribe(createLSN(0n))) {
+    // Use Promise.race to collect events with a timeout
+    const collectPromise = (async () => {
+      const iterator = subscription.subscribe(createLSN(0n));
+      for await (const entry of iterator) {
         events.push(entry);
         if (events.length >= 5) break;
       }
-    } finally {
-      clearTimeout(timeout);
-    }
+    })();
 
+    // Stop after a short time
+    const timeoutPromise = new Promise<void>(resolve => {
+      setTimeout(() => {
+        subscription.stop();
+        resolve();
+      }, 300);
+    });
+
+    await Promise.race([collectPromise, timeoutPromise]);
+
+    // With an empty reader, no events should be collected
     expect(events).toHaveLength(0);
   }, 10000);
 

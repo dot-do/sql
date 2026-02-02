@@ -920,8 +920,10 @@ export function analyzeForEncoding(
     }
 
     // Bitpack estimate (for small integers)
+    // Note: Bitpack is not suitable for int64/uint64/timestamp as it uses Number
+    // which loses precision for values > Number.MAX_SAFE_INTEGER
     let bitpackSize = Infinity;
-    if (isIntegerType(dataType)) {
+    if (isIntegerType(dataType) && dataType !== 'int64' && dataType !== 'uint64') {
       const max = Math.max(...numericValues.map((v) => Math.abs(Number(v))));
       if (max > 0) {
         const bitsNeeded = Math.ceil(Math.log2(max + 1));

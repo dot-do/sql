@@ -682,4 +682,447 @@ describe('LRUCache', () => {
       expect(cache.size).toBe(0);
     });
   });
+
+  describe('LFU eviction policy', () => {
+    it('should evict least frequently used entry', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 3,
+        evictionPolicy: 'lfu',
+      });
+
+      cache.set(1, createMockPage(1)); // freq: 1
+      cache.set(2, createMockPage(2)); // freq: 1
+      cache.set(3, createMockPage(3)); // freq: 1
+
+      // Access item 2 and 3 multiple times
+      cache.get(2); // freq: 2
+      cache.get(3); // freq: 2
+      cache.get(3); // freq: 3
+
+      // Add new item - should evict item 1 (lowest frequency)
+      cache.set(4, createMockPage(4));
+
+      expect(cache.get(1)).toBeUndefined(); // Evicted (freq was 1)
+      expect(cache.get(2)).toBeDefined(); // Still present (freq was 2)
+      expect(cache.get(3)).toBeDefined(); // Still present (freq was 3)
+      expect(cache.get(4)).toBeDefined(); // Newly added
+    });
+
+    it('should use LRU order for ties in frequency', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 3,
+        evictionPolicy: 'lfu',
+      });
+
+      cache.set(1, createMockPage(1)); // freq: 1, oldest
+      cache.set(2, createMockPage(2)); // freq: 1
+      cache.set(3, createMockPage(3)); // freq: 1, newest
+
+      // All have same frequency, should evict oldest (1)
+      cache.set(4, createMockPage(4));
+
+      expect(cache.get(1)).toBeUndefined(); // Evicted (oldest with freq 1)
+      expect(cache.get(2)).toBeDefined();
+      expect(cache.get(3)).toBeDefined();
+      expect(cache.get(4)).toBeDefined();
+    });
+
+    it('should track frequency correctly', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 10,
+        evictionPolicy: 'lfu',
+      });
+
+      cache.set(1, createMockPage(1));
+      expect(cache.getFrequency(1)).toBe(1);
+
+      cache.get(1);
+      expect(cache.getFrequency(1)).toBe(2);
+
+      cache.get(1);
+      cache.get(1);
+      expect(cache.getFrequency(1)).toBe(4);
+    });
+
+    it('should report LFU policy', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 10,
+        evictionPolicy: 'lfu',
+      });
+
+      expect(cache.policy).toBe('lfu');
+    });
+
+    it('should handle rapid access patterns', () => {
+      const evictedKeys: number[] = [];
+      const cache = new LRUCache<number, Page>({
+        maxSize: 5,
+        evictionPolicy: 'lfu',
+        onEvict: (key) => evictedKeys.push(key),
+      });
+
+      // Add 5 items
+      for (let i = 1; i <= 5; i++) {
+        cache.set(i, createMockPage(i));
+      }
+
+      // Access items with different frequencies
+      // Item 5: accessed 10 times
+      for (let i = 0; i < 10; i++) cache.get(5);
+      // Item 4: accessed 5 times
+      for (let i = 0; i < 5; i++) cache.get(4);
+      // Item 3: accessed 3 times
+      for (let i = 0; i < 3; i++) cache.get(3);
+      // Item 2: accessed 2 times
+      for (let i = 0; i < 2; i++) cache.get(2);
+      // Item 1: accessed 1 time (original set counts as 1)
+
+      // Add new item - should evict item 1
+      cache.set(6, createMockPage(6));
+      expect(evictedKeys).toContain(1);
+
+      // Add another - should evict item 6 (freq 1) or item 2 (freq 2)
+      cache.set(7, createMockPage(7));
+      expect(evictedKeys.length).toBe(2);
+    });
+  });
+
+  describe('ARC eviction policy', () => {
+    it('should create cache with ARC policy', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 10,
+        evictionPolicy: 'arc',
+      });
+
+      expect(cache.policy).toBe('arc');
+    });
+
+    it('should add new items to T1 (recency list)', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 10,
+        evictionPolicy: 'arc',
+      });
+
+      cache.set(1, createMockPage(1));
+      cache.set(2, createMockPage(2));
+      cache.set(3, createMockPage(3));
+
+      const stats = cache.getARCStats();
+      expect(stats.t1Size).toBe(3);
+      expect(stats.t2Size).toBe(0);
+    });
+
+    it('should move items to T2 on second access', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 10,
+        evictionPolicy: 'arc',
+      });
+
+      cache.set(1, createMockPage(1)); // T1
+      cache.set(2, createMockPage(2)); // T1
+      cache.get(1); // Move to T2
+
+      const stats = cache.getARCStats();
+      expect(stats.t1Size).toBe(1); // Only item 2
+      expect(stats.t2Size).toBe(1); // Item 1 moved to T2
+    });
+
+    it('should respect max size', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 3,
+        evictionPolicy: 'arc',
+      });
+
+      cache.set(1, createMockPage(1));
+      cache.set(2, createMockPage(2));
+      cache.set(3, createMockPage(3));
+      cache.set(4, createMockPage(4)); // Should trigger eviction
+
+      expect(cache.size).toBe(3);
+    });
+
+    it('should populate ghost lists on eviction', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 2,
+        evictionPolicy: 'arc',
+      });
+
+      cache.set(1, createMockPage(1)); // T1
+      cache.set(2, createMockPage(2)); // T1
+      cache.set(3, createMockPage(3)); // Evicts 1 to B1
+
+      const stats = cache.getARCStats();
+      expect(stats.b1Size).toBe(1); // Item 1 should be in ghost list B1
+    });
+
+    it('should adapt p parameter on ghost list hits', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 3,
+        evictionPolicy: 'arc',
+      });
+
+      // Fill cache
+      cache.set(1, createMockPage(1));
+      cache.set(2, createMockPage(2));
+      cache.set(3, createMockPage(3));
+
+      const initialP = cache.arcTargetT1Size;
+
+      // Evict item 1 by adding item 4
+      cache.set(4, createMockPage(4));
+
+      // Item 1 should now be in B1
+      // Re-add item 1 - this is a ghost hit on B1
+      cache.set(1, createMockPage(1));
+
+      // P should have increased (favor T1)
+      expect(cache.arcTargetT1Size).toBeGreaterThanOrEqual(initialP);
+    });
+
+    it('should retain frequently accessed items', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 3,
+        evictionPolicy: 'arc',
+      });
+
+      cache.set(1, createMockPage(1));
+      cache.get(1); // Move to T2 (frequently accessed)
+
+      cache.set(2, createMockPage(2));
+      cache.set(3, createMockPage(3));
+      cache.set(4, createMockPage(4)); // Should evict from T1, not T2
+
+      // Item 1 should still be present (it's in T2)
+      expect(cache.get(1)).toBeDefined();
+    });
+
+    it('should handle mixed access patterns', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 5,
+        evictionPolicy: 'arc',
+      });
+
+      // Add items
+      for (let i = 1; i <= 5; i++) {
+        cache.set(i, createMockPage(i));
+      }
+
+      // Make items 1, 2, 3 frequently accessed (move to T2)
+      cache.get(1);
+      cache.get(2);
+      cache.get(3);
+
+      // Now add more items, which should evict from T1 (items 4, 5)
+      cache.set(6, createMockPage(6));
+      cache.set(7, createMockPage(7));
+
+      // Frequently accessed items should still be present
+      expect(cache.get(1)).toBeDefined();
+      expect(cache.get(2)).toBeDefined();
+      expect(cache.get(3)).toBeDefined();
+
+      // At least one of the less frequently accessed items should be evicted
+      const evictedCount = [4, 5].filter((i) => !cache.has(i)).length;
+      expect(evictedCount).toBeGreaterThanOrEqual(2);
+    });
+
+    it('should clear all ARC state', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 3,
+        evictionPolicy: 'arc',
+      });
+
+      cache.set(1, createMockPage(1));
+      cache.get(1); // Move to T2
+      cache.set(2, createMockPage(2));
+      cache.set(3, createMockPage(3));
+      cache.set(4, createMockPage(4)); // Evict to ghost list
+
+      cache.clear();
+
+      const stats = cache.getARCStats();
+      expect(stats.t1Size).toBe(0);
+      expect(stats.t2Size).toBe(0);
+      expect(stats.b1Size).toBe(0);
+      expect(stats.b2Size).toBe(0);
+      expect(stats.p).toBe(0);
+      expect(cache.size).toBe(0);
+    });
+
+    it('should delete items correctly', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 10,
+        evictionPolicy: 'arc',
+      });
+
+      cache.set(1, createMockPage(1));
+      cache.get(1); // Move to T2
+      cache.set(2, createMockPage(2)); // In T1
+
+      const deleted1 = cache.delete(1);
+      const deleted2 = cache.delete(2);
+
+      expect(deleted1).toBe(true);
+      expect(deleted2).toBe(true);
+      expect(cache.size).toBe(0);
+
+      const stats = cache.getARCStats();
+      expect(stats.t1Size).toBe(0);
+      expect(stats.t2Size).toBe(0);
+    });
+  });
+
+  describe('cache statistics', () => {
+    it('should track hits and misses', () => {
+      const cache = new LRUCache<number, Page>({ maxSize: 10 });
+
+      cache.set(1, createMockPage(1));
+      cache.get(1); // Hit
+      cache.get(1); // Hit
+      cache.get(2); // Miss (undefined returned, but not tracked)
+      cache.recordMiss(); // Explicitly record miss
+
+      expect(cache.hits).toBe(2);
+      expect(cache.misses).toBe(1);
+    });
+
+    it('should calculate hit rate correctly', () => {
+      const cache = new LRUCache<number, Page>({ maxSize: 10 });
+
+      cache.set(1, createMockPage(1));
+      cache.get(1); // Hit
+      cache.get(1); // Hit
+      cache.recordMiss();
+      cache.recordMiss();
+
+      // 2 hits, 2 misses = 50% hit rate
+      expect(cache.hitRate).toBe(0.5);
+    });
+
+    it('should track evictions', () => {
+      const cache = new LRUCache<number, Page>({ maxSize: 2 });
+
+      cache.set(1, createMockPage(1));
+      cache.set(2, createMockPage(2));
+      cache.set(3, createMockPage(3)); // Evicts 1
+      cache.set(4, createMockPage(4)); // Evicts 2
+
+      expect(cache.evictions).toBe(2);
+    });
+
+    it('should reset statistics', () => {
+      const cache = new LRUCache<number, Page>({ maxSize: 2 });
+
+      cache.set(1, createMockPage(1));
+      cache.get(1);
+      cache.recordMiss();
+      cache.set(2, createMockPage(2));
+      cache.set(3, createMockPage(3));
+
+      expect(cache.hits).toBeGreaterThan(0);
+      expect(cache.misses).toBeGreaterThan(0);
+      expect(cache.evictions).toBeGreaterThan(0);
+
+      cache.resetStats();
+
+      expect(cache.hits).toBe(0);
+      expect(cache.misses).toBe(0);
+      expect(cache.evictions).toBe(0);
+    });
+
+    it('should handle zero requests for hit rate', () => {
+      const cache = new LRUCache<number, Page>({ maxSize: 10 });
+
+      // No requests made
+      expect(cache.hitRate).toBe(0);
+    });
+  });
+
+  describe('memory pressure callbacks', () => {
+    it('should call onMemoryPressure when threshold crossed', () => {
+      const pressureEvents: MemoryPressureInfo[] = [];
+      const cache = new LRUCache<number, Page>({
+        maxSize: 1000,
+        sizeCalculator: (page) => {
+          let size = 0;
+          for (const key of page.keys) size += key.byteLength;
+          for (const value of page.values) size += value.byteLength;
+          return size;
+        },
+        onMemoryPressure: (info) => pressureEvents.push(info),
+        pressureThresholds: {
+          low: 0.5,
+          medium: 0.75,
+          high: 0.9,
+        },
+      });
+
+      // Add items to trigger pressure thresholds
+      // Each page is 100 bytes
+      // Need to cross from below 50% to above 75% to trigger callback
+      // (initial level is 'low', so crossing into 'low' doesn't trigger callback)
+      for (let i = 1; i <= 8; i++) {
+        cache.set(i, createMockPage(i, 100)); // 800 bytes total = 80%
+      }
+
+      // Should have received callback when crossing 75% threshold
+      expect(pressureEvents.length).toBeGreaterThan(0);
+      // First callback should be 'medium' when crossing 75%
+      expect(pressureEvents[0].level).toBe('medium');
+      expect(pressureEvents[0].usageRatio).toBeGreaterThanOrEqual(0.75);
+    });
+
+    it('should report memory usage ratio', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 1000,
+        sizeCalculator: (page) => {
+          let size = 0;
+          for (const key of page.keys) size += key.byteLength;
+          for (const value of page.values) size += value.byteLength;
+          return size;
+        },
+      });
+
+      cache.set(1, createMockPage(1, 500)); // 500 bytes = 50%
+
+      expect(cache.memoryUsageRatio).toBe(0.5);
+    });
+
+    it('should allow manual eviction', () => {
+      const cache = new LRUCache<number, Page>({ maxSize: 10 });
+
+      for (let i = 1; i <= 10; i++) {
+        cache.set(i, createMockPage(i));
+      }
+
+      expect(cache.size).toBe(10);
+
+      cache.evict(3); // Manually evict 3 entries
+
+      expect(cache.size).toBe(7);
+    });
+
+    it('should allow eviction to target ratio', () => {
+      const cache = new LRUCache<number, Page>({
+        maxSize: 1000,
+        sizeCalculator: (page) => {
+          let size = 0;
+          for (const key of page.keys) size += key.byteLength;
+          for (const value of page.values) size += value.byteLength;
+          return size;
+        },
+      });
+
+      // Add 10 pages of 100 bytes each = 1000 bytes = 100%
+      for (let i = 1; i <= 10; i++) {
+        cache.set(i, createMockPage(i, 100));
+      }
+
+      expect(cache.memoryUsageRatio).toBe(1.0);
+
+      cache.evictToRatio(0.5); // Evict until 50%
+
+      expect(cache.memoryUsageRatio).toBeLessThanOrEqual(0.5);
+    });
+  });
 });

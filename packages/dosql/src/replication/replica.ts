@@ -35,6 +35,7 @@ import {
   ReplicationError,
   ReplicationErrorCode,
   serializeReplicaId,
+  replicaIdsEqual,
   type FencingToken,
   type LeaderElectionState,
   type VoteRequest,
@@ -87,6 +88,8 @@ interface ReplicaState {
   knownReplicas: Map<string, ReplicaInfo>;
   /** Observed leaders (for split-brain detection) */
   observedLeaders: ReplicaId[];
+  /** Current fencing token (for split-brain prevention) */
+  currentFencingToken: FencingToken | null;
 }
 
 // =============================================================================
@@ -136,6 +139,7 @@ export function createReplicaDO(
       lastKnownPrimaryLSN: replicaInfo.lastLSN,
       knownReplicas: new Map(),
       observedLeaders: [],
+      currentFencingToken: null,
     };
 
     // Initialize leader election state machine
@@ -590,6 +594,15 @@ export function createReplicaDO(
     state.info.role = 'replica';
     state.info.status = 'syncing';
 
+    // Reset fencing token on demotion
+    state.currentFencingToken = null;
+
+    // Reset election state machine
+    if (electionStateMachine) {
+      // Create a new state machine to reset state
+      electionStateMachine = new LeaderElectionStateMachine(state.info.id, fullConfig);
+    }
+
     await persistState();
 
     // Re-register with new primary
@@ -597,6 +610,353 @@ export function createReplicaDO(
 
     // Start streaming
     await startStreaming();
+  }
+
+  // ==========================================================================
+  // AUTO-PROMOTION & LEADER ELECTION
+  // ==========================================================================
+
+  /**
+   * Check if this replica is eligible for auto-promotion
+   */
+  async function checkPromotionEligibility(): Promise<PromotionEligibility> {
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
+    if (!electionStateMachine) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Election state machine not initialized');
+
+    return electionStateMachine.checkPromotionEligibility(state.currentLSN, state.lastKnownPrimaryLSN);
+  }
+
+  /**
+   * Start leader election process
+   */
+  async function startElection(): Promise<LeaderElectionState> {
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
+    if (!electionStateMachine) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Election state machine not initialized');
+
+    // Check if we're already in an election
+    const currentRole = electionStateMachine.getRole();
+    if (currentRole === 'candidate') {
+      throw new ReplicationError(
+        ReplicationErrorCode.ELECTION_IN_PROGRESS,
+        'Election already in progress',
+        state.info.id
+      );
+    }
+
+    // Check eligibility before starting
+    const eligibility = await checkPromotionEligibility();
+    if (!eligibility.eligible) {
+      throw new ReplicationError(
+        ReplicationErrorCode.NOT_ELIGIBLE_FOR_PROMOTION,
+        eligibility.reason,
+        state.info.id
+      );
+    }
+
+    // Start the election
+    const voteRequest = electionStateMachine.startElection(state.currentLSN);
+
+    logger.info('Started election', {
+      replicaId: serializeReplicaId(state.info.id),
+      term: voteRequest.term.toString(),
+      currentLSN: state.currentLSN.toString(),
+    });
+
+    // Update state with new fencing token
+    state.currentFencingToken = voteRequest.fencingToken;
+
+    return electionStateMachine.getState();
+  }
+
+  /**
+   * Handle vote request from another candidate
+   */
+  async function handleVoteRequest(request: VoteRequest): Promise<VoteResponse> {
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
+    if (!electionStateMachine) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Election state machine not initialized');
+
+    const response = electionStateMachine.handleVoteRequest(request, state.currentLSN);
+
+    // If we granted the vote, update our observed leaders
+    if (response.voteGranted) {
+      // Track the candidate as a potential leader
+      const candidateKey = serializeReplicaId(request.candidateId);
+      if (!state.observedLeaders.some(l => serializeReplicaId(l) === candidateKey)) {
+        state.observedLeaders.push(request.candidateId);
+      }
+    }
+
+    return response;
+  }
+
+  /**
+   * Handle leader heartbeat
+   */
+  async function handleLeaderHeartbeat(heartbeat: LeaderHeartbeat): Promise<void> {
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
+    if (!electionStateMachine) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Election state machine not initialized');
+
+    electionStateMachine.handleLeaderHeartbeat(heartbeat);
+
+    // Update our tracked state
+    state.lastKnownPrimaryLSN = heartbeat.currentLSN;
+    state.currentFencingToken = heartbeat.fencingToken;
+    state.info.lastHeartbeat = Date.now();
+
+    // Update observed leaders for split-brain detection
+    const leaderKey = serializeReplicaId(heartbeat.leaderId);
+    state.observedLeaders = state.observedLeaders.filter(l => serializeReplicaId(l) !== leaderKey);
+    state.observedLeaders.push(heartbeat.leaderId);
+
+    // Keep only recent leaders (last 5 for split-brain detection)
+    if (state.observedLeaders.length > 5) {
+      state.observedLeaders = state.observedLeaders.slice(-5);
+    }
+
+    await persistState();
+  }
+
+  /**
+   * Get current leader election state
+   */
+  async function getElectionState(): Promise<LeaderElectionState> {
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
+    if (!electionStateMachine) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Election state machine not initialized');
+
+    return electionStateMachine.getState();
+  }
+
+  /**
+   * Validate fencing token
+   */
+  async function validateFencingToken(token: FencingToken): Promise<boolean> {
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
+    if (!electionStateMachine) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Election state machine not initialized');
+
+    return electionStateMachine.validateFencingToken(token);
+  }
+
+  /**
+   * Detect split-brain scenario
+   */
+  async function detectSplitBrain(): Promise<SplitBrainDetection> {
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
+    if (!electionStateMachine) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Election state machine not initialized');
+
+    return electionStateMachine.detectSplitBrain(state.observedLeaders);
+  }
+
+  /**
+   * Auto-promote with split-brain detection
+   * This is the main entry point for automatic failover
+   */
+  async function autoPromote(): Promise<{ success: boolean; fencingToken: FencingToken | null; error?: string }> {
+    if (!state) {
+      return { success: false, fencingToken: null, error: 'Replica not initialized' };
+    }
+    if (!electionStateMachine) {
+      return { success: false, fencingToken: null, error: 'Election state machine not initialized' };
+    }
+
+    // Step 1: Check promotion eligibility
+    const eligibility = await checkPromotionEligibility();
+    if (!eligibility.eligible) {
+      return { success: false, fencingToken: null, error: eligibility.reason };
+    }
+
+    logger.info('Auto-promotion started', {
+      replicaId: serializeReplicaId(state.info.id),
+      priority: eligibility.priority,
+      lsnLag: eligibility.lsnLag.toString(),
+    });
+
+    // Step 2: Detect potential split-brain before proceeding
+    const splitBrainCheck = await detectSplitBrain();
+    if (splitBrainCheck.detected) {
+      logger.warn('Split-brain detected during auto-promotion', {
+        replicaId: serializeReplicaId(state.info.id),
+        conflictingLeaders: splitBrainCheck.conflictingLeaders.map(l => serializeReplicaId(l)),
+      });
+
+      // Use the split-brain resolver to determine if we should proceed
+      const leaders = splitBrainCheck.conflictingLeaders.map(id => ({
+        id,
+        token: state.currentFencingToken ?? generateFencingToken(0n, id),
+        lsn: state.currentLSN,
+      }));
+
+      // Add ourselves as a potential leader
+      const ourToken = generateFencingToken(electionStateMachine.getState().term + 1n, state.info.id);
+      leaders.push({
+        id: state.info.id,
+        token: ourToken,
+        lsn: state.currentLSN,
+      });
+
+      const resolution = splitBrainResolver.resolveConflict(leaders);
+      if (!resolution) {
+        return { success: false, fencingToken: null, error: 'Failed to resolve split-brain conflict' };
+      }
+
+      // Only proceed if we are the winner
+      if (!replicaIdsEqual(resolution.winner, state.info.id)) {
+        return {
+          success: false,
+          fencingToken: null,
+          error: `Lost split-brain resolution to ${serializeReplicaId(resolution.winner)}: ${resolution.reason}`,
+        };
+      }
+
+      logger.info('Won split-brain resolution', {
+        replicaId: serializeReplicaId(state.info.id),
+        reason: resolution.reason,
+      });
+    }
+
+    // Step 3: Start election and attempt to become leader
+    try {
+      await startElection();
+    } catch (error) {
+      if (error instanceof ReplicationError && error.code === ReplicationErrorCode.NOT_ELIGIBLE_FOR_PROMOTION) {
+        return { success: false, fencingToken: null, error: error.message };
+      }
+      throw error;
+    }
+
+    // Step 4: In a real distributed system, we would wait for votes from other replicas
+    // For now, we simulate single-node promotion where we have quorum of 1
+    // In production, this would involve RPC calls to other replicas
+
+    const electionState = electionStateMachine.getState();
+
+    // If auto-failover with quorum size 1 (or single replica), we can become leader immediately
+    // The self-vote from startElection() should be enough for quorum
+    if (fullConfig.quorumSize === 1 || state.knownReplicas.size === 0) {
+      // With quorum size 1, the self-vote should give us quorum
+      // Simulate receiving our own vote response to trigger leader election
+      const selfVoteResponse: VoteResponse = {
+        voterId: state.info.id,
+        term: electionState.term,
+        voteGranted: true,
+        reason: 'Self-vote for single-node election',
+      };
+
+      // This will call becomeLeader() if we have quorum
+      const wonElection = electionStateMachine.handleVoteResponse(selfVoteResponse);
+
+      if (wonElection || electionStateMachine.getRole() === 'leader') {
+        const newToken = electionStateMachine.getFencingToken();
+        state.currentFencingToken = newToken;
+
+        // Promote to primary
+        await promoteToPrimary();
+
+        logger.info('Auto-promotion completed successfully', {
+          replicaId: serializeReplicaId(state.info.id),
+          fencingToken: newToken?.epoch.toString() ?? 'unknown',
+        });
+
+        return { success: true, fencingToken: newToken };
+      }
+
+      // Shouldn't reach here with quorum size 1
+      return { success: false, fencingToken: null, error: 'Failed to achieve quorum with single node' };
+    }
+
+    // For multi-replica setup, we need to collect votes
+    // This is a simplified version - in production, you'd make RPC calls to other replicas
+    // and wait for responses before deciding if we have quorum
+
+    // Generate vote request for other replicas
+    const voteRequest: VoteRequest = {
+      candidateId: state.info.id,
+      term: electionState.term,
+      lastLSN: state.currentLSN,
+      fencingToken: electionState.fencingToken!,
+    };
+
+    // Simulate self-vote (already done in startElection)
+    // In production: broadcast voteRequest to all known replicas and collect responses
+
+    // Check if we won the election (have quorum)
+    if (role === 'leader') {
+      const newToken = electionStateMachine.getFencingToken();
+      state.currentFencingToken = newToken;
+
+      // Promote to primary
+      await promoteToPrimary();
+
+      logger.info('Auto-promotion completed with quorum', {
+        replicaId: serializeReplicaId(state.info.id),
+        term: electionState.term.toString(),
+      });
+
+      return { success: true, fencingToken: newToken };
+    }
+
+    // Election started but not yet won - waiting for votes
+    return {
+      success: false,
+      fencingToken: electionState.fencingToken,
+      error: 'Election started, waiting for votes from other replicas',
+    };
+  }
+
+  /**
+   * Register a known replica for quorum calculation
+   */
+  function registerKnownReplica(info: ReplicaInfo): void {
+    if (!state) return;
+    state.knownReplicas.set(serializeReplicaId(info.id), info);
+    if (electionStateMachine) {
+      electionStateMachine.registerReplica(info);
+    }
+  }
+
+  /**
+   * Unregister a known replica
+   */
+  function unregisterKnownReplica(replicaId: ReplicaId): void {
+    if (!state) return;
+    state.knownReplicas.delete(serializeReplicaId(replicaId));
+    if (electionStateMachine) {
+      electionStateMachine.unregisterReplica(replicaId);
+    }
+  }
+
+  /**
+   * Handle vote response from another replica (for election process)
+   */
+  async function handleVoteResponse(response: VoteResponse): Promise<boolean> {
+    if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
+    if (!electionStateMachine) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Election state machine not initialized');
+
+    const wonElection = electionStateMachine.handleVoteResponse(response);
+
+    if (wonElection) {
+      const newToken = electionStateMachine.getFencingToken();
+      state.currentFencingToken = newToken;
+
+      // Auto-promote to primary on winning election
+      await promoteToPrimary();
+
+      logger.info('Won election and promoted to primary', {
+        replicaId: serializeReplicaId(state.info.id),
+        term: electionStateMachine.getState().term.toString(),
+      });
+    }
+
+    return wonElection;
+  }
+
+  /**
+   * Update last known primary LSN (called when receiving heartbeats or WAL batches)
+   */
+  function updateLastKnownPrimaryLSN(lsn: bigint): void {
+    if (!state) return;
+    if (lsn > state.lastKnownPrimaryLSN) {
+      state.lastKnownPrimaryLSN = lsn;
+    }
   }
 
   // ==========================================================================
@@ -639,7 +999,16 @@ export function createReplicaDO(
         streamingActive: false, // Don't auto-start streaming
         appliedLSNs: new Set(),
         sessions: new Map(),
+        lastKnownPrimaryLSN: BigInt(persistedState.currentLSN),
+        knownReplicas: new Map(),
+        observedLeaders: [],
+        currentFencingToken: null,
       };
+
+      // Initialize election state machine if we have state
+      if (state.info.id) {
+        electionStateMachine = new LeaderElectionStateMachine(state.info.id, fullConfig);
+      }
     } catch (e) {
       // Ignore corrupted state
     }
@@ -663,6 +1032,15 @@ export function createReplicaDO(
     forwardWrite,
     promoteToPrimary,
     demoteToReplica,
+    // Auto-promotion & leader election
+    checkPromotionEligibility,
+    startElection,
+    handleVoteRequest,
+    handleLeaderHeartbeat,
+    getElectionState,
+    validateFencingToken,
+    detectSplitBrain,
+    autoPromote,
   };
 }
 

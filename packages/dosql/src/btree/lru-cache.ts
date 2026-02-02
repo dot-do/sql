@@ -15,8 +15,11 @@
 
 /**
  * Eviction policy for the cache
+ * - 'lru': Least Recently Used - evicts entries not accessed recently
+ * - 'lfu': Least Frequently Used - evicts entries accessed least often
+ * - 'arc': Adaptive Replacement Cache - balances between recency and frequency
  */
-export type EvictionPolicy = 'lru' | 'lfu';
+export type EvictionPolicy = 'lru' | 'lfu' | 'arc';
 
 /**
  * Memory pressure levels for callbacks
@@ -125,6 +128,8 @@ interface LRUNode<K, V> {
   next: LRUNode<K, V> | null;
   /** Access frequency for LFU policy */
   frequency: number;
+  /** ARC list membership: 't1' = recency, 't2' = frequency, 'b1' = ghost recency, 'b2' = ghost frequency */
+  arcList?: 't1' | 't2' | 'b1' | 'b2';
 }
 
 /**
@@ -168,6 +173,19 @@ export class LRUCache<K, V> {
 
   // Memory pressure tracking
   private _lastPressureLevel: MemoryPressureLevel = 'low';
+
+  // ARC state: maintains four lists
+  // T1: recently accessed items (recency)
+  // T2: frequently accessed items (accessed more than once, frequency)
+  // B1: ghost entries for recently evicted from T1
+  // B2: ghost entries for recently evicted from T2
+  private readonly arcT1: { head: LRUNode<K, V> | null; tail: LRUNode<K, V> | null } = { head: null, tail: null };
+  private readonly arcT2: { head: LRUNode<K, V> | null; tail: LRUNode<K, V> | null } = { head: null, tail: null };
+  private readonly arcB1 = new Map<K, LRUNode<K, V>>(); // Ghost entries (only key, no value)
+  private readonly arcB2 = new Map<K, LRUNode<K, V>>(); // Ghost entries (only key, no value)
+  private _arcT1Size = 0; // Actual entries in T1
+  private _arcT2Size = 0; // Actual entries in T2
+  private _arcP = 0; // Target size for T1 (adaptive parameter)
 
   constructor(options: LRUCacheOptions<K, V>) {
     this.maxSize = options.maxSize;
@@ -289,6 +307,9 @@ export class LRUCache<K, V> {
     if (this.evictionPolicy === 'lfu') {
       // Update frequency for LFU policy
       this.incrementFrequency(node);
+    } else if (this.evictionPolicy === 'arc') {
+      // For ARC: move from T1 to T2 if in T1, or move to MRU position in T2 if already in T2
+      this.arcOnHit(node);
     } else {
       // Move to tail (most recently used) for LRU policy
       this.moveToTail(node);
@@ -330,6 +351,8 @@ export class LRUCache<K, V> {
 
       if (this.evictionPolicy === 'lfu') {
         this.incrementFrequency(existingNode);
+      } else if (this.evictionPolicy === 'arc') {
+        this.arcOnHit(existingNode);
       } else {
         this.moveToTail(existingNode);
       }
@@ -345,21 +368,26 @@ export class LRUCache<K, V> {
         frequency: 1,
       };
 
-      // Evict if necessary before adding
-      this.evictToFit(newSize);
-
-      // Add to map
-      this.map.set(key, node);
-
-      if (this.evictionPolicy === 'lfu') {
-        // Add to frequency list for LFU
-        this.addToFrequencyList(node, 1);
-        this._minFrequency = 1;
+      // For ARC: check ghost lists before eviction
+      if (this.evictionPolicy === 'arc') {
+        this.arcOnMiss(key, node, newSize);
       } else {
-        // Add to tail for LRU
-        this.addToTail(node);
+        // Evict if necessary before adding
+        this.evictToFit(newSize);
+
+        // Add to map
+        this.map.set(key, node);
+
+        if (this.evictionPolicy === 'lfu') {
+          // Add to frequency list for LFU
+          this.addToFrequencyList(node, 1);
+          this._minFrequency = 1;
+        } else {
+          // Add to tail for LRU
+          this.addToTail(node);
+        }
+        this._currentBytes += newSize;
       }
-      this._currentBytes += newSize;
     }
 
     // Check memory pressure after set
@@ -392,6 +420,8 @@ export class LRUCache<K, V> {
 
       if (this.evictionPolicy === 'lfu') {
         this.incrementFrequency(existingNode);
+      } else if (this.evictionPolicy === 'arc') {
+        this.arcOnHit(existingNode);
       } else {
         this.moveToTail(existingNode);
       }
@@ -407,21 +437,26 @@ export class LRUCache<K, V> {
         frequency: 1,
       };
 
-      // Evict if necessary before adding - await async callbacks
-      await this.evictToFitAsync(newSize);
-
-      // Add to map
-      this.map.set(key, node);
-
-      if (this.evictionPolicy === 'lfu') {
-        // Add to frequency list for LFU
-        this.addToFrequencyList(node, 1);
-        this._minFrequency = 1;
+      // For ARC: check ghost lists before eviction
+      if (this.evictionPolicy === 'arc') {
+        await this.arcOnMissAsync(key, node, newSize);
       } else {
-        // Add to tail for LRU
-        this.addToTail(node);
+        // Evict if necessary before adding - await async callbacks
+        await this.evictToFitAsync(newSize);
+
+        // Add to map
+        this.map.set(key, node);
+
+        if (this.evictionPolicy === 'lfu') {
+          // Add to frequency list for LFU
+          this.addToFrequencyList(node, 1);
+          this._minFrequency = 1;
+        } else {
+          // Add to tail for LRU
+          this.addToTail(node);
+        }
+        this._currentBytes += newSize;
       }
-      this._currentBytes += newSize;
     }
 
     // Check memory pressure after set
@@ -439,6 +474,14 @@ export class LRUCache<K, V> {
 
     if (this.evictionPolicy === 'lfu') {
       this.removeFromFrequencyList(node, node.frequency);
+    } else if (this.evictionPolicy === 'arc') {
+      // Update size counters before removing from list
+      if (node.arcList === 't1') {
+        this._arcT1Size--;
+      } else if (node.arcList === 't2') {
+        this._arcT2Size--;
+      }
+      this.arcRemoveFromList(node);
     } else {
       this.removeNode(node);
     }
@@ -475,6 +518,17 @@ export class LRUCache<K, V> {
     this.frequencyLists.clear();
     this._minFrequency = 0;
     this._lastPressureLevel = 'low';
+
+    // Reset ARC state
+    this.arcT1.head = null;
+    this.arcT1.tail = null;
+    this.arcT2.head = null;
+    this.arcT2.tail = null;
+    this.arcB1.clear();
+    this.arcB2.clear();
+    this._arcT1Size = 0;
+    this._arcT2Size = 0;
+    this._arcP = 0;
   }
 
   /**
@@ -500,6 +554,17 @@ export class LRUCache<K, V> {
     this.frequencyLists.clear();
     this._minFrequency = 0;
     this._lastPressureLevel = 'low';
+
+    // Reset ARC state
+    this.arcT1.head = null;
+    this.arcT1.tail = null;
+    this.arcT2.head = null;
+    this.arcT2.tail = null;
+    this.arcB1.clear();
+    this.arcB2.clear();
+    this._arcT1Size = 0;
+    this._arcT2Size = 0;
+    this._arcP = 0;
   }
 
   /**
@@ -602,6 +667,8 @@ export class LRUCache<K, V> {
   private evictOne(): void {
     if (this.evictionPolicy === 'lfu') {
       this.evictLFU();
+    } else if (this.evictionPolicy === 'arc') {
+      this.evictARC();
     } else {
       this.evictLRU();
     }
@@ -726,6 +793,8 @@ export class LRUCache<K, V> {
   private async evictOneAsync(): Promise<void> {
     if (this.evictionPolicy === 'lfu') {
       await this.evictLFUAsync();
+    } else if (this.evictionPolicy === 'arc') {
+      await this.evictARCAsync();
     } else {
       await this.evictLRUAsync();
     }
@@ -958,5 +1027,381 @@ export class LRUCache<K, V> {
   getFrequency(key: K): number | undefined {
     const node = this.map.get(key);
     return node?.frequency;
+  }
+
+  // ============================================================================
+  // ARC (Adaptive Replacement Cache) Implementation
+  // ============================================================================
+  //
+  // ARC maintains four lists:
+  // - T1: Pages seen only once recently (recency)
+  // - T2: Pages seen at least twice recently (frequency)
+  // - B1: Ghost entries for pages evicted from T1
+  // - B2: Ghost entries for pages evicted from T2
+  //
+  // The parameter p controls the target size of T1, which adapts based on
+  // hit patterns in the ghost lists.
+
+  /**
+   * Get the current ARC target size for T1 (useful for debugging/monitoring)
+   */
+  get arcTargetT1Size(): number {
+    return this._arcP;
+  }
+
+  /**
+   * Get the current sizes of ARC lists (useful for debugging/monitoring)
+   */
+  getARCStats(): { t1Size: number; t2Size: number; b1Size: number; b2Size: number; p: number } {
+    return {
+      t1Size: this._arcT1Size,
+      t2Size: this._arcT2Size,
+      b1Size: this.arcB1.size,
+      b2Size: this.arcB2.size,
+      p: this._arcP,
+    };
+  }
+
+  /**
+   * ARC: Handle a cache hit - move item to T2 (frequency list)
+   */
+  private arcOnHit(node: LRUNode<K, V>): void {
+    if (node.arcList === 't1') {
+      // Move from T1 to T2 (item is now frequently accessed)
+      this.arcRemoveFromList(node);
+      node.arcList = 't2';
+      this.arcAddToListTail(this.arcT2, node);
+      this._arcT1Size--;
+      this._arcT2Size++;
+    } else if (node.arcList === 't2') {
+      // Already in T2, just move to MRU position
+      this.arcRemoveFromList(node);
+      this.arcAddToListTail(this.arcT2, node);
+    }
+  }
+
+  /**
+   * ARC: Handle a cache miss (sync version)
+   */
+  private arcOnMiss(key: K, node: LRUNode<K, V>, newSize: number): void {
+    // Check if key is in ghost list B1 (recently evicted from T1)
+    if (this.arcB1.has(key)) {
+      // Adapt: Increase target size of T1
+      const delta = this.arcB2.size >= this.arcB1.size
+        ? 1
+        : Math.ceil(this.arcB2.size / this.arcB1.size);
+      this._arcP = Math.min(this._arcP + delta, this.maxSize);
+
+      // Remove from B1
+      this.arcB1.delete(key);
+
+      // Make room in cache by evicting from T2 (since we hit B1)
+      this.arcReplace(false, newSize);
+
+      // Add to T2 (since it was in B1, treat as frequently accessed)
+      this.map.set(key, node);
+      node.arcList = 't2';
+      this.arcAddToListTail(this.arcT2, node);
+      this._arcT2Size++;
+      this._currentBytes += newSize;
+      return;
+    }
+
+    // Check if key is in ghost list B2 (recently evicted from T2)
+    if (this.arcB2.has(key)) {
+      // Adapt: Decrease target size of T1
+      const delta = this.arcB1.size >= this.arcB2.size
+        ? 1
+        : Math.ceil(this.arcB1.size / this.arcB2.size);
+      this._arcP = Math.max(this._arcP - delta, 0);
+
+      // Remove from B2
+      this.arcB2.delete(key);
+
+      // Make room in cache by evicting from T1 (since we hit B2)
+      this.arcReplace(true, newSize);
+
+      // Add to T2 (since it was in B2, treat as frequently accessed)
+      this.map.set(key, node);
+      node.arcList = 't2';
+      this.arcAddToListTail(this.arcT2, node);
+      this._arcT2Size++;
+      this._currentBytes += newSize;
+      return;
+    }
+
+    // Key is not in any list - completely new item
+    // Make room if needed
+    this.arcMakeRoom(newSize);
+
+    // Add to T1 (newly seen items go to recency list)
+    this.map.set(key, node);
+    node.arcList = 't1';
+    this.arcAddToListTail(this.arcT1, node);
+    this._arcT1Size++;
+    this._currentBytes += newSize;
+  }
+
+  /**
+   * ARC: Handle a cache miss (async version)
+   */
+  private async arcOnMissAsync(key: K, node: LRUNode<K, V>, newSize: number): Promise<void> {
+    // Check if key is in ghost list B1 (recently evicted from T1)
+    if (this.arcB1.has(key)) {
+      // Adapt: Increase target size of T1
+      const delta = this.arcB2.size >= this.arcB1.size
+        ? 1
+        : Math.ceil(this.arcB2.size / this.arcB1.size);
+      this._arcP = Math.min(this._arcP + delta, this.maxSize);
+
+      // Remove from B1
+      this.arcB1.delete(key);
+
+      // Make room in cache by evicting from T2 (since we hit B1)
+      await this.arcReplaceAsync(false, newSize);
+
+      // Add to T2 (since it was in B1, treat as frequently accessed)
+      this.map.set(key, node);
+      node.arcList = 't2';
+      this.arcAddToListTail(this.arcT2, node);
+      this._arcT2Size++;
+      this._currentBytes += newSize;
+      return;
+    }
+
+    // Check if key is in ghost list B2 (recently evicted from T2)
+    if (this.arcB2.has(key)) {
+      // Adapt: Decrease target size of T1
+      const delta = this.arcB1.size >= this.arcB2.size
+        ? 1
+        : Math.ceil(this.arcB1.size / this.arcB2.size);
+      this._arcP = Math.max(this._arcP - delta, 0);
+
+      // Remove from B2
+      this.arcB2.delete(key);
+
+      // Make room in cache by evicting from T1 (since we hit B2)
+      await this.arcReplaceAsync(true, newSize);
+
+      // Add to T2 (since it was in B2, treat as frequently accessed)
+      this.map.set(key, node);
+      node.arcList = 't2';
+      this.arcAddToListTail(this.arcT2, node);
+      this._arcT2Size++;
+      this._currentBytes += newSize;
+      return;
+    }
+
+    // Key is not in any list - completely new item
+    // Make room if needed
+    await this.arcMakeRoomAsync(newSize);
+
+    // Add to T1 (newly seen items go to recency list)
+    this.map.set(key, node);
+    node.arcList = 't1';
+    this.arcAddToListTail(this.arcT1, node);
+    this._arcT1Size++;
+    this._currentBytes += newSize;
+  }
+
+  /**
+   * ARC: Make room for a new entry by evicting from T1 or T2 and managing ghost lists
+   */
+  private arcMakeRoom(newSize: number): void {
+    const cacheSize = this._arcT1Size + this._arcT2Size;
+
+    // If cache is full, we need to evict
+    if (this.sizeCalculator) {
+      while (this._currentBytes + newSize > this.maxSize && this._arcT1Size + this._arcT2Size > 0) {
+        this.arcReplace(this._arcT1Size > this._arcP, newSize);
+      }
+    } else {
+      while (this._arcT1Size + this._arcT2Size >= this.maxSize) {
+        this.arcReplace(this._arcT1Size > this._arcP, newSize);
+      }
+    }
+
+    // If ghost lists are too large, trim them
+    // Ghost list size can be up to maxSize each
+    while (this.arcB1.size > this.maxSize) {
+      const oldest = this.arcB1.keys().next().value;
+      if (oldest !== undefined) this.arcB1.delete(oldest);
+    }
+    while (this.arcB2.size > this.maxSize) {
+      const oldest = this.arcB2.keys().next().value;
+      if (oldest !== undefined) this.arcB2.delete(oldest);
+    }
+  }
+
+  /**
+   * ARC: Make room for a new entry (async version)
+   */
+  private async arcMakeRoomAsync(newSize: number): Promise<void> {
+    // If cache is full, we need to evict
+    if (this.sizeCalculator) {
+      while (this._currentBytes + newSize > this.maxSize && this._arcT1Size + this._arcT2Size > 0) {
+        await this.arcReplaceAsync(this._arcT1Size > this._arcP, newSize);
+      }
+    } else {
+      while (this._arcT1Size + this._arcT2Size >= this.maxSize) {
+        await this.arcReplaceAsync(this._arcT1Size > this._arcP, newSize);
+      }
+    }
+
+    // If ghost lists are too large, trim them
+    while (this.arcB1.size > this.maxSize) {
+      const oldest = this.arcB1.keys().next().value;
+      if (oldest !== undefined) this.arcB1.delete(oldest);
+    }
+    while (this.arcB2.size > this.maxSize) {
+      const oldest = this.arcB2.keys().next().value;
+      if (oldest !== undefined) this.arcB2.delete(oldest);
+    }
+  }
+
+  /**
+   * ARC: Replace (evict) one entry from T1 or T2
+   * @param evictFromT1 - If true, prefer evicting from T1; otherwise from T2
+   */
+  private arcReplace(evictFromT1: boolean, _newSize: number): void {
+    // Decide which list to evict from
+    let evictT1 = evictFromT1;
+
+    // If T1 is empty, must evict from T2
+    if (this._arcT1Size === 0) {
+      evictT1 = false;
+    }
+    // If T2 is empty, must evict from T1
+    else if (this._arcT2Size === 0) {
+      evictT1 = true;
+    }
+
+    if (evictT1 && this.arcT1.head) {
+      // Evict LRU from T1, add to B1
+      const victim = this.arcT1.head;
+      this.arcRemoveFromList(victim);
+      this.map.delete(victim.key);
+      this._currentBytes -= victim.size;
+      this._arcT1Size--;
+      this._evictions++;
+
+      // Call eviction callback
+      if (this.onEvict) {
+        this.onEvict(victim.key, victim.value, victim.dirty);
+      }
+
+      // Add to ghost list B1 (we track that this key was recently in T1)
+      this.arcB1.set(victim.key, victim);
+    } else if (this.arcT2.head) {
+      // Evict LRU from T2, add to B2
+      const victim = this.arcT2.head;
+      this.arcRemoveFromList(victim);
+      this.map.delete(victim.key);
+      this._currentBytes -= victim.size;
+      this._arcT2Size--;
+      this._evictions++;
+
+      // Call eviction callback
+      if (this.onEvict) {
+        this.onEvict(victim.key, victim.value, victim.dirty);
+      }
+
+      // Add to ghost list B2 (we track that this key was recently in T2)
+      this.arcB2.set(victim.key, victim);
+    }
+  }
+
+  /**
+   * ARC: Replace (evict) one entry from T1 or T2 (async version)
+   */
+  private async arcReplaceAsync(evictFromT1: boolean, _newSize: number): Promise<void> {
+    let evictT1 = evictFromT1;
+
+    if (this._arcT1Size === 0) {
+      evictT1 = false;
+    } else if (this._arcT2Size === 0) {
+      evictT1 = true;
+    }
+
+    if (evictT1 && this.arcT1.head) {
+      const victim = this.arcT1.head;
+      this.arcRemoveFromList(victim);
+      this.map.delete(victim.key);
+      this._currentBytes -= victim.size;
+      this._arcT1Size--;
+      this._evictions++;
+
+      if (this.onEvict) {
+        await this.onEvict(victim.key, victim.value, victim.dirty);
+      }
+
+      this.arcB1.set(victim.key, victim);
+    } else if (this.arcT2.head) {
+      const victim = this.arcT2.head;
+      this.arcRemoveFromList(victim);
+      this.map.delete(victim.key);
+      this._currentBytes -= victim.size;
+      this._arcT2Size--;
+      this._evictions++;
+
+      if (this.onEvict) {
+        await this.onEvict(victim.key, victim.value, victim.dirty);
+      }
+
+      this.arcB2.set(victim.key, victim);
+    }
+  }
+
+  /**
+   * ARC: Evict one entry (used by evictOne)
+   */
+  private evictARC(): void {
+    // Prefer evicting from T1 if T1 size > p, otherwise from T2
+    this.arcReplace(this._arcT1Size > this._arcP, 0);
+  }
+
+  /**
+   * ARC: Evict one entry (async version)
+   */
+  private async evictARCAsync(): Promise<void> {
+    await this.arcReplaceAsync(this._arcT1Size > this._arcP, 0);
+  }
+
+  /**
+   * ARC: Remove a node from its current list
+   */
+  private arcRemoveFromList(node: LRUNode<K, V>): void {
+    const list = node.arcList === 't1' ? this.arcT1 : this.arcT2;
+
+    if (node.prev) {
+      node.prev.next = node.next;
+    } else {
+      list.head = node.next;
+    }
+
+    if (node.next) {
+      node.next.prev = node.prev;
+    } else {
+      list.tail = node.prev;
+    }
+
+    node.prev = null;
+    node.next = null;
+  }
+
+  /**
+   * ARC: Add a node to the tail (MRU position) of a list
+   */
+  private arcAddToListTail(list: { head: LRUNode<K, V> | null; tail: LRUNode<K, V> | null }, node: LRUNode<K, V>): void {
+    node.prev = list.tail;
+    node.next = null;
+
+    if (list.tail) {
+      list.tail.next = node;
+    } else {
+      list.head = node;
+    }
+
+    list.tail = node;
   }
 }

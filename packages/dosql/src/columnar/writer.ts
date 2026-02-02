@@ -446,6 +446,13 @@ export class ColumnarWriter {
         return encodeDelta(values, dataType, nullBitmap).data;
 
       case 'bitpack': {
+        // Bitpack is not safe for 64-bit types as it converts to Number,
+        // which loses precision for values > Number.MAX_SAFE_INTEGER
+        if (dataType === 'int64' || dataType === 'uint64' || dataType === 'timestamp') {
+          // Fall back to raw encoding for 64-bit types
+          return encodeRaw(values, dataType, nullBitmap).data;
+        }
+
         // Find max value to determine bit width
         const nonNullValues = values.filter((v) => v !== null) as (number | bigint)[];
         const maxValue = nonNullValues.length > 0

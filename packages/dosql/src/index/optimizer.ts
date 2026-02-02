@@ -42,6 +42,7 @@ import {
 } from './types.js';
 
 import type { SecondaryIndex } from './secondary.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // COST MODEL CONSTANTS
@@ -513,7 +514,7 @@ function estimatePredicateComplexity(predicate: Predicate): number {
     case 'isNull':
       return 1;
     default:
-      return 1;
+      return assertNever(predicate, `Unknown predicate type: ${(predicate as Predicate).type}`);
   }
 }
 
