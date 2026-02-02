@@ -1823,6 +1823,164 @@ describe('Set Operations Operator', () => {
       expect(getSetOperationPrecedence('INTERSECT')).toBeGreaterThan(getSetOperationPrecedence('UNION'));
     });
   });
+
+  describe('Set Operation Performance', () => {
+    it('should handle large dataset UNION efficiently with hash-based deduplication', async () => {
+      // Generate 10000 rows with some duplicates
+      const rowCount = 10000;
+      const duplicateRatio = 0.3;
+      const uniqueCount = Math.floor(rowCount * (1 - duplicateRatio));
+
+      const left: Row[] = [];
+      const right: Row[] = [];
+
+      // Left side: unique ids from 0 to uniqueCount, then duplicates
+      for (let i = 0; i < rowCount / 2; i++) {
+        const id = i % uniqueCount;
+        left.push({
+          id,
+          name: `user_${id}`,
+          value: id * 1.5,
+          active: id % 2 === 0,
+        });
+      }
+
+      // Right side: unique ids from uniqueCount/2 to uniqueCount*1.5, then duplicates
+      for (let i = 0; i < rowCount / 2; i++) {
+        const id = (Math.floor(uniqueCount / 2) + i) % Math.floor(uniqueCount * 1.5);
+        right.push({
+          id,
+          name: `user_${id}`,
+          value: id * 1.5,
+          active: id % 2 === 0,
+        });
+      }
+
+      const startTime = performance.now();
+      const results = await executeSetOperation('UNION', left, right, false);
+      const endTime = performance.now();
+
+      const duration = endTime - startTime;
+
+      // Should complete in reasonable time (< 500ms for 10000 rows)
+      expect(duration).toBeLessThan(500);
+
+      // Should have deduplicated correctly (actual count depends on overlap)
+      expect(results.length).toBeLessThanOrEqual(rowCount);
+      expect(results.length).toBeGreaterThan(0);
+
+      // Verify no duplicates in result
+      const seen = new Set<number>();
+      for (const row of results) {
+        const id = row.id as number;
+        expect(seen.has(id)).toBe(false);
+        seen.add(id);
+      }
+    });
+
+    it('should handle rows with various SQL value types efficiently', async () => {
+      const rowCount = 1000;
+      const left: Row[] = [];
+      const right: Row[] = [];
+
+      for (let i = 0; i < rowCount; i++) {
+        const row: Row = {
+          id: i,
+          name: `user_${i}_${'x'.repeat(i % 50)}`, // Variable length strings
+          bigValue: BigInt(i * 1000000000000),
+          timestamp: new Date(Date.now() + i * 1000),
+          flag: i % 2 === 0,
+          nullableField: i % 3 === 0 ? null : `value_${i}`,
+          binaryData: new Uint8Array([i % 256, (i * 2) % 256, (i * 3) % 256]),
+        };
+        left.push(row);
+        // Add some duplicates to right side
+        if (i % 2 === 0) {
+          right.push({ ...row });
+        } else {
+          right.push({
+            ...row,
+            id: i + rowCount, // Different id
+          });
+        }
+      }
+
+      const startTime = performance.now();
+      const results = await executeSetOperation('UNION', left, right, false);
+      const endTime = performance.now();
+
+      const duration = endTime - startTime;
+
+      // Should complete efficiently even with complex types
+      expect(duration).toBeLessThan(300);
+
+      // Should have correct deduplication
+      expect(results.length).toBe(rowCount + rowCount / 2); // All left + half of right (non-duplicates)
+    });
+
+    it('INTERSECT should perform well with hash-based lookup', async () => {
+      const rowCount = 5000;
+      const overlapRatio = 0.5;
+      const overlapCount = Math.floor(rowCount * overlapRatio);
+
+      const left: Row[] = [];
+      const right: Row[] = [];
+
+      // Left: 0 to rowCount-1
+      for (let i = 0; i < rowCount; i++) {
+        left.push({ id: i, value: `left_${i}` });
+      }
+
+      // Right: overlapCount to rowCount + overlapCount - 1 (50% overlap)
+      for (let i = 0; i < rowCount; i++) {
+        right.push({ id: i + overlapCount, value: `left_${i + overlapCount}` });
+      }
+
+      const startTime = performance.now();
+      const results = await executeSetOperation('INTERSECT', left, right, false);
+      const endTime = performance.now();
+
+      const duration = endTime - startTime;
+
+      // Should complete efficiently
+      expect(duration).toBeLessThan(200);
+
+      // Should return correct intersection
+      expect(results.length).toBe(rowCount - overlapCount);
+    });
+
+    it('EXCEPT should perform well with hash-based exclusion', async () => {
+      const rowCount = 5000;
+
+      const left: Row[] = [];
+      const right: Row[] = [];
+
+      // Left: 0 to rowCount-1
+      for (let i = 0; i < rowCount; i++) {
+        left.push({ id: i, value: `item_${i}` });
+      }
+
+      // Right: even numbers only
+      for (let i = 0; i < rowCount; i += 2) {
+        right.push({ id: i, value: `item_${i}` });
+      }
+
+      const startTime = performance.now();
+      const results = await executeSetOperation('EXCEPT', left, right, false);
+      const endTime = performance.now();
+
+      const duration = endTime - startTime;
+
+      // Should complete efficiently
+      expect(duration).toBeLessThan(200);
+
+      // Should return only odd numbers
+      expect(results.length).toBe(rowCount / 2);
+      for (const row of results) {
+        expect((row.id as number) % 2).toBe(1);
+      }
+    });
+  });
 });
 
 // =============================================================================

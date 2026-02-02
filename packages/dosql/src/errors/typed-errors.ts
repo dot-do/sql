@@ -300,8 +300,18 @@ export class ParserError extends DoSQLError {
         return 'The SQL statement is invalid.';
       case ParserErrorCode.UNKNOWN_OPERATION:
         return 'Could not determine the SQL operation type.';
+      case ParserErrorCode.INVALID_DATA_TYPE:
+        return 'The specified data type is invalid.';
+      case ParserErrorCode.INVALID_REFERENCE_ACTION:
+        return 'The specified reference action is invalid.';
+      case ParserErrorCode.UNKNOWN_WINDOW_NAME:
+        return 'The specified window name is not defined.';
+      case ParserErrorCode.INVALID_FRAME_SPEC:
+        return 'The window frame specification is invalid.';
+      case ParserErrorCode.UNKNOWN_FUNCTION:
+        return 'The specified function is not recognized.';
       default:
-        return this.message;
+        return assertNever(this.code);
     }
   }
 
@@ -362,6 +372,14 @@ export class StorageError extends DoSQLError {
       case StorageErrorCode.INVALID_PAGE_ID:
         this.recoveryHint = 'Use a valid page ID';
         break;
+      case StorageErrorCode.BUCKET_NOT_FOUND:
+        this.recoveryHint = 'Check bucket configuration and bindings';
+        break;
+      case StorageErrorCode.CORRUPTION:
+        this.recoveryHint = 'Data may be corrupted - consider restoring from backup';
+        break;
+      default:
+        assertNever(this.code);
     }
   }
 
@@ -388,7 +406,7 @@ export class StorageError extends DoSQLError {
       case StorageErrorCode.CORRUPTION:
         return 'Data corruption was detected.';
       default:
-        return this.message;
+        return assertNever(this.code);
     }
   }
 
@@ -454,7 +472,8 @@ export function createJoinOrderFailedError(tables: string[], sql?: string): Plan
  * @example
  * ```typescript
  * default:
- *   throw createUnknownPlanTypeError((plan as any).type, sql);
+ *   // Use type assertion to access type property in exhaustive switch default case
+ *   throw createUnknownPlanTypeError((plan as { type: unknown }).type as string, sql);
  * ```
  */
 export function createUnknownPlanTypeError(planType: string, sql?: string): ExecutorError {

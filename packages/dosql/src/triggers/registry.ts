@@ -155,7 +155,7 @@ export function createTriggerRegistry(options: TriggerRegistryOptions = {}): Tri
    */
   function isSQLTrigger(trigger: unknown): trigger is ParsedSQLTrigger {
     if (!trigger || typeof trigger !== 'object') return false;
-    const t = trigger as Record<string, unknown>;
+    const t = trigger as { timing?: unknown; body?: unknown };
     return (
       typeof t.timing === 'string' &&
       ['BEFORE', 'AFTER', 'INSTEAD OF'].includes(t.timing) &&

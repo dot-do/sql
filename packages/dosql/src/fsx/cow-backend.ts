@@ -42,6 +42,7 @@ import {
 import { SnapshotManager } from './snapshot.js';
 import { MergeEngine } from './merge.js';
 import { GarbageCollector } from './gc.js';
+import { FNV_OFFSET_BASIS, FNV_PRIME } from '../utils/hash.js';
 
 // =============================================================================
 // COW Backend Implementation
@@ -662,10 +663,10 @@ export class COWBackend implements FSXWithCOW {
     }
 
     // Simple fallback hash (FNV-1a)
-    let hash = 2166136261;
+    let hash = FNV_OFFSET_BASIS;
     for (let i = 0; i < data.length; i++) {
       hash ^= data[i];
-      hash = (hash * 16777619) >>> 0;
+      hash = Math.imul(hash, FNV_PRIME) >>> 0;
     }
     return hash.toString(16).padStart(8, '0');
   }

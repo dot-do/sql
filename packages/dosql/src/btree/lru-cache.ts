@@ -327,7 +327,12 @@ export class LRUCache<K, V> {
       existingNode.size = newSize;
       existingNode.dirty = options.dirty ?? existingNode.dirty;
       this._currentBytes += newSize - oldSize;
-      this.moveToTail(existingNode);
+
+      if (this.evictionPolicy === 'lfu') {
+        this.incrementFrequency(existingNode);
+      } else {
+        this.moveToTail(existingNode);
+      }
     } else {
       // Create new entry
       const node: LRUNode<K, V> = {
@@ -337,16 +342,28 @@ export class LRUCache<K, V> {
         dirty: options.dirty ?? false,
         prev: null,
         next: null,
+        frequency: 1,
       };
 
       // Evict if necessary before adding
       this.evictToFit(newSize);
 
-      // Add to map and tail
+      // Add to map
       this.map.set(key, node);
-      this.addToTail(node);
+
+      if (this.evictionPolicy === 'lfu') {
+        // Add to frequency list for LFU
+        this.addToFrequencyList(node, 1);
+        this._minFrequency = 1;
+      } else {
+        // Add to tail for LRU
+        this.addToTail(node);
+      }
       this._currentBytes += newSize;
     }
+
+    // Check memory pressure after set
+    this.checkMemoryPressure();
   }
 
   /**
@@ -372,7 +389,12 @@ export class LRUCache<K, V> {
       existingNode.size = newSize;
       existingNode.dirty = options.dirty ?? existingNode.dirty;
       this._currentBytes += newSize - oldSize;
-      this.moveToTail(existingNode);
+
+      if (this.evictionPolicy === 'lfu') {
+        this.incrementFrequency(existingNode);
+      } else {
+        this.moveToTail(existingNode);
+      }
     } else {
       // Create new entry
       const node: LRUNode<K, V> = {
@@ -382,16 +404,28 @@ export class LRUCache<K, V> {
         dirty: options.dirty ?? false,
         prev: null,
         next: null,
+        frequency: 1,
       };
 
       // Evict if necessary before adding - await async callbacks
       await this.evictToFitAsync(newSize);
 
-      // Add to map and tail
+      // Add to map
       this.map.set(key, node);
-      this.addToTail(node);
+
+      if (this.evictionPolicy === 'lfu') {
+        // Add to frequency list for LFU
+        this.addToFrequencyList(node, 1);
+        this._minFrequency = 1;
+      } else {
+        // Add to tail for LRU
+        this.addToTail(node);
+      }
       this._currentBytes += newSize;
     }
+
+    // Check memory pressure after set
+    this.checkMemoryPressure();
   }
 
   /**
@@ -432,6 +466,11 @@ export class LRUCache<K, V> {
     this.head = null;
     this.tail = null;
     this._currentBytes = 0;
+
+    // Reset LFU state
+    this.frequencyLists.clear();
+    this._minFrequency = 0;
+    this._lastPressureLevel = 'low';
   }
 
   /**
@@ -452,6 +491,11 @@ export class LRUCache<K, V> {
     this.head = null;
     this.tail = null;
     this._currentBytes = 0;
+
+    // Reset LFU state
+    this.frequencyLists.clear();
+    this._minFrequency = 0;
+    this._lastPressureLevel = 'low';
   }
 
   /**

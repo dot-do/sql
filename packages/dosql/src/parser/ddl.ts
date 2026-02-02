@@ -44,6 +44,8 @@ import type {
 } from './ddl-types.js';
 
 import { parseWithStorageClause, type TableStorageConfig } from '../engine/storage-config.js';
+import { SQLSyntaxError, createInvalidDataTypeError, createInvalidReferenceActionError } from '../errors/index.js';
+import { SyntaxErrorCode } from '../errors/codes.js';
 
 // =============================================================================
 // TOKENIZER
@@ -493,7 +495,7 @@ class Parser {
     } else if (token.type === 'KEYWORD' || token.type === 'IDENTIFIER') {
       typeName = this.advance().value.toUpperCase();
     } else {
-      throw new Error(`Expected data type but got ${token.value || token.type}`);
+      throw createInvalidDataTypeError(token.value || token.type);
     }
 
     // Check for precision/scale

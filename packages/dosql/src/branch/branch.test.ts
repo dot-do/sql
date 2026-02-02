@@ -1355,23 +1355,25 @@ describe('Branch Manager - Deletion and Cleanup', () => {
   });
 
   // Test 72
-  it('should prevent deletion of branch with child branches without force', async () => {
+  it('should prevent deletion of branch with unmerged commits without force', async () => {
     const stub = getUniqueStub();
     await runInDurableObject(stub, async (instance: TestBranchDO) => {
-      // Create parent branch
-      await instance.createBranch({ name: 'parent-branch' });
-      await instance.checkout('parent-branch');
-      await instance.commit('Parent commit');
+      // Create a base commit on main
+      await instance.commit('Base commit');
 
-      // Create child branch
-      await instance.createBranch({ name: 'child-branch', from: 'parent-branch' });
+      // Create feature branch with work that diverges from main
+      await instance.createBranch({ name: 'unmerged-work' });
+      await instance.checkout('unmerged-work');
+      await instance.commit('Unmerged commit 1');
+      await instance.commit('Unmerged commit 2');
 
+      // Add commit to main to make branches diverge
       await instance.checkout('main');
+      await instance.commit('Main continues');
 
-      // Parent still has unmerged commits, should fail without force
-      // Even if child exists, the unmerged check should trigger first
+      // Branch has unmerged commits, should fail without force
       await expect(
-        instance.deleteBranch('parent-branch')
+        instance.deleteBranch('unmerged-work')
       ).rejects.toThrow();
     });
   });

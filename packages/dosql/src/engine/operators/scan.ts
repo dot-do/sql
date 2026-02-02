@@ -174,4 +174,19 @@ export class ScanOperator implements Operator {
   columns(): string[] {
     return this.outputColumns;
   }
+
+  /**
+   * Async iterator support - enables `for await (const row of operator)`
+   * Note: The operator must be opened before iterating
+   */
+  async *[Symbol.asyncIterator](): AsyncIterator<Row> {
+    try {
+      let row: Row | null;
+      while ((row = await this.next()) !== null) {
+        yield row;
+      }
+    } finally {
+      await this.close();
+    }
+  }
 }

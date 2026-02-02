@@ -106,6 +106,9 @@ export type {
   LSN,
   StatementHash,
   ShardId,
+  UUID,
+  Email,
+  Timestamp,
   // Query types
   SQLValue,
   QueryResult,
@@ -195,6 +198,9 @@ export {
   createLSN,
   createStatementHash,
   createShardId,
+  createUUID,
+  createEmail,
+  createTimestamp,
   // Generic branded type factory pattern
   createBrandedTypeFactory,
   createBrandedBigintFactory,
@@ -204,11 +210,19 @@ export {
   compareLSN,
   incrementLSN,
   lsnValue,
+  // Timestamp utilities
+  timestampValue,
+  timestampToMillis,
+  timestampToISO,
+  compareTimestamp,
   // Type guards for validation
   isValidLSN,
   isValidTransactionId,
   isValidShardId,
   isValidStatementHash,
+  isValidUUID,
+  isValidEmail,
+  isValidTimestamp,
   // Dev mode configuration
   setDevMode,
   isDevMode,

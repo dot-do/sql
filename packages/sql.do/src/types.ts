@@ -94,12 +94,18 @@ export {
   type LSN,
   type StatementHash,
   type ShardId,
+  type UUID,
+  type Email,
+  type Timestamp,
 
   // Brand constructors
   createTransactionId,
   createLSN,
   createStatementHash,
   createShardId,
+  createUUID,
+  createEmail,
+  createTimestamp,
 
   // Generic branded type factory pattern
   createBrandedTypeFactory,
@@ -112,11 +118,20 @@ export {
   incrementLSN,
   lsnValue,
 
+  // Timestamp utilities
+  timestampValue,
+  timestampToMillis,
+  timestampToISO,
+  compareTimestamp,
+
   // Type guards for validation
   isValidLSN,
   isValidTransactionId,
   isValidShardId,
   isValidStatementHash,
+  isValidUUID,
+  isValidEmail,
+  isValidTimestamp,
 
   // Dev mode configuration
   setDevMode,

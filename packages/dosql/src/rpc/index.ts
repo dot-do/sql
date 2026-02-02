@@ -122,6 +122,36 @@ export {
 } from './server.js';
 
 // =============================================================================
+// Connection Pool Exports
+// =============================================================================
+
+export {
+  // Connection pool
+  DOConnectionPool,
+  createDOConnectionPool,
+
+  // Pooled ShardRPC
+  createPooledShardRPC,
+
+  // Configuration
+  DEFAULT_DO_CONNECTION_POOL_CONFIG,
+
+  // Types
+  type DOConnectionPoolConfig,
+  type PooledConnection,
+  type AcquireOptions,
+  type DOConnectionPoolStats,
+  type DOConnectionPoolEvents,
+  type DOStubFactory,
+  type ConnectionHealth,
+  type PooledShardRPCConfig,
+  type DOStub,
+  type ShardRPC,
+  type ShardResult,
+  type ShardExecuteOptions,
+} from './connection-pool.js';
+
+// =============================================================================
 // Convenience Re-exports from CapnWeb
 // =============================================================================
 

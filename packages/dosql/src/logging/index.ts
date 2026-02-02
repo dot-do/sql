@@ -411,8 +411,11 @@ class Logger implements StructuredLogger {
         name: error.name,
         message: error.message,
       };
-      if ('code' in error && typeof (error as Record<string, unknown>).code === 'string') {
-        entry.error.code = (error as Record<string, unknown>).code as string;
+      if ('code' in error) {
+        const errorCode = (error as { code?: unknown }).code;
+        if (typeof errorCode === 'string') {
+          entry.error.code = errorCode;
+        }
       }
       if (this.includeStackTraces && error.stack) {
         entry.error.stack = error.stack;

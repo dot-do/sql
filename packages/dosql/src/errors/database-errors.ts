@@ -14,6 +14,7 @@ import {
   type SerializedError,
 } from './base.js';
 import { DatabaseErrorCode } from './codes.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // Database Error
@@ -68,6 +69,23 @@ export class DatabaseError extends DoSQLError {
       case DatabaseErrorCode.TIMEOUT:
         this.recoveryHint = 'Increase the timeout setting or optimize the query';
         break;
+      case DatabaseErrorCode.NOT_FOUND:
+        this.recoveryHint = 'Check that the database exists';
+        break;
+      case DatabaseErrorCode.CONSTRAINT_VIOLATION:
+        this.recoveryHint = 'Check that the data satisfies all constraints';
+        break;
+      case DatabaseErrorCode.QUERY_ERROR:
+        this.recoveryHint = 'Check the query syntax and parameters';
+        break;
+      case DatabaseErrorCode.CONFIG_ERROR:
+        this.recoveryHint = 'Check the database configuration';
+        break;
+      case DatabaseErrorCode.INTERNAL:
+        this.recoveryHint = 'An internal error occurred - please report this issue';
+        break;
+      default:
+        assertNever(this.code);
     }
   }
 

@@ -181,9 +181,9 @@ export async function executeSimpleCTE(
   if (cte.columns && cte.columns.length > 0 && rows.length > 0) {
     const originalColumns = Object.keys(rows[0]);
     if (originalColumns.length !== cte.columns.length) {
-      throw new Error(
-        `CTE '${cte.name}' column count mismatch: ` +
-        `expected ${cte.columns.length}, got ${originalColumns.length}`
+      throw new ExecutorError(
+        ExecutorErrorCode.OPERATOR_ERROR,
+        `CTE '${cte.name}' column count mismatch: expected ${cte.columns.length}, got ${originalColumns.length}`
       );
     }
 
@@ -231,7 +231,8 @@ export async function executeRecursiveCTE(
   ctx: CTEExecutionContext
 ): Promise<MaterializedCTE> {
   if (!cte.anchorQuery || !cte.recursiveQuery) {
-    throw new Error(
+    throw new ExecutorError(
+      ExecutorErrorCode.OPERATOR_ERROR,
       `Recursive CTE '${cte.name}' must have both anchor and recursive queries`
     );
   }
@@ -278,9 +279,9 @@ export async function executeRecursiveCTE(
   while (workingTable.length > 0 && iteration < maxIterations) {
     // Check row limit
     if (allRows.length >= maxRows) {
-      throw new Error(
-        `Recursive CTE '${cte.name}' exceeded maximum row limit (${maxRows}). ` +
-        `This may indicate an infinite loop.`
+      throw new ExecutorError(
+        ExecutorErrorCode.OPERATOR_ERROR,
+        `Recursive CTE '${cte.name}' exceeded maximum row limit (${maxRows}). This may indicate an infinite loop.`
       );
     }
 
@@ -331,9 +332,9 @@ export async function executeRecursiveCTE(
   }
 
   if (iteration >= maxIterations) {
-    throw new Error(
-      `Recursive CTE '${cte.name}' exceeded maximum iterations (${maxIterations}). ` +
-      `This may indicate an infinite loop.`
+    throw new ExecutorError(
+      ExecutorErrorCode.OPERATOR_ERROR,
+      `Recursive CTE '${cte.name}' exceeded maximum iterations (${maxIterations}). This may indicate an infinite loop.`
     );
   }
 

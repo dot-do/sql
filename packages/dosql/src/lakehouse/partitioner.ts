@@ -15,6 +15,7 @@ import {
   LakehouseError,
   LakehouseErrorCode,
 } from './types.js';
+import { fnv1a } from '../utils/hash.js';
 
 // =============================================================================
 // Partition Value Extraction
@@ -118,8 +119,8 @@ function toDate(value: unknown, type: string): Date {
  * Apply bucket transform (hash mod N)
  */
 function applyBucket(value: unknown, bucketCount: number): string {
-  const hash = simpleHash(String(value));
-  const bucket = Math.abs(hash) % bucketCount;
+  const hash = fnv1a(String(value));
+  const bucket = hash % bucketCount;
   return bucket.toString().padStart(4, '0');
 }
 
@@ -167,17 +168,6 @@ function sanitizePathComponent(value: string): string {
     .substring(0, 128); // Limit length
 }
 
-/**
- * Simple hash function (FNV-1a)
- */
-function simpleHash(str: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = (hash * 16777619) >>> 0;
-  }
-  return hash;
-}
 
 // =============================================================================
 // Partitioner Class
