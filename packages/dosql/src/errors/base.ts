@@ -13,90 +13,20 @@
  * @packageDocumentation
  */
 
-// =============================================================================
-// Error Context
-// =============================================================================
+// Re-export shared types from @dotdo/sql-types for consistency
+export {
+  ErrorCategory,
+  type ErrorContext,
+  type SerializedError,
+  type ErrorLogEntry,
+} from '@dotdo/sql-types';
 
-/**
- * Context that can be attached to any error
- */
-export interface ErrorContext {
-  /** Request ID for tracing */
-  requestId?: string | undefined;
-  /** Transaction ID if within a transaction */
-  transactionId?: string | undefined;
-  /** SQL statement that caused the error */
-  sql?: string | undefined;
-  /** Table name involved */
-  table?: string | undefined;
-  /** Column name involved */
-  column?: string | undefined;
-  /** Additional metadata */
-  metadata?: Record<string, unknown> | undefined;
-}
-
-/**
- * Serialized error format for RPC/API responses
- */
-export interface SerializedError {
-  /** Error class name */
-  name: string;
-  /** Machine-readable error code */
-  code: string;
-  /** Human-readable error message */
-  message: string;
-  /** Timestamp when error occurred */
-  timestamp: number;
-  /** Error context */
-  context?: ErrorContext | undefined;
-  /** Stack trace (optional, may be omitted in production) */
-  stack?: string | undefined;
-  /** Serialized cause error */
-  cause?: SerializedError | undefined;
-}
-
-/**
- * Log entry format for structured logging
- */
-export interface ErrorLogEntry {
-  /** Log level */
-  level: 'error' | 'warn';
-  /** ISO timestamp */
-  timestamp: string;
-  /** Error details */
-  error: {
-    name: string;
-    code: string;
-    message: string;
-    stack?: string | undefined;
-  };
-  /** Additional metadata */
-  metadata: Record<string, unknown>;
-}
-
-// =============================================================================
-// Error Categories
-// =============================================================================
-
-/**
- * High-level error categories for consistent handling at API layer
- */
-export enum ErrorCategory {
-  /** Connection/networking errors */
-  CONNECTION = 'CONNECTION',
-  /** Query execution errors */
-  EXECUTION = 'EXECUTION',
-  /** Input validation errors */
-  VALIDATION = 'VALIDATION',
-  /** Resource errors (not found, quota exceeded) */
-  RESOURCE = 'RESOURCE',
-  /** Conflict errors (deadlock, serialization) */
-  CONFLICT = 'CONFLICT',
-  /** Timeout errors */
-  TIMEOUT = 'TIMEOUT',
-  /** Internal errors (bugs, unexpected states) */
-  INTERNAL = 'INTERNAL',
-}
+import {
+  ErrorCategory,
+  type ErrorContext,
+  type SerializedError,
+  type ErrorLogEntry,
+} from '@dotdo/sql-types';
 
 // =============================================================================
 // Base DoSQL Error
@@ -150,10 +80,16 @@ export abstract class DoSQLError extends Error {
   /** Recovery hint for developers */
   recoveryHint?: string;
 
+  /** Error cause for error chaining */
+  declare readonly cause?: Error;
+
   constructor(message: string, options?: { cause?: Error; context?: ErrorContext }) {
-    super(message, { cause: options?.cause });
+    super(message);
     this.timestamp = Date.now();
     this.context = options?.context;
+    if (options?.cause) {
+      this.cause = options.cause;
+    }
 
     // Ensure proper prototype chain for instanceof checks
     Object.setPrototypeOf(this, new.target.prototype);
@@ -267,12 +203,12 @@ export class AggregateDoSQLError extends DoSQLError {
     this.errors = errors;
   }
 
-  isRetryable(): boolean {
+  override isRetryable(): boolean {
     // Only retryable if all individual errors are retryable
     return this.errors.every(e => e.isRetryable());
   }
 
-  toJSON(): SerializedError & { errors: SerializedError[] } {
+  override toJSON(): SerializedError & { errors: SerializedError[] } {
     return {
       ...super.toJSON(),
       errors: this.errors.map(e => e.toJSON()),

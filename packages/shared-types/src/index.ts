@@ -20,6 +20,41 @@
  */
 
 // =============================================================================
+// Unified Error Hierarchy
+// =============================================================================
+
+/**
+ * Base error classes and utilities shared across all DoSQL packages.
+ * @public
+ * @stability stable
+ */
+export {
+  // Base classes
+  BaseError,
+  GenericError,
+  AggregateError,
+  // Types and interfaces
+  ErrorCategory,
+  type ErrorContext,
+  type SerializedError,
+  type ErrorLogEntry,
+  // Registry and deserialization
+  registerErrorDeserializer,
+  deserializeError,
+  // Error code utilities
+  ErrorCodePrefix,
+  type ErrorCodePrefix as ErrorCodePrefixType,
+  getErrorCodePrefix,
+  isErrorCodeInCategory,
+  // URL masking utility
+  maskUrl,
+  // Retryable error utilities
+  RETRYABLE_ERROR_CODES,
+  type RetryableErrorCode,
+  isRetryableCode,
+} from './errors.js';
+
+// =============================================================================
 // Runtime Configuration (re-exported from config.ts for backwards compatibility)
 // =============================================================================
 

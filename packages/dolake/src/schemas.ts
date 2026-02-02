@@ -6,6 +6,13 @@
  */
 
 import { z, ZodError } from 'zod';
+import {
+  BaseError,
+  ErrorCategory,
+  registerErrorDeserializer,
+  type SerializedError,
+} from '@dotdo/sql-types';
+import { DoLakeErrorCode } from './errors.js';
 
 // =============================================================================
 // CDC Event Schemas
@@ -404,7 +411,10 @@ export type ValidatedRpcMessage = z.infer<typeof RpcMessageSchema>;
  * @see validateRpcMessage
  * @see CDCBatchMessageSchema
  */
-export class MessageValidationError extends Error {
+export class MessageValidationError extends BaseError {
+  readonly code = DoLakeErrorCode.MESSAGE_VALIDATION_ERROR;
+  readonly category = ErrorCategory.VALIDATION;
+
   /**
    * The underlying Zod validation error, if available.
    *
@@ -457,6 +467,10 @@ export class MessageValidationError extends Error {
     this.zodError = zodError ?? null;
   }
 
+  override isRetryable(): boolean {
+    return false;
+  }
+
   /**
    * Get a human-readable description of all validation errors.
    *
@@ -488,7 +502,15 @@ export class MessageValidationError extends Error {
       .map((e) => `${e.path.join('.')}: ${e.message}`)
       .join('; ');
   }
+
+  static fromJSON(json: SerializedError): MessageValidationError {
+    const details = json.context?.metadata?.validationDetails as string | undefined;
+    return new MessageValidationError(json.message, null);
+  }
 }
+
+// Register for deserialization
+registerErrorDeserializer('MessageValidationError', MessageValidationError.fromJSON);
 
 /**
  * Validate and parse a client RPC message

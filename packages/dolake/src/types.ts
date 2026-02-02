@@ -15,6 +15,33 @@ import {
 } from './constants.js';
 
 // =============================================================================
+// Re-export Error Types from Unified Error Hierarchy
+// =============================================================================
+
+export {
+  // Base error class
+  DoLakeError,
+  // Specific error classes
+  ConnectionError,
+  VersionMismatchError,
+  BufferOverflowError,
+  FlushError,
+  ParquetWriteError,
+  IcebergError,
+  CompactionError,
+  VFSStorageError,
+  MessageValidationError,
+  // Error codes
+  DoLakeErrorCode,
+  type DoLakeErrorCode as DoLakeErrorCodeType,
+  // Shared types
+  ErrorCategory,
+  type ErrorContext,
+  type SerializedError,
+  type ErrorLogEntry,
+} from './errors.js';
+
+// =============================================================================
 // Re-export Unified Types from lake.do and sql.do
 // =============================================================================
 
@@ -731,160 +758,6 @@ export const SCHEMA_VERSION_HISTORY = [
 export const BREAKING_CHANGES: Record<number, string[]> = {
   1: ['Added version field to BufferSnapshot'],
 };
-
-// =============================================================================
-// Error Types
-// =============================================================================
-
-/**
- * Base error class for DoLake
- */
-export class DoLakeError extends Error {
-  constructor(
-    message: string,
-    public readonly code: string,
-    public readonly retryable: boolean = false
-  ) {
-    super(message);
-    this.name = 'DoLakeError';
-  }
-}
-
-/**
- * Version mismatch error for incompatible schema versions
- */
-export class VersionMismatchError extends DoLakeError {
-  constructor(
-    message: string,
-    public readonly snapshotVersion: number,
-    public readonly currentVersion: number,
-    public readonly minSupportedVersion: number
-  ) {
-    super(message, 'VERSION_MISMATCH', false);
-    this.name = 'VersionMismatchError';
-  }
-}
-
-/**
- * Connection error
- */
-export class ConnectionError extends DoLakeError {
-  constructor(message: string, retryable: boolean = true) {
-    super(message, 'CONNECTION_ERROR', retryable);
-    this.name = 'ConnectionError';
-  }
-}
-
-/**
- * Buffer overflow error
- *
- * Thrown when the CDC buffer cannot accept more events because it has reached
- * its maximum configured size. This error includes detailed context about the
- * buffer state and suggestions for handling.
- *
- * @example
- * ```typescript
- * try {
- *   bufferManager.addBatch(sourceDoId, events, sequenceNumber);
- * } catch (error) {
- *   if (error instanceof BufferOverflowError) {
- *     console.log(`Buffer full: ${error.currentSizeBytes}/${error.maxSizeBytes} bytes`);
- *     console.log(`Utilization: ${(error.utilization * 100).toFixed(1)}%`);
- *     // Wait for flush before retrying
- *     await new Promise(r => setTimeout(r, 1000));
- *   }
- * }
- * ```
- */
-export class BufferOverflowError extends DoLakeError {
-  /**
-   * Current buffer size in bytes at the time of the error
-   */
-  public readonly currentSizeBytes: number;
-
-  /**
-   * Maximum allowed buffer size in bytes
-   */
-  public readonly maxSizeBytes: number;
-
-  /**
-   * Size of the batch that was attempted to be added (in bytes)
-   */
-  public readonly attemptedBatchSizeBytes: number;
-
-  /**
-   * Current buffer utilization (0.0 - 1.0)
-   */
-  public readonly utilization: number;
-
-  constructor(options: {
-    currentSizeBytes: number;
-    maxSizeBytes: number;
-    attemptedBatchSizeBytes: number;
-  }) {
-    const { currentSizeBytes, maxSizeBytes, attemptedBatchSizeBytes } = options;
-    const utilization = currentSizeBytes / maxSizeBytes;
-    const requiredSize = currentSizeBytes + attemptedBatchSizeBytes;
-
-    const formatBytes = (bytes: number): string => {
-      if (bytes >= 1024 * 1024) {
-        return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-      }
-      if (bytes >= 1024) {
-        return `${(bytes / 1024).toFixed(2)} KB`;
-      }
-      return `${bytes} bytes`;
-    };
-
-    const message =
-      `Buffer overflow: cannot add batch of ${formatBytes(attemptedBatchSizeBytes)}. ` +
-      `Current buffer: ${formatBytes(currentSizeBytes)} / ${formatBytes(maxSizeBytes)} ` +
-      `(${(utilization * 100).toFixed(1)}% utilized). ` +
-      `Required: ${formatBytes(requiredSize)}. ` +
-      `Suggestions: (1) Wait for the buffer to flush before retrying, ` +
-      `(2) Reduce batch size, or (3) Increase flushThresholdBytes to trigger more frequent flushes.`;
-
-    super(message, 'BUFFER_OVERFLOW', true);
-    this.name = 'BufferOverflowError';
-    this.currentSizeBytes = currentSizeBytes;
-    this.maxSizeBytes = maxSizeBytes;
-    this.attemptedBatchSizeBytes = attemptedBatchSizeBytes;
-    this.utilization = utilization;
-  }
-}
-
-/**
- * Flush error
- */
-export class FlushError extends DoLakeError {
-  constructor(message: string, public readonly usedFallback: boolean) {
-    super(message, 'FLUSH_ERROR', true);
-    this.name = 'FlushError';
-  }
-}
-
-/**
- * Parquet write error
- */
-export class ParquetWriteError extends DoLakeError {
-  constructor(message: string) {
-    super(message, 'PARQUET_WRITE_ERROR', true);
-    this.name = 'ParquetWriteError';
-  }
-}
-
-/**
- * Iceberg metadata error
- */
-export class IcebergError extends DoLakeError {
-  constructor(message: string, options?: { cause?: Error }) {
-    super(message, 'ICEBERG_ERROR', false);
-    this.name = 'IcebergError';
-    if (options?.cause) {
-      this.cause = options.cause;
-    }
-  }
-}
 
 // =============================================================================
 // Utility Types

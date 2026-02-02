@@ -14,6 +14,7 @@
 
 import type { CDCEvent } from './types.js';
 import { DurabilityTier, type VFSStorage, type R2Storage } from './durability.js';
+import { VFSStorageError } from './errors.js';
 
 // =============================================================================
 // Configuration Types
@@ -208,23 +209,8 @@ export interface AlarmResult {
   recoveryResult?: RecoveryResult;
 }
 
-// =============================================================================
-// Error Types
-// =============================================================================
-
-/**
- * Error class for VFS storage operations
- */
-export class VFSStorageError extends Error {
-  constructor(
-    message: string,
-    public readonly code: string,
-    public readonly context?: Record<string, unknown>
-  ) {
-    super(message);
-    this.name = 'VFSStorageError';
-  }
-}
+// Re-export VFSStorageError from errors module
+export { VFSStorageError } from './errors.js';
 
 // =============================================================================
 // Internal Types

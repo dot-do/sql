@@ -16,6 +16,7 @@ import {
   generateSnapshotId,
 } from './types.js';
 import { partitionToPath } from './iceberg.js';
+import { CompactionError, DoLakeErrorCode } from './errors.js';
 
 // =============================================================================
 // Compaction Configuration
@@ -143,23 +144,8 @@ export interface AtomicCommitPreparation {
   filesToDelete: string[];
 }
 
-// =============================================================================
-// Compaction Error
-// =============================================================================
-
-/**
- * Error thrown during compaction operations
- */
-export class CompactionError extends Error {
-  constructor(
-    message: string,
-    public readonly code: string = 'COMPACTION_ERROR',
-    public readonly retryable: boolean = true
-  ) {
-    super(message);
-    this.name = 'CompactionError';
-  }
-}
+// Re-export CompactionError from errors module
+export { CompactionError } from './errors.js';
 
 // =============================================================================
 // Compaction Manager

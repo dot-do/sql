@@ -12,61 +12,10 @@
 import type { LakeRPCError } from '../types.js';
 import type { ConnectionConfig, PendingRequest, ConnectionEventHandler } from './types.js';
 import { ConnectionEventEmitter } from './event-emitter.js';
+import { ConnectionError } from '../errors.js';
 
-// =============================================================================
-// Error Classes
-// =============================================================================
-
-/**
- * Masks sensitive data in a URL for safe logging and error messages.
- * @internal
- */
-function maskUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    if (parsed.password) {
-      parsed.password = '***';
-    }
-    const sensitiveParams = ['token', 'key', 'secret', 'password', 'auth', 'api_key', 'apikey', 'access_token'];
-    for (const param of sensitiveParams) {
-      if (parsed.searchParams.has(param)) {
-        parsed.searchParams.set(param, '***');
-      }
-    }
-    return parsed.toString();
-  } catch {
-    const match = url.match(/^(\w+:\/\/)([^/?#]+)/);
-    if (match) {
-      return `${match[1]}${match[2]}/***`;
-    }
-    return '[invalid-url]';
-  }
-}
-
-/**
- * Error thrown when a connection operation fails.
- *
- * @public
- * @stability stable
- * @since 0.1.0
- */
-export class ConnectionError extends Error {
-  readonly code: string;
-  readonly details?: unknown;
-  readonly url?: string;
-
-  constructor(error: LakeRPCError, url?: string) {
-    const maskedUrl = url ? maskUrl(url) : undefined;
-    const fullMessage = maskedUrl ? `${error.message} (url: ${maskedUrl})` : error.message;
-    super(fullMessage);
-    this.name = 'ConnectionError';
-    this.code = error.code;
-    this.details = error.details;
-    if (maskedUrl) {
-      this.url = maskedUrl;
-    }
-  }
-}
+// Re-export ConnectionError for backward compatibility
+export { ConnectionError } from '../errors.js';
 
 // =============================================================================
 // Connection Manager Implementation

@@ -48,6 +48,7 @@
     "directory": "packages/lake.do"
   },
   "dependencies": {
+    "@dotdo/sql-types": "workspace:*",
     "sql.do": "workspace:*"
   },
   "devDependencies": {

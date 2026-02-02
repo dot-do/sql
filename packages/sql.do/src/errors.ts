@@ -1,56 +1,96 @@
 /**
  * SQL Client Error Types
  *
- * Provides error classes for SQL operations, connection management, and timeouts.
- * All errors include machine-readable codes for programmatic error handling.
+ * Unified error handling for the sql.do client package.
+ * All errors extend BaseError from @dotdo/sql-types for consistency
+ * across the DoSQL ecosystem.
  *
  * @packageDocumentation
  */
 
+import {
+  BaseError,
+  ErrorCategory,
+  registerErrorDeserializer,
+  maskUrl,
+  type ErrorContext,
+  type SerializedError,
+} from '@dotdo/sql-types';
+
 import type { RPCError } from './types.js';
 
+// Re-export shared types for convenience
+export {
+  ErrorCategory,
+  type ErrorContext,
+  type SerializedError,
+  type ErrorLogEntry,
+  maskUrl,
+} from '@dotdo/sql-types';
+
 // =============================================================================
-// URL Masking Utility
+// Error Codes
 // =============================================================================
 
 /**
- * Masks sensitive data in a URL for safe logging and error messages.
- *
- * Removes or masks:
- * - Password in userinfo (user:password@host)
- * - Query parameters that may contain tokens (token, key, secret, password, auth, api_key)
- *
- * @param url - The URL to mask
- * @returns A masked version of the URL safe for logging
- * @internal
+ * SQL client error codes following standardized naming convention.
  */
-export function maskUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
+export const SQLErrorCode = {
+  // Query errors
+  SYNTAX_ERROR: 'QUERY_SYNTAX_ERROR',
+  CONSTRAINT_VIOLATION: 'QUERY_CONSTRAINT_VIOLATION',
+  TABLE_NOT_FOUND: 'QUERY_TABLE_NOT_FOUND',
+  COLUMN_NOT_FOUND: 'QUERY_COLUMN_NOT_FOUND',
 
-    // Mask password in userinfo
-    if (parsed.password) {
-      parsed.password = '***';
-    }
+  // Connection errors
+  CONNECTION_FAILED: 'CONN_FAILED',
+  CONNECTION_CLOSED: 'CONN_CLOSED',
 
-    // Mask sensitive query parameters
-    const sensitiveParams = ['token', 'key', 'secret', 'password', 'auth', 'api_key', 'apikey', 'access_token'];
-    for (const param of sensitiveParams) {
-      if (parsed.searchParams.has(param)) {
-        parsed.searchParams.set(param, '***');
-      }
-    }
+  // Timeout errors
+  TIMEOUT: 'TIMEOUT',
+  QUERY_TIMEOUT: 'QUERY_TIMEOUT',
 
-    return parsed.toString();
-  } catch {
-    // If URL parsing fails, mask everything after :// except the host
-    const match = url.match(/^(\w+:\/\/)([^/?#]+)/);
-    if (match) {
-      return `${match[1]}${match[2]}/***`;
-    }
-    // Fallback: return a generic masked version
-    return '[invalid-url]';
-  }
+  // Transaction errors
+  TRANSACTION_CONFLICT: 'TX_CONFLICT',
+  TRANSACTION_ABORTED: 'TX_ABORTED',
+
+  // Protocol errors
+  MESSAGE_PARSE_ERROR: 'PROTOCOL_MESSAGE_PARSE_ERROR',
+
+  // Network errors
+  NETWORK_ERROR: 'NETWORK_ERROR',
+  UNAVAILABLE: 'UNAVAILABLE',
+  RESOURCE_EXHAUSTED: 'RESOURCE_EXHAUSTED',
+} as const;
+
+export type SQLErrorCode = typeof SQLErrorCode[keyof typeof SQLErrorCode];
+
+// =============================================================================
+// Retryable Error Codes
+// =============================================================================
+
+/**
+ * Error codes that indicate the error is retryable.
+ */
+export const RETRYABLE_ERROR_CODES = [
+  'TIMEOUT',
+  'QUERY_TIMEOUT',
+  'CONN_CLOSED',
+  'CONN_FAILED',
+  'NETWORK_ERROR',
+  'UNAVAILABLE',
+  'RESOURCE_EXHAUSTED',
+] as const;
+
+export type RetryableErrorCode = typeof RETRYABLE_ERROR_CODES[number];
+
+const RETRYABLE_ERROR_CODES_SET: ReadonlySet<string> = new Set(RETRYABLE_ERROR_CODES);
+
+/**
+ * Checks if a SQL error code is retryable.
+ */
+export function isRetryableCode(code: string): boolean {
+  return RETRYABLE_ERROR_CODES_SET.has(code);
 }
 
 // =============================================================================
@@ -59,97 +99,65 @@ export function maskUrl(url: string): string {
 
 /**
  * Error thrown by SQL operations when a query or command fails.
- *
- * Contains a machine-readable {@link code} for programmatic error handling,
- * optional {@link details} for debugging, and optional {@link suggestion} for
- * error recovery hints. Extends the standard JavaScript Error class with
- * additional context about the SQL failure.
- *
- * Common error codes:
- * - `SYNTAX_ERROR` - Invalid SQL syntax
- * - `CONSTRAINT_VIOLATION` - Unique constraint, foreign key, or check constraint failed
- * - `TABLE_NOT_FOUND` - Referenced table does not exist
- * - `TIMEOUT` - Query execution timed out
- * - `CONNECTION_CLOSED` - WebSocket connection was closed
- * - `TRANSACTION_CONFLICT` - Transaction was aborted due to conflict
- *
- * @example
- * ```typescript
- * try {
- *   await client.exec('INSERT INTO users (id, name) VALUES (?, ?)', [1, 'Alice']);
- * } catch (error) {
- *   if (error instanceof SQLError) {
- *     switch (error.code) {
- *       case 'CONSTRAINT_VIOLATION':
- *         console.log('User with this ID already exists');
- *         break;
- *       case 'TIMEOUT':
- *         console.log('Query timed out, retrying...');
- *         break;
- *       case 'SYNTAX_ERROR':
- *         console.error(`Syntax error: ${error.message}`);
- *         if (error.suggestion) {
- *           console.log(`Suggestion: ${error.suggestion}`);
- *         }
- *         break;
- *       default:
- *         console.error(`SQL Error [${error.code}]: ${error.message}`);
- *     }
- *   }
- * }
- * ```
- *
- * @public
- * @since 0.1.0
  */
-export class SQLError extends Error {
-  /**
-   * Machine-readable error code for programmatic error handling.
-   *
-   * Use this to implement different error handling strategies based on the
-   * type of failure (e.g., retry for TIMEOUT, fail fast for SYNTAX_ERROR).
-   */
+export class SQLError extends BaseError {
   readonly code: string;
-
-  /**
-   * Optional additional details about the error.
-   *
-   * May contain structured information like the specific constraint that failed,
-   * the position in the SQL where a syntax error occurred, etc.
-   */
+  readonly category: ErrorCategory;
   readonly details?: unknown;
-
-  /**
-   * Optional suggestion for error recovery.
-   *
-   * Provides actionable hints to help developers fix the error, such as:
-   * - Spelling corrections for typos (e.g., "Did you mean 'SELECT'?")
-   * - Missing clause suggestions (e.g., "Add a WHERE clause to limit results")
-   * - Syntax fixes (e.g., "Use single quotes for string literals")
-   *
-   * @example
-   * ```typescript
-   * if (error.suggestion) {
-   *   console.log(`Hint: ${error.suggestion}`);
-   * }
-   * ```
-   */
   readonly suggestion?: string;
 
-  /**
-   * Creates a new SQLError from an RPC error response.
-   *
-   * @param error - The RPC error object from the server response
-   * @internal
-   */
   constructor(error: RPCError) {
     super(error.message);
     this.name = 'SQLError';
     this.code = error.code;
+    this.category = SQLError.getCategoryFromCode(error.code);
     if (error.details !== undefined) this.details = error.details;
     if (error.suggestion !== undefined) this.suggestion = error.suggestion;
   }
+
+  static create(code: string, message: string, details?: unknown, suggestion?: string): SQLError {
+    const error: RPCError = { code, message } as RPCError;
+    if (details !== undefined) {
+      (error as { details: unknown }).details = details;
+    }
+    if (suggestion !== undefined) {
+      (error as { suggestion: string }).suggestion = suggestion;
+    }
+    return new SQLError(error);
+  }
+
+  override isRetryable(): boolean {
+    return isRetryableCode(this.code);
+  }
+
+  override toUserMessage(): string {
+    if (this.suggestion) {
+      return `${this.message}. Suggestion: ${this.suggestion}`;
+    }
+    return this.message;
+  }
+
+  private static getCategoryFromCode(code: string): ErrorCategory {
+    if (code.startsWith('CONN_') || code === 'NETWORK_ERROR') return ErrorCategory.CONNECTION;
+    if (code === 'TIMEOUT' || code.endsWith('_TIMEOUT')) return ErrorCategory.TIMEOUT;
+    if (code.startsWith('QUERY_SYNTAX') || code.startsWith('QUERY_TABLE')) return ErrorCategory.VALIDATION;
+    if (code.startsWith('TX_')) return ErrorCategory.CONFLICT;
+    return ErrorCategory.EXECUTION;
+  }
+
+  static fromJSON(json: SerializedError): SQLError {
+    const error: RPCError = { code: json.code, message: json.message } as RPCError;
+    if (json.context?.metadata?.details !== undefined) {
+      (error as { details: unknown }).details = json.context.metadata.details;
+    }
+    if (json.context?.metadata?.suggestion !== undefined) {
+      (error as { suggestion: string }).suggestion = json.context.metadata.suggestion as string;
+    }
+    return new SQLError(error);
+  }
 }
+
+registerErrorDeserializer('SQLError', SQLError.fromJSON);
 
 // =============================================================================
 // Connection Error
@@ -157,51 +165,15 @@ export class SQLError extends Error {
 
 /**
  * Error thrown when a connection to the database fails.
- *
- * This error is typically retryable as it indicates a network or infrastructure
- * issue rather than a problem with the SQL statement itself. The error message
- * includes the URL (with sensitive data masked) for debugging purposes.
- *
- * @example
- * ```typescript
- * try {
- *   await client.connect();
- * } catch (error) {
- *   if (error instanceof ConnectionError) {
- *     console.log(`Connection failed: ${error.message}`);
- *     console.log(`URL: ${error.url}`);
- *     console.log(`Retryable: ${error.retryable}`);
- *   }
- * }
- * ```
- *
- * @public
- * @since 0.2.0
  */
-export class ConnectionError extends Error {
-  /**
-   * Error code indicating this is a connection-related error.
-   */
-  readonly code = 'CONNECTION_FAILED' as const;
-
-  /**
-   * Indicates whether this error is safe to retry.
-   * Connection errors are typically retryable.
-   */
-  readonly retryable = true;
-
-  /**
-   * The URL that the connection was attempted to (masked for security).
-   * May be undefined if no URL was provided.
-   */
+export class ConnectionError extends BaseError {
+  readonly code = SQLErrorCode.CONNECTION_FAILED;
+  readonly category = ErrorCategory.CONNECTION;
   readonly url?: string;
 
-  /**
-   * Creates a new ConnectionError.
-   *
-   * @param message - Description of the connection failure
-   * @param url - Optional URL that the connection was attempted to (will be masked)
-   */
+  /** Backward compatibility property */
+  readonly retryable = true;
+
   constructor(message: string, url?: string) {
     const maskedUrl = url ? maskUrl(url) : undefined;
     const fullMessage = maskedUrl ? `${message} (url: ${maskedUrl})` : message;
@@ -211,7 +183,22 @@ export class ConnectionError extends Error {
       this.url = maskedUrl;
     }
   }
+
+  override isRetryable(): boolean {
+    return true;
+  }
+
+  override toUserMessage(): string {
+    return 'Failed to connect to the database. Please check your network connection and try again.';
+  }
+
+  static fromJSON(json: SerializedError): ConnectionError {
+    const url = json.context?.metadata?.url as string | undefined;
+    return new ConnectionError(json.message, url);
+  }
 }
+
+registerErrorDeserializer('ConnectionError', ConnectionError.fromJSON);
 
 // =============================================================================
 // Timeout Error
@@ -219,139 +206,49 @@ export class ConnectionError extends Error {
 
 /**
  * The type of operation that timed out.
- * @public
  */
 export type TimeoutOperationType = 'query' | 'exec' | 'transaction' | 'rpc';
 
 /**
  * Error thrown when an operation times out.
- *
- * This error is typically retryable as the timeout may have been due to
- * transient network issues or server load. The error includes the operation
- * type for easier programmatic handling.
- *
- * @example
- * ```typescript
- * try {
- *   await client.query('SELECT * FROM large_table');
- * } catch (error) {
- *   if (error instanceof TimeoutError) {
- *     console.log(`${error.operationType} timed out after ${error.timeoutMs}ms`);
- *     console.log(`Retryable: ${error.retryable}`);
- *   }
- * }
- * ```
- *
- * @public
- * @since 0.2.0
  */
-export class TimeoutError extends Error {
-  /**
-   * Error code indicating this is a timeout error.
-   */
-  readonly code = 'TIMEOUT' as const;
-
-  /**
-   * Indicates whether this error is safe to retry.
-   * Timeout errors are typically retryable.
-   */
-  readonly retryable = true;
-
-  /**
-   * The timeout duration in milliseconds that was exceeded.
-   */
+export class TimeoutError extends BaseError {
+  readonly code = SQLErrorCode.TIMEOUT;
+  readonly category = ErrorCategory.TIMEOUT;
   readonly timeoutMs: number;
-
-  /**
-   * The type of operation that timed out (query, exec, transaction, or rpc).
-   */
   readonly operationType: TimeoutOperationType;
 
-  /**
-   * Creates a new TimeoutError.
-   *
-   * @param operationType - The type of operation that timed out
-   * @param timeoutMs - The timeout duration in milliseconds
-   */
+  /** Backward compatibility property */
+  readonly retryable = true;
+
   constructor(operationType: TimeoutOperationType, timeoutMs: number) {
     super(`${operationType} timeout after ${timeoutMs}ms`);
     this.name = 'TimeoutError';
     this.timeoutMs = timeoutMs;
     this.operationType = operationType;
+    this.context = {
+      metadata: { timeoutMs, operationType },
+    };
+  }
+
+  override isRetryable(): boolean {
+    return true;
+  }
+
+  override toUserMessage(): string {
+    return `The ${this.operationType} operation timed out. Please try again or consider breaking the operation into smaller parts.`;
+  }
+
+  static fromJSON(json: SerializedError): TimeoutError {
+    const meta = json.context?.metadata ?? {};
+    return new TimeoutError(
+      (meta.operationType as TimeoutOperationType) ?? 'query',
+      (meta.timeoutMs as number) ?? 30000
+    );
   }
 }
 
-// =============================================================================
-// Retryable Error Codes
-// =============================================================================
-
-/**
- * Error codes that indicate the error is retryable.
- *
- * **Retry Backoff Algorithm:**
- * When retrying these errors, use exponential backoff with jitter to avoid
- * thundering herd problems. The recommended formula is:
- *
- *   delay = min(baseDelay * 2^attempt, maxDelay) + random(0, jitter)
- *
- * Example with baseDelay=100ms, maxDelay=10000ms:
- *   - Attempt 0: 100ms  (100 * 2^0 = 100)
- *   - Attempt 1: 200ms  (100 * 2^1 = 200)
- *   - Attempt 2: 400ms  (100 * 2^2 = 400)
- *   - Attempt 3: 800ms  (100 * 2^3 = 800)
- *   - Attempt 4: 1600ms (100 * 2^4 = 1600)
- *
- * **Rationale for each code:**
- * - TIMEOUT: Transient server/network overload; backing off allows recovery
- * - CONNECTION_CLOSED: WebSocket disconnected; reconnection may succeed
- * - NETWORK_ERROR: Intermittent network failure; retry after brief delay
- * - UNAVAILABLE: Server temporarily unavailable (e.g., during deployment)
- * - RESOURCE_EXHAUSTED: Rate limiting or quota; exponential backoff essential
- *
- * @internal
- */
-export const RETRYABLE_ERROR_CODES = [
-  'TIMEOUT',
-  'CONNECTION_CLOSED',
-  'NETWORK_ERROR',
-  'UNAVAILABLE',
-  'RESOURCE_EXHAUSTED',
-] as const;
-
-/**
- * Type for retryable error codes.
- * @public
- */
-export type RetryableErrorCode = typeof RETRYABLE_ERROR_CODES[number];
-
-/**
- * Set of retryable error codes for O(1) lookup.
- * @internal
- */
-const RETRYABLE_ERROR_CODES_SET: ReadonlySet<string> = new Set(RETRYABLE_ERROR_CODES);
-
-/**
- * Checks if a SQL error is retryable (connection issues, timeouts, etc.).
- *
- * @param error - The SQL error to check
- * @returns `true` if the error is retryable
- *
- * @example
- * ```typescript
- * try {
- *   await client.exec('INSERT INTO users VALUES (?)');
- * } catch (error) {
- *   if (error instanceof SQLError && isRetryableError(error)) {
- *     // Safe to retry
- *   }
- * }
- * ```
- *
- * @public
- */
-export function isRetryableError(error: SQLError): boolean {
-  return RETRYABLE_ERROR_CODES_SET.has(error.code);
-}
+registerErrorDeserializer('TimeoutError', TimeoutError.fromJSON);
 
 // =============================================================================
 // Message Parse Error
@@ -359,65 +256,49 @@ export function isRetryableError(error: SQLError): boolean {
 
 /**
  * Error thrown when WebSocket message parsing fails.
- *
- * This error indicates a protocol-level failure when the client receives
- * malformed data from the server. This could be due to:
- * - Invalid JSON in the message
- * - Missing required fields in the RPC response
- * - Unexpected message format
- *
- * Unlike connection or timeout errors, message parse errors typically indicate
- * a bug or protocol mismatch and are generally not retryable.
- *
- * @example
- * ```typescript
- * client.on('error', (error) => {
- *   if (error instanceof MessageParseError) {
- *     console.error(`Protocol error: ${error.message}`);
- *     console.error(`Raw message: ${error.rawMessage?.substring(0, 100)}...`);
- *     // Report to monitoring service
- *   }
- * });
- * ```
- *
- * @public
- * @since 0.3.0
  */
-export class MessageParseError extends Error {
-  /**
-   * Error code indicating this is a message parsing error.
-   */
-  readonly code = 'MESSAGE_PARSE_ERROR' as const;
-
-  /**
-   * Indicates whether this error is safe to retry.
-   * Message parse errors are generally not retryable as they indicate protocol issues.
-   */
-  readonly retryable = false;
-
-  /**
-   * The raw message that failed to parse (truncated for safety).
-   * May be undefined if the message couldn't be converted to string.
-   */
+export class MessageParseError extends BaseError {
+  readonly code = SQLErrorCode.MESSAGE_PARSE_ERROR;
+  readonly category = ErrorCategory.INTERNAL;
   readonly rawMessage: string | undefined;
-
-  /**
-   * The underlying parsing error, if available.
-   */
   readonly originalError: Error | undefined;
 
-  /**
-   * Creates a new MessageParseError.
-   *
-   * @param message - Description of the parsing failure
-   * @param rawMessage - The raw message that failed to parse (will be truncated)
-   * @param originalError - The underlying error that caused the parse failure
-   */
   constructor(message: string, rawMessage?: string, originalError?: Error) {
-    super(message);
+    const superOpts: { cause?: Error } = {};
+    if (originalError) {
+      superOpts.cause = originalError;
+    }
+    super(message, Object.keys(superOpts).length > 0 ? superOpts : undefined);
     this.name = 'MessageParseError';
-    // Truncate raw message to prevent memory issues with large malformed messages
     this.rawMessage = rawMessage !== undefined ? rawMessage.substring(0, 1000) : undefined;
     this.originalError = originalError;
   }
+
+  override isRetryable(): boolean {
+    return false;
+  }
+
+  override toUserMessage(): string {
+    return 'A protocol error occurred. Please report this issue if it persists.';
+  }
+
+  static fromJSON(json: SerializedError): MessageParseError {
+    return new MessageParseError(
+      json.message,
+      json.context?.metadata?.rawMessage as string | undefined
+    );
+  }
+}
+
+registerErrorDeserializer('MessageParseError', MessageParseError.fromJSON);
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+/**
+ * Checks if a SQL error is retryable.
+ */
+export function isRetryableError(error: SQLError | ConnectionError | TimeoutError): boolean {
+  return error.isRetryable();
 }
