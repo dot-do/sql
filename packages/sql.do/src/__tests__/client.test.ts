@@ -1160,8 +1160,8 @@ describe('Network Error Handling', () => {
     expect(ConnectionError).toBeDefined();
 
     const error = new ConnectionError('Failed to connect');
-    expect(error.code).toBe('CONNECTION_FAILED');
-    expect(error.retryable).toBe(true);
+    expect(error.code).toBe('CONN_FAILED');
+    expect(error.isRetryable()).toBe(true);
   });
 
   /**
@@ -1175,7 +1175,7 @@ describe('Network Error Handling', () => {
     expect(error.code).toBe('TIMEOUT');
     expect(error.timeoutMs).toBe(30000);
     expect(error.operationType).toBe('query');
-    expect(error.retryable).toBe(true);
+    expect(error.isRetryable()).toBe(true);
     expect(error.message).toBe('query timeout after 30000ms');
   });
 
@@ -1229,26 +1229,26 @@ describe('Network Error Handling', () => {
   });
 
   /**
-   * GAP: Should categorize errors by retryability
-   * Currently: isRetryableError is private
+   * IMPLEMENTED: isRetryable method on error objects
+   * Errors expose retryability via isRetryable() method
    */
-  it.fails('should expose error retryability', async () => {
+  it('should expose error retryability', async () => {
     const client = new DoSQLClient({
       url: 'ws://localhost:8080',
     });
 
-    // GAP: isRetryable should be on error object or exposed method
+    // IMPLEMENTED: isRetryable method on error object
     const retryableError = new SQLError({
       code: 'TIMEOUT',
       message: 'Request timed out',
     });
-    expect((retryableError as any).retryable).toBe(true);
+    expect(retryableError.isRetryable()).toBe(true);
 
     const nonRetryableError = new SQLError({
       code: 'SYNTAX_ERROR',
       message: 'Invalid SQL',
     });
-    expect((nonRetryableError as any).retryable).toBe(false);
+    expect(nonRetryableError.isRetryable()).toBe(false);
   });
 
   /**
