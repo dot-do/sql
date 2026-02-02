@@ -421,7 +421,7 @@ function getTypeCategory(value: SqlValue): number {
 function compareBlobs(a: Uint8Array, b: Uint8Array): number {
   const minLen = Math.min(a.length, b.length);
   for (let i = 0; i < minLen; i++) {
-    if (a[i] !== b[i]) return a[i] - b[i];
+    if (a[i] !== b[i]) return a[i]! - b[i]!;
   }
   return a.length - b.length;
 }
@@ -570,22 +570,22 @@ export function executeAggregate(
 
   switch (lowerName) {
     case 'count':
-      factory = distinct ? aggregateFactories.count_distinct : aggregateFactories.count;
+      factory = distinct ? aggregateFactories.count_distinct! : aggregateFactories.count!;
       break;
     case 'sum':
-      factory = aggregateFactories.sum;
+      factory = aggregateFactories.sum!;
       break;
     case 'total':
-      factory = aggregateFactories.total;
+      factory = aggregateFactories.total!;
       break;
     case 'avg':
-      factory = aggregateFactories.avg;
+      factory = aggregateFactories.avg!;
       break;
     case 'min':
-      factory = aggregateFactories.min;
+      factory = aggregateFactories.min!;
       break;
     case 'max':
-      factory = aggregateFactories.max;
+      factory = aggregateFactories.max!;
       break;
     case 'group_concat':
       return (() => {

@@ -188,7 +188,7 @@ export function parseCollateClause(sql: string): CollateClause | null {
   const regex = /\bCOLLATE\s+([a-zA-Z_][a-zA-Z0-9_]*|"[^"]+"|'[^']+')/i;
   const match = sql.match(regex);
 
-  if (!match) {
+  if (!match || !match[1]) {
     return null;
   }
 
@@ -276,7 +276,7 @@ export function parseCreateCollation(sql: string): CreateCollationStatement {
     name,
   };
 
-  if (unicodeMatch) {
+  if (unicodeMatch && unicodeMatch[1]) {
     const options: UnicodeCollationOptions = {
       locale: unicodeMatch[1],
     };

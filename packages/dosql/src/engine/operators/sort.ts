@@ -74,7 +74,7 @@ export class SortOperator implements Operator {
 
   async next(): Promise<Row | null> {
     if (this.index >= this.sortedRows.length) return null;
-    return this.sortedRows[this.index++];
+    return this.sortedRows[this.index++] ?? null;
   }
 
   async close(): Promise<void> {

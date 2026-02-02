@@ -32,10 +32,11 @@ function toColumnarPredicates(predicate: Predicate | undefined): ColumnarPredica
           const opMap: Record<string, ColumnarPredicate['op']> = {
             eq: 'eq', ne: 'ne', lt: 'lt', le: 'le', gt: 'gt', ge: 'ge',
           };
-          if (opMap[p.op]) {
+          const mappedOp = opMap[p.op];
+          if (mappedOp) {
             predicates.push({
               column: p.left.column,
-              op: opMap[p.op],
+              op: mappedOp,
               value: p.right.value as number | bigint | string | null,
             });
           }
@@ -153,7 +154,7 @@ export class ScanOperator implements Operator {
         const projected: Row = {};
         for (const col of this.plan.columns) {
           if (col in row) {
-            projected[col] = row[col];
+            projected[col] = row[col] ?? null;
           }
         }
         return projected;

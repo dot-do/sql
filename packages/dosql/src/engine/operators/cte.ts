@@ -132,14 +132,14 @@ export class CTEScanOperator implements Operator {
     if (this.alias && this.alias !== this.cteName) {
       const aliasedRow: Row = {};
       for (const col of this.outputColumns) {
-        aliasedRow[col] = row[col];
+        aliasedRow[col] = row[col] ?? null;
         // Also add with alias prefix for qualified references
-        aliasedRow[`${this.alias}.${col}`] = row[col];
+        aliasedRow[`${this.alias}.${col}`] = row[col] ?? null;
       }
       return aliasedRow;
     }
 
-    return row;
+    return row ?? null;
   }
 
   async close(): Promise<void> {

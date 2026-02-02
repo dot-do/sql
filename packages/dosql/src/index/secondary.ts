@@ -434,7 +434,7 @@ export class SecondaryIndex {
         return {
           index: this.definition.name,
           key,
-          existingRowId: existing[0],
+          existingRowId: existing[0] ?? null,
           newRowId: rowId,
         };
       }

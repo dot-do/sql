@@ -428,7 +428,7 @@ export class AttachSchemaResolver implements SchemaResolver {
       };
     }
 
-    return candidates[0];
+    return candidates[0]!;
   }
 
   /**
@@ -576,8 +576,8 @@ export function parseAttachStatement(sql: string): {
   }
 
   return {
-    path: match[1],
-    alias: match[2],
+    path: match[1]!,
+    alias: match[2]!,
   };
 }
 
@@ -590,7 +590,7 @@ export function parseDetachStatement(sql: string): { alias: string } | null {
 
   const match = normalized.match(/^DETACH\s+(?:DATABASE\s+)?(\w+)$/i);
 
-  if (!match) {
+  if (!match || !match[1]) {
     return null;
   }
 

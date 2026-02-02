@@ -382,7 +382,7 @@ export class WindowOperator implements Operator {
     if (this.outputIndex >= this.outputRows.length) {
       return null;
     }
-    return this.outputRows[this.outputIndex++];
+    return this.outputRows[this.outputIndex++] ?? null;
   }
 
   /**

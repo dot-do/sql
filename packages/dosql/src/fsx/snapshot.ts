@@ -388,8 +388,8 @@ export class SnapshotManager {
     return {
       snapshotCount: snapshots.length,
       totalManifestEntries,
-      oldestSnapshot: snapshots.length > 0 ? snapshots[snapshots.length - 1] : undefined,
-      newestSnapshot: snapshots.length > 0 ? snapshots[0] : undefined,
+      oldestSnapshot: snapshots.length > 0 ? (snapshots[snapshots.length - 1] ?? null) : null,
+      newestSnapshot: snapshots.length > 0 ? (snapshots[0] ?? null) : null,
       uniquePaths: allPaths.size,
     };
   }

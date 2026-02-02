@@ -95,10 +95,10 @@ export function max_scalar(...args: SqlValue[]): SqlValue {
   const nonNull = args.filter(a => a !== null);
   if (nonNull.length === 0) return null;
 
-  let maxVal = nonNull[0];
+  let maxVal = nonNull[0]!;
   for (let i = 1; i < nonNull.length; i++) {
-    if (compare(nonNull[i], maxVal) > 0) {
-      maxVal = nonNull[i];
+    if (compare(nonNull[i]!, maxVal) > 0) {
+      maxVal = nonNull[i]!;
     }
   }
   return maxVal;
@@ -113,10 +113,10 @@ export function min_scalar(...args: SqlValue[]): SqlValue {
   const nonNull = args.filter(a => a !== null);
   if (nonNull.length === 0) return null;
 
-  let minVal = nonNull[0];
+  let minVal = nonNull[0]!;
   for (let i = 1; i < nonNull.length; i++) {
-    if (compare(nonNull[i], minVal) < 0) {
-      minVal = nonNull[i];
+    if (compare(nonNull[i]!, minVal) < 0) {
+      minVal = nonNull[i]!;
     }
   }
   return minVal;

@@ -297,13 +297,14 @@ export function createCDCSubscription(
       fromLSN: bigint,
       filterOptions?: { tables?: string[]; operations?: WALOperation[] }
     ): AsyncIterableIterator<HLCCDCEvent<T>> {
-      // Build filter from options
-      const filter: CDCFilter | undefined = filterOptions
-        ? {
-            tables: filterOptions.tables,
-            operations: filterOptions.operations,
-          }
-        : undefined;
+      // Build filter from options - only include defined properties
+      let filter: CDCFilter | undefined;
+      if (filterOptions) {
+        const filterObj: CDCFilter = {};
+        if (filterOptions.tables) filterObj.tables = filterOptions.tables;
+        if (filterOptions.operations) filterObj.operations = filterOptions.operations;
+        filter = Object.keys(filterObj).length > 0 ? filterObj : undefined;
+      }
 
       // Iterate over entries sorted by HLC
       for await (const entry of subscription.subscribe(fromLSN, filter)) {

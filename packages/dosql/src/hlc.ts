@@ -423,7 +423,7 @@ export function serializeHLC(hlc: HLCTimestamp): string {
  */
 export function parseHLC(str: string): HLCTimestamp {
   const match = str.match(/^(\d+):(\d+)@(.+)$/);
-  if (!match) {
+  if (!match || !match[1] || !match[2] || !match[3]) {
     throw new HLCError(
       HLCErrorCode.INVALID_TIMESTAMP,
       `Invalid HLC format: ${str}`

@@ -340,7 +340,7 @@ class QueryParser {
   // =============================================================================
 
   private peek(): ParserToken {
-    return this.tokens[this.current];
+    return this.tokens[this.current]!;
   }
 
   private peekNext(): ParserToken | undefined {
@@ -368,7 +368,7 @@ class QueryParser {
     if (!this.isAtEnd()) {
       this.current++;
     }
-    return this.tokens[this.current - 1];
+    return this.tokens[this.current - 1]!;
   }
 
   private match(type: TokenType): boolean {

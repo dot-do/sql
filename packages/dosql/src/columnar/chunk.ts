@@ -314,10 +314,10 @@ export function deserializeRowGroup(data: Uint8Array): RowGroup {
     const columnName = decoder.decode(data.subarray(offset, offset + nameLength));
     offset += nameLength;
 
-    const dataType = DATA_TYPE_REVERSE[view.getUint8(offset)];
+    const dataType = DATA_TYPE_REVERSE[view.getUint8(offset)]!;
     offset += 1;
 
-    const encoding = ENCODING_REVERSE[view.getUint8(offset)];
+    const encoding = ENCODING_REVERSE[view.getUint8(offset)]!;
     offset += 1;
 
     const dataOffset = view.getUint32(offset, true);

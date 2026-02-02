@@ -513,7 +513,7 @@ export function parseForeignKeyDefinition(
 
   // Extract constraint name if present
   const nameMatch = definition.match(/CONSTRAINT\s+(\w+)\s+FOREIGN/i);
-  const name = nameMatch
+  const name = nameMatch && nameMatch[1]
     ? nameMatch[1]
     : generateConstraintName(tableName, 'FOREIGN_KEY', columns);
 
@@ -524,7 +524,7 @@ export function parseForeignKeyDefinition(
     columns,
     enabled: true,
     deferrable,
-    referencedTable: refTable,
+    referencedTable: refTable!,
     referencedColumns: refColumns,
     onDelete: onDelete ? parseReferentialAction(onDelete) : 'NO_ACTION',
     onUpdate: onUpdate ? parseReferentialAction(onUpdate) : 'NO_ACTION',
@@ -559,7 +559,7 @@ export function parseColumnForeignKey(
     columns: [columnName],
     enabled: true,
     deferrable: 'NOT_DEFERRABLE',
-    referencedTable: refTable,
+    referencedTable: refTable!,
     referencedColumns: [refColumn],
     onDelete: onDelete ? parseReferentialAction(onDelete) : 'NO_ACTION',
     onUpdate: onUpdate ? parseReferentialAction(onUpdate) : 'NO_ACTION',

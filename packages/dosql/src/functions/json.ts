@@ -212,21 +212,22 @@ function setAtPath(
         return obj;
       }
       const rec = current as Record<string, unknown>;
-      if (rec[segment] === undefined || rec[segment] === null) {
-        rec[segment] = typeof nextSegment === 'number' ? [] : {};
-      } else if (typeof rec[segment] === 'object') {
-        rec[segment] = Array.isArray(rec[segment])
-          ? [...(rec[segment] as unknown[])]
-          : { ...(rec[segment] as object) };
+      const seg = segment as string;
+      if (rec[seg] === undefined || rec[seg] === null) {
+        rec[seg] = typeof nextSegment === 'number' ? [] : {};
+      } else if (typeof rec[seg] === 'object') {
+        rec[seg] = Array.isArray(rec[seg])
+          ? [...(rec[seg] as unknown[])]
+          : { ...(rec[seg] as object) };
       }
-      current = rec[segment];
+      current = rec[seg];
     }
   }
 
   if (pathSegments.length === 0) {
     return root;
   }
-  const lastSegment = pathSegments[pathSegments.length - 1];
+  const lastSegment = pathSegments[pathSegments.length - 1]!;
   if (typeof lastSegment === 'number') {
     if (Array.isArray(current)) {
       current[lastSegment] = value;
@@ -272,28 +273,30 @@ function removeAtPath(obj: unknown, pathSegments: (string | number)[]): unknown 
     const segment = pathSegments[i];
     if (typeof segment === 'number') {
       if (!Array.isArray(current)) return obj;
-      if (typeof current[segment] === 'object' && current[segment] !== null) {
-        current[segment] = Array.isArray(current[segment])
-          ? [...current[segment]]
-          : { ...current[segment] };
+      const idx = segment as number;
+      if (typeof current[idx] === 'object' && current[idx] !== null) {
+        current[idx] = Array.isArray(current[idx])
+          ? [...(current[idx] as unknown[])]
+          : { ...(current[idx] as object) };
       }
-      current = current[segment];
+      current = current[idx];
     } else {
       if (typeof current !== 'object' || current === null || Array.isArray(current)) {
         return obj;
       }
       const rec = current as Record<string, unknown>;
-      if (typeof rec[segment] === 'object' && rec[segment] !== null) {
-        rec[segment] = Array.isArray(rec[segment])
-          ? [...(rec[segment] as unknown[])]
-          : { ...(rec[segment] as object) };
+      const key = segment as string;
+      if (typeof rec[key] === 'object' && rec[key] !== null) {
+        rec[key] = Array.isArray(rec[key])
+          ? [...(rec[key] as unknown[])]
+          : { ...(rec[key] as object) };
       }
-      current = rec[segment];
+      current = rec[key];
     }
   }
 
   // Remove at last segment
-  const lastSegment = pathSegments[pathSegments.length - 1];
+  const lastSegment = pathSegments[pathSegments.length - 1]!;
   if (typeof lastSegment === 'number' && Array.isArray(current)) {
     current.splice(lastSegment, 1);
   } else if (typeof lastSegment === 'string' && typeof current === 'object' && !Array.isArray(current)) {
@@ -408,7 +411,7 @@ export function json_type(x: SqlValue, path?: SqlValue): SqlValue {
   const parsed = parseJson(x);
   if (parsed === undefined) return null;
 
-  let value = parsed;
+  let value: unknown = parsed;
 
   if (path !== undefined && path !== null) {
     try {
@@ -489,7 +492,7 @@ export function json_array_length(x: SqlValue, path?: SqlValue): SqlValue {
   const parsed = parseJson(x);
   if (parsed === undefined) return null;
 
-  let value = parsed;
+  let value: unknown = parsed;
 
   if (path !== undefined && path !== null) {
     try {
@@ -702,7 +705,7 @@ export function json_each(x: SqlValue, path?: SqlValue): JsonEachRow[] {
   const parsed = parseJson(x);
   if (parsed === undefined) return [];
 
-  let root = parsed;
+  let root: unknown = parsed;
   let rootPath = '$';
 
   if (path !== undefined && path !== null) {
@@ -774,7 +777,7 @@ export function json_tree(x: SqlValue, path?: SqlValue): JsonTreeRow[] {
   const parsed = parseJson(x);
   if (parsed === undefined) return [];
 
-  let root = parsed;
+  let root: unknown = parsed;
   let rootPath = '$';
 
   if (path !== undefined && path !== null) {

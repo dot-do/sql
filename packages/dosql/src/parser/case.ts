@@ -308,11 +308,11 @@ class Tokenizer {
     } else {
       this.column++;
     }
-    return char;
+    return char ?? '';
   }
 
   private peek(offset = 0): string {
-    return this.sql[this.pos + offset] || '';
+    return this.sql[this.pos + offset] ?? '';
   }
 
   private skipWhitespaceAndComments(): void {
@@ -911,7 +911,7 @@ export class CaseExpressionParser {
     };
 
     if (this.match('operator') && compOps[this.current().value]) {
-      const op = compOps[this.advance().value];
+      const op = compOps[this.advance().value] ?? 'eq';
       const right = this.parseAddSub();
       return { type: 'binary', op, left, right, location: loc };
     }
@@ -1372,7 +1372,7 @@ function evaluateExpr(expr: ParsedExpr, row: Row): SqlValue {
     case 'column':
       if (expr.table) {
         const fullKey = `${expr.table}.${expr.name}`;
-        if (fullKey in row) return row[fullKey];
+        if (fullKey in row) return row[fullKey] ?? null;
       }
       return row[expr.name] ?? null;
 
@@ -1489,11 +1489,11 @@ function evaluateFunction(name: string, args: SqlValue[]): SqlValue {
       return null;
 
     case 'nullif':
-      return args[0] === args[1] ? null : args[0];
+      return args[0] === args[1] ? null : (args[0] ?? null);
 
     case 'iif':
     case 'if':
-      return isTruthy(args[0]) ? args[1] : args[2];
+      return isTruthy(args[0]) ? (args[1] ?? null) : (args[2] ?? null);
 
     case 'upper':
       return typeof args[0] === 'string' ? args[0].toUpperCase() : null;

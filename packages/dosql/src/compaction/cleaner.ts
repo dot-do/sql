@@ -296,10 +296,10 @@ export class CompactionCleaner<K> {
     // Create manifest entries
     const entries: RowGroupManifestEntry[] = rowGroups.map((rowGroup, i) => ({
       id: rowGroup.id,
-      storagePath: storagePaths[i],
+      storagePath: storagePaths[i]!,
       rowCount: rowGroup.rowCount,
       byteSize: rowGroup.byteSize ?? 0,
-      lsnRange,
+      lsnRange: lsnRange!,
       createdAt: rowGroup.createdAt,
       jobId,
     }));

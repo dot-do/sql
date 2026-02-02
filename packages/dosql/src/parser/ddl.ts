@@ -44,7 +44,7 @@ import type {
 } from './ddl-types.js';
 
 import { parseWithStorageClause, type TableStorageConfig } from '../engine/storage-config.js';
-import { SQLSyntaxError, createInvalidDataTypeError, createInvalidReferenceActionError } from '../errors/index.js';
+import { SQLSyntaxError } from '../errors/index.js';
 import { SyntaxErrorCode } from '../errors/codes.js';
 
 // =============================================================================
@@ -198,12 +198,12 @@ function tokenize(sql: string): Token[] {
   let pos = 0;
 
   while (pos < sql.length) {
-    const char = sql[pos];
+    const char = sql[pos]!;
 
     // Whitespace
     if (/\s/.test(char)) {
       const start = pos;
-      while (pos < sql.length && /\s/.test(sql[pos])) {
+      while (pos < sql.length && /\s/.test(sql[pos]!)) {
         pos++;
       }
       tokens.push({ type: 'WHITESPACE', value: sql.slice(start, pos), position: start });
@@ -495,7 +495,7 @@ class Parser {
     } else if (token.type === 'KEYWORD' || token.type === 'IDENTIFIER') {
       typeName = this.advance().value.toUpperCase();
     } else {
-      throw createInvalidDataTypeError(token.value || token.type);
+      throw new SQLSyntaxError(SyntaxErrorCode.INVALID_DATA_TYPE, `Invalid data type: ${token.value || token.type}`);
     }
 
     // Check for precision/scale
@@ -551,7 +551,7 @@ class Parser {
       if (this.consumeKeyword('DEFAULT')) return 'SET DEFAULT';
       throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, 'Expected NULL or DEFAULT after SET');
     }
-    throw createInvalidReferenceActionError('missing');
+    throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, 'Invalid or missing referential action');
   }
 
   /**

@@ -45,6 +45,23 @@ import type { SecondaryIndex } from './secondary.js';
 import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
+// TYPE INFERENCE HELPER
+// =============================================================================
+
+type LiteralDataType = 'string' | 'number' | 'bigint' | 'boolean' | 'date' | 'bytes' | 'null';
+
+function inferDataType(value: unknown): LiteralDataType {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return 'string';
+  if (typeof value === 'number') return 'number';
+  if (typeof value === 'bigint') return 'bigint';
+  if (typeof value === 'boolean') return 'boolean';
+  if (value instanceof Date) return 'date';
+  if (value instanceof Uint8Array) return 'bytes';
+  return 'string'; // Default to string for unknown types
+}
+
+// =============================================================================
 // COST MODEL CONSTANTS
 // =============================================================================
 
@@ -738,9 +755,9 @@ function optimizeScan(
     alias: plan.alias,
     index: selection.selectedIndex!.name,
     lookupKey: selection.indexPredicates.map(p => ({
-      type: 'literal',
+      type: 'literal' as const,
       value: p.value,
-      dataType: 'unknown' as const,
+      dataType: inferDataType(p.value),
     })),
     columns: plan.columns,
     estimatedRows: selection.cost.estimatedRows,
@@ -751,7 +768,7 @@ function optimizeScan(
   if (selection.filterPredicates.length > 0) {
     const filterPredicate: Predicate =
       selection.filterPredicates.length === 1
-        ? selection.filterPredicates[0]
+        ? selection.filterPredicates[0]!
         : {
             type: 'logical',
             op: 'and',

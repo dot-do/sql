@@ -609,7 +609,7 @@ export class DerivedTableOperator implements Operator {
       if (this.currentIndex >= this.materializedRows.length) {
         return null;
       }
-      return this.materializedRows[this.currentIndex++];
+      return this.materializedRows[this.currentIndex++] ?? null;
     }
 
     if (this.innerOperator) {

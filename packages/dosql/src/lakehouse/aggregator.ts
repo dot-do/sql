@@ -8,7 +8,7 @@
  * - Writes unified stream to lakehouse
  */
 
-import type { WALEntry, WALReader } from '../wal/types.js';
+import type { WALEntry, WALReader, LSN } from '../wal/types.js';
 import type { CDCSubscription, CDCFilter, ChangeEvent } from '../cdc/types.js';
 
 import {
@@ -109,8 +109,8 @@ function parseGlobalLSN(globalLSN: string): {
 } {
   const [ts, doId, lsn] = globalLSN.split(':');
   return {
-    timestamp: parseInt(ts, 36),
-    doId,
+    timestamp: parseInt(ts!, 36),
+    doId: doId!,
     localLSN: BigInt('0x' + lsn),
   };
 }
@@ -271,7 +271,7 @@ export class Aggregator {
     while (this.running) {
       try {
         const entries = await source.reader.readEntries({
-          fromLSN,
+          fromLSN: fromLSN as LSN,
           limit: 1000,
           operations: this.config.filter?.operations,
         });

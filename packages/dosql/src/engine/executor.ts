@@ -230,17 +230,17 @@ class MergeOperator implements Operator {
 
       if (minRow === null) {
         minIndex = i;
-        minRow = row;
+        minRow = row ?? null;
       } else if (this.plan.orderBy) {
         // Compare based on order by
         if (this.compareRows(row, minRow) < 0) {
           minIndex = i;
-          minRow = row;
+          minRow = row ?? null;
         }
       } else {
         // No ordering, just pick the first non-null
         minIndex = i;
-        minRow = row;
+        minRow = row ?? null;
         break;
       }
     }

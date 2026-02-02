@@ -619,7 +619,7 @@ export function parsePartitionPath(path: string): PartitionKey[] {
   const parts = path.split('/').filter(Boolean);
   return parts.map(part => {
     const [column, value] = part.split('=');
-    return { column, value };
+    return { column: column!, value: value ?? '' };
   });
 }
 

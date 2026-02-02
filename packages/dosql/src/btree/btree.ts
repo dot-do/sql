@@ -733,7 +733,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
       node.values.unshift(borrowedValue);
 
       // 2. Update parent separator to be the new first key of node
-      parent.keys[separatorKeyIndex] = node.keys[0];
+      parent.keys[separatorKeyIndex] = node.keys[0]!;
     } else {
       // For internal nodes:
       // 1. Move separator key from parent down to beginning of node
@@ -771,7 +771,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
       node.values.push(borrowedValue);
 
       // 2. Update parent separator to be the new first key of right sibling
-      parent.keys[separatorKeyIndex] = rightSibling.keys[0];
+      parent.keys[separatorKeyIndex] = rightSibling.keys[0]!;
     } else {
       // For internal nodes:
       // 1. Move separator key from parent down to end of node

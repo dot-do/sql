@@ -48,14 +48,14 @@ export function evaluateExpression(expr: Expression, row: Row): SqlValue {
       if (expr.table) {
         // Try table.column first
         const fullKey = `${expr.table}.${expr.column}`;
-        if (fullKey in row) return row[fullKey];
+        if (fullKey in row) return row[fullKey]!;
       }
       // Try direct column name
-      if (expr.column in row) return row[expr.column];
+      if (expr.column in row) return row[expr.column]!;
       // Try finding column in prefixed keys (e.g., "users.name" when looking for "name")
       for (const key of Object.keys(row)) {
         if (key.endsWith(`.${expr.column}`)) {
-          return row[key];
+          return row[key]!;
         }
       }
       return null;
@@ -299,16 +299,16 @@ function evaluateFunction(name: string, args: SqlValue[]): SqlValue {
       }
       return null;
     case 'nullif':
-      return args[0] === args[1] ? null : args[0];
+      return args[0] === args[1] ? null : (args[0] ?? null);
     case 'ifnull':
     case 'isnull':
-      return args[0] ?? args[1];
+      return args[0] ?? args[1] ?? null;
 
     // Type conversion
     case 'cast':
     case 'convert':
       // Simplified cast - just return the value
-      return args[0];
+      return args[0] ?? null;
 
     default:
       throw createUnknownFunctionError(name);
@@ -391,9 +391,9 @@ export function evaluatePredicate(predicate: Predicate, row: Row): boolean {
           if (v === value) return true;
           if (v === null) hasNull = true;
         }
-        // If no match found and list contains NULL, result should be NULL
+        // If no match found and list contains NULL, result should be NULL (treated as false in boolean context)
         // If no match found and no NULL in list, result is false
-        return hasNull ? null : false;
+        return false;
       }
 
       // Subquery case - predicate.values is a QueryPlan

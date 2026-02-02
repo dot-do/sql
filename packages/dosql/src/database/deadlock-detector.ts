@@ -535,12 +535,12 @@ export class WaitForGraph {
         if (participants.length === 0) {
           throw new Error('Cannot select victim from empty participant list');
         }
-        return participants[participants.length - 1]; // Default: last in cycle
+        return participants[participants.length - 1]!; // Default: last in cycle
     }
   }
 
   private selectYoungestVictim(participants: string[]): string {
-    let youngest = participants[0];
+    let youngest = participants[0]!;
     let youngestTime = 0;
 
     for (const txnId of participants) {
@@ -556,7 +556,7 @@ export class WaitForGraph {
   }
 
   private selectLeastWorkVictim(participants: string[]): string {
-    let leastWork = participants[0];
+    let leastWork = participants[0]!;
     let minCost = Infinity;
 
     for (const txnId of participants) {
@@ -574,7 +574,7 @@ export class WaitForGraph {
   private selectRoundRobinVictim(participants: string[]): string {
     const index = this.roundRobinCounter % participants.length;
     this.roundRobinCounter++;
-    return participants[index];
+    return participants[index]!;
   }
 
   private selectPreferReadOnlyVictim(participants: string[]): string {
@@ -591,7 +591,7 @@ export class WaitForGraph {
 
   private selectPriorityVictim(participants: string[]): string {
     // Select lowest priority transaction as victim
-    let lowestPriority = participants[0];
+    let lowestPriority = participants[0]!;
     let minPriority = Infinity;
 
     for (const txnId of participants) {

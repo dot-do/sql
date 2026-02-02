@@ -130,8 +130,8 @@ class BoundedHeap {
   }
 
   private swap(i: number, j: number): void {
-    const temp = this.heap[i];
-    this.heap[i] = this.heap[j];
+    const temp = this.heap[i]!;
+    this.heap[i] = this.heap[j]!;
     this.heap[j] = temp;
   }
 }
@@ -198,7 +198,7 @@ export class TopNOperator implements Operator {
 
   async next(): Promise<Row | null> {
     if (this.index >= this.sortedRows.length) return null;
-    return this.sortedRows[this.index++];
+    return this.sortedRows[this.index++] ?? null;
   }
 
   async close(): Promise<void> {

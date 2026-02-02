@@ -191,10 +191,12 @@ function getAggregateInfo(aggExpr: AggregateExpr): { func: string; argExpr: Expr
     // For COUNT(*), args[0] might be { type: 'literal', value: '*' }
     if (testFormat.args && testFormat.args.length > 0) {
       const firstArg = testFormat.args[0];
-      if (firstArg.type === 'literal' && firstArg.value === '*') {
-        return { func, argExpr: '*' };
+      if (firstArg) {
+        if (firstArg.type === 'literal' && firstArg.value === '*') {
+          return { func, argExpr: '*' };
+        }
+        return { func, argExpr: firstArg };
       }
-      return { func, argExpr: firstArg };
     }
     return { func, argExpr: '*' };
   }

@@ -152,7 +152,7 @@ function formatPartitionValue(value: unknown, type: string): string {
     return value.toString();
   }
   if (value instanceof Date) {
-    return value.toISOString().split('T')[0];
+    return value.toISOString().split('T')[0]!;
   }
   return sanitizePathComponent(String(value));
 }
@@ -416,8 +416,8 @@ export function parseChunkPath(path: string, prefix: string = ''): ParsedChunkPa
   const parts = relativePath.split('/').filter(Boolean);
   if (parts.length < 2) return null;
 
-  const table = parts[0];
-  const fileName = parts[parts.length - 1];
+  const table = parts[0]!;
+  const fileName = parts[parts.length - 1]!;
 
   // Extract chunk ID from filename
   if (!fileName.endsWith('.columnar')) return null;

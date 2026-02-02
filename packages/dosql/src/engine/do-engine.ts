@@ -687,7 +687,7 @@ export class DOQueryEngine {
 
         // Apply the final row values
         for (const col of Object.keys(finalRow)) {
-          row[col] = finalRow[col];
+          row[col] = finalRow[col] ?? null;
         }
 
         // Write to storage
@@ -910,13 +910,13 @@ export class DOQueryEngine {
     const parts = columnDefs.split(',').map(p => p.trim());
     for (const part of parts) {
       const pkMatch = part.match(/PRIMARY\s+KEY\s*\((\w+)\)/i);
-      if (pkMatch) {
+      if (pkMatch && pkMatch[1]) {
         primaryKey = pkMatch[1];
         continue;
       }
 
       const colMatch = part.match(/(\w+)\s+(\w+)(?:\s+NOT\s+NULL)?/i);
-      if (colMatch) {
+      if (colMatch && colMatch[1] && colMatch[2]) {
         columns.push({
           name: colMatch[1],
           type: colMatch[2],
@@ -1036,7 +1036,7 @@ export class DOQueryEngine {
 
     // Parse: DROP TABLE [IF EXISTS] tablename
     const match = sql.match(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i);
-    if (!match) {
+    if (!match || !match[1]) {
       return { success: false, rowsAffected: 0 };
     }
 
@@ -1146,13 +1146,13 @@ export class DOQueryEngine {
 
     let compareValue: SqlValue;
     if (valueStr === '?' && params && params.length > 0) {
-      compareValue = params[params.length - 1]; // Use last param for WHERE
+      compareValue = params[params.length - 1] ?? null; // Use last param for WHERE
     } else if (valueStr.startsWith('$') && params) {
       const paramIndex = parseInt(valueStr.slice(1), 10) - 1;
       if (paramIndex < 0 || paramIndex >= params.length) {
         throw new BindingError(BindingErrorCode.COUNT_MISMATCH, `Parameter index $${paramIndex + 1} out of bounds (${params.length} params provided)`);
       }
-      compareValue = params[paramIndex];
+      compareValue = params[paramIndex] ?? null;
     } else {
       compareValue = this.parseLiteral(valueStr);
     }

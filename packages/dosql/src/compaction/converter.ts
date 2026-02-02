@@ -472,8 +472,8 @@ export async function* streamConvert<K, V>(
 
       for (let i = 0; i < result.rowGroups.length; i++) {
         yield {
-          rowGroup: result.rowGroups[i],
-          serialized: result.serialized[i],
+          rowGroup: result.rowGroups[i]!,
+          serialized: result.serialized[i]!,
         };
       }
     }
@@ -486,8 +486,8 @@ export async function* streamConvert<K, V>(
 
     for (let i = 0; i < result.rowGroups.length; i++) {
       yield {
-        rowGroup: result.rowGroups[i],
-        serialized: result.serialized[i],
+        rowGroup: result.rowGroups[i]!,
+        serialized: result.serialized[i]!,
       };
     }
   }
