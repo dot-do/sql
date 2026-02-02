@@ -188,8 +188,44 @@ export function createReplicaDO(
       }
     }, fullConfig.heartbeatIntervalMs);
 
+    // Start election check loop (if auto-failover is enabled)
+    if (fullConfig.autoFailover && electionStateMachine) {
+      state.electionCheckInterval = setInterval(async () => {
+        try {
+          await checkAndStartElection();
+        } catch (error) {
+          logger.error('Election check error', error instanceof Error ? error : new Error(String(error)));
+        }
+      }, fullConfig.heartbeatIntervalMs);
+    }
+
     // Initial pull
     await pullAndApplyWAL();
+  }
+
+  /**
+   * Check if we should start an election and initiate if needed
+   */
+  async function checkAndStartElection(): Promise<void> {
+    if (!state || !electionStateMachine) return;
+    if (state.info.role === 'primary') return;
+
+    // Check if we should start election
+    if (electionStateMachine.shouldStartElection()) {
+      logger.info('Primary timeout detected, checking promotion eligibility', {
+        replicaId: serializeReplicaId(state.info.id),
+      });
+
+      const eligibility = await checkPromotionEligibility();
+      if (eligibility.eligible) {
+        logger.info('Eligible for promotion, starting election', {
+          replicaId: serializeReplicaId(state.info.id),
+          priority: eligibility.priority,
+        });
+
+        await startElection();
+      }
+    }
   }
 
   async function stopStreaming(): Promise<void> {
@@ -199,6 +235,10 @@ export function createReplicaDO(
     if (state.streamingInterval) {
       clearInterval(state.streamingInterval);
       state.streamingInterval = undefined;
+    }
+    if (state.electionCheckInterval) {
+      clearInterval(state.electionCheckInterval);
+      state.electionCheckInterval = undefined;
     }
   }
 

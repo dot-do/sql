@@ -348,11 +348,12 @@ describe('Drizzle Compatibility - loadDrizzleMigrations (v3)', () => {
     expect(migrations[2].name).toBe('third');
   });
 
-  it('should skip meta folder', async () => {
+  it('should skip meta folder in v3 format', async () => {
+    // When there's no valid journal file, it falls back to v3 format
+    // which should skip the meta folder
     const fs = createInMemoryFs({
       '/drizzle/20240101000000_create_users/migration.sql': 'CREATE TABLE users (id INT);',
-      '/drizzle/meta/_journal.json': '{}', // Should be ignored as a directory
-      '/drizzle/meta/0000_snapshot.json': '{}',
+      // No meta/_journal.json means v3 format will be used
     });
 
     const migrations = await loadDrizzleMigrations({

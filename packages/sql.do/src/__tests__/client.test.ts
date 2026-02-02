@@ -31,80 +31,19 @@ import {
   TransactionContext,
 } from '../client.js';
 import type { SQLClientConfig, ClientEventMap } from '../client.js';
-
-// =============================================================================
-// Test Helpers
-// =============================================================================
-
-/**
- * Mock WebSocket for testing
- */
-class MockWebSocket {
-  static READY_STATE_CONNECTING = 0;
-  static READY_STATE_OPEN = 1;
-  static READY_STATE_CLOSING = 2;
-  static READY_STATE_CLOSED = 3;
-
-  readyState = MockWebSocket.READY_STATE_CONNECTING;
-  url: string;
-  private listeners: Map<string, Set<(event: any) => void>> = new Map();
-
-  constructor(url: string) {
-    this.url = url;
-    // Simulate async connection
-    setTimeout(() => {
-      this.readyState = MockWebSocket.READY_STATE_OPEN;
-      this.emit('open', {});
-    }, 10);
-  }
-
-  addEventListener(event: string, callback: (event: any) => void): void {
-    if (!this.listeners.has(event)) {
-      this.listeners.set(event, new Set());
-    }
-    this.listeners.get(event)!.add(callback);
-  }
-
-  removeEventListener(event: string, callback: (event: any) => void): void {
-    this.listeners.get(event)?.delete(callback);
-  }
-
-  send(data: string): void {
-    // Simulate server response
-    const request = JSON.parse(data);
-    setTimeout(() => {
-      this.emit('message', {
-        data: JSON.stringify({
-          id: request.id,
-          result: { rows: [], rowsAffected: 0 },
-        }),
-      });
-    }, 5);
-  }
-
-  close(): void {
-    this.readyState = MockWebSocket.READY_STATE_CLOSED;
-    this.emit('close', {});
-  }
-
-  private emit(event: string, data: any): void {
-    this.listeners.get(event)?.forEach((callback) => callback(data));
-  }
-
-  // Test helpers
-  simulateError(error: Error): void {
-    this.emit('error', { error });
-  }
-
-  simulateClose(): void {
-    this.readyState = MockWebSocket.READY_STATE_CLOSED;
-    this.emit('close', {});
-  }
-
-  simulateMessage(data: any): void {
-    this.emit('message', { data: JSON.stringify(data) });
-  }
-}
+import {
+  MockWebSocket,
+  MockWebSocketTracker,
+  setupMockWebSocket,
+  getGlobalWithWebSocket,
+  asExtendedClient,
+  createTestClient,
+  createExtendedError,
+  createEventListener,
+  type TestClientConfig,
+  type ExtendedClient,
+  type ExtendedTransactionContext,
+} from './test-utils.js';
 
 // =============================================================================
 // 1. CONSTRUCTOR VALIDATION - GAP: Missing comprehensive validation

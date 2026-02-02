@@ -919,13 +919,13 @@ class Parser {
             } else if (this.consumeKeyword('UPDATE')) {
               onUpdate = this.parseReferenceAction();
             } else {
-              throw new Error('Expected DELETE or UPDATE after ON');
+              throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, 'Expected DELETE or UPDATE after ON');
             }
           } else if (this.consumeKeyword('MATCH')) {
             if (this.consumeKeyword('SIMPLE')) match = 'SIMPLE';
             else if (this.consumeKeyword('PARTIAL')) match = 'PARTIAL';
             else if (this.consumeKeyword('FULL')) match = 'FULL';
-            else throw new Error('Expected SIMPLE, PARTIAL, or FULL after MATCH');
+            else throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, 'Expected SIMPLE, PARTIAL, or FULL after MATCH');
           } else {
             const defer = this.parseDeferrableClause();
             if (defer) {

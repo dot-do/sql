@@ -136,20 +136,21 @@ interface HibernatableWebSocket extends WebSocket {
 // =============================================================================
 
 /**
- * Generic constructor type for mixin patterns.
+ * Generic constructor type for Durable Object mixin patterns.
  *
- * TypeScript mixin pattern requires rest parameter `...args: ConstructorArgs`
- * to allow extending arbitrary base classes. We use `unknown[]` with explicit
- * documentation that the actual constructor signature is preserved from the
- * base class at runtime.
+ * TypeScript's mixin pattern requires `any[]` for constructor rest parameters
+ * (TS2545). This is a known TypeScript limitation documented in the handbook.
+ * The constraint ensures type safety at the instance level while allowing
+ * constructor flexibility required for mixins.
  *
- * @template T - The instance type produced by the constructor
- * @template TArgs - Constructor argument types (defaults to unknown[] for flexibility)
+ * @see https://www.typescriptlang.org/docs/handbook/mixins.html
+ *
+ * @template TInstance - The instance type that must extend DurableObject
  */
-type MixinConstructor<
-  T = object,
-  TArgs extends unknown[] = unknown[]
-> = abstract new (...args: TArgs) => T;
+// Using any[] is required by TypeScript for mixin constructor patterns (TS2545)
+// The DurableObject constraint on TInstance provides type safety for the instance
+type DurableObjectMixinBase<TInstance extends DurableObject = DurableObject> =
+  new (...args: any[]) => TInstance;  // eslint-disable-line @typescript-eslint/no-explicit-any
 
 /**
  * Mixin to add hibernation support to any Durable Object class.
@@ -165,10 +166,10 @@ type MixinConstructor<
  * @returns A class with hibernation support
  *
  * @remarks
- * The mixin pattern requires accepting constructor arguments as a rest parameter.
- * The actual constructor signature is preserved from the base class.
+ * The mixin pattern uses `any[]` for constructor args as required by TypeScript.
+ * Type safety is enforced through the DurableObject instance constraint.
  */
-export function HibernationMixin<T extends MixinConstructor<DurableObject>>(Base: T) {
+export function HibernationMixin<T extends DurableObjectMixinBase>(Base: T) {
   return class extends Base {
     /** @internal Hibernation statistics */
     private hibernationStats: HibernationStats = {

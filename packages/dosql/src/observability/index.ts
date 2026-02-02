@@ -1,15 +1,45 @@
 /**
  * DoSQL Observability Module
  *
- * Provides OpenTelemetry tracing and Prometheus metrics for production monitoring.
+ * Provides unified observability with distributed tracing, metrics, and structured logging
+ * for production monitoring of DoSQL across Durable Object boundaries.
  *
  * Features:
- * - OpenTelemetry-compatible tracing with W3C Trace Context propagation
+ * - Distributed tracing with correlation IDs across DO boundaries
+ * - W3C Trace Context propagation for interoperability
  * - Prometheus-format metrics collection
+ * - Trace-aware structured logging
  * - SQL statement sanitization for safe tracing
- * - Query execution instrumentation
+ * - Query and transaction instrumentation
  *
- * @example Basic Usage
+ * @example Unified Observability (Recommended)
+ * ```typescript
+ * import { createUnifiedObservability } from 'dosql/observability';
+ *
+ * const obs = createUnifiedObservability({
+ *   serviceName: 'my-database',
+ *   tracing: { enabled: true },
+ *   metrics: { enabled: true },
+ * });
+ *
+ * // Handle incoming request with automatic context propagation
+ * async function fetch(request: Request) {
+ *   return obs.traceRequest(request, 'handle-query', async (span) => {
+ *     span.setAttribute('db.operation', 'SELECT');
+ *
+ *     // Logger automatically includes trace context (correlationId, traceId, spanId)
+ *     obs.logger.info('Processing query', { sql: 'SELECT * FROM users' });
+ *
+ *     // Make traced calls to other DOs with automatic context propagation
+ *     const result = await obs.tracedFetch(otherDO, shardRequest);
+ *
+ *     obs.metrics.queryTotal.inc({ operation: 'SELECT', status: 'success' });
+ *     return result;
+ *   });
+ * }
+ * ```
+ *
+ * @example Basic Observability
  * ```typescript
  * import { createObservability } from 'dosql/observability';
  *
@@ -378,3 +408,36 @@ export async function instrumentTransaction<T>(
     span.end();
   }
 }
+
+// =============================================================================
+// DISTRIBUTED TRACING EXPORTS
+// =============================================================================
+
+export {
+  createDistributedTracer,
+  DistributedTracerImpl,
+  NoOpDistributedTracer,
+  DistributedTraceStorage,
+  prepareTracedFetch,
+  startServerSpan,
+  withDistributedContext,
+  type DistributedTracer,
+  type DistributedSpan,
+  type DistributedTraceContext,
+  type DistributedTracerConfig,
+  type DistributedSpanOptions,
+  DEFAULT_DISTRIBUTED_TRACER_CONFIG,
+} from './distributed-tracing.js';
+
+// =============================================================================
+// UNIFIED OBSERVABILITY EXPORTS
+// =============================================================================
+
+export {
+  createUnifiedObservability,
+  type UnifiedObservability,
+  type UnifiedObservabilityConfig,
+  type UnifiedMetrics,
+  type TraceAwareLogger,
+  DEFAULT_UNIFIED_CONFIG,
+} from './unified.js';

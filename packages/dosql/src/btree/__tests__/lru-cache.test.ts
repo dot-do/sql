@@ -1,17 +1,20 @@
 /**
- * LRU Cache Tests for B-tree Page Manager
+ * LRU/LFU Cache Tests for B-tree Page Manager
  *
- * TDD tests for LRU eviction policy in the B-tree page cache.
+ * TDD tests for eviction policies in the B-tree page cache.
  * These tests verify:
  * - Cache respects max size
  * - LRU eviction order is correct
+ * - LFU eviction order is correct
  * - Recently accessed items are retained
+ * - Frequently accessed items are retained (LFU)
  * - onEvict callback fires for evicted items
+ * - Memory pressure callbacks work correctly
  * - Edge cases: empty cache, single item, exact capacity
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { LRUCache, type LRUCacheOptions } from '../lru-cache.js';
+import { LRUCache, type LRUCacheOptions, type MemoryPressureInfo } from '../lru-cache.js';
 import { Page, PageType, createLeafPage } from '../types.js';
 
 /**

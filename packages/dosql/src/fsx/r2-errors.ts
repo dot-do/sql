@@ -91,8 +91,14 @@ export class R2Error extends FSXError {
         return `Write conflict for ${this.path ?? 'this file'}. Please retry.`;
       case R2ErrorCode.CHECKSUM_MISMATCH:
         return `Data integrity error for ${this.path ?? 'this file'}. The file may be corrupted.`;
+      case R2ErrorCode.NOT_FOUND:
+        return `The file ${this.path ?? 'requested'} was not found.`;
+      case R2ErrorCode.READ_DURING_WRITE:
+        return `Cannot read ${this.path ?? 'the file'} while it is being written.`;
+      case R2ErrorCode.NETWORK_ERROR:
+        return `A network error occurred for ${this.path ?? 'the operation'}. Please retry.`;
       default:
-        return this.message;
+        return assertNever(this.r2Code);
     }
   }
 }
@@ -120,7 +126,7 @@ function mapR2ToFSXErrorCode(r2Code: R2ErrorCode): FSXErrorCode {
     case R2ErrorCode.NOT_FOUND:
       return FSXErrorCode.NOT_FOUND;
     default:
-      return FSXErrorCode.READ_FAILED;
+      return assertNever(r2Code);
   }
 }
 

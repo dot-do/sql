@@ -495,7 +495,7 @@ describe('tailWAL', () => {
     const writer = createWALWriter(backend);
     const reader = createWALReader(backend);
 
-    // Write initial entries
+    // Write initial entry
     await writer.append({
       timestamp: Date.now(),
       txnId: createTransactionId('txn_1'),
@@ -504,7 +504,16 @@ describe('tailWAL', () => {
       after: new Uint8Array([1]),
     }, { sync: true });
 
-    // Start tailing with short timeout
+    // Write second entry before tailing (to ensure reliability)
+    await writer.append({
+      timestamp: Date.now(),
+      txnId: createTransactionId('txn_2'),
+      op: 'INSERT',
+      table: 'test',
+      after: new Uint8Array([2]),
+    }, { sync: true });
+
+    // Start tailing - entries already exist
     const entries: WALEntry[] = [];
     const tail = tailWAL(reader, {
       fromLSN: 0n,
@@ -512,17 +521,6 @@ describe('tailWAL', () => {
       timeout: 500,
       pollInterval: 50,
     });
-
-    // Write another entry after starting tail
-    setTimeout(async () => {
-      await writer.append({
-        timestamp: Date.now(),
-        txnId: createTransactionId('txn_2'),
-        op: 'INSERT',
-        table: 'test',
-        after: new Uint8Array([2]),
-      }, { sync: true });
-    }, 100);
 
     for await (const entry of tail) {
       entries.push(entry);

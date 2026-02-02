@@ -782,14 +782,12 @@ describe('Network Timeouts', () => {
   describe('Transient failure recovery', () => {
     it('should handle transient DO storage failures', async () => {
       const storage = createFailingDOStorage({
-        failureMode: 'transient',
-        failUntilAttempt: 2,
+        failureMode: 'write_error',
       });
       const backend = createDOBackend(storage);
 
-      // First attempt will fail, but we're testing that transient failures can occur
-      // Note: DOStorageBackend doesn't have built-in retry, so first call will fail
-      await expect(backend.write('test.bin', textToBytes('test'))).rejects.toThrow();
+      // First attempt will fail due to write error
+      await expect(backend.write('test.bin', textToBytes('test'))).rejects.toThrow('write failed');
 
       // Reset and try again - should succeed
       storage._resetAttempts();
@@ -1100,22 +1098,26 @@ describe('Error Recovery Patterns', () => {
   });
 
   describe('Delete operation error handling', () => {
-    it('should handle delete errors gracefully', async () => {
-      const storage = createFailingDOStorage({ failureMode: 'delete_error' });
+    it('should handle delete errors by throwing', async () => {
+      const storage = createFailingDOStorage({ failureMode: 'none' });
       const backend = createDOBackend(storage);
 
       // Write first without errors
-      storage._setFailureMode('none');
       await backend.write('to-delete.bin', textToBytes('data'));
 
       // Enable delete errors
       storage._setFailureMode('delete_error');
 
-      // The delete method in DOStorageBackend doesn't throw on missing files,
-      // but should propagate storage errors
-      // Note: Current implementation may not throw on delete errors
-      // This test documents expected behavior
-      await backend.delete('to-delete.bin');
+      // The delete method propagates storage errors
+      await expect(backend.delete('to-delete.bin')).rejects.toThrow('delete failed');
+    });
+
+    it('should handle delete of non-existent file gracefully', async () => {
+      const storage = createFailingDOStorage({ failureMode: 'none' });
+      const backend = createDOBackend(storage);
+
+      // Deleting non-existent file should not throw
+      await backend.delete('nonexistent.bin');
     });
   });
 

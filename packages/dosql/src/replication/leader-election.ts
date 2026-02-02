@@ -590,13 +590,4 @@ export class SplitBrainResolver {
   }
 }
 
-// =============================================================================
-// EXPORTS
-// =============================================================================
-
-export {
-  generateFencingToken,
-  validateFencingTokenSignature,
-  compareFencingTokens,
-  isFencingTokenExpired,
-};
+// Functions are already exported with `export function` declarations above

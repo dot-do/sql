@@ -192,7 +192,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
 
     // Cache miss - record it and read from storage
     this.pageCache.recordMiss();
-    const data = await this.fsx.read(this.pageKey(pageId));
+    const data = await this.storage.read(this.pageKey(pageId));
     if (!data) {
       throw new Error(`Page ${pageId} not found`);
     }
@@ -208,7 +208,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   private async writePage(page: Page): Promise<void> {
     const data = serializePage(page);
-    await this.fsx.write(this.pageKey(page.id), data);
+    await this.storage.write(this.pageKey(page.id), data);
     // Add to cache as clean (not dirty since we just wrote it)
     // Use setAsync to ensure any evicted dirty pages are written before continuing
     await this.pageCache.setAsync(page.id, page, { dirty: false });
