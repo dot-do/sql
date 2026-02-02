@@ -576,3 +576,39 @@ export type SchemaOf<S extends SD> = {
  */
 export type TableOf<S extends SD, K extends keyof S> =
   S[K] extends TD ? import('./inference.js').InferTableDef<S[K], S> : never;
+
+// =============================================================================
+// RE-EXPORTS: VERSIONING (CDC/Lakehouse Compatibility)
+// =============================================================================
+
+/**
+ * Schema versioning for CDC and lakehouse compatibility.
+ * @public
+ * @stability stable
+ */
+export {
+  // Version types
+  type SchemaVersion,
+  type SchemaChangeType,
+  type CompatibilityLevel,
+  type ColumnDefinition,
+  type IndexDefinition,
+  type ConstraintDefinition,
+  type TableSchema,
+  type SchemaChangeEvent,
+  type SchemaRegistryEntry,
+
+  // Version creation
+  createSchemaVersion,
+
+  // Schema registry
+  SchemaVersionRegistry,
+
+  // CDC integration
+  type SchemaEnrichedCDCEvent,
+  SchemaAwareCDCProcessor,
+
+  // Global registry
+  getSchemaRegistry,
+  resetSchemaRegistry,
+} from './versioning.js';

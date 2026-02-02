@@ -581,21 +581,32 @@ export class LRUCache<K, V> {
   private evictToFit(newSize: number): void {
     if (this.sizeCalculator) {
       // Byte-based eviction
-      while (this.head && this._currentBytes + newSize > this.maxSize) {
-        this.evictHead();
+      while (this.map.size > 0 && this._currentBytes + newSize > this.maxSize) {
+        this.evictOne();
       }
     } else {
       // Entry count-based eviction
-      while (this.head && this.map.size >= this.maxSize) {
-        this.evictHead();
+      while (this.map.size >= this.maxSize) {
+        this.evictOne();
       }
     }
   }
 
   /**
-   * Evict the head (least recently used) entry
+   * Evict one entry based on the eviction policy
    */
-  private evictHead(): void {
+  private evictOne(): void {
+    if (this.evictionPolicy === 'lfu') {
+      this.evictLFU();
+    } else {
+      this.evictLRU();
+    }
+  }
+
+  /**
+   * Evict the head (least recently used) entry - LRU policy
+   */
+  private evictLRU(): void {
     if (!this.head) return;
 
     const node = this.head;
@@ -608,6 +619,37 @@ export class LRUCache<K, V> {
 
     if (this.onEvict) {
       this.onEvict(node.key, node.value, node.dirty);
+    }
+  }
+
+  /**
+   * Evict the least frequently used entry - LFU policy
+   */
+  private evictLFU(): void {
+    // Find the list with minimum frequency
+    const list = this.frequencyLists.get(this._minFrequency);
+    if (!list || !list.head) {
+      // Fallback to LRU if frequency lists are empty
+      this.evictLRU();
+      return;
+    }
+
+    // Evict the head of the minimum frequency list (LRU among LFU ties)
+    const node = list.head;
+    this.removeFromFrequencyList(node, this._minFrequency);
+    this.map.delete(node.key);
+    this._currentBytes -= node.size;
+
+    // Track eviction
+    this._evictions++;
+
+    if (this.onEvict) {
+      this.onEvict(node.key, node.value, node.dirty);
+    }
+
+    // Update min frequency if the list is now empty
+    if (!list.head) {
+      this.updateMinFrequency();
     }
   }
 
@@ -663,21 +705,32 @@ export class LRUCache<K, V> {
   private async evictToFitAsync(newSize: number): Promise<void> {
     if (this.sizeCalculator) {
       // Byte-based eviction
-      while (this.head && this._currentBytes + newSize > this.maxSize) {
-        await this.evictHeadAsync();
+      while (this.map.size > 0 && this._currentBytes + newSize > this.maxSize) {
+        await this.evictOneAsync();
       }
     } else {
       // Entry count-based eviction
-      while (this.head && this.map.size >= this.maxSize) {
-        await this.evictHeadAsync();
+      while (this.map.size >= this.maxSize) {
+        await this.evictOneAsync();
       }
     }
   }
 
   /**
-   * Evict the head entry, awaiting async onEvict callback
+   * Evict one entry based on the eviction policy, awaiting async callback
    */
-  private async evictHeadAsync(): Promise<void> {
+  private async evictOneAsync(): Promise<void> {
+    if (this.evictionPolicy === 'lfu') {
+      await this.evictLFUAsync();
+    } else {
+      await this.evictLRUAsync();
+    }
+  }
+
+  /**
+   * Evict the head entry (LRU), awaiting async onEvict callback
+   */
+  private async evictLRUAsync(): Promise<void> {
     if (!this.head) return;
 
     const node = this.head;
@@ -691,5 +744,215 @@ export class LRUCache<K, V> {
     if (this.onEvict) {
       await this.onEvict(node.key, node.value, node.dirty);
     }
+  }
+
+  /**
+   * Evict the least frequently used entry, awaiting async callback
+   */
+  private async evictLFUAsync(): Promise<void> {
+    const list = this.frequencyLists.get(this._minFrequency);
+    if (!list || !list.head) {
+      await this.evictLRUAsync();
+      return;
+    }
+
+    const node = list.head;
+    this.removeFromFrequencyList(node, this._minFrequency);
+    this.map.delete(node.key);
+    this._currentBytes -= node.size;
+
+    // Track eviction
+    this._evictions++;
+
+    if (this.onEvict) {
+      await this.onEvict(node.key, node.value, node.dirty);
+    }
+
+    if (!list.head) {
+      this.updateMinFrequency();
+    }
+  }
+
+  /**
+   * LFU Helper: Add a node to a frequency list
+   */
+  private addToFrequencyList(node: LRUNode<K, V>, frequency: number): void {
+    let list = this.frequencyLists.get(frequency);
+    if (!list) {
+      list = { head: null, tail: null };
+      this.frequencyLists.set(frequency, list);
+    }
+
+    // Add to tail of frequency list (most recently used among same frequency)
+    node.prev = list.tail;
+    node.next = null;
+
+    if (list.tail) {
+      list.tail.next = node;
+    } else {
+      list.head = node;
+    }
+    list.tail = node;
+  }
+
+  /**
+   * LFU Helper: Remove a node from a frequency list
+   */
+  private removeFromFrequencyList(node: LRUNode<K, V>, frequency: number): void {
+    const list = this.frequencyLists.get(frequency);
+    if (!list) return;
+
+    if (node.prev) {
+      node.prev.next = node.next;
+    } else {
+      list.head = node.next;
+    }
+
+    if (node.next) {
+      node.next.prev = node.prev;
+    } else {
+      list.tail = node.prev;
+    }
+
+    node.prev = null;
+    node.next = null;
+
+    // Clean up empty frequency lists
+    if (!list.head) {
+      this.frequencyLists.delete(frequency);
+    }
+  }
+
+  /**
+   * LFU Helper: Increment a node's frequency
+   */
+  private incrementFrequency(node: LRUNode<K, V>): void {
+    const oldFreq = node.frequency;
+    const newFreq = oldFreq + 1;
+
+    // Remove from old frequency list
+    this.removeFromFrequencyList(node, oldFreq);
+
+    // Update node frequency
+    node.frequency = newFreq;
+
+    // Add to new frequency list
+    this.addToFrequencyList(node, newFreq);
+
+    // Update min frequency if we just emptied the min frequency list
+    if (oldFreq === this._minFrequency && !this.frequencyLists.has(oldFreq)) {
+      this._minFrequency = newFreq;
+    }
+  }
+
+  /**
+   * LFU Helper: Update min frequency after eviction
+   */
+  private updateMinFrequency(): void {
+    // Find the new minimum frequency
+    if (this.frequencyLists.size === 0) {
+      this._minFrequency = 0;
+      return;
+    }
+
+    // Start from current min and find next non-empty frequency
+    for (let freq = this._minFrequency; freq <= this._minFrequency + 1000; freq++) {
+      if (this.frequencyLists.has(freq)) {
+        this._minFrequency = freq;
+        return;
+      }
+    }
+
+    // Fallback: find minimum in all frequencies
+    this._minFrequency = Math.min(...this.frequencyLists.keys());
+  }
+
+  /**
+   * Check memory pressure and invoke callback if level changed
+   */
+  private checkMemoryPressure(): void {
+    if (!this.onMemoryPressure || !this.sizeCalculator) return;
+
+    const ratio = this.memoryUsageRatio;
+    let level: MemoryPressureLevel;
+
+    if (ratio >= this.pressureThresholds.high) {
+      level = ratio >= 1.0 ? 'critical' : 'high';
+    } else if (ratio >= this.pressureThresholds.medium) {
+      level = 'medium';
+    } else if (ratio >= this.pressureThresholds.low) {
+      level = 'low';
+    } else {
+      level = 'low';
+    }
+
+    // Only notify on level change or when entering critical
+    if (level !== this._lastPressureLevel || level === 'critical') {
+      this._lastPressureLevel = level;
+      this.onMemoryPressure({
+        currentBytes: this._currentBytes,
+        maxBytes: this.maxSize,
+        usageRatio: ratio,
+        level,
+        entryCount: this.map.size,
+      });
+    }
+  }
+
+  /**
+   * Manually trigger eviction of N entries.
+   * Useful for proactive eviction when memory pressure is high.
+   * @param count - Number of entries to evict
+   */
+  evict(count: number = 1): void {
+    for (let i = 0; i < count && this.map.size > 0; i++) {
+      this.evictOne();
+    }
+  }
+
+  /**
+   * Manually trigger eviction of N entries, awaiting async callbacks.
+   * @param count - Number of entries to evict
+   */
+  async evictAsync(count: number = 1): Promise<void> {
+    for (let i = 0; i < count && this.map.size > 0; i++) {
+      await this.evictOneAsync();
+    }
+  }
+
+  /**
+   * Evict entries until memory usage is below the given ratio (0-1).
+   * @param targetRatio - Target memory usage ratio
+   */
+  evictToRatio(targetRatio: number): void {
+    if (!this.sizeCalculator) return;
+
+    const targetBytes = this.maxSize * targetRatio;
+    while (this.map.size > 0 && this._currentBytes > targetBytes) {
+      this.evictOne();
+    }
+  }
+
+  /**
+   * Evict entries until memory usage is below the given ratio, awaiting async callbacks.
+   * @param targetRatio - Target memory usage ratio
+   */
+  async evictToRatioAsync(targetRatio: number): Promise<void> {
+    if (!this.sizeCalculator) return;
+
+    const targetBytes = this.maxSize * targetRatio;
+    while (this.map.size > 0 && this._currentBytes > targetBytes) {
+      await this.evictOneAsync();
+    }
+  }
+
+  /**
+   * Get the frequency of an entry (for LFU policy debugging)
+   * @param key - The key to check
+   * @returns The access frequency or undefined if not found
+   */
+  getFrequency(key: K): number | undefined {
+    const node = this.map.get(key);
+    return node?.frequency;
   }
 }

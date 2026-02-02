@@ -40,11 +40,11 @@ type PreparedQueryConfig = Omit<PreparedQueryConfigBase, 'statement' | 'run'>;
  */
 function getFieldName(field: unknown): string {
   if (field && typeof field === 'object') {
-    const f = field as Record<string, unknown>;
-    if ('name' in field && typeof f.name === 'string') {
+    const f = field as { name?: unknown; fieldAlias?: unknown };
+    if (typeof f.name === 'string') {
       return f.name;
     }
-    if ('fieldAlias' in field && typeof f.fieldAlias === 'string') {
+    if (typeof f.fieldAlias === 'string') {
       return f.fieldAlias;
     }
   }

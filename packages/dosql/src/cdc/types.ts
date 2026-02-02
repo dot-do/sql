@@ -839,6 +839,18 @@ export interface CDCBatch {
 
 /**
  * Schema change event for evolution tracking
+ *
+ * Note: The full schema versioning types are available in 'dosql/schema':
+ * - SchemaVersion (branded bigint type)
+ * - SchemaChangeType (full set of change operations)
+ * - SchemaChangeEvent (comprehensive event with compatibility level)
+ * - SchemaVersionRegistry (for tracking schema evolution)
+ * - SchemaAwareCDCProcessor (for enriching CDC events with schema metadata)
+ *
+ * This interface provides a simplified schema change event for CDC streams.
+ * For full schema evolution support, use the schema versioning module.
+ *
+ * @see {@link import('../schema/versioning.js').SchemaChangeEvent} for full type
  */
 export interface SchemaChangeEvent {
   /** Event type */
@@ -846,15 +858,29 @@ export interface SchemaChangeEvent {
   /** Table affected */
   table: string;
   /** Change type */
-  changeType: 'add_column' | 'drop_column' | 'alter_column' | 'create_table' | 'drop_table';
+  changeType: 'add_column' | 'drop_column' | 'alter_column' | 'create_table' | 'drop_table' | 'rename_column' | 'rename_table';
   /** Column name (for column changes) */
   column?: string;
+  /** Old column name (for renames) */
+  oldColumnName?: string;
   /** Old type (for alter) */
   oldType?: string;
   /** New type (for alter/add) */
   newType?: string;
+  /** Is column nullable */
+  nullable?: boolean;
+  /** Default value */
+  defaultValue?: string;
+  /** Schema version before change */
+  beforeSchemaVersion?: number;
   /** Schema version after change */
   schemaVersion: number;
+  /** Schema checksum for validation */
+  schemaChecksum?: string;
+  /** Compatibility level of this change */
+  compatibility?: 'backward_compatible' | 'forward_compatible' | 'full_compatible' | 'breaking';
+  /** Transaction ID */
+  txnId?: string;
   /** Timestamp */
   timestamp: number;
   /** LSN of schema change */

@@ -2,14 +2,16 @@
  * B-tree Implementation for DoSQL
  *
  * A B+tree implementation for row storage in Durable Objects.
- * Uses fsx for page persistence with the following characteristics:
+ * Uses the unified StorageInterface for page persistence with the following characteristics:
  *
  * - Keys and values are serialized using pluggable codecs
- * - Pages are stored as fsx blobs with configurable prefixes
+ * - Pages are stored as storage blobs with configurable prefixes
  * - Leaf pages are linked for efficient range scans
  * - Supports concurrent reads (single-writer assumed)
+ * - Works with any StorageInterface implementation (DO, R2, memory, etc.)
  */
 
+import type { StorageInterface } from '../storage/interface.js';
 import type { FSXBackend } from '../fsx/types.js';
 import {
   Page,
@@ -41,10 +43,52 @@ import { LRUCache } from './lru-cache.js';
 const METADATA_KEY = '_meta';
 
 /**
+ * Storage backend type that can be either the new StorageInterface or legacy FSXBackend.
+ * This union type provides backward compatibility while allowing migration to the new interface.
+ */
+type StorageBackend = StorageInterface | FSXBackend;
+
+/**
+ * Normalize a storage backend to use consistent method names.
+ * Supports both new StorageInterface (get/put) and legacy FSXBackend (read/write).
+ */
+function normalizeStorage(storage: StorageBackend): {
+  read: (key: string) => Promise<Uint8Array | null>;
+  write: (key: string, data: Uint8Array) => Promise<void>;
+  delete: (key: string) => Promise<void>;
+  list: (prefix: string) => Promise<string[]>;
+} {
+  // Check if it's the new StorageInterface (has 'get' method)
+  if ('get' in storage && typeof storage.get === 'function') {
+    const si = storage as StorageInterface;
+    return {
+      read: (key) => si.get(key),
+      write: (key, data) => si.put(key, data),
+      delete: (key) => si.delete(key),
+      list: (prefix) => si.list(prefix),
+    };
+  }
+
+  // It's the legacy FSXBackend
+  const fsx = storage as FSXBackend;
+  return {
+    read: (key) => fsx.read(key),
+    write: (key, data) => fsx.write(key, data),
+    delete: (key) => fsx.delete(key),
+    list: (prefix) => fsx.list(prefix),
+  };
+}
+
+/**
  * B+tree implementation
  */
 export class BTreeImpl<K, V> implements BTree<K, V> {
-  private readonly fsx: FSXBackend;
+  private readonly storage: {
+    read: (key: string) => Promise<Uint8Array | null>;
+    write: (key: string, data: Uint8Array) => Promise<void>;
+    delete: (key: string) => Promise<void>;
+    list: (prefix: string) => Promise<string[]>;
+  };
   private readonly keyCodec: KeyCodec<K>;
   private readonly valueCodec: ValueCodec<V>;
   private readonly config: BTreeConfig;
@@ -54,12 +98,12 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   private readonly pageCache: LRUCache<number, Page>;
 
   constructor(
-    fsx: FSXBackend,
+    storage: StorageBackend,
     keyCodec: KeyCodec<K>,
     valueCodec: ValueCodec<V>,
     config: Partial<BTreeConfig> = {}
   ) {
-    this.fsx = fsx;
+    this.storage = normalizeStorage(storage);
     this.keyCodec = keyCodec;
     this.valueCodec = valueCodec;
     this.config = { ...DEFAULT_BTREE_CONFIG, ...config };

@@ -8,6 +8,11 @@
  * - All leaves are linked for efficient range scans
  */
 
+import type { StorageInterface } from '../storage/interface.js';
+
+// Re-export StorageInterface as the preferred storage type
+export type { StorageInterface };
+
 /**
  * Page types in the B-tree
  */

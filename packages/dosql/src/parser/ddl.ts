@@ -533,7 +533,7 @@ class Parser {
     if (this.consumeKeyword('IGNORE')) return 'IGNORE';
     if (this.consumeKeyword('REPLACE')) return 'REPLACE';
 
-    throw new Error(`Expected conflict action but got ${token.value}`);
+    throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, `Expected conflict action but got ${token.value}`);
   }
 
   /**
@@ -549,9 +549,9 @@ class Parser {
     if (this.consumeKeyword('SET')) {
       if (this.consumeKeyword('NULL')) return 'SET NULL';
       if (this.consumeKeyword('DEFAULT')) return 'SET DEFAULT';
-      throw new Error('Expected NULL or DEFAULT after SET');
+      throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, 'Expected NULL or DEFAULT after SET');
     }
-    throw new Error('Expected reference action');
+    throw createInvalidReferenceActionError('missing');
   }
 
   /**
@@ -566,7 +566,7 @@ class Parser {
       if (this.consumeKeyword('INITIALLY')) {
         if (this.consumeKeyword('DEFERRED')) return 'DEFERRABLE INITIALLY DEFERRED';
         if (this.consumeKeyword('IMMEDIATE')) return 'DEFERRABLE INITIALLY IMMEDIATE';
-        throw new Error('Expected DEFERRED or IMMEDIATE');
+        throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, 'Expected DEFERRED or IMMEDIATE');
       }
       return 'DEFERRABLE';
     }
@@ -690,7 +690,7 @@ class Parser {
           value = this.advance().value;
           isExpression = true;
         } else {
-          throw new Error(`Unexpected default value: ${token.value}`);
+          throw new SQLSyntaxError(SyntaxErrorCode.UNEXPECTED_TOKEN, `Unexpected default value: ${token.value}`);
         }
 
         constraints.push({

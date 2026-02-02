@@ -108,8 +108,16 @@ export class DatabaseError extends DoSQLError {
         return 'The operation violates a database constraint.';
       case DatabaseErrorCode.TIMEOUT:
         return 'The database operation timed out. Please try again.';
+      case DatabaseErrorCode.CONNECTION_FAILED:
+        return 'Failed to connect to the database.';
+      case DatabaseErrorCode.QUERY_ERROR:
+        return 'An error occurred while executing the query.';
+      case DatabaseErrorCode.CONFIG_ERROR:
+        return 'The database configuration is invalid.';
+      case DatabaseErrorCode.INTERNAL:
+        return 'An internal database error occurred.';
       default:
-        return this.message;
+        return assertNever(this.code);
     }
   }
 

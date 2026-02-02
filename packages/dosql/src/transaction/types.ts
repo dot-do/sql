@@ -19,6 +19,7 @@ import {
   type ErrorContext,
   type SerializedError,
 } from '../errors/base.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // Re-export branded types for convenience
 export type { LSN, TransactionId } from '../engine/types.js';
@@ -642,17 +643,22 @@ export class TransactionError extends DoSQLError {
         return ErrorCategory.CONFLICT;
       case TransactionErrorCode.TIMEOUT:
       case TransactionErrorCode.LOCK_TIMEOUT:
+      case TransactionErrorCode.IO_TIMEOUT:
         return ErrorCategory.TIMEOUT;
       case TransactionErrorCode.NO_ACTIVE_TRANSACTION:
       case TransactionErrorCode.TRANSACTION_ALREADY_ACTIVE:
       case TransactionErrorCode.SAVEPOINT_NOT_FOUND:
+      case TransactionErrorCode.DUPLICATE_SAVEPOINT:
       case TransactionErrorCode.READ_ONLY_VIOLATION:
+      case TransactionErrorCode.INVALID_STATE:
         return ErrorCategory.VALIDATION;
       case TransactionErrorCode.WAL_FAILURE:
       case TransactionErrorCode.ROLLBACK_FAILED:
         return ErrorCategory.INTERNAL;
+      case TransactionErrorCode.LOCK_FAILED:
+        return ErrorCategory.CONFLICT;
       default:
-        return ErrorCategory.EXECUTION;
+        return assertNever(this.code);
     }
   }
 
@@ -691,6 +697,20 @@ export class TransactionError extends DoSQLError {
       case TransactionErrorCode.ROLLBACK_FAILED:
         this.recoveryHint = 'Critical error - investigate immediately and consider database recovery';
         break;
+      case TransactionErrorCode.DUPLICATE_SAVEPOINT:
+        this.recoveryHint = 'Use a unique savepoint name or release the existing one first';
+        break;
+      case TransactionErrorCode.LOCK_FAILED:
+        this.recoveryHint = 'Retry the operation or reduce contention';
+        break;
+      case TransactionErrorCode.INVALID_STATE:
+        this.recoveryHint = 'Check the transaction state before performing operations';
+        break;
+      case TransactionErrorCode.IO_TIMEOUT:
+        this.recoveryHint = 'Check storage system health and retry';
+        break;
+      default:
+        assertNever(this.code);
     }
   }
 

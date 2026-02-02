@@ -35,7 +35,21 @@ import {
   ReplicationError,
   ReplicationErrorCode,
   serializeReplicaId,
+  type FencingToken,
+  type LeaderElectionState,
+  type VoteRequest,
+  type VoteResponse,
+  type LeaderHeartbeat,
+  type SplitBrainDetection,
+  type PromotionEligibility,
 } from './types.js';
+import {
+  LeaderElectionStateMachine,
+  SplitBrainResolver,
+  generateFencingToken,
+  validateFencingTokenSignature,
+  compareFencingTokens,
+} from './leader-election.js';
 
 // =============================================================================
 // REPLICA STATE
@@ -55,6 +69,8 @@ interface ReplicaState {
   streamingActive: boolean;
   /** Streaming interval handle */
   streamingInterval?: ReturnType<typeof setInterval>;
+  /** Election check interval handle */
+  electionCheckInterval?: ReturnType<typeof setInterval>;
   /** Snapshot in progress */
   snapshotInProgress?: {
     info: SnapshotInfo;
@@ -65,6 +81,12 @@ interface ReplicaState {
   appliedLSNs: Set<string>;
   /** Session states for read-your-writes */
   sessions: Map<string, SessionState>;
+  /** Last known primary LSN (for eligibility calculation) */
+  lastKnownPrimaryLSN: bigint;
+  /** Known replicas for quorum */
+  knownReplicas: Map<string, ReplicaInfo>;
+  /** Observed leaders (for split-brain detection) */
+  observedLeaders: ReplicaId[];
 }
 
 // =============================================================================

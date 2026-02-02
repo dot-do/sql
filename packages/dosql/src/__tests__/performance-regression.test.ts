@@ -461,10 +461,14 @@ describe('performance regression: INSERT Throughput Baselines', () => {
       await runInDurableObject(stub, async (instance: PerformanceRegressionDO) => {
         instance.exec('CREATE TABLE batch_latency (id INTEGER PRIMARY KEY, data TEXT)');
 
-        const values = Array.from({ length: 100 }, (_, i) => `(${i}, 'data_${i}')`).join(', ');
-
+        let batchId = 0;
         const { latency } = await runBenchmark(
-          () => instance.execWithTiming(`INSERT INTO batch_latency (id, data) VALUES ${values}`),
+          () => {
+            const base = batchId * 100;
+            batchId++;
+            const values = Array.from({ length: 100 }, (_, i) => `(${base + i}, 'data_${i}')`).join(', ');
+            return instance.execWithTiming(`INSERT INTO batch_latency (id, data) VALUES ${values}`);
+          },
           { iterations: 20, warmupIterations: 5 }
         );
 

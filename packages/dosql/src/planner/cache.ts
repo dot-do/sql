@@ -359,9 +359,10 @@ function extractTablesFromPlan(plan: unknown): Set<string> {
   const tables = new Set<string>();
 
   function traverse(node: unknown): void {
-    if (!node || typeof node !== 'object') return;
+    if (node === null || typeof node !== 'object') return;
 
-    const obj = node as Record<string, unknown>;
+    // Type narrowing: node is a non-null object
+    const obj = node as { table?: unknown; tables?: unknown; children?: unknown };
 
     // Check for table property
     if (typeof obj.table === 'string') {
@@ -385,8 +386,8 @@ function extractTablesFromPlan(plan: unknown): Set<string> {
     }
 
     // Recurse into other properties
-    for (const value of Object.values(obj)) {
-      if (value && typeof value === 'object') {
+    for (const value of Object.values(node as object)) {
+      if (value !== null && typeof value === 'object') {
         traverse(value);
       }
     }
