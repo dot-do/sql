@@ -84,7 +84,7 @@ export interface DeadlockInfo {
   /** All participants in the cycle */
   participants: string[];
   /** Transactions that exceeded the deadlock timeout */
-  exceededTimeout?: string[];
+  exceededTimeout?: string[] | undefined;
 }
 
 /**
@@ -649,8 +649,8 @@ export interface DeadlockDetectorOptions {
 export class DeadlockDetector {
   private graph: WaitForGraph;
   private options: Required<Omit<DeadlockDetectorOptions, 'autoRetry' | 'throttle'>> & {
-    autoRetry?: AutoRetryConfig;
-    throttle?: ThrottleConfig;
+    autoRetry?: AutoRetryConfig | undefined;
+    throttle?: ThrottleConfig | undefined;
   };
   private stats: DeadlockStats;
   private history: DeadlockInfo[];

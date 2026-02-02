@@ -70,9 +70,9 @@ export interface FSXMetadata {
   /** Last modification timestamp */
   lastModified: Date;
   /** Optional content hash/etag */
-  etag?: string;
+  etag?: string | undefined;
   /** Custom metadata */
-  custom?: Record<string, string>;
+  custom?: Record<string, string> | undefined;
 }
 
 /**
@@ -166,9 +166,9 @@ export interface TieredMetadata extends FSXMetadata {
   /** Which storage tier(s) contain the data */
   tier: StorageTier;
   /** When data was last accessed */
-  lastAccessed?: Date;
+  lastAccessed?: Date | undefined;
   /** When data was migrated to cold storage */
-  migratedAt?: Date;
+  migratedAt?: Date | undefined;
 }
 
 // =============================================================================

@@ -132,7 +132,8 @@ export class QueryOptimizer {
     if (alternatives.length > 0) {
       const bestIndex = alternatives.findIndex(a => a.plan === physicalPlan);
       if (bestIndex >= 0) {
-        alternatives[bestIndex].chosen = true;
+        // Non-null assertion: bestIndex >= 0 guarantees valid access
+        alternatives[bestIndex]!.chosen = true;
       }
     }
 
@@ -242,7 +243,8 @@ export class QueryOptimizer {
     }
 
     // Choose best alternative
-    let best = scanAlternatives[0];
+    // Non-null assertion: scanAlternatives is populated above with at least one element
+    let best = scanAlternatives[0]!;
     for (const alt of scanAlternatives.slice(1)) {
       if (isBetterCost(alt.cost, best.cost)) {
         best = alt;
@@ -365,7 +367,8 @@ export class QueryOptimizer {
     }
 
     // Choose best
-    let best = joinAlternatives[0];
+    // Non-null assertion: joinAlternatives is populated above with at least one element
+    let best = joinAlternatives[0]!;
     for (const alt of joinAlternatives.slice(1)) {
       if (isBetterCost(alt.cost, best.cost)) {
         best = alt;
@@ -886,7 +889,8 @@ export function findOptimalJoinOrder(
   }
 
   if (tables.length === 1) {
-    return tables[0].plan;
+    // Non-null assertion: length === 1 guarantees tables[0] exists
+    return tables[0]!.plan;
   }
 
   // Dynamic programming: memo[subset] = best plan for joining subset of tables
@@ -895,7 +899,9 @@ export function findOptimalJoinOrder(
   // Initialize with single tables
   for (let i = 0; i < tables.length; i++) {
     const mask = 1 << i;
-    memo.set(mask, { plan: tables[i].plan, cost: tables[i].plan.cost });
+    // Non-null assertion: i < tables.length guarantees valid access
+    const table = tables[i]!;
+    memo.set(mask, { plan: table.plan, cost: table.plan.cost });
   }
 
   // Build up larger subsets
@@ -993,11 +999,13 @@ function findJoinCondition(
 
   for (let i = 0; i < tables.length; i++) {
     if (!(leftMask & (1 << i))) continue;
-    const leftTable = tables[i].name;
+    // Non-null assertion: i < tables.length guarantees valid access
+    const leftTable = tables[i]!.name;
 
     for (let j = 0; j < tables.length; j++) {
       if (!(rightMask & (1 << j))) continue;
-      const rightTable = tables[j].name;
+      // Non-null assertion: j < tables.length guarantees valid access
+      const rightTable = tables[j]!.name;
 
       const cond = joinConditions.get(leftTable)?.get(rightTable) ??
         joinConditions.get(rightTable)?.get(leftTable);
@@ -1013,7 +1021,8 @@ function findJoinCondition(
   }
 
   if (conditions.length === 1) {
-    return conditions[0];
+    // Non-null assertion: length === 1 guarantees conditions[0] exists
+    return conditions[0]!;
   }
 
   return {
@@ -1051,7 +1060,8 @@ export function suggestJoinOrder(
 
   // Start with smallest table
   const sorted = [...tables].sort((a, b) => a.rowCount - b.rowCount);
-  const result: string[] = [sorted[0].name];
+  // Non-null assertion: tables.length > 1 guarantees sorted[0] exists
+  const result: string[] = [sorted[0]!.name];
   const remaining = new Set(sorted.slice(1).map(t => t.name));
 
   while (remaining.size > 0) {
@@ -1084,7 +1094,8 @@ export function suggestJoinOrder(
           rows: tables.find(t => t.name === name)?.rowCount ?? Infinity,
         }))
         .sort((a, b) => a.rows - b.rows)[0];
-      bestTable = smallest.name;
+      // Non-null assertion: remaining set is non-empty, so sorted array has at least one element
+      bestTable = smallest!.name;
     }
 
     result.push(bestTable);

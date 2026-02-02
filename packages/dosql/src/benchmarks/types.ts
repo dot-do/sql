@@ -119,7 +119,7 @@ export interface BenchmarkOperation {
   /** SQL statement or description */
   sql: string;
   /** Parameters for the operation */
-  params?: Record<string, unknown>;
+  params?: Record<string, unknown> | undefined;
   /** Execution time in milliseconds */
   durationMs: number;
   /** Number of rows affected/returned */
@@ -127,7 +127,7 @@ export interface BenchmarkOperation {
   /** Success status */
   success: boolean;
   /** Error message if failed */
-  error?: string;
+  error?: string | undefined;
   /** Timestamp when operation started */
   startedAt: number;
 }

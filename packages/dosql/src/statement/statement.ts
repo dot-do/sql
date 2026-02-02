@@ -557,17 +557,19 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Parse columns
     const columns: ColumnInfo[] = [];
-    const columnParts = columnDefs.split(',').map(c => c.trim());
+    // columnDefs is guaranteed to exist from the regex match
+    const columnParts = columnDefs!.split(',').map(c => c.trim());
 
     for (const part of columnParts) {
       const colMatch = part.match(/^(\w+)\s+(\w+)/);
       if (colMatch) {
         const col: ColumnInfo & { primaryKey?: boolean; autoIncrement?: boolean; defaultValue?: SqlValue } = {
-          name: colMatch[1],
-          column: colMatch[1],
+          // Non-null assertion: regex groups [1] and [2] are guaranteed by the regex match
+          name: colMatch[1]!,
+          column: colMatch[1]!,
           table: tableName,
           database: 'main',
-          type: colMatch[2].toUpperCase(),
+          type: colMatch[2]!.toUpperCase(),
         };
 
         // Check for PRIMARY KEY
@@ -583,7 +585,8 @@ export class InMemoryEngine implements ExecutionEngine {
         // Check for DEFAULT value
         const defaultMatch = part.match(/DEFAULT\s+(-?\d+(?:\.\d+)?|'[^']*'|NULL)/i);
         if (defaultMatch) {
-          const defVal = defaultMatch[1];
+          // Non-null assertion: regex group [1] is guaranteed by the regex match
+          const defVal = defaultMatch[1]!;
           if (defVal.toUpperCase() === 'NULL') {
             col.defaultValue = null;
           } else if (defVal.startsWith("'") && defVal.endsWith("'")) {
@@ -646,7 +649,8 @@ export class InMemoryEngine implements ExecutionEngine {
 
     // Parse column definitions with sort order
     const columns: IndexColumn[] = [];
-    const columnDefs = columnList.split(',').map(c => c.trim());
+    // columnList is guaranteed to exist from the regex match
+    const columnDefs = columnList!.split(',').map(c => c.trim());
 
     for (const colDef of columnDefs) {
       const colMatch = colDef.match(/^(\w+)(?:\s+(ASC|DESC))?$/i);
@@ -764,8 +768,10 @@ export class InMemoryEngine implements ExecutionEngine {
       const row: Record<string, SqlValue> = {};
 
       for (let i = 0; i < columnNames.length; i++) {
-        const colName = columnNames[i];
-        const placeholder = valuePlaceholders[i];
+        // Non-null assertion: i < columnNames.length guarantees valid access
+        const colName = columnNames[i]!;
+        // Non-null assertion: valuePlaceholders has same length as columnNames
+        const placeholder = valuePlaceholders[i]!;
 
         if (placeholder === '?') {
           row[colName] = params[paramIndex++];
@@ -914,7 +920,8 @@ export class InMemoryEngine implements ExecutionEngine {
       // colListStr should be "(col1, col2, ...)"
       const colMatch = colListStr.match(/^\(([^)]+)\)\s*$/);
       if (colMatch) {
-        columnNames = colMatch[1].split(',').map(c => c.trim());
+        // Non-null assertion: regex group [1] is guaranteed by the regex match
+        columnNames = colMatch[1]!.split(',').map(c => c.trim());
         rest = rest.slice(endIdx);
       }
     }
@@ -1373,7 +1380,8 @@ export class InMemoryEngine implements ExecutionEngine {
       rows = [{}];
     } else if (tableRefs.length === 1) {
       // Single table query - prefix columns with alias for consistent resolution
-      const ref = tableRefs[0];
+      // Non-null assertion: tableRefs.length === 1 guarantees tableRefs[0] exists
+      const ref = tableRefs[0]!;
       const table = aliasToTable.get(ref.alias)!;
       rows = table.rows.map(row => {
         const prefixed: Record<string, SqlValue> = {};

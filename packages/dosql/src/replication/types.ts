@@ -61,7 +61,7 @@ export interface ReplicaInfo {
   /** Durable Object stub URL for RPC */
   doUrl: string;
   /** Region-specific metadata */
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | undefined;
 }
 
 // =============================================================================
@@ -95,7 +95,7 @@ export interface WALBatch {
   /** Timestamp when batch was created */
   timestamp: number;
   /** Whether this is a compressed batch */
-  compressed?: boolean;
+  compressed?: boolean | undefined;
 }
 
 /**
@@ -109,7 +109,7 @@ export interface WALAck {
   /** Processing time in milliseconds */
   processingTimeMs: number;
   /** Any errors encountered */
-  errors?: WALApplyError[];
+  errors?: WALApplyError[] | undefined;
 }
 
 /**
@@ -193,9 +193,9 @@ export interface SnapshotRequest {
   /** Requesting replica ID */
   replicaId: ReplicaId;
   /** Current LSN of the replica (for incremental sync) */
-  currentLSN?: bigint;
+  currentLSN?: bigint | undefined;
   /** Preferred chunk size */
-  preferredChunkSize?: number;
+  preferredChunkSize?: number | undefined;
 }
 
 // =============================================================================
@@ -232,7 +232,7 @@ export interface RoutingDecision {
   /** Reason for routing decision */
   reason: string;
   /** Estimated latency */
-  estimatedLatencyMs?: number;
+  estimatedLatencyMs?: number | undefined;
   /** Whether this is a fallback decision */
   fallback: boolean;
 }
@@ -248,7 +248,7 @@ export interface SessionState {
   /** Session start time */
   startedAt: number;
   /** Preferred region */
-  preferredRegion?: string;
+  preferredRegion?: string | undefined;
 }
 
 // =============================================================================
@@ -311,17 +311,17 @@ export interface FailoverState {
   /** Current failover status */
   status: 'idle' | 'initiating' | 'in_progress' | 'completed' | 'failed' | 'rolled_back';
   /** Old primary */
-  oldPrimary?: ReplicaId;
+  oldPrimary?: ReplicaId | undefined;
   /** New primary */
-  newPrimary?: ReplicaId;
+  newPrimary?: ReplicaId | undefined;
   /** Failover reason */
-  reason?: FailoverReason;
+  reason?: FailoverReason | undefined;
   /** Failover start time */
-  startedAt?: number;
+  startedAt?: number | undefined;
   /** Failover completion time */
-  completedAt?: number;
+  completedAt?: number | undefined;
   /** Any errors during failover */
-  errors?: string[];
+  errors?: string[] | undefined;
 }
 
 /**
@@ -331,11 +331,11 @@ export interface FailoverDecision {
   /** Whether to proceed with failover */
   proceed: boolean;
   /** Candidate for new primary */
-  candidate?: ReplicaId;
+  candidate?: ReplicaId | undefined;
   /** Reason for decision */
   reason: string;
   /** Data loss estimate (LSN difference) */
-  dataLossEstimate?: bigint;
+  dataLossEstimate?: bigint | undefined;
 }
 
 // =============================================================================
@@ -370,7 +370,7 @@ export interface Conflict {
   /** Conflict detection timestamp */
   detectedAt: number;
   /** Resolution (if resolved) */
-  resolution?: ConflictResolution;
+  resolution?: ConflictResolution | undefined;
 }
 
 /**

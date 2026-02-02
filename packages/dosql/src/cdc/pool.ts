@@ -77,7 +77,7 @@ export interface CDCConsumer {
   /** Unique consumer identifier */
   id: string;
   /** Consumer name (optional, for debugging) */
-  name?: string;
+  name?: string | undefined;
   /** Current state */
   state: ConsumerState;
   /** When the consumer connected */
@@ -93,9 +93,9 @@ export interface CDCConsumer {
   /** Whether backpressure is active for this consumer */
   backpressureActive: boolean;
   /** Filter applied to this consumer */
-  filter?: CDCFilter;
+  filter?: CDCFilter | undefined;
   /** Custom metadata */
-  metadata?: Record<string, string>;
+  metadata?: Record<string, string> | undefined;
 }
 
 /**
@@ -108,11 +108,11 @@ interface InternalConsumer extends CDCConsumer {
   /** Maximum buffer size */
   maxBufferSize: number;
   /** Callback when consumer is ready for more events */
-  onReady?: () => void;
+  onReady?: (() => void) | undefined;
   /** Callback when consumer receives events */
-  onEvents?: (events: CDCEvent[]) => Promise<void>;
+  onEvents?: ((events: CDCEvent[]) => Promise<void>) | undefined;
   /** Callback when backpressure changes */
-  onBackpressure?: (signal: BackpressureSignal) => void;
+  onBackpressure?: ((signal: BackpressureSignal) => void) | undefined;
 }
 
 /**

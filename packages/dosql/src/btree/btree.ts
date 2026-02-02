@@ -299,7 +299,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     );
 
     if (found) {
-      return this.valueCodec.decode(leafPage.values[index]);
+      // Non-null assertion: found=true means index is valid
+      return this.valueCodec.decode(leafPage.values[index]!);
     }
 
     return undefined;
@@ -330,7 +331,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
       // If binary search returns found=false at index i, the key is between
       // keys[i-1] and keys[i], so we should go to children[i] (keys < keys[i]).
       const childIndex = found ? index + 1 : index;
-      const childId = page.children[childIndex];
+      // Non-null assertion: childIndex is always valid for a well-formed B+tree
+      const childId = page.children[childIndex]!;
       page = await this.readPage(childId);
     }
 
@@ -352,7 +354,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     if (path.length === 0) {
       throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'B-tree findPath returned empty path');
     }
-    const leafPage = path[path.length - 1];
+    // Non-null assertion is safe: we just checked path.length > 0
+    const leafPage = path[path.length - 1]!;
 
     // Check if key already exists
     const { found, index } = binarySearch(
@@ -400,7 +403,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
 
       // Same logic as findLeaf: if found, go right; otherwise, go to insertion point
       const childIndex = found ? index + 1 : index;
-      const childId = page.children[childIndex];
+      // Non-null assertion: childIndex is always valid for a well-formed B+tree
+      const childId = page.children[childIndex]!;
       page = await this.readPage(childId);
       path.push(page);
     }
@@ -502,7 +506,9 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
       const newRootId = this.allocPageId();
       const newRoot = createInternalPage(newRootId);
 
-      const oldRootId = path[0].id;
+      // Non-null assertion: path[0] exists because we only get here when parentIndex < 0,
+      // which means the path has at least one element (the current root)
+      const oldRootId = path[0]!.id;
       newRoot.keys.push(key);
       newRoot.children.push(oldRootId);
       newRoot.children.push(rightChildId);
@@ -514,7 +520,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
       return;
     }
 
-    const parent = path[parentIndex];
+    // Non-null assertion: parentIndex >= 0 and was derived from a valid path traversal
+    const parent = path[parentIndex]!;
     const { index } = binarySearch(parent.keys, key, (a, b) =>
       this.compareKeys(a, b)
     );
@@ -580,7 +587,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     if (path.length === 0) {
       throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'B-tree findPath returned empty path');
     }
-    const leaf = path[path.length - 1];
+    // Non-null assertion is safe: we just checked path.length > 0
+    const leaf = path[path.length - 1]!;
 
     const { found, index } = binarySearch(leaf.keys, serializedKey, (a, b) =>
       this.compareKeys(a, b)
@@ -613,14 +621,16 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   private async handleUnderflow(path: Page[], nodeIndex: number): Promise<void> {
     if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'B-tree not initialized');
 
-    const node = path[nodeIndex];
+    // Non-null assertion: nodeIndex is derived from valid path traversal
+    const node = path[nodeIndex]!;
 
     // Root doesn't need to meet minimum key requirement
     if (node.id === this.metadata.rootPageId) {
       // If root is internal and has only one child, shrink the tree
       if (node.type === PageType.INTERNAL && node.keys.length === 0 && node.children.length === 1) {
         const oldRootId = node.id;
-        this.metadata.rootPageId = node.children[0];
+        // Non-null assertion: we checked children.length === 1
+        this.metadata.rootPageId = node.children[0]!;
         this.metadata.height--;
         // Delete the old root page from storage
         await this.deletePage(oldRootId);
@@ -628,12 +638,14 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
       return;
     }
 
-    const parent = path[nodeIndex - 1];
+    // Non-null assertion: nodeIndex > 0 since we're not the root, so parent exists
+    const parent = path[nodeIndex - 1]!;
     const childIndexInParent = this.findChildIndex(parent, node.id);
 
     // Try to borrow from left sibling first
     if (childIndexInParent > 0) {
-      const leftSiblingId = parent.children[childIndexInParent - 1];
+      // Non-null assertion: childIndexInParent > 0 guarantees this exists
+      const leftSiblingId = parent.children[childIndexInParent - 1]!;
       const leftSibling = await this.readPage(leftSiblingId);
 
       if (leftSibling.keys.length > this.config.minKeys) {
@@ -644,7 +656,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
 
     // Try to borrow from right sibling
     if (childIndexInParent < parent.children.length - 1) {
-      const rightSiblingId = parent.children[childIndexInParent + 1];
+      // Non-null assertion: checked bounds above
+      const rightSiblingId = parent.children[childIndexInParent + 1]!;
       const rightSibling = await this.readPage(rightSiblingId);
 
       if (rightSibling.keys.length > this.config.minKeys) {
@@ -656,12 +669,14 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     // Neither sibling can donate, so merge
     if (childIndexInParent > 0) {
       // Merge with left sibling (current node merges into left)
-      const leftSiblingId = parent.children[childIndexInParent - 1];
+      // Non-null assertion: childIndexInParent > 0 guarantees this exists
+      const leftSiblingId = parent.children[childIndexInParent - 1]!;
       const leftSibling = await this.readPage(leftSiblingId);
       await this.mergeNodes(parent, leftSibling, node, childIndexInParent - 1);
     } else {
       // Merge with right sibling (right merges into current)
-      const rightSiblingId = parent.children[childIndexInParent + 1];
+      // Non-null assertion: if childIndexInParent === 0 and we're not root, right sibling must exist
+      const rightSiblingId = parent.children[childIndexInParent + 1]!;
       const rightSibling = await this.readPage(rightSiblingId);
       await this.mergeNodes(parent, node, rightSibling, childIndexInParent);
     }
@@ -673,7 +688,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
       // Root has become empty after merge - shrink tree
       if (parent.type === PageType.INTERNAL && parent.children.length === 1) {
         const oldRootId = parent.id;
-        this.metadata.rootPageId = parent.children[0];
+        // Non-null assertion: we checked children.length === 1
+        this.metadata.rootPageId = parent.children[0]!;
         this.metadata.height--;
         // Delete the old root page from storage
         await this.deletePage(oldRootId);
@@ -835,7 +851,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     while (true) {
       // Iterate through current leaf
       while (i < leaf.keys.length) {
-        const keyBytes = leaf.keys[i];
+        // Non-null assertion: i < leaf.keys.length guarantees valid access
+        const keyBytes = leaf.keys[i]!;
 
         // Check if we've passed the end
         if (this.compareKeys(keyBytes, endKey) >= 0) {
@@ -843,7 +860,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
         }
 
         const key = this.keyCodec.decode(keyBytes);
-        const value = this.valueCodec.decode(leaf.values[i]);
+        // Non-null assertion: i < leaf.keys.length, and values array matches keys
+        const value = this.valueCodec.decode(leaf.values[i]!);
         yield [key, value];
         i++;
       }
@@ -868,14 +886,16 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     // Find the leftmost leaf
     let page = await this.readPage(this.metadata.rootPageId);
     while (page.type === PageType.INTERNAL) {
-      page = await this.readPage(page.children[0]);
+      // Non-null assertion: internal nodes always have at least one child
+      page = await this.readPage(page.children[0]!);
     }
 
     // Iterate through all leaves using the leaf chain
     while (true) {
       for (let i = 0; i < page.keys.length; i++) {
-        const key = this.keyCodec.decode(page.keys[i]);
-        const value = this.valueCodec.decode(page.values[i]);
+        // Non-null assertion: i < page.keys.length guarantees valid access
+        const key = this.keyCodec.decode(page.keys[i]!);
+        const value = this.valueCodec.decode(page.values[i]!);
         yield [key, value];
       }
 

@@ -26,8 +26,8 @@ export type SetOperationType = 'UNION' | 'INTERSECT' | 'EXCEPT';
 export interface SourcePosition {
   start: number;
   end: number;
-  line?: number;
-  column?: number;
+  line?: number | undefined;
+  column?: number | undefined;
 }
 
 /**
@@ -36,12 +36,12 @@ export interface SourcePosition {
 export interface SimpleSelectNode {
   type: 'simpleSelect';
   sql: string;
-  columns?: string[];
-  from?: string;
-  where?: string;
-  groupBy?: string[];
-  having?: string;
-  position?: SourcePosition;
+  columns?: string[] | undefined;
+  from?: string | undefined;
+  where?: string | undefined;
+  groupBy?: string[] | undefined;
+  having?: string | undefined;
+  position?: SourcePosition | undefined;
 }
 
 /**
@@ -53,7 +53,7 @@ export interface SetOperationNode {
   all: boolean;
   left: SelectNode;
   right: SelectNode;
-  position?: SourcePosition;
+  position?: SourcePosition | undefined;
 }
 
 /**
@@ -75,11 +75,11 @@ export type NullsPosition = 'FIRST' | 'LAST';
  * Order by item
  */
 export interface OrderByItem {
-  column?: string;
-  columnIndex?: number;
-  expression?: string;
+  column?: string | undefined;
+  columnIndex?: number | undefined;
+  expression?: string | undefined;
   direction: SortDirection;
-  nullsPosition?: NullsPosition;
+  nullsPosition?: NullsPosition | undefined;
 }
 
 /**
@@ -89,7 +89,7 @@ export interface CompoundOperation {
   operator: SetOperationType;
   all: boolean;
   select: SelectNode;
-  position?: SourcePosition;
+  position?: SourcePosition | undefined;
 }
 
 /**
@@ -97,9 +97,9 @@ export interface CompoundOperation {
  */
 export interface CTEDefinition {
   name: string;
-  columns?: string[];
+  columns?: string[] | undefined;
   query: string;
-  recursive?: boolean;
+  recursive?: boolean | undefined;
 }
 
 /**
@@ -107,13 +107,13 @@ export interface CTEDefinition {
  */
 export interface CompoundSelectStatement {
   type: 'compoundSelect';
-  cte?: CTEDefinition[];
+  cte?: CTEDefinition[] | undefined;
   base: SelectNode;
   operations: CompoundOperation[];
-  orderBy?: OrderByItem[];
-  limit?: number;
-  offset?: number;
-  position?: SourcePosition;
+  orderBy?: OrderByItem[] | undefined;
+  limit?: number | undefined;
+  offset?: number | undefined;
+  position?: SourcePosition | undefined;
 }
 
 /**
@@ -127,7 +127,7 @@ export interface SetOperationParseSuccess {
 export interface SetOperationParseError {
   success: false;
   error: string;
-  position?: SourcePosition;
+  position?: SourcePosition | undefined;
 }
 
 export type SetOperationParseResult = SetOperationParseSuccess | SetOperationParseError;
@@ -143,7 +143,7 @@ export interface CompoundSelectParseSuccess {
 export interface CompoundSelectParseError {
   success: false;
   error: string;
-  position?: SourcePosition;
+  position?: SourcePosition | undefined;
 }
 
 export type CompoundSelectParseResult = CompoundSelectParseSuccess | CompoundSelectParseError;
@@ -153,8 +153,8 @@ export type CompoundSelectParseResult = CompoundSelectParseSuccess | CompoundSel
  */
 export interface SetOpValidationResult {
   valid: boolean;
-  error?: string;
-  warnings?: string[];
+  error?: string | undefined;
+  warnings?: string[] | undefined;
 }
 
 // =============================================================================

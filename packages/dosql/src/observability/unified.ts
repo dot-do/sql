@@ -75,17 +75,17 @@ export interface UnifiedObservabilityConfig {
   /** Service name for identification */
   serviceName: string;
   /** Instance ID for multi-instance deployments */
-  instanceId?: string;
+  instanceId?: string | undefined;
   /** Tracing configuration */
-  tracing?: Partial<DistributedTracerConfig>;
+  tracing?: Partial<DistributedTracerConfig> | undefined;
   /** Metrics configuration */
-  metrics?: Partial<MetricsConfig>;
+  metrics?: Partial<MetricsConfig> | undefined;
   /** Logging configuration */
   logging?: {
-    level?: LogLevel;
-    sink?: LogSink;
-    includeTraceContext?: boolean;
-  };
+    level?: LogLevel | undefined;
+    sink?: LogSink | undefined;
+    includeTraceContext?: boolean | undefined;
+  } | undefined;
 }
 
 /**

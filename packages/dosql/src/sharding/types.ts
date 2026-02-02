@@ -111,7 +111,7 @@ export interface ShardedTableConfig<T = unknown> {
 export interface UnshardedTableConfig {
   type: 'unsharded';
   /** Specific shard where data resides (optional, uses primary shard if not set, branded type) */
-  shard?: ShardId;
+  shard?: ShardId | undefined;
 }
 
 /**
@@ -201,9 +201,9 @@ export interface VSchema<Tables extends Record<string, TableShardingConfig> = Re
   /** Shard definitions */
   shards: ShardConfig[];
   /** Default shard for unsharded tables (branded type) */
-  defaultShard?: ShardId;
+  defaultShard?: ShardId | undefined;
   /** Global settings */
-  settings?: VSchemaSettings;
+  settings?: VSchemaSettings | undefined;
 }
 
 /**

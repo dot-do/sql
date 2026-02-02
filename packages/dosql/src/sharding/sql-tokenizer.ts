@@ -611,7 +611,9 @@ export function getTokensBetweenKeywords(
   let endIndex = tokens.length;
 
   for (let i = startIndex + 1; i < tokens.length; i++) {
-    if (tokens[i].type === 'keyword' && endKeywordSet.has(tokens[i].value)) {
+    // Non-null assertion: i < tokens.length guarantees valid access
+    const token = tokens[i]!;
+    if (token.type === 'keyword' && endKeywordSet.has(token.value)) {
       endIndex = i;
       break;
     }
@@ -650,18 +652,21 @@ export function extractShardKeyFromTokens(
 
   // Scan for shard key equality: column = value
   for (let i = 0; i < whereTokens.length; i++) {
-    const token = whereTokens[i];
+    // Non-null assertion: i < whereTokens.length guarantees valid access
+    const token = whereTokens[i]!;
 
     // Check if this is our shard key column (case-insensitive)
     if (token.type === 'identifier' && token.value.toLowerCase() === shardKeyLower) {
       // Check for table.column pattern before this
-      if (i > 1 && whereTokens[i - 1].value === '.') {
+      // Non-null assertion: bounds checked in condition
+      if (i > 1 && whereTokens[i - 1]!.value === '.') {
         // Skip the table prefix, this is still our column
       }
 
       // Look for = operator
       const nextNonWhitespace = findNextMeaningful(whereTokens, i + 1);
-      if (nextNonWhitespace !== -1 && whereTokens[nextNonWhitespace].value === '=') {
+      // Non-null assertion: nextNonWhitespace !== -1 guarantees valid access
+      if (nextNonWhitespace !== -1 && whereTokens[nextNonWhitespace]!.value === '=') {
         // Get the value
         const valueIndex = findNextMeaningful(whereTokens, nextNonWhitespace + 1);
         if (valueIndex !== -1) {
@@ -674,7 +679,8 @@ export function extractShardKeyFromTokens(
       }
 
       // Look for IN operator
-      if (nextNonWhitespace !== -1 && whereTokens[nextNonWhitespace].value === 'IN') {
+      // Non-null assertion: nextNonWhitespace !== -1 guarantees valid access
+      if (nextNonWhitespace !== -1 && whereTokens[nextNonWhitespace]!.value === 'IN') {
         const values = parseInList(whereTokens, nextNonWhitespace + 1);
         if (values.length > 0) {
           return { value: values[0], method: 'in-list', values };
@@ -684,11 +690,13 @@ export function extractShardKeyFromTokens(
 
     // Also check for aliased column: alias.column
     if (token.value === '.' && i + 1 < whereTokens.length) {
-      const columnToken = whereTokens[i + 1];
+      // Non-null assertion: bounds checked in condition
+      const columnToken = whereTokens[i + 1]!;
       if (columnToken.type === 'identifier' && columnToken.value.toLowerCase() === shardKeyLower) {
         // Look for = operator
         const nextNonWhitespace = findNextMeaningful(whereTokens, i + 2);
-        if (nextNonWhitespace !== -1 && whereTokens[nextNonWhitespace].value === '=') {
+        // Non-null assertion: nextNonWhitespace !== -1 guarantees valid access
+        if (nextNonWhitespace !== -1 && whereTokens[nextNonWhitespace]!.value === '=') {
           const valueIndex = findNextMeaningful(whereTokens, nextNonWhitespace + 1);
           if (valueIndex !== -1) {
             const valueToken = whereTokens[valueIndex];
@@ -765,7 +773,8 @@ function parseInList(tokens: SQLToken[], startIndex: number): unknown[] {
   let i = startIndex;
 
   // Find opening parenthesis
-  while (i < tokens.length && tokens[i].value !== '(') {
+  // Non-null assertion: i < tokens.length guarantees valid access
+  while (i < tokens.length && tokens[i]!.value !== '(') {
     i++;
   }
   if (i >= tokens.length) return [];
@@ -773,7 +782,8 @@ function parseInList(tokens: SQLToken[], startIndex: number): unknown[] {
 
   let depth = 1;
   while (i < tokens.length && depth > 0) {
-    const token = tokens[i];
+    // Non-null assertion: i < tokens.length guarantees valid access
+    const token = tokens[i]!;
 
     if (token.value === '(') {
       depth++;
@@ -840,7 +850,8 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
   // Parse conditions - simplified approach focusing on equality conditions
   let i = 0;
   while (i < whereTokens.length) {
-    const token = whereTokens[i];
+    // Non-null assertion: i < whereTokens.length guarantees valid access
+    const token = whereTokens[i]!;
 
     // Skip AND/OR keywords
     if (token.type === 'keyword' && (token.value === 'AND' || token.value === 'OR')) {
@@ -856,14 +867,17 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
 
     // Handle function calls in WHERE clause: FUNC(...) op value
     // Function keywords (like LOWER, UPPER, etc.) followed by '(' are function calls
-    if (token.type === 'keyword' && i + 1 < whereTokens.length && whereTokens[i + 1].value === '(') {
+    // Non-null assertion: bounds checked in condition
+    if (token.type === 'keyword' && i + 1 < whereTokens.length && whereTokens[i + 1]!.value === '(') {
       const funcName = token.value;
       // Skip past the function call including its parentheses
       let depth = 0;
       let funcEnd = i + 1;
       while (funcEnd < whereTokens.length) {
-        if (whereTokens[funcEnd].value === '(') depth++;
-        if (whereTokens[funcEnd].value === ')') {
+        // Non-null assertion: funcEnd < whereTokens.length guarantees valid access
+        const funcToken = whereTokens[funcEnd]!;
+        if (funcToken.value === '(') depth++;
+        if (funcToken.value === ')') {
           depth--;
           if (depth === 0) {
             funcEnd++;
@@ -875,7 +889,8 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
 
       // Now check if there's an operator and value after the function call
       if (funcEnd < whereTokens.length) {
-        const opToken = whereTokens[funcEnd];
+        // Non-null assertion: bounds checked above
+        const opToken = whereTokens[funcEnd]!;
         if (opToken.value === '=' || ['!=', '<>', '>', '<', '>=', '<='].includes(opToken.value)) {
           const valueIndex = funcEnd + 1;
           if (valueIndex < whereTokens.length) {
@@ -904,18 +919,21 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
       let nextIndex = i + 1;
 
       // Check for table.column
-      if (nextIndex < whereTokens.length && whereTokens[nextIndex].value === '.') {
+      // Non-null assertion: bounds checked in condition
+      if (nextIndex < whereTokens.length && whereTokens[nextIndex]!.value === '.') {
         tableAlias = column;
         nextIndex++;
-        if (nextIndex < whereTokens.length && whereTokens[nextIndex].type === 'identifier') {
-          column = whereTokens[nextIndex].value;
+        // Non-null assertion: bounds checked in condition
+        if (nextIndex < whereTokens.length && whereTokens[nextIndex]!.type === 'identifier') {
+          column = whereTokens[nextIndex]!.value;
           nextIndex++;
         }
       }
 
       // Look for operator
       if (nextIndex < whereTokens.length) {
-        const opToken = whereTokens[nextIndex];
+        // Non-null assertion: bounds checked above
+        const opToken = whereTokens[nextIndex]!;
 
         if (opToken.value === '=') {
           // Equality condition
@@ -924,16 +942,18 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
             const valueToken = whereTokens[nextIndex];
 
             // Check for subquery: = (SELECT ...)
-            if (valueToken.value === '(') {
+            if (valueToken?.value === '(') {
               // Look ahead to see if this is a subquery
-              if (nextIndex + 1 < whereTokens.length && whereTokens[nextIndex + 1].type === 'keyword' && whereTokens[nextIndex + 1].value === 'SELECT') {
+              // Non-null assertion: bounds checked in condition
+              if (nextIndex + 1 < whereTokens.length && whereTokens[nextIndex + 1]!.type === 'keyword' && whereTokens[nextIndex + 1]!.value === 'SELECT') {
                 // This is a scalar subquery - store as a subquery marker, not a number
                 // Skip past the subquery
                 let depth = 1;
                 let subEnd = nextIndex + 1;
                 while (subEnd < whereTokens.length && depth > 0) {
-                  if (whereTokens[subEnd].value === '(') depth++;
-                  if (whereTokens[subEnd].value === ')') depth--;
+                  // Non-null assertion: subEnd < whereTokens.length guarantees valid access
+                  if (whereTokens[subEnd]!.value === '(') depth++;
+                  if (whereTokens[subEnd]!.value === ')') depth--;
                   subEnd++;
                 }
                 conditions.push({
@@ -948,7 +968,7 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
             }
 
             const value = parseTokenValue(valueToken);
-            if (value !== null || valueToken.type === 'string' || valueToken.type === 'number') {
+            if (value !== null || valueToken?.type === 'string' || valueToken?.type === 'number') {
               conditions.push({
                 column,
                 tableAlias,
@@ -972,8 +992,9 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
           // Skip to end of IN list
           let depth = 0;
           while (nextIndex < whereTokens.length) {
-            if (whereTokens[nextIndex].value === '(') depth++;
-            if (whereTokens[nextIndex].value === ')') {
+            // Non-null assertion: nextIndex < whereTokens.length guarantees valid access
+            if (whereTokens[nextIndex]!.value === '(') depth++;
+            if (whereTokens[nextIndex]!.value === ')') {
               depth--;
               if (depth === 0) {
                 nextIndex++;
@@ -996,7 +1017,8 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
           }
 
           // Skip AND
-          if (nextIndex < whereTokens.length && whereTokens[nextIndex].value === 'AND') {
+          // Non-null assertion: bounds checked in condition
+          if (nextIndex < whereTokens.length && whereTokens[nextIndex]!.value === 'AND') {
             nextIndex++;
           }
 
@@ -1035,11 +1057,13 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
           // IS NULL / IS NOT NULL
           nextIndex++;
           let isNot = false;
-          if (nextIndex < whereTokens.length && whereTokens[nextIndex].value === 'NOT') {
+          // Non-null assertion: bounds checked in condition
+          if (nextIndex < whereTokens.length && whereTokens[nextIndex]!.value === 'NOT') {
             isNot = true;
             nextIndex++;
           }
-          if (nextIndex < whereTokens.length && whereTokens[nextIndex].value === 'NULL') {
+          // Non-null assertion: bounds checked in condition
+          if (nextIndex < whereTokens.length && whereTokens[nextIndex]!.value === 'NULL') {
             conditions.push({
               column,
               tableAlias,
@@ -1052,7 +1076,8 @@ export function extractConditionsFromTokens(tokens: SQLToken[]): {
           // LIKE condition
           nextIndex++;
           if (nextIndex < whereTokens.length) {
-            const valueToken = whereTokens[nextIndex];
+            // Non-null assertion: bounds checked above
+            const valueToken = whereTokens[nextIndex]!;
             conditions.push({
               column,
               tableAlias,

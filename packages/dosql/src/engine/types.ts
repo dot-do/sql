@@ -174,9 +174,9 @@ export interface ColumnDef {
 export interface TableSchema {
   name: string;
   columns: ColumnDef[];
-  primaryKey?: string[];
-  indexes?: IndexDef[];
-  storageConfig?: import('./storage-config.js').TableStorageConfig;
+  primaryKey?: string[] | undefined;
+  indexes?: IndexDef[] | undefined;
+  storageConfig?: import('./storage-config.js').TableStorageConfig | undefined;
 }
 
 /**
@@ -237,7 +237,7 @@ export type Expression =
  */
 export interface ColumnRef {
   type: 'columnRef';
-  table?: string;
+  table?: string | undefined;
   column: string;
 }
 
@@ -301,7 +301,7 @@ export interface AggregateExpr {
 export interface CaseExpr {
   type: 'case';
   /** Operand for simple CASE (undefined for searched CASE) */
-  operand?: Expression;
+  operand?: Expression | undefined;
   /**
    * WHEN clauses
    * - For searched CASE: each has { condition: Expression, result: Expression }
@@ -311,7 +311,7 @@ export interface CaseExpr {
     | { condition: Expression; result: Expression }
     | { value: Expression; result: Expression }
   >;
-  else?: Expression;
+  else?: Expression | undefined;
 }
 
 /**
@@ -669,11 +669,11 @@ export interface QueryResult<T = Row> {
   /** Rows returned by the query */
   rows: T[];
   /** Number of rows affected (for INSERT/UPDATE/DELETE) */
-  rowsAffected?: number;
+  rowsAffected?: number | undefined;
   /** Column metadata */
-  columns?: { name: string; type: string }[];
+  columns?: { name: string; type: string }[] | undefined;
   /** Execution statistics */
-  stats?: ExecutionStats;
+  stats?: ExecutionStats | undefined;
 }
 
 /**

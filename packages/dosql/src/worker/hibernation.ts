@@ -136,38 +136,104 @@ interface HibernatableWebSocket extends WebSocket {
 // =============================================================================
 
 /**
+ * Standard Durable Object constructor signature.
+ *
+ * This matches Cloudflare's DurableObject constructor: (ctx: DurableObjectState, env: Env).
+ * Using explicit parameter types provides better type inference than `unknown[]`.
+ */
+type DurableObjectConstructorArgs = [ctx: DurableObjectState, env: unknown];
+
+/**
  * Generic constructor type for Durable Object mixin patterns.
  *
- * TypeScript's mixin pattern requires `any[]` for constructor rest parameters
- * (TS2545). This is a known TypeScript limitation documented in the handbook.
- * The constraint ensures type safety at the instance level while allowing
- * constructor flexibility required for mixins.
+ * ## Why this type exists
+ *
+ * TypeScript's mixin pattern has a known limitation (TS2545/TS2509): when extending
+ * a class expression, the constructor parameter types cannot be inferred. The standard
+ * workaround is to use `...args: any[]`, but this sacrifices type safety.
+ *
+ * ## Our approach
+ *
+ * Instead of using `any[]`, we use `DurableObjectConstructorArgs` which matches
+ * Cloudflare's actual DO constructor signature `(ctx: DurableObjectState, env: Env)`.
+ * This provides:
+ *
+ * 1. **Compile-time safety**: Constructor args are typed, not `any`
+ * 2. **Runtime correctness**: Matches actual Cloudflare Worker behavior
+ * 3. **IDE support**: Better autocomplete and error messages
+ *
+ * ## Trade-off
+ *
+ * This is slightly less flexible than `any[]` - it assumes all DOs use the standard
+ * `(ctx, env)` signature. However, this is the canonical Cloudflare pattern and
+ * covers all real-world use cases.
  *
  * @see https://www.typescriptlang.org/docs/handbook/mixins.html
+ * @see https://developers.cloudflare.com/durable-objects/api/
  *
  * @template TInstance - The instance type that must extend DurableObject
  */
-// Using any[] is required by TypeScript for mixin constructor patterns (TS2545)
-// The DurableObject constraint on TInstance provides type safety for the instance
 type DurableObjectMixinBase<TInstance extends DurableObject = DurableObject> =
-  new (...args: any[]) => TInstance;  // eslint-disable-line @typescript-eslint/no-explicit-any
+  new (...args: DurableObjectConstructorArgs) => TInstance;
+
+/**
+ * Interface for accessing the ctx property on Durable Object instances.
+ *
+ * Cloudflare's DurableObject base class stores the state in a `ctx` property.
+ * This interface provides type-safe access to that property for the mixin.
+ *
+ * @internal
+ */
+interface DurableObjectWithCtx {
+  readonly ctx: DurableObjectState;
+}
+
+/**
+ * Type guard to check if an object has the `ctx` property from DurableObject.
+ *
+ * @param obj - The object to check
+ * @returns True if the object has a ctx property
+ *
+ * @internal
+ */
+function hasDurableObjectCtx(obj: unknown): obj is DurableObjectWithCtx {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    'ctx' in obj &&
+    typeof (obj as DurableObjectWithCtx).ctx === 'object'
+  );
+}
 
 /**
  * Mixin to add hibernation support to any Durable Object class.
  *
- * Usage:
+ * This mixin adds WebSocket hibernation capabilities to a Durable Object,
+ * allowing the DO to sleep while keeping WebSocket connections open. This
+ * can reduce costs by ~95% for idle connections.
+ *
+ * ## Usage
+ *
  * ```typescript
- * export class MyDatabase extends HibernationMixin(BaseDurableObject) {
- *   // Your DO implementation
+ * export class MyDatabase extends HibernationMixin(DurableObject) {
+ *   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+ *     // Handle incoming message
+ *     this.sendResponse(ws, { id: 'response', result: 'ok' });
+ *     this.scheduleHibernation();
+ *   }
  * }
  * ```
  *
- * @param Base - The base Durable Object class to extend
- * @returns A class with hibernation support
+ * ## Type Safety
  *
- * @remarks
- * The mixin pattern uses `any[]` for constructor args as required by TypeScript.
- * Type safety is enforced through the DurableObject instance constraint.
+ * The mixin uses `DurableObjectConstructorArgs` instead of `any[]` to provide
+ * type-safe constructor parameters. This assumes the standard Cloudflare DO
+ * constructor signature `(ctx: DurableObjectState, env: Env)`.
+ *
+ * @param Base - The base Durable Object class to extend
+ * @returns A class with hibernation support mixed in
+ *
+ * @typeParam T - Constructor type that produces a DurableObject instance
  */
 export function HibernationMixin<T extends DurableObjectMixinBase>(Base: T) {
   return class extends Base {
@@ -198,10 +264,23 @@ export function HibernationMixin<T extends DurableObjectMixinBase>(Base: T) {
 
     /**
      * Gets the DurableObjectState for WebSocket management.
-     * Override in subclass if state is stored differently.
+     *
+     * The base DurableObject class stores state in a `ctx` property. This method
+     * provides type-safe access with a runtime check. Override in subclass if
+     * state is stored differently.
+     *
+     * @returns The DurableObjectState for this instance
+     * @throws Error if the ctx property is not accessible (indicates misuse)
      */
     protected getState(): DurableObjectState {
-      return (this as unknown as { ctx: DurableObjectState }).ctx;
+      if (hasDurableObjectCtx(this)) {
+        return this.ctx;
+      }
+      // Fallback for edge cases - should not happen with proper usage
+      throw new Error(
+        'HibernationMixin: Unable to access DurableObjectState. ' +
+        'Ensure the base class is a DurableObject or override getState().'
+      );
     }
 
     /**

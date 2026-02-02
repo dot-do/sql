@@ -231,7 +231,7 @@ export type AnyConstraint =
  */
 export interface TableConstraints {
   /** Primary key (at most one per table) */
-  primaryKey?: PrimaryKeyConstraint;
+  primaryKey?: PrimaryKeyConstraint | undefined;
   /** Foreign keys */
   foreignKeys: ForeignKeyConstraint[];
   /** Unique constraints */

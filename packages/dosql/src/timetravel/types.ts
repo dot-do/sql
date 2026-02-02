@@ -57,7 +57,7 @@ export interface BranchTimePoint {
   /** The branch name */
   branch: string;
   /** Optional point within the branch (defaults to HEAD) */
-  point?: TimePoint;
+  point?: TimePoint | undefined;
 }
 
 /**
@@ -67,13 +67,13 @@ export interface BranchTimePoint {
 export interface RelativeTimePoint {
   type: 'relative';
   /** The anchor point (defaults to HEAD) */
-  anchor?: TimePoint;
+  anchor?: TimePoint | undefined;
   /** Offset in LSN (negative = earlier) */
-  lsnOffset?: bigint;
+  lsnOffset?: bigint | undefined;
   /** Offset in time (negative = earlier) */
-  timeOffset?: number;
+  timeOffset?: number | undefined;
   /** Offset in versions/snapshots (negative = earlier) */
-  versionOffset?: number;
+  versionOffset?: number | undefined;
 }
 
 /**
@@ -109,7 +109,7 @@ export interface TimeTravelQuery {
   /** Scope of the query */
   scope: TimeTravelScope;
   /** Optional table-specific time points */
-  tableOverrides?: Map<string, TimePoint>;
+  tableOverrides?: Map<string, TimePoint> | undefined;
 }
 
 /**
@@ -121,7 +121,7 @@ export interface AsOfClause {
   /** The value (string for timestamp/snapshot/branch, bigint for LSN, number for version) */
   value: string | bigint | number;
   /** Optional branch context */
-  branch?: string;
+  branch?: string | undefined;
 }
 
 // =============================================================================
@@ -137,16 +137,16 @@ export interface ResolvedTimePoint {
   /** The resolved timestamp */
   timestamp: Date;
   /** The snapshot ID if available */
-  snapshotId?: SnapshotId;
+  snapshotId?: SnapshotId | undefined;
   /** The branch context */
   branch: string;
   /** The snapshot containing this point (may be earlier than resolved point) */
-  baseSnapshot?: Snapshot;
+  baseSnapshot?: Snapshot | undefined;
   /** WAL entries to replay from snapshot to reach this point */
   walReplayRange?: {
     fromLSN: bigint;
     toLSN: bigint;
-  };
+  } | undefined;
   /** Resolution metadata */
   resolution: {
     /** Whether the exact point was found */
@@ -154,7 +154,7 @@ export interface ResolvedTimePoint {
     /** The original time point requested */
     original: TimePoint;
     /** Notes about the resolution */
-    notes?: string;
+    notes?: string | undefined;
   };
 }
 
@@ -236,7 +236,7 @@ export interface BranchHistoryNode {
     parentSnapshot: SnapshotId;
     forkLSN: bigint;
     forkTimestamp: Date;
-  };
+  } | undefined;
 }
 
 /**
@@ -290,7 +290,7 @@ export interface LakehouseSnapshot {
   /** Schema version at snapshot time */
   schemaVersion: number;
   /** Optional description */
-  description?: string;
+  description?: string | undefined;
 }
 
 /**
@@ -306,7 +306,7 @@ export interface TableSnapshot {
   /** Size in bytes */
   sizeBytes: number;
   /** Partition information if applicable */
-  partitions?: PartitionSnapshot[];
+  partitions?: PartitionSnapshot[] | undefined;
 }
 
 /**
@@ -330,13 +330,13 @@ export interface GlobalTimeTravelOptions {
   /** The time point to query as of */
   asOf: TimePoint;
   /** Whether to include data not yet in lakehouse (from DOs) */
-  includePendingData?: boolean;
+  includePendingData?: boolean | undefined;
   /** Consistency level */
   consistency: 'snapshot' | 'eventual' | 'strong';
   /** Tables to query (empty = all) */
-  tables?: string[];
+  tables?: string[] | undefined;
   /** Timeout for cross-shard coordination */
-  timeoutMs?: number;
+  timeoutMs?: number | undefined;
 }
 
 /**
@@ -346,7 +346,7 @@ export interface GlobalTimeTravelResult {
   /** The lakehouse snapshot used */
   lakehouseSnapshot: LakehouseSnapshot;
   /** Data from DOs not yet in lakehouse */
-  pendingData?: PendingDataResult[];
+  pendingData?: PendingDataResult[] | undefined;
   /** The effective time point */
   effectivePoint: ResolvedTimePoint;
   /** Per-shard status */
@@ -366,7 +366,7 @@ export interface PendingDataResult {
   /** Whether this data was included in the result */
   included: boolean;
   /** Entries if included */
-  entries?: WALEntry[];
+  entries?: WALEntry[] | undefined;
 }
 
 /**
@@ -382,7 +382,7 @@ export interface ShardQueryStatus {
   /** Latency in ms */
   latencyMs: number;
   /** Error if failed */
-  error?: string;
+  error?: string | undefined;
 }
 
 // =============================================================================
@@ -473,15 +473,15 @@ export class TimeTravelError extends Error {
  */
 export interface SerializedTimePoint {
   type: TimePoint['type'];
-  lsn?: string; // bigint serialized as string
-  timestamp?: string; // ISO date string
-  snapshotId?: SnapshotId;
-  branch?: string;
-  point?: SerializedTimePoint;
-  lsnOffset?: string;
-  timeOffset?: number;
-  versionOffset?: number;
-  anchor?: SerializedTimePoint;
+  lsn?: string | undefined; // bigint serialized as string
+  timestamp?: string | undefined; // ISO date string
+  snapshotId?: SnapshotId | undefined;
+  branch?: string | undefined;
+  point?: SerializedTimePoint | undefined;
+  lsnOffset?: string | undefined;
+  timeOffset?: number | undefined;
+  versionOffset?: number | undefined;
+  anchor?: SerializedTimePoint | undefined;
 }
 
 /**

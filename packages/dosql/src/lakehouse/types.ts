@@ -29,11 +29,11 @@ export interface LakehouseConfig {
   /** Flush interval in milliseconds (default: 60000 = 1 minute) */
   flushIntervalMs: number;
   /** Enable compression (default: true) */
-  compression?: boolean;
+  compression?: boolean | undefined;
   /** Manifest update strategy */
-  manifestStrategy?: 'immediate' | 'batched';
+  manifestStrategy?: 'immediate' | 'batched' | undefined;
   /** Number of snapshots to retain (default: 100) */
-  snapshotRetention?: number;
+  snapshotRetention?: number | undefined;
 }
 
 /**
@@ -69,9 +69,9 @@ export interface PartitionColumn {
   /** Column type for partitioning */
   type: PartitionColumnType;
   /** Transform function (e.g., 'year', 'month', 'day', 'hour' for timestamps) */
-  transform?: 'year' | 'month' | 'day' | 'hour' | 'identity' | 'bucket' | 'truncate';
+  transform?: 'year' | 'month' | 'day' | 'hour' | 'identity' | 'bucket' | 'truncate' | undefined;
   /** Transform argument (e.g., bucket count, truncate length) */
-  transformArg?: number;
+  transformArg?: number | undefined;
 }
 
 /**
@@ -125,7 +125,7 @@ export interface ChunkMetadata {
   /** Format of the chunk (columnar) */
   format: 'columnar';
   /** Compression used (if any) */
-  compression?: 'none' | 'gzip' | 'zstd';
+  compression?: 'none' | 'gzip' | 'zstd' | undefined;
   /** Minimum LSN included in this chunk */
   minLSN: bigint;
   /** Maximum LSN included in this chunk */
@@ -135,7 +135,7 @@ export interface ChunkMetadata {
   /** Creation timestamp */
   createdAt: number;
   /** Checksum for integrity verification */
-  checksum?: string;
+  checksum?: string | undefined;
 }
 
 /**
@@ -271,7 +271,7 @@ export interface DOCDCEvent {
   /** Source DO identifier */
   doId: string;
   /** Shard ID (if applicable) */
-  shardId?: string;
+  shardId?: string | undefined;
   /** Original WAL entry */
   entry: WALEntry;
   /** Decoded record data */
@@ -363,11 +363,11 @@ export interface LakehouseQuery {
   /** SQL query string */
   sql: string;
   /** Query parameters */
-  params?: unknown[];
+  params?: unknown[] | undefined;
   /** Target snapshot ID (for time travel, defaults to current) */
-  snapshotId?: string;
+  snapshotId?: string | undefined;
   /** Query hints */
-  hints?: QueryHints;
+  hints?: QueryHints | undefined;
 }
 
 /**
@@ -375,15 +375,15 @@ export interface LakehouseQuery {
  */
 export interface QueryHints {
   /** Force specific partitions */
-  partitions?: PartitionKey[][];
+  partitions?: PartitionKey[][] | undefined;
   /** Disable partition pruning */
-  disablePartitionPruning?: boolean;
+  disablePartitionPruning?: boolean | undefined;
   /** Disable predicate pushdown */
-  disablePredicatePushdown?: boolean;
+  disablePredicatePushdown?: boolean | undefined;
   /** Maximum chunks to scan */
-  maxChunks?: number;
+  maxChunks?: number | undefined;
   /** Timeout in milliseconds */
-  timeoutMs?: number;
+  timeoutMs?: number | undefined;
 }
 
 /**
@@ -417,9 +417,9 @@ export interface PushdownPredicate {
   /** Operator */
   op: 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'in' | 'between' | 'is_null' | 'is_not_null';
   /** Value(s) */
-  value?: unknown;
+  value?: unknown | undefined;
   /** Second value for between */
-  value2?: unknown;
+  value2?: unknown | undefined;
 }
 
 /**
@@ -481,29 +481,29 @@ export interface R2Object {
   key: string;
   size: number;
   etag: string;
-  httpMetadata?: Record<string, string>;
-  customMetadata?: Record<string, string>;
+  httpMetadata?: Record<string, string> | undefined;
+  customMetadata?: Record<string, string> | undefined;
   uploaded: Date;
   arrayBuffer(): Promise<ArrayBuffer>;
-  body?: ReadableStream;
+  body?: ReadableStream | undefined;
 }
 
 /**
  * R2 put options
  */
 export interface R2PutOptions {
-  httpMetadata?: Record<string, string>;
-  customMetadata?: Record<string, string>;
+  httpMetadata?: Record<string, string> | undefined;
+  customMetadata?: Record<string, string> | undefined;
 }
 
 /**
  * R2 list options
  */
 export interface R2ListOptions {
-  prefix?: string;
-  delimiter?: string;
-  cursor?: string;
-  limit?: number;
+  prefix?: string | undefined;
+  delimiter?: string | undefined;
+  cursor?: string | undefined;
+  limit?: number | undefined;
 }
 
 /**
@@ -512,8 +512,8 @@ export interface R2ListOptions {
 export interface R2ListResult {
   objects: R2Object[];
   truncated: boolean;
-  cursor?: string;
-  delimitedPrefixes?: string[];
+  cursor?: string | undefined;
+  delimitedPrefixes?: string[] | undefined;
 }
 
 // =============================================================================

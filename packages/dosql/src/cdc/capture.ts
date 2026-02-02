@@ -69,7 +69,7 @@ export interface CaptureState {
   /** Whether capture is active */
   active: boolean;
   /** Last capture timestamp */
-  lastCaptureAt?: number;
+  lastCaptureAt?: number | undefined;
 }
 
 /**

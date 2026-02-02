@@ -183,10 +183,10 @@ export interface R2IndexSchema {
   primaryKey: string[];
 
   /** Partition key columns (for partition pruning) */
-  partitionBy?: string[];
+  partitionBy?: string[] | undefined;
 
   /** Sort key columns (for range query optimization) */
-  sortBy?: SortColumn[];
+  sortBy?: SortColumn[] | undefined;
 }
 
 /**
@@ -238,7 +238,7 @@ export interface SortColumn {
   direction: 'asc' | 'desc';
 
   /** Nulls ordering */
-  nulls?: 'first' | 'last';
+  nulls?: 'first' | 'last' | undefined;
 }
 
 // =============================================================================
@@ -303,10 +303,10 @@ export interface R2BTreePageInfo {
   type: R2BTreePageType;
 
   /** First key in page (for binary search) */
-  firstKey?: Uint8Array;
+  firstKey?: Uint8Array | undefined;
 
   /** Last key in page (for binary search) */
-  lastKey?: Uint8Array;
+  lastKey?: Uint8Array | undefined;
 }
 
 /**
@@ -488,7 +488,7 @@ export interface R2ChunkStats {
   columns: Map<string, R2ColumnStats>;
 
   /** Partition values (if partitioned) */
-  partitionValues?: Map<string, R2IndexValue>;
+  partitionValues?: Map<string, R2IndexValue> | undefined;
 }
 
 /**
@@ -505,22 +505,22 @@ export interface R2ColumnStats {
   nullCount: bigint;
 
   /** Number of distinct values (approximate) */
-  distinctCount?: bigint;
+  distinctCount?: bigint | undefined;
 
   /** Sum for numeric columns */
-  sum?: number | bigint;
+  sum?: number | bigint | undefined;
 
   /** Average for numeric columns */
-  avg?: number;
+  avg?: number | undefined;
 
   /** Whether all values are the same */
-  allSame?: boolean;
+  allSame?: boolean | undefined;
 
   /** Whether the column is sorted */
-  sorted?: boolean;
+  sorted?: boolean | undefined;
 
   /** Sort direction if sorted */
-  sortDirection?: 'asc' | 'desc';
+  sortDirection?: 'asc' | 'desc' | undefined;
 }
 
 /**
@@ -655,7 +655,7 @@ export interface R2IndexHeaderReadResult {
   valid: boolean;
 
   /** Validation errors if any */
-  errors?: string[];
+  errors?: string[] | undefined;
 }
 
 /**

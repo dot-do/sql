@@ -35,9 +35,12 @@ export function vector_distance_cos(a: Vector, b: Vector): number {
   let normB = 0;
 
   for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
+    // Non-null assertion: i < a.length and i < b.length guarantees valid access
+    const aVal = a[i]!;
+    const bVal = b[i]!;
+    dot += aVal * bVal;
+    normA += aVal * aVal;
+    normB += bVal * bVal;
   }
 
   const denom = Math.sqrt(normA) * Math.sqrt(normB);
@@ -66,7 +69,8 @@ export function vector_distance_l2(a: Vector, b: Vector): number {
 
   let sum = 0;
   for (let i = 0; i < a.length; i++) {
-    const diff = a[i] - b[i];
+    // Non-null assertion: i < a.length and i < b.length guarantees valid access
+    const diff = a[i]! - b[i]!;
     sum += diff * diff;
   }
 
@@ -88,7 +92,8 @@ export function vector_distance_l2_squared(a: Vector, b: Vector): number {
 
   let sum = 0;
   for (let i = 0; i < a.length; i++) {
-    const diff = a[i] - b[i];
+    // Non-null assertion: i < a.length and i < b.length guarantees valid access
+    const diff = a[i]! - b[i]!;
     sum += diff * diff;
   }
 
@@ -110,7 +115,8 @@ export function vector_distance_dot(a: Vector, b: Vector): number {
 
   let dot = 0;
   for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
+    // Non-null assertion: i < a.length and i < b.length guarantees valid access
+    dot += a[i]! * b[i]!;
   }
 
   // Return negative so that "smaller distance = more similar"
@@ -131,7 +137,8 @@ export function vector_dot_product(a: Vector, b: Vector): number {
 
   let dot = 0;
   for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
+    // Non-null assertion: i < a.length and i < b.length guarantees valid access
+    dot += a[i]! * b[i]!;
   }
 
   return dot;
@@ -153,8 +160,9 @@ export function vector_distance_hamming(a: Vector, b: Vector): number {
   let diff = 0;
   for (let i = 0; i < a.length; i++) {
     // Convert to binary (0 or 1) and compare
-    const bitA = a[i] >= 0.5 ? 1 : 0;
-    const bitB = b[i] >= 0.5 ? 1 : 0;
+    // Non-null assertion: i < a.length and i < b.length guarantees valid access
+    const bitA = a[i]! >= 0.5 ? 1 : 0;
+    const bitB = b[i]! >= 0.5 ? 1 : 0;
     if (bitA !== bitB) {
       diff++;
     }
@@ -178,7 +186,8 @@ export function vector_distance_hamming_packed(a: Uint8Array, b: Uint8Array): nu
   let diff = 0;
   for (let i = 0; i < a.length; i++) {
     // XOR gives us the differing bits, popcount counts them
-    let xor = a[i] ^ b[i];
+    // Non-null assertion: i < a.length and i < b.length guarantees valid access
+    let xor = a[i]! ^ b[i]!;
     // Brian Kernighan's algorithm for popcount
     while (xor) {
       diff++;
@@ -217,7 +226,9 @@ export function vector_similarity_cos(a: Vector, b: Vector): number {
 export function vector_norm(v: Vector): number {
   let sum = 0;
   for (let i = 0; i < v.length; i++) {
-    sum += v[i] * v[i];
+    // Non-null assertion: i < v.length guarantees valid access
+    const val = v[i]!;
+    sum += val * val;
   }
   return Math.sqrt(sum);
 }
@@ -236,7 +247,8 @@ export function vector_normalize(v: Vector): Vector {
 
   const result = new Float32Array(v.length);
   for (let i = 0; i < v.length; i++) {
-    result[i] = v[i] / norm;
+    // Non-null assertion: i < v.length guarantees valid access
+    result[i] = v[i]! / norm;
   }
   return result;
 }
@@ -255,7 +267,8 @@ export function vector_add(a: Vector, b: Vector): Vector {
 
   const result = new Float32Array(a.length);
   for (let i = 0; i < a.length; i++) {
-    result[i] = a[i] + b[i];
+    // Non-null assertion: i < a.length and i < b.length guarantees valid access
+    result[i] = a[i]! + b[i]!;
   }
   return result;
 }
@@ -274,7 +287,8 @@ export function vector_sub(a: Vector, b: Vector): Vector {
 
   const result = new Float32Array(a.length);
   for (let i = 0; i < a.length; i++) {
-    result[i] = a[i] - b[i];
+    // Non-null assertion: i < a.length and i < b.length guarantees valid access
+    result[i] = a[i]! - b[i]!;
   }
   return result;
 }
@@ -289,7 +303,8 @@ export function vector_sub(a: Vector, b: Vector): Vector {
 export function vector_scale(v: Vector, scalar: number): Vector {
   const result = new Float32Array(v.length);
   for (let i = 0; i < v.length; i++) {
-    result[i] = v[i] * scalar;
+    // Non-null assertion: i < v.length guarantees valid access
+    result[i] = v[i]! * scalar;
   }
   return result;
 }

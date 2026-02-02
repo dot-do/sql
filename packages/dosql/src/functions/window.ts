@@ -285,18 +285,21 @@ function calculateGroupBoundary(
     case 'unboundedFollowing':
       return rows.length - 1;
     case 'currentRow': {
-      const group = groups[currentGroup];
+      // Non-null assertion: currentGroup is derived from valid index
+      const group = groups[currentGroup]!;
       return side === 'start' ? group.start : group.end;
     }
     case 'preceding': {
       const targetGroup = Math.max(0, currentGroup - (boundary.offset ?? 0));
-      const group = groups[targetGroup];
-      return side === 'start' ? group.start : groups[currentGroup].end;
+      // Non-null assertion: targetGroup is bounded by valid indices
+      const group = groups[targetGroup]!;
+      return side === 'start' ? group.start : groups[currentGroup]!.end;
     }
     case 'following': {
       const targetGroup = Math.min(groups.length - 1, currentGroup + (boundary.offset ?? 0));
-      const group = groups[targetGroup];
-      return side === 'start' ? groups[currentGroup].start : group.end;
+      // Non-null assertion: targetGroup is bounded by valid indices
+      const group = groups[targetGroup]!;
+      return side === 'start' ? groups[currentGroup]!.start : group.end;
     }
     default:
       return assertNever(boundary.type, `Unknown frame boundary type: ${boundary.type}`);
@@ -394,8 +397,9 @@ function findValueBoundary(
   side: 'start' | 'end'
 ): number {
   // This is a simplified implementation that works for numeric columns
-  const col = orderByColumns[0];
-  const currentValue = rows[currentIndex][col];
+  // Non-null assertion: orderByColumns has at least one element
+  const col = orderByColumns[0]!;
+  const currentValue = rows[currentIndex]![col];
 
   if (typeof currentValue !== 'number' && typeof currentValue !== 'bigint') {
     // For non-numeric values, fall back to row-based behavior
@@ -411,7 +415,8 @@ function findValueBoundary(
   if (isPreceding) {
     // Find first row with value >= targetValue
     for (let i = 0; i < rows.length; i++) {
-      const val = rows[i][col];
+      // Non-null assertion: i < rows.length guarantees valid access
+      const val = rows[i]![col];
       if (typeof val === 'number' && val >= targetValue) {
         return side === 'start' ? i : currentIndex;
       }
@@ -420,7 +425,8 @@ function findValueBoundary(
   } else {
     // Find last row with value <= targetValue
     for (let i = rows.length - 1; i >= 0; i--) {
-      const val = rows[i][col];
+      // Non-null assertion: i >= 0 and i < rows.length guarantees valid access
+      const val = rows[i]![col];
       if (typeof val === 'number' && val <= targetValue) {
         return side === 'start' ? currentIndex : i;
       }
@@ -643,7 +649,8 @@ export function lagColumn(
     return defaultValue;
   }
 
-  return partitionRows[targetIndex][column] ?? defaultValue;
+  // Non-null assertion: bounds checked above
+  return partitionRows[targetIndex]![column] ?? defaultValue;
 }
 
 /**
@@ -682,7 +689,8 @@ export function leadColumn(
     return defaultValue;
   }
 
-  return partitionRows[targetIndex][column] ?? defaultValue;
+  // Non-null assertion: bounds checked above
+  return partitionRows[targetIndex]![column] ?? defaultValue;
 }
 
 /**
@@ -695,7 +703,8 @@ export function firstValue(ctx: WindowContext, column: string): SqlValue {
     return null;
   }
 
-  return partitionRows[frameStart][column] ?? null;
+  // Non-null assertion: bounds checked above
+  return partitionRows[frameStart]![column] ?? null;
 }
 
 /**
@@ -708,7 +717,8 @@ export function lastValue(ctx: WindowContext, column: string): SqlValue {
     return null;
   }
 
-  return partitionRows[frameEnd][column] ?? null;
+  // Non-null assertion: bounds checked above
+  return partitionRows[frameEnd]![column] ?? null;
 }
 
 /**
@@ -726,7 +736,8 @@ export function nthValue(ctx: WindowContext, column: string, n: SqlValue): SqlVa
     return null;
   }
 
-  return partitionRows[targetIndex][column] ?? null;
+  // Non-null assertion: bounds checked above
+  return partitionRows[targetIndex]![column] ?? null;
 }
 
 // =============================================================================
@@ -742,7 +753,8 @@ export function windowSum(ctx: WindowContext, column: string): SqlValue {
   let hasValue = false;
 
   for (let i = frameStart; i <= frameEnd && i < partitionRows.length; i++) {
-    const val = partitionRows[i][column];
+    // Non-null assertion: i < partitionRows.length guarantees valid access
+    const val = partitionRows[i]![column];
     if (val !== null && typeof val === 'number') {
       sum += val;
       hasValue = true;
@@ -764,7 +776,8 @@ export function windowAvg(ctx: WindowContext, column: string): SqlValue {
   let count = 0;
 
   for (let i = frameStart; i <= frameEnd && i < partitionRows.length; i++) {
-    const val = partitionRows[i][column];
+    // Non-null assertion: i < partitionRows.length guarantees valid access
+    const val = partitionRows[i]![column];
     if (val !== null && typeof val === 'number') {
       sum += val;
       count++;
@@ -788,7 +801,8 @@ export function windowCount(ctx: WindowContext, column?: string): SqlValue {
     if (column === undefined || column === '*') {
       count++;
     } else {
-      const val = partitionRows[i][column];
+      // Non-null assertion: i < partitionRows.length guarantees valid access
+      const val = partitionRows[i]![column];
       if (val !== null) {
         count++;
       }
@@ -806,8 +820,9 @@ export function windowMin(ctx: WindowContext, column: string): SqlValue {
   let min: SqlValue = null;
 
   for (let i = frameStart; i <= frameEnd && i < partitionRows.length; i++) {
-    const val = partitionRows[i][column];
-    if (val !== null) {
+    // Non-null assertion: i < partitionRows.length guarantees valid access
+    const val = partitionRows[i]![column];
+    if (val !== null && val !== undefined) {
       if (min === null || val < min) {
         min = val;
       }
@@ -825,8 +840,9 @@ export function windowMax(ctx: WindowContext, column: string): SqlValue {
   let max: SqlValue = null;
 
   for (let i = frameStart; i <= frameEnd && i < partitionRows.length; i++) {
-    const val = partitionRows[i][column];
-    if (val !== null) {
+    // Non-null assertion: i < partitionRows.length guarantees valid access
+    const val = partitionRows[i]![column];
+    if (val !== null && val !== undefined) {
       if (max === null || val > max) {
         max = val;
       }

@@ -62,9 +62,9 @@ export interface ColumnDataType {
   /** Base data type name */
   name: string;
   /** Optional precision (e.g., VARCHAR(255), DECIMAL(10,2)) */
-  precision?: number;
+  precision?: number | undefined;
   /** Optional scale (e.g., DECIMAL(10,2) -> scale is 2) */
-  scale?: number;
+  scale?: number | undefined;
 }
 
 // =============================================================================
@@ -106,13 +106,13 @@ export type DeferrableClause =
 export interface PrimaryKeyColumnConstraint {
   type: 'PRIMARY KEY';
   /** Optional constraint name */
-  name?: string;
+  name?: string | undefined;
   /** Sort order for the primary key */
-  order?: 'ASC' | 'DESC';
+  order?: 'ASC' | 'DESC' | undefined;
   /** Conflict resolution clause */
-  onConflict?: ConflictClause;
+  onConflict?: ConflictClause | undefined;
   /** AUTOINCREMENT keyword (SQLite-specific) */
-  autoincrement?: boolean;
+  autoincrement?: boolean | undefined;
 }
 
 /**
@@ -121,9 +121,9 @@ export interface PrimaryKeyColumnConstraint {
 export interface NotNullColumnConstraint {
   type: 'NOT NULL';
   /** Optional constraint name */
-  name?: string;
+  name?: string | undefined;
   /** Conflict resolution clause */
-  onConflict?: ConflictClause;
+  onConflict?: ConflictClause | undefined;
 }
 
 /**
@@ -132,9 +132,9 @@ export interface NotNullColumnConstraint {
 export interface UniqueColumnConstraint {
   type: 'UNIQUE';
   /** Optional constraint name */
-  name?: string;
+  name?: string | undefined;
   /** Conflict resolution clause */
-  onConflict?: ConflictClause;
+  onConflict?: ConflictClause | undefined;
 }
 
 /**
@@ -143,7 +143,7 @@ export interface UniqueColumnConstraint {
 export interface CheckColumnConstraint {
   type: 'CHECK';
   /** Optional constraint name */
-  name?: string;
+  name?: string | undefined;
   /** The CHECK expression as a string */
   expression: string;
 }
@@ -156,7 +156,7 @@ export interface DefaultColumnConstraint {
   /** The default value (literal, expression, or function call) */
   value: string | number | boolean | null;
   /** If the value is an expression (e.g., CURRENT_TIMESTAMP) */
-  isExpression?: boolean;
+  isExpression?: boolean | undefined;
 }
 
 /**
@@ -174,19 +174,19 @@ export interface CollateColumnConstraint {
 export interface ReferencesColumnConstraint {
   type: 'REFERENCES';
   /** Optional constraint name */
-  name?: string;
+  name?: string | undefined;
   /** Referenced table name */
   table: string;
   /** Referenced column(s) */
-  columns?: string[];
+  columns?: string[] | undefined;
   /** ON DELETE action */
-  onDelete?: ReferenceAction;
+  onDelete?: ReferenceAction | undefined;
   /** ON UPDATE action */
-  onUpdate?: ReferenceAction;
+  onUpdate?: ReferenceAction | undefined;
   /** MATCH clause */
-  match?: 'SIMPLE' | 'PARTIAL' | 'FULL';
+  match?: 'SIMPLE' | 'PARTIAL' | 'FULL' | undefined;
   /** Deferrable clause */
-  deferrable?: DeferrableClause;
+  deferrable?: DeferrableClause | undefined;
 }
 
 /**
@@ -239,15 +239,15 @@ export interface ColumnDefinition {
 export interface PrimaryKeyTableConstraint {
   type: 'PRIMARY KEY';
   /** Optional constraint name */
-  name?: string;
+  name?: string | undefined;
   /** Columns included in the primary key */
   columns: Array<{
     name: string;
-    order?: 'ASC' | 'DESC';
-    collation?: string;
+    order?: 'ASC' | 'DESC' | undefined;
+    collation?: string | undefined;
   }>;
   /** Conflict resolution clause */
-  onConflict?: ConflictClause;
+  onConflict?: ConflictClause | undefined;
 }
 
 /**
@@ -256,15 +256,15 @@ export interface PrimaryKeyTableConstraint {
 export interface UniqueTableConstraint {
   type: 'UNIQUE';
   /** Optional constraint name */
-  name?: string;
+  name?: string | undefined;
   /** Columns included in the unique constraint */
   columns: Array<{
     name: string;
-    order?: 'ASC' | 'DESC';
-    collation?: string;
+    order?: 'ASC' | 'DESC' | undefined;
+    collation?: string | undefined;
   }>;
   /** Conflict resolution clause */
-  onConflict?: ConflictClause;
+  onConflict?: ConflictClause | undefined;
 }
 
 /**
@@ -273,7 +273,7 @@ export interface UniqueTableConstraint {
 export interface ForeignKeyTableConstraint {
   type: 'FOREIGN KEY';
   /** Optional constraint name */
-  name?: string;
+  name?: string | undefined;
   /** Local columns */
   columns: string[];
   /** Referenced table */
@@ -282,13 +282,13 @@ export interface ForeignKeyTableConstraint {
     columns: string[];
   };
   /** ON DELETE action */
-  onDelete?: ReferenceAction;
+  onDelete?: ReferenceAction | undefined;
   /** ON UPDATE action */
-  onUpdate?: ReferenceAction;
+  onUpdate?: ReferenceAction | undefined;
   /** MATCH clause */
-  match?: 'SIMPLE' | 'PARTIAL' | 'FULL';
+  match?: 'SIMPLE' | 'PARTIAL' | 'FULL' | undefined;
   /** Deferrable clause */
-  deferrable?: DeferrableClause;
+  deferrable?: DeferrableClause | undefined;
 }
 
 /**
@@ -297,7 +297,7 @@ export interface ForeignKeyTableConstraint {
 export interface CheckTableConstraint {
   type: 'CHECK';
   /** Optional constraint name */
-  name?: string;
+  name?: string | undefined;
   /** The CHECK expression as a string */
   expression: string;
 }
@@ -323,23 +323,23 @@ export interface CreateTableStatement {
   /** Table name */
   name: string;
   /** Schema/database name (optional) */
-  schema?: string;
+  schema?: string | undefined;
   /** IF NOT EXISTS clause */
-  ifNotExists?: boolean;
+  ifNotExists?: boolean | undefined;
   /** TEMPORARY or TEMP keyword */
-  temporary?: boolean;
+  temporary?: boolean | undefined;
   /** Column definitions */
   columns: ColumnDefinition[];
   /** Table-level constraints */
   constraints: TableConstraint[];
   /** WITHOUT ROWID option (SQLite-specific) */
-  withoutRowId?: boolean;
+  withoutRowId?: boolean | undefined;
   /** STRICT option (SQLite 3.37+) */
-  strict?: boolean;
+  strict?: boolean | undefined;
   /** AS SELECT clause for CREATE TABLE ... AS SELECT */
-  asSelect?: string;
+  asSelect?: string | undefined;
   /** Storage configuration from WITH STORAGE clause */
-  storageConfig?: import('../engine/storage-config.js').TableStorageConfig;
+  storageConfig?: import('../engine/storage-config.js').TableStorageConfig | undefined;
 }
 
 /**
@@ -349,11 +349,11 @@ export interface IndexColumn {
   /** Column name or expression */
   name: string;
   /** Sort order */
-  order?: 'ASC' | 'DESC';
+  order?: 'ASC' | 'DESC' | undefined;
   /** Collation */
-  collation?: string;
+  collation?: string | undefined;
   /** If this is an expression rather than a simple column name */
-  isExpression?: boolean;
+  isExpression?: boolean | undefined;
 }
 
 /**
@@ -364,17 +364,17 @@ export interface CreateIndexStatement {
   /** Index name */
   name: string;
   /** Schema/database name (optional) */
-  schema?: string;
+  schema?: string | undefined;
   /** IF NOT EXISTS clause */
-  ifNotExists?: boolean;
+  ifNotExists?: boolean | undefined;
   /** UNIQUE index */
-  unique?: boolean;
+  unique?: boolean | undefined;
   /** Table name */
   table: string;
   /** Indexed columns or expressions */
   columns: IndexColumn[];
   /** WHERE clause for partial index */
-  where?: string;
+  where?: string | undefined;
 }
 
 /**
@@ -432,7 +432,7 @@ export interface AlterTableStatement {
   /** Table name */
   name: string;
   /** Schema/database name (optional) */
-  schema?: string;
+  schema?: string | undefined;
   /** The alter operation */
   operations: AlterTableOperation[];
 }
@@ -445,9 +445,9 @@ export interface DropTableStatement {
   /** Table name */
   name: string;
   /** Schema/database name (optional) */
-  schema?: string;
+  schema?: string | undefined;
   /** IF EXISTS clause */
-  ifExists?: boolean;
+  ifExists?: boolean | undefined;
 }
 
 /**
@@ -458,9 +458,9 @@ export interface DropIndexStatement {
   /** Index name */
   name: string;
   /** Schema/database name (optional) */
-  schema?: string;
+  schema?: string | undefined;
   /** IF EXISTS clause */
-  ifExists?: boolean;
+  ifExists?: boolean | undefined;
 }
 
 /**
@@ -471,13 +471,13 @@ export interface CreateViewStatement {
   /** View name */
   name: string;
   /** Schema/database name (optional) */
-  schema?: string;
+  schema?: string | undefined;
   /** IF NOT EXISTS clause */
-  ifNotExists?: boolean;
+  ifNotExists?: boolean | undefined;
   /** TEMPORARY or TEMP keyword */
-  temporary?: boolean;
+  temporary?: boolean | undefined;
   /** Optional column list */
-  columns?: string[];
+  columns?: string[] | undefined;
   /** The SELECT statement that defines the view */
   select: string;
 }
@@ -490,9 +490,9 @@ export interface DropViewStatement {
   /** View name */
   name: string;
   /** Schema/database name (optional) */
-  schema?: string;
+  schema?: string | undefined;
   /** IF EXISTS clause */
-  ifExists?: boolean;
+  ifExists?: boolean | undefined;
 }
 
 // =============================================================================
@@ -517,23 +517,23 @@ export interface CreateTriggerStatement {
   /** Trigger name */
   name: string;
   /** Schema/database name (optional) */
-  schema?: string;
+  schema?: string | undefined;
   /** IF NOT EXISTS clause */
-  ifNotExists?: boolean;
+  ifNotExists?: boolean | undefined;
   /** TEMPORARY or TEMP keyword */
-  temporary?: boolean;
+  temporary?: boolean | undefined;
   /** Trigger timing: BEFORE, AFTER, or INSTEAD OF */
   timing: TriggerTiming;
   /** Trigger event: INSERT, UPDATE, or DELETE */
   event: TriggerEvent;
   /** Columns for UPDATE OF clause (optional) */
-  columns?: string[];
+  columns?: string[] | undefined;
   /** Table name the trigger is on */
   table: string;
   /** FOR EACH ROW clause (defaults to true in SQLite) */
-  forEachRow?: boolean;
+  forEachRow?: boolean | undefined;
   /** WHEN condition expression (optional) */
-  when?: string;
+  when?: string | undefined;
   /** Trigger body statements */
   body: string[];
 }
@@ -546,9 +546,9 @@ export interface DropTriggerStatement {
   /** Trigger name */
   name: string;
   /** Schema/database name (optional) */
-  schema?: string;
+  schema?: string | undefined;
   /** IF EXISTS clause */
-  ifExists?: boolean;
+  ifExists?: boolean | undefined;
 }
 
 /**
@@ -585,17 +585,17 @@ export interface ParseError {
   /** Error message */
   error: string;
   /** Character offset where error occurred (0-indexed) */
-  position?: number;
+  position?: number | undefined;
   /** Line number (1-indexed) */
-  line?: number;
+  line?: number | undefined;
   /** Column number (1-indexed) */
-  column?: number;
+  column?: number | undefined;
   /** The problematic token (if available) */
-  token?: string;
+  token?: string | undefined;
   /** Expected token(s) (if available) */
-  expected?: string;
+  expected?: string | undefined;
   /** Suggestion for fix (if available) */
-  suggestion?: string;
+  suggestion?: string | undefined;
 }
 
 /**

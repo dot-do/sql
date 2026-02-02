@@ -69,7 +69,7 @@ export interface Snapshot {
   summary: SnapshotSummary;
 
   /** Schema ID at time of snapshot */
-  'schema-id'?: number;
+  'schema-id'?: number | undefined;
 }
 
 /**
@@ -128,15 +128,15 @@ export interface ManifestFile {
   'deleted-rows-count': bigint;
 
   /** Partition field summaries (optional) */
-  partitions?: PartitionFieldSummary[];
+  partitions?: PartitionFieldSummary[] | undefined;
 }
 
 /** Summary stats for a partition field in a manifest */
 export interface PartitionFieldSummary {
   'contains-null': boolean;
-  'contains-nan'?: boolean;
-  'lower-bound'?: Uint8Array;
-  'upper-bound'?: Uint8Array;
+  'contains-nan'?: boolean | undefined;
+  'lower-bound'?: Uint8Array | undefined;
+  'upper-bound'?: Uint8Array | undefined;
 }
 
 /** Status of a file entry in a manifest */
@@ -152,13 +152,13 @@ export interface ManifestEntry {
   status: ManifestEntryStatus;
 
   /** Snapshot ID when file was added */
-  'snapshot-id'?: bigint;
+  'snapshot-id'?: bigint | undefined;
 
   /** Sequence number when file was added */
-  'sequence-number'?: bigint;
+  'sequence-number'?: bigint | undefined;
 
   /** File sequence number */
-  'file-sequence-number'?: bigint;
+  'file-sequence-number'?: bigint | undefined;
 
   /** The data file */
   'data-file': DataFile;
@@ -198,31 +198,31 @@ export interface DataFile {
   'file-size-in-bytes': bigint;
 
   /** Per-column value counts (key: field-id) */
-  'column-sizes'?: Map<number, bigint>;
+  'column-sizes'?: Map<number, bigint> | undefined;
 
   /** Per-column value counts */
-  'value-counts'?: Map<number, bigint>;
+  'value-counts'?: Map<number, bigint> | undefined;
 
   /** Per-column null counts */
-  'null-value-counts'?: Map<number, bigint>;
+  'null-value-counts'?: Map<number, bigint> | undefined;
 
   /** Per-column NaN counts */
-  'nan-value-counts'?: Map<number, bigint>;
+  'nan-value-counts'?: Map<number, bigint> | undefined;
 
   /** Per-column lower bounds (serialized) */
-  'lower-bounds'?: Map<number, Uint8Array>;
+  'lower-bounds'?: Map<number, Uint8Array> | undefined;
 
   /** Per-column upper bounds (serialized) */
-  'upper-bounds'?: Map<number, Uint8Array>;
+  'upper-bounds'?: Map<number, Uint8Array> | undefined;
 
   /** Split offsets for the file */
-  'split-offsets'?: bigint[];
+  'split-offsets'?: bigint[] | undefined;
 
   /** Equality field IDs for equality deletes */
-  'equality-ids'?: number[];
+  'equality-ids'?: number[] | undefined;
 
   /** Sort order ID used for file */
-  'sort-order-id'?: number;
+  'sort-order-id'?: number | undefined;
 }
 
 /**
@@ -251,7 +251,7 @@ export interface DoSQLTableMetadata extends Omit<TableMetadata, 'snapshots' | 's
   'last-column-id': number;
 
   /** Last partition ID assigned */
-  'last-partition-id'?: number;
+  'last-partition-id'?: number | undefined;
 
   /** All snapshots */
   snapshots: Snapshot[];
@@ -266,10 +266,10 @@ export interface DoSQLTableMetadata extends Omit<TableMetadata, 'snapshots' | 's
   'metadata-log'?: Array<{
     'metadata-file': string;
     'timestamp-ms': bigint;
-  }>;
+  }> | undefined;
 
   /** Named references (branches, tags) */
-  refs?: Record<string, SnapshotRef>;
+  refs?: Record<string, SnapshotRef> | undefined;
 
   /** Current snapshot ID */
   'current-snapshot-id': bigint | null;
@@ -279,9 +279,9 @@ export interface DoSQLTableMetadata extends Omit<TableMetadata, 'snapshots' | 's
 export interface SnapshotRef {
   'snapshot-id': bigint;
   type: 'branch' | 'tag';
-  'max-ref-age-ms'?: bigint;
-  'max-snapshot-age-ms'?: bigint;
-  'min-snapshots-to-keep'?: number;
+  'max-ref-age-ms'?: bigint | undefined;
+  'max-snapshot-age-ms'?: bigint | undefined;
+  'min-snapshots-to-keep'?: number | undefined;
 }
 
 /**

@@ -107,8 +107,9 @@ function compareValues(a: SqlValue, b: SqlValue, direction: 'asc' | 'desc', null
   } else if (a instanceof Uint8Array && b instanceof Uint8Array) {
     const minLen = Math.min(a.length, b.length);
     for (let i = 0; i < minLen; i++) {
+      // Non-null assertion: i < minLen guarantees valid index
       if (a[i] !== b[i]) {
-        result = a[i] - b[i];
+        result = a[i]! - b[i]!;
         break;
       }
     }
@@ -179,81 +180,91 @@ function evaluateWindowFunction(
     // Value access functions
     case 'lag': {
       if (args.length === 0) return null;
-      const columnExpr = args[0];
+      // Non-null assertion: args.length > 0 checked above
+      const columnExpr = args[0]!;
       if (columnExpr.type !== 'columnRef') return null;
-      const offset = args.length > 1 ? evaluateExpression(args[1], currentRow) : 1;
-      const defaultVal = args.length > 2 ? evaluateExpression(args[2], currentRow) : null;
+      const offset = args.length > 1 ? evaluateExpression(args[1]!, currentRow) : 1;
+      const defaultVal = args.length > 2 ? evaluateExpression(args[2]!, currentRow) : null;
       return lagColumn(ctx, columnExpr.column, typeof offset === 'number' ? offset : 1, defaultVal);
     }
     case 'lead': {
       if (args.length === 0) return null;
-      const columnExpr = args[0];
+      // Non-null assertion: args.length > 0 checked above
+      const columnExpr = args[0]!;
       if (columnExpr.type !== 'columnRef') return null;
-      const offset = args.length > 1 ? evaluateExpression(args[1], currentRow) : 1;
-      const defaultVal = args.length > 2 ? evaluateExpression(args[2], currentRow) : null;
+      const offset = args.length > 1 ? evaluateExpression(args[1]!, currentRow) : 1;
+      const defaultVal = args.length > 2 ? evaluateExpression(args[2]!, currentRow) : null;
       return leadColumn(ctx, columnExpr.column, typeof offset === 'number' ? offset : 1, defaultVal);
     }
     case 'first_value': {
       if (args.length === 0) return null;
-      const columnExpr = args[0];
+      // Non-null assertion: args.length > 0 checked above
+      const columnExpr = args[0]!;
       if (columnExpr.type !== 'columnRef') return null;
       return firstValue(ctx, columnExpr.column);
     }
     case 'last_value': {
       if (args.length === 0) return null;
-      const columnExpr = args[0];
+      // Non-null assertion: args.length > 0 checked above
+      const columnExpr = args[0]!;
       if (columnExpr.type !== 'columnRef') return null;
       return lastValue(ctx, columnExpr.column);
     }
     case 'nth_value': {
       if (args.length < 2) return null;
-      const columnExpr = args[0];
+      // Non-null assertion: args.length >= 2 checked above
+      const columnExpr = args[0]!;
       if (columnExpr.type !== 'columnRef') return null;
-      const n = evaluateExpression(args[1], currentRow);
+      const n = evaluateExpression(args[1]!, currentRow);
       return nthValue(ctx, columnExpr.column, n);
     }
 
     // Aggregate window functions
     case 'sum': {
       if (args.length === 0) return null;
-      const columnExpr = args[0];
+      // Non-null assertion: args.length > 0 checked above
+      const columnExpr = args[0]!;
       if (columnExpr.type !== 'columnRef') {
         // Try to evaluate expression for each row in frame
-        return evaluateAggregateOverFrame(ctx, 'sum', args[0]);
+        return evaluateAggregateOverFrame(ctx, 'sum', columnExpr);
       }
       return windowSum(ctx, columnExpr.column);
     }
     case 'avg': {
       if (args.length === 0) return null;
-      const columnExpr = args[0];
+      // Non-null assertion: args.length > 0 checked above
+      const columnExpr = args[0]!;
       if (columnExpr.type !== 'columnRef') {
-        return evaluateAggregateOverFrame(ctx, 'avg', args[0]);
+        return evaluateAggregateOverFrame(ctx, 'avg', columnExpr);
       }
       return windowAvg(ctx, columnExpr.column);
     }
     case 'count': {
-      if (args.length === 0 || (args[0].type === 'columnRef' && args[0].column === '*')) {
+      // Non-null assertion: args[0] checked by length
+      if (args.length === 0 || (args[0]!.type === 'columnRef' && args[0]!.column === '*')) {
         return windowCount(ctx);
       }
-      const columnExpr = args[0];
+      const columnExpr = args[0]!;
       if (columnExpr.type !== 'columnRef') {
-        return evaluateAggregateOverFrame(ctx, 'count', args[0]);
+        return evaluateAggregateOverFrame(ctx, 'count', columnExpr);
       }
       return windowCount(ctx, columnExpr.column);
     }
     case 'min': {
       if (args.length === 0) return null;
-      const columnExpr = args[0];
+      // Non-null assertion: args.length > 0 checked above
+      const columnExpr = args[0]!;
       if (columnExpr.type !== 'columnRef') {
-        return evaluateAggregateOverFrame(ctx, 'min', args[0]);
+        return evaluateAggregateOverFrame(ctx, 'min', columnExpr);
       }
       return windowMin(ctx, columnExpr.column);
     }
     case 'max': {
       if (args.length === 0) return null;
-      const columnExpr = args[0];
+      // Non-null assertion: args.length > 0 checked above
+      const columnExpr = args[0]!;
       if (columnExpr.type !== 'columnRef') {
-        return evaluateAggregateOverFrame(ctx, 'max', args[0]);
+        return evaluateAggregateOverFrame(ctx, 'max', columnExpr);
       }
       return windowMax(ctx, columnExpr.column);
     }
@@ -393,7 +404,8 @@ export class WindowOperator implements Operator {
 
     // Process each group
     for (const [specKey, funcDefs] of specGroups) {
-      const spec = funcDefs[0].windowSpec;
+      // Non-null assertion: funcDefs array comes from groupByWindowSpec and is non-empty
+      const spec = funcDefs[0]!.windowSpec;
       const partitionBy = spec.partitionBy?.map(col => col) || [];
       const orderBy = spec.orderBy?.map(o => ({
         column: o.column,
@@ -415,7 +427,8 @@ export class WindowOperator implements Operator {
 
         // Evaluate window functions for each row
         for (let i = 0; i < sortedPartition.length; i++) {
-          const currentRow = sortedPartition[i];
+          // Non-null assertion: i < sortedPartition.length guarantees valid access
+          const currentRow = sortedPartition[i]!;
 
           // Calculate frame boundaries
           const { start, end } = calculateFrameBoundaries(

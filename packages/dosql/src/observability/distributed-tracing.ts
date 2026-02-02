@@ -35,7 +35,7 @@ export interface DistributedTraceContext extends TraceContext {
   /** Correlation ID for cross-service request tracking */
   correlationId: string;
   /** Origin service/DO that started the trace */
-  originService?: string;
+  originService?: string | undefined;
   /** Timestamp when trace was started */
   startTimestamp: number;
   /** Baggage items for cross-boundary context propagation */

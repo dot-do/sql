@@ -258,7 +258,8 @@ export function encodeRawStrings(values: (string | null)[]): EncodingResult {
   let offset = 0;
 
   for (let i = 0; i < values.length; i++) {
-    const bytes = encoded[i];
+    // Non-null assertion: i < values.length === encoded.length guarantees valid access
+    const bytes = encoded[i]!;
     view.setUint32(offset, bytes.length, true); // Little-endian
     offset += 4;
     buffer.set(bytes, offset);
@@ -754,7 +755,8 @@ function writeBits(
     const bitsToWrite = Math.min(remaining, 8 - bitInByte);
     const mask = (1 << bitsToWrite) - 1;
 
-    buffer[byteIndex] |= (val & mask) << bitInByte;
+    // Non-null assertion: byteIndex is within buffer bounds
+    buffer[byteIndex]! |= (val & mask) << bitInByte;
 
     val >>>= bitsToWrite;
     bitOffset += bitsToWrite;
@@ -773,7 +775,8 @@ function readBits(buffer: Uint8Array, bitOffset: number, numBits: number): numbe
     const bitsToRead = Math.min(remaining, 8 - bitInByte);
     const mask = (1 << bitsToRead) - 1;
 
-    value |= ((buffer[byteIndex] >>> bitInByte) & mask) << shift;
+    // Non-null assertion: byteIndex is within buffer bounds
+    value |= ((buffer[byteIndex]! >>> bitInByte) & mask) << shift;
 
     shift += bitsToRead;
     bitOffset += bitsToRead;
@@ -799,7 +802,8 @@ export function createNullBitmap(values: unknown[]): Uint8Array {
     if (values[i] !== null && values[i] !== undefined) {
       const byteIndex = Math.floor(i / 8);
       const bitIndex = i % 8;
-      bitmap[byteIndex] |= 1 << bitIndex;
+      // Non-null assertion: byteIndex is within bitmap bounds
+      bitmap[byteIndex]! |= 1 << bitIndex;
     }
   }
 
@@ -812,7 +816,8 @@ export function createNullBitmap(values: unknown[]): Uint8Array {
 export function isNull(nullBitmap: Uint8Array, index: number): boolean {
   const byteIndex = Math.floor(index / 8);
   const bitIndex = index % 8;
-  return (nullBitmap[byteIndex] & (1 << bitIndex)) === 0;
+  // Non-null assertion: byteIndex is within bitmap bounds
+  return (nullBitmap[byteIndex]! & (1 << bitIndex)) === 0;
 }
 
 /**
@@ -821,7 +826,8 @@ export function isNull(nullBitmap: Uint8Array, index: number): boolean {
 export function setNull(nullBitmap: Uint8Array, index: number): void {
   const byteIndex = Math.floor(index / 8);
   const bitIndex = index % 8;
-  nullBitmap[byteIndex] &= ~(1 << bitIndex);
+  // Non-null assertion: byteIndex is within bitmap bounds
+  nullBitmap[byteIndex]! &= ~(1 << bitIndex);
 }
 
 /**
@@ -830,7 +836,8 @@ export function setNull(nullBitmap: Uint8Array, index: number): void {
 export function setNotNull(nullBitmap: Uint8Array, index: number): void {
   const byteIndex = Math.floor(index / 8);
   const bitIndex = index % 8;
-  nullBitmap[byteIndex] |= 1 << bitIndex;
+  // Non-null assertion: byteIndex is within bitmap bounds
+  nullBitmap[byteIndex]! |= 1 << bitIndex;
 }
 
 // ============================================================================
@@ -891,7 +898,8 @@ export function analyzeForEncoding(
     // Check if sorted (for delta encoding)
     let isSorted = true;
     for (let i = 1; i < numericValues.length; i++) {
-      if (numericValues[i] < numericValues[i - 1]) {
+      // Non-null assertion: i and i-1 are valid indices
+      if (numericValues[i]! < numericValues[i - 1]!) {
         isSorted = false;
         break;
       }

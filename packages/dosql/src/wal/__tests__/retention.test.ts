@@ -15,7 +15,7 @@
  * 6. Metrics for WAL size and cleanup operations
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FSXBackend } from '../../fsx/types.js';
 import { createSizeAlertCollector, type SizeAlert } from '../../__tests__/test-utils.js';
 
@@ -1007,31 +1007,37 @@ describe('WAL Retention Policy - Metrics [RED]', () => {
   });
 
   it('should emit metrics events for real-time monitoring', async () => {
-    // GAP: No event-based metrics emission
-    const { createWALRetentionManager } = await import('../retention.js');
-    const { createWALReader } = await import('../reader.js');
+    vi.useFakeTimers();
+    try {
+      // GAP: No event-based metrics emission
+      const { createWALRetentionManager } = await import('../retention.js');
+      const { createWALReader } = await import('../reader.js');
 
-    const reader = createWALReader(backend);
-    interface MetricsEvent { type: string; timestamp: number; data: unknown }
-    const metricsEvents: MetricsEvent[] = [];
+      const reader = createWALReader(backend);
+      interface MetricsEvent { type: string; timestamp: number; data: unknown }
+      const metricsEvents: MetricsEvent[] = [];
 
-    const manager = createWALRetentionManager(backend, reader, null, {
-      onMetricsUpdate: (event: MetricsEvent) => metricsEvents.push(event),
-      metricsInterval: 1000, // Emit every second
-    } as Record<string, unknown>);
+      const manager = createWALRetentionManager(backend, reader, null, {
+        onMetricsUpdate: (event: MetricsEvent) => metricsEvents.push(event),
+        metricsInterval: 1000, // Emit every second
+      } as Record<string, unknown>);
 
-    // Start metrics collection
-    const extManager = manager as unknown as ExtendedWALRetentionManager;
-    extManager.startMetricsCollection();
+      // Start metrics collection
+      const extManager = manager as unknown as ExtendedWALRetentionManager;
+      extManager.startMetricsCollection();
 
-    await new Promise(resolve => setTimeout(resolve, 1500));
+      // Advance time past metrics interval
+      await vi.advanceTimersByTimeAsync(1500);
 
-    extManager.stopMetricsCollection();
+      extManager.stopMetricsCollection();
 
-    expect(metricsEvents.length).toBeGreaterThan(0);
-    expect(metricsEvents[0]).toHaveProperty('type', 'metrics');
-    expect(metricsEvents[0]).toHaveProperty('timestamp');
-    expect(metricsEvents[0]).toHaveProperty('data');
+      expect(metricsEvents.length).toBeGreaterThan(0);
+      expect(metricsEvents[0]).toHaveProperty('type', 'metrics');
+      expect(metricsEvents[0]).toHaveProperty('timestamp');
+      expect(metricsEvents[0]).toHaveProperty('data');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should provide histogram metrics for cleanup operation latencies', async () => {

@@ -26,7 +26,7 @@ interface CacheEntry {
   /** When this entry was cached */
   cachedAt: number;
   /** ETag for cache validation */
-  etag?: string;
+  etag?: string | undefined;
   /** Last access time (for LRU) */
   lastAccessed: number;
   /** Access count (for LFU) */
@@ -107,7 +107,7 @@ export class R2Cache {
   /**
    * Get cached data if available and valid
    */
-  get(key: string): { data: Uint8Array; etag?: string } | null {
+  get(key: string): { data: Uint8Array; etag?: string | undefined } | null {
     const entry = this.cache.get(key);
 
     if (!entry) {

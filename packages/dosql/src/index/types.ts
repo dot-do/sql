@@ -31,10 +31,10 @@ export interface IndexDefinition {
   unique: boolean;
 
   /** Additional columns to include in the index (for covering queries) */
-  include?: string[];
+  include?: string[] | undefined;
 
   /** Optional WHERE clause for partial index */
-  where?: Predicate;
+  where?: Predicate | undefined;
 }
 
 /**
@@ -48,7 +48,7 @@ export interface IndexColumn {
   direction: 'asc' | 'desc';
 
   /** How to handle NULL values */
-  nulls?: 'first' | 'last';
+  nulls?: 'first' | 'last' | undefined;
 }
 
 /**
@@ -65,7 +65,7 @@ export interface IndexMetadata {
   distinctKeys: number;
 
   /** Timestamp of last rebuild */
-  lastRebuild?: number;
+  lastRebuild?: number | undefined;
 
   /** Height of the B-tree */
   height: number;
@@ -91,7 +91,7 @@ export interface IndexStatistics {
   pageCount: number;
 
   /** Histogram buckets for key distribution (optional) */
-  histogram?: HistogramBucket[];
+  histogram?: HistogramBucket[] | undefined;
 }
 
 /**
@@ -138,7 +138,7 @@ export interface EncodedIndexKey {
   bytes: Uint8Array;
 
   /** Original column values (for debugging) */
-  values?: SqlValue[];
+  values?: SqlValue[] | undefined;
 }
 
 // =============================================================================
@@ -150,16 +150,16 @@ export interface EncodedIndexKey {
  */
 export interface IndexScanRange {
   /** Start key (undefined = scan from beginning) */
-  start?: IndexBound;
+  start?: IndexBound | undefined;
 
   /** End key (undefined = scan to end) */
-  end?: IndexBound;
+  end?: IndexBound | undefined;
 
   /** Whether to scan in reverse order */
-  reverse?: boolean;
+  reverse?: boolean | undefined;
 
   /** Maximum number of entries to scan */
-  limit?: number;
+  limit?: number | undefined;
 }
 
 /**
@@ -184,7 +184,7 @@ export interface IndexScanResult {
   hasMore: boolean;
 
   /** Continuation token for pagination */
-  cursor?: string;
+  cursor?: string | undefined;
 
   /** Number of entries scanned (for statistics) */
   entriesScanned: number;
@@ -205,13 +205,13 @@ export interface IndexLookupSpec {
   accessType: IndexAccessType;
 
   /** Range to scan (for range/prefix access) */
-  range?: IndexScanRange;
+  range?: IndexScanRange | undefined;
 
   /** Exact keys to look up (for point access) */
-  lookupKeys?: SqlValue[][];
+  lookupKeys?: SqlValue[][] | undefined;
 
   /** Columns that must be fetched from the table */
-  fetchColumns?: string[];
+  fetchColumns?: string[] | undefined;
 
   /** Whether this is a covering index (no table fetch needed) */
   isCovering: boolean;
@@ -303,10 +303,10 @@ export interface IndexMaintenanceOp {
   index: IndexDefinition;
 
   /** Old entry (for delete/update) */
-  oldEntry?: IndexEntry;
+  oldEntry?: IndexEntry | undefined;
 
   /** New entry (for insert/update) */
-  newEntry?: IndexEntry;
+  newEntry?: IndexEntry | undefined;
 }
 
 /**

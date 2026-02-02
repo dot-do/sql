@@ -17,11 +17,11 @@ export interface DoSQLQueryResult {
   /** Rows returned by the query */
   rows: Row[];
   /** Number of rows affected (for INSERT/UPDATE/DELETE) */
-  rowsAffected?: number;
+  rowsAffected?: number | undefined;
   /** Last inserted row ID (for INSERT) */
-  lastInsertRowId?: number | bigint;
+  lastInsertRowId?: number | bigint | undefined;
   /** Column metadata */
-  columns?: { name: string; type: string }[];
+  columns?: { name: string; type: string }[] | undefined;
 }
 
 /**
@@ -48,19 +48,19 @@ export interface DoSQLBackend {
    * Begin a transaction
    * @returns Transaction ID
    */
-  beginTransaction?(): Promise<string>;
+  beginTransaction?(): Promise<string> | undefined;
 
   /**
    * Commit a transaction
    * @param transactionId - The transaction to commit
    */
-  commit?(transactionId: string): Promise<void>;
+  commit?(transactionId: string): Promise<void> | undefined;
 
   /**
    * Rollback a transaction
    * @param transactionId - The transaction to rollback
    */
-  rollback?(transactionId: string): Promise<void>;
+  rollback?(transactionId: string): Promise<void> | undefined;
 
   /**
    * Get the current transaction ID (if in a transaction)
@@ -80,20 +80,20 @@ export interface DoSQLKnexConfig {
   backend: DoSQLBackend;
 
   /** Enable query logging */
-  debug?: boolean;
+  debug?: boolean | undefined;
 
   /** Custom log function */
   log?: {
-    warn?: (message: string) => void;
-    error?: (message: string) => void;
-    debug?: (message: string) => void;
-  };
+    warn?: ((message: string) => void) | undefined;
+    error?: ((message: string) => void) | undefined;
+    debug?: ((message: string) => void) | undefined;
+  } | undefined;
 
   /** Pool configuration (ignored for DoSQL, included for Knex compatibility) */
   pool?: {
-    min?: number;
-    max?: number;
-  };
+    min?: number | undefined;
+    max?: number | undefined;
+  } | undefined;
 }
 
 // =============================================================================
@@ -107,17 +107,17 @@ export interface KnexQueryObject {
   /** The SQL query string */
   sql: string;
   /** Parameter bindings */
-  bindings?: SqlValue[];
+  bindings?: SqlValue[] | undefined;
   /** Query method (select, insert, update, delete, raw) */
-  method?: string;
+  method?: string | undefined;
   /** Options */
   options?: {
-    returning?: string | string[];
-  };
+    returning?: string | string[] | undefined;
+  } | undefined;
   /** Timeout in milliseconds */
-  timeout?: number;
+  timeout?: number | undefined;
   /** Cancel on timeout */
-  cancelOnTimeout?: boolean;
+  cancelOnTimeout?: boolean | undefined;
 }
 
 /**
@@ -125,13 +125,13 @@ export interface KnexQueryObject {
  */
 export interface KnexResponse {
   /** Selected rows (for SELECT) */
-  rows?: Row[];
+  rows?: Row[] | undefined;
   /** Row count (for INSERT/UPDATE/DELETE) */
-  rowCount?: number;
+  rowCount?: number | undefined;
   /** Last inserted ID */
-  lastID?: number | bigint;
+  lastID?: number | bigint | undefined;
   /** Columns in result */
-  fields?: { name: string; type?: string }[];
+  fields?: { name: string; type?: string | undefined }[] | undefined;
 }
 
 /**
@@ -166,7 +166,7 @@ export interface ColumnDefinition {
   nullable: boolean;
   primaryKey: boolean;
   autoIncrement: boolean;
-  defaultValue?: SqlValue;
+  defaultValue?: SqlValue | undefined;
   unique: boolean;
 }
 
@@ -176,7 +176,7 @@ export interface ColumnDefinition {
 export interface TableDefinition {
   name: string;
   columns: ColumnDefinition[];
-  primaryKey?: string[];
-  unique?: string[][];
-  indexes?: { name: string; columns: string[]; unique: boolean }[];
+  primaryKey?: string[] | undefined;
+  unique?: string[][] | undefined;
+  indexes?: { name: string; columns: string[]; unique: boolean }[] | undefined;
 }

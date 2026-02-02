@@ -116,10 +116,10 @@ export interface CompactionJob {
   createdAt: number;
 
   /** When the job started running */
-  startedAt?: number;
+  startedAt?: number | undefined;
 
   /** When the job completed (success or failure) */
-  completedAt?: number;
+  completedAt?: number | undefined;
 
   /** Number of rows scanned from B-tree */
   rowsScanned: number;
@@ -137,10 +137,10 @@ export interface CompactionJob {
   rowsDeleted: number;
 
   /** LSN range being compacted [start, end] */
-  lsnRange?: [bigint, bigint];
+  lsnRange?: [bigint, bigint] | undefined;
 
   /** Error message if status is 'failed' */
-  error?: string;
+  error?: string | undefined;
 
   /** Progress percentage (0-100) */
   progress: number;
@@ -172,10 +172,10 @@ export interface CompactionSummary {
   totalBytesWritten: number;
 
   /** Last compaction timestamp */
-  lastCompactionAt?: number;
+  lastCompactionAt?: number | undefined;
 
   /** Last error message */
-  lastError?: string;
+  lastError?: string | undefined;
 
   /** Average compaction duration in ms */
   averageDuration: number;
@@ -202,7 +202,7 @@ export interface CompactionCandidate<K, V> {
   size: number;
 
   /** LSN when this row was last modified (if tracked) */
-  lsn?: bigint;
+  lsn?: bigint | undefined;
 }
 
 /**
@@ -216,7 +216,7 @@ export interface ScanResult<K, V> {
   hasMore: boolean;
 
   /** Cursor for pagination (the last key scanned) */
-  cursor?: K;
+  cursor?: K | undefined;
 
   /** Total rows scanned */
   scanned: number;
@@ -225,7 +225,7 @@ export interface ScanResult<K, V> {
   totalSize: number;
 
   /** LSN range of scanned data */
-  lsnRange?: [bigint, bigint];
+  lsnRange?: [bigint, bigint] | undefined;
 }
 
 /**
@@ -233,16 +233,16 @@ export interface ScanResult<K, V> {
  */
 export interface ScanOptions<K> {
   /** Start key for scanning (exclusive) */
-  afterKey?: K;
+  afterKey?: K | undefined;
 
   /** Maximum candidates to return */
-  limit?: number;
+  limit?: number | undefined;
 
   /** Minimum age threshold (ms) */
-  minAge?: number;
+  minAge?: number | undefined;
 
   /** Only scan rows with LSN <= this value */
-  maxLSN?: bigint;
+  maxLSN?: bigint | undefined;
 }
 
 // =============================================================================
@@ -254,16 +254,16 @@ export interface ScanOptions<K> {
  */
 export interface ConversionOptions {
   /** Target rows per chunk */
-  targetRows?: number;
+  targetRows?: number | undefined;
 
   /** Target bytes per chunk */
-  targetBytes?: number;
+  targetBytes?: number | undefined;
 
   /** Force specific encoding for columns */
-  forceEncoding?: Map<string, 'raw' | 'dict' | 'rle' | 'delta' | 'bitpack'>;
+  forceEncoding?: Map<string, 'raw' | 'dict' | 'rle' | 'delta' | 'bitpack'> | undefined;
 
   /** Whether to compute extended statistics */
-  computeStats?: boolean;
+  computeStats?: boolean | undefined;
 }
 
 /**
@@ -295,7 +295,7 @@ export interface ConversionResult {
  */
 export interface CleanupOptions {
   /** Whether to verify columnar chunks are durable before deleting */
-  verifyDurability?: boolean;
+  verifyDurability?: boolean | undefined;
 
   /** Keys to delete from B-tree */
   keys: unknown[];
@@ -304,7 +304,7 @@ export interface CleanupOptions {
   rowGroupIds: string[];
 
   /** Whether to update manifest */
-  updateManifest?: boolean;
+  updateManifest?: boolean | undefined;
 }
 
 /**
@@ -348,10 +348,10 @@ export interface RowGroupManifestEntry {
   keyRange?: {
     min: unknown;
     max: unknown;
-  };
+  } | undefined;
 
   /** LSN range covered by this row group */
-  lsnRange?: [bigint, bigint];
+  lsnRange?: [bigint, bigint] | undefined;
 
   /** Creation timestamp */
   createdAt: number;
@@ -383,7 +383,7 @@ export interface CompactionManifest {
   totalBytes: number;
 
   /** Last compaction LSN */
-  lastCompactedLSN?: bigint;
+  lastCompactedLSN?: bigint | undefined;
 
   /** Last updated timestamp */
   updatedAt: number;
@@ -423,10 +423,10 @@ export interface SchedulerStatus {
   state: SchedulerState;
 
   /** Next scheduled run time (for 'scheduled' mode) */
-  nextRunAt?: number;
+  nextRunAt?: number | undefined;
 
   /** Current or last job */
-  currentJob?: CompactionJob;
+  currentJob?: CompactionJob | undefined;
 
   /** Write rate statistics */
   writeRate: WriteRateStats;
@@ -536,13 +536,13 @@ export interface CompactorDeps<K, V> {
   schema: ColumnarTableSchema;
 
   /** Optional WAL writer for LSN tracking */
-  wal?: WALWriter;
+  wal?: WALWriter | undefined;
 
   /** Optional callback for DO alarm setting */
-  setAlarm?: (time: number) => Promise<void>;
+  setAlarm?: ((time: number) => Promise<void>) | undefined;
 
   /** Optional callback for write rate tracking */
-  onWrite?: () => void;
+  onWrite?: (() => void) | undefined;
 }
 
 // =============================================================================

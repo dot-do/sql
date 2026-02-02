@@ -43,22 +43,22 @@ export type ExplainFormat = 'text' | 'json' | 'yaml' | 'tree';
  */
 export interface ExplainOptions {
   /** Output format */
-  format?: ExplainFormat;
+  format?: ExplainFormat | undefined;
 
   /** Include cost estimates */
-  costs?: boolean;
+  costs?: boolean | undefined;
 
   /** Include row estimates */
-  rowEstimates?: boolean;
+  rowEstimates?: boolean | undefined;
 
   /** Include buffer/timing info (for EXPLAIN ANALYZE) */
-  analyze?: boolean;
+  analyze?: boolean | undefined;
 
   /** Verbose output (show all details) */
-  verbose?: boolean;
+  verbose?: boolean | undefined;
 
   /** Query optimizer for cost estimation */
-  optimizer?: QueryOptimizer;
+  optimizer?: QueryOptimizer | undefined;
 }
 
 /**
@@ -72,55 +72,55 @@ export interface ExplainNode {
   operation: string;
 
   /** Relation/table name if applicable */
-  relationName?: string;
+  relationName?: string | undefined;
 
   /** Index name if applicable */
-  indexName?: string;
+  indexName?: string | undefined;
 
   /** Alias if applicable */
-  alias?: string;
+  alias?: string | undefined;
 
   /** Access method used */
-  accessMethod?: string;
+  accessMethod?: string | undefined;
 
   /** Index condition (predicates pushed to index) */
-  indexCondition?: string;
+  indexCondition?: string | undefined;
 
   /** Filter condition (evaluated after index) */
-  filterCondition?: string;
+  filterCondition?: string | undefined;
 
   /** Cost estimates */
   cost?: {
     startup: number;
     total: number;
-  };
+  } | undefined;
 
   /** Row estimates */
-  rows?: number;
+  rows?: number | undefined;
 
   /** Width estimate (bytes per row) */
-  width?: number;
+  width?: number | undefined;
 
   /** Actual rows (for ANALYZE) */
-  actualRows?: number;
+  actualRows?: number | undefined;
 
   /** Actual time (for ANALYZE) */
   actualTime?: {
     startup: number;
     total: number;
-  };
+  } | undefined;
 
   /** Loops (for ANALYZE) */
-  loops?: number;
+  loops?: number | undefined;
 
   /** Output columns */
-  output?: string[];
+  output?: string[] | undefined;
 
   /** Child nodes */
-  children?: ExplainNode[];
+  children?: ExplainNode[] | undefined;
 
   /** Additional properties */
-  properties?: Record<string, string | number | boolean>;
+  properties?: Record<string, string | number | boolean> | undefined;
 }
 
 // =============================================================================

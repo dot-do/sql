@@ -25,13 +25,13 @@ export interface Migration {
   readonly sql: string;
 
   /** Optional down migration SQL for rollback */
-  readonly downSql?: string;
+  readonly downSql?: string | undefined;
 
   /** Schema snapshot after this migration (JSON) */
-  readonly snapshot?: MigrationSnapshot;
+  readonly snapshot?: MigrationSnapshot | undefined;
 
   /** Human-readable name (e.g., "add_users_table") */
-  readonly name?: string;
+  readonly name?: string | undefined;
 
   /** When this migration was created */
   readonly createdAt: Date;
@@ -56,16 +56,16 @@ export interface MigrationSnapshot {
   tables: Record<string, SnapshotTable>;
 
   /** Enums (PostgreSQL only) */
-  enums?: Record<string, SnapshotEnum>;
+  enums?: Record<string, SnapshotEnum> | undefined;
 
   /** Indexes */
-  indexes?: Record<string, SnapshotIndex>;
+  indexes?: Record<string, SnapshotIndex> | undefined;
 
   /** Foreign keys */
-  foreignKeys?: Record<string, SnapshotForeignKey>;
+  foreignKeys?: Record<string, SnapshotForeignKey> | undefined;
 
   /** Composite primary keys */
-  compositePrimaryKeys?: Record<string, SnapshotCompositePrimaryKey>;
+  compositePrimaryKeys?: Record<string, SnapshotCompositePrimaryKey> | undefined;
 }
 
 /**
@@ -74,11 +74,11 @@ export interface MigrationSnapshot {
 export interface SnapshotTable {
   name: string;
   columns: Record<string, SnapshotColumn>;
-  primaryKey?: SnapshotPrimaryKey;
-  indexes?: Record<string, SnapshotIndex>;
-  foreignKeys?: Record<string, SnapshotForeignKey>;
-  uniqueConstraints?: Record<string, SnapshotUniqueConstraint>;
-  checkConstraints?: Record<string, SnapshotCheckConstraint>;
+  primaryKey?: SnapshotPrimaryKey | undefined;
+  indexes?: Record<string, SnapshotIndex> | undefined;
+  foreignKeys?: Record<string, SnapshotForeignKey> | undefined;
+  uniqueConstraints?: Record<string, SnapshotUniqueConstraint> | undefined;
+  checkConstraints?: Record<string, SnapshotCheckConstraint> | undefined;
 }
 
 /**
@@ -88,20 +88,20 @@ export interface SnapshotColumn {
   name: string;
   type: string;
   notNull: boolean;
-  default?: string;
-  primaryKey?: boolean;
-  autoincrement?: boolean;
+  default?: string | undefined;
+  primaryKey?: boolean | undefined;
+  autoincrement?: boolean | undefined;
   generated?: {
     as: string;
     type: 'stored' | 'virtual';
-  };
+  } | undefined;
 }
 
 /**
  * Primary key definition
  */
 export interface SnapshotPrimaryKey {
-  name?: string;
+  name?: string | undefined;
   columns: string[];
 }
 
@@ -112,7 +112,7 @@ export interface SnapshotIndex {
   name: string;
   columns: string[];
   unique: boolean;
-  where?: string;
+  where?: string | undefined;
 }
 
 /**
@@ -123,8 +123,8 @@ export interface SnapshotForeignKey {
   columns: string[];
   referencedTable: string;
   referencedColumns: string[];
-  onDelete?: 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default';
-  onUpdate?: 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default';
+  onDelete?: 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default' | undefined;
+  onUpdate?: 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default' | undefined;
 }
 
 /**
@@ -182,7 +182,7 @@ export interface AppliedMigration {
   durationMs: number;
 
   /** Optional error message if migration failed */
-  error?: string;
+  error?: string | undefined;
 }
 
 /**

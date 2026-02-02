@@ -32,7 +32,7 @@ export type FrameBoundaryType =
  */
 export interface FrameBoundary {
   type: FrameBoundaryType;
-  offset?: number;
+  offset?: number | undefined;
 }
 
 /**
@@ -52,7 +52,7 @@ export interface FrameSpec {
   mode: FrameMode;
   start: FrameBoundary;
   end: FrameBoundary;
-  exclusion?: FrameExclusion;
+  exclusion?: FrameExclusion | undefined;
 }
 
 /**
@@ -71,7 +71,7 @@ export type NullsPosition = 'first' | 'last';
 export interface OrderByItem {
   expression: Expression;
   direction: SortDirection;
-  nulls?: NullsPosition;
+  nulls?: NullsPosition | undefined;
 }
 
 /**
@@ -89,7 +89,7 @@ export type Expression =
  */
 export interface ColumnReference {
   type: 'column';
-  table?: string;
+  table?: string | undefined;
   column: string;
 }
 
@@ -109,9 +109,9 @@ export interface FunctionCall {
   type: 'function';
   name: string;
   args: Expression[];
-  over?: WindowSpec | string; // inline spec or named window
-  distinct?: boolean;
-  filter?: Expression;
+  over?: WindowSpec | string | undefined; // inline spec or named window
+  distinct?: boolean | undefined;
+  filter?: Expression | undefined;
 }
 
 /**
@@ -137,10 +137,10 @@ export interface UnaryExpression {
  * Window specification
  */
 export interface WindowSpec {
-  baseName?: string; // Reference to named window
-  partitionBy?: Expression[];
-  orderBy?: OrderByItem[];
-  frame?: FrameSpec;
+  baseName?: string | undefined; // Reference to named window
+  partitionBy?: Expression[] | undefined;
+  orderBy?: OrderByItem[] | undefined;
+  frame?: FrameSpec | undefined;
 }
 
 /**

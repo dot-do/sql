@@ -32,7 +32,7 @@ export interface CollationDefinition {
   /** Whether this is a built-in collation */
   builtin: boolean;
   /** Optional description */
-  description?: string;
+  description?: string | undefined;
   /** Whether the collation is case-sensitive */
   caseSensitive: boolean;
   /** Whether the collation respects trailing spaces */

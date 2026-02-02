@@ -44,8 +44,8 @@ export interface TieredStorageStats {
   totalFiles: number;
   hotToTotalRatio: number;
   migrationPending: number;
-  hotStorageWarning?: boolean;
-  lastMigration?: Date;
+  hotStorageWarning?: boolean | undefined;
+  lastMigration?: Date | undefined;
   migrationCount: number;
   totalBytesMigrated: number;
 }

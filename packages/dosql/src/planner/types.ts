@@ -224,11 +224,11 @@ export interface PhysicalPlanNode {
 export interface ScanNode extends PhysicalPlanNode {
   nodeType: 'scan';
   table: string;
-  alias?: string;
+  alias?: string | undefined;
   accessMethod: AccessMethod;
-  indexName?: string;
-  indexCondition?: IndexCondition[];
-  filterCondition?: Predicate;
+  indexName?: string | undefined;
+  indexCondition?: IndexCondition[] | undefined;
+  filterCondition?: Predicate | undefined;
   projection: string[];
 }
 
@@ -265,11 +265,11 @@ export interface JoinNode extends PhysicalPlanNode {
   nodeType: 'join';
   joinType: 'inner' | 'left' | 'right' | 'full' | 'cross';
   algorithm: JoinAlgorithm;
-  condition?: Predicate;
+  condition?: Predicate | undefined;
   /** For hash joins: which side builds the hash table */
-  buildSide?: 'left' | 'right';
+  buildSide?: 'left' | 'right' | undefined;
   /** For index nested loop: index to use */
-  indexName?: string;
+  indexName?: string | undefined;
 }
 
 /**
@@ -280,7 +280,7 @@ export interface AggregateNode extends PhysicalPlanNode {
   strategy: AggregateStrategy;
   groupBy: Expression[];
   aggregates: Array<{ expr: Expression; alias: string }>;
-  having?: Predicate;
+  having?: Predicate | undefined;
 }
 
 /**
@@ -291,10 +291,10 @@ export interface SortNode extends PhysicalPlanNode {
   sortKeys: Array<{
     expr: Expression;
     direction: 'asc' | 'desc';
-    nullsFirst?: boolean;
+    nullsFirst?: boolean | undefined;
   }>;
   method: SortMethod;
-  limit?: number;
+  limit?: number | undefined;
 }
 
 /**
@@ -303,7 +303,7 @@ export interface SortNode extends PhysicalPlanNode {
 export interface LimitNode extends PhysicalPlanNode {
   nodeType: 'limit';
   limit: number;
-  offset?: number;
+  offset?: number | undefined;
 }
 
 /**
@@ -329,7 +329,7 @@ export interface UnionNode extends PhysicalPlanNode {
 export interface MergeNode extends PhysicalPlanNode {
   nodeType: 'merge';
   mergeType: 'append' | 'interleave';
-  sortKeys?: Array<{ expr: Expression; direction: 'asc' | 'desc' }>;
+  sortKeys?: Array<{ expr: Expression; direction: 'asc' | 'desc' }> | undefined;
 }
 
 /**
@@ -365,20 +365,20 @@ export interface IndexDef {
   columns: Array<{
     name: string;
     direction: 'asc' | 'desc';
-    nullsFirst?: boolean;
+    nullsFirst?: boolean | undefined;
   }>;
 
   /** Whether the index enforces uniqueness */
   unique: boolean;
 
   /** INCLUDE columns (for covering indexes) */
-  include?: string[];
+  include?: string[] | undefined;
 
   /** Partial index condition */
-  where?: Predicate;
+  where?: Predicate | undefined;
 
   /** Index type */
-  type?: 'btree' | 'hash' | 'gin' | 'gist';
+  type?: 'btree' | 'hash' | 'gin' | 'gist' | undefined;
 }
 
 /**
@@ -419,16 +419,16 @@ export interface AnalyzedPredicate {
   original: Predicate;
 
   /** Column referenced (for simple predicates) */
-  column?: string;
+  column?: string | undefined;
 
   /** Table referenced */
-  table?: string;
+  table?: string | undefined;
 
   /** Operator */
-  operator?: ComparisonOp;
+  operator?: ComparisonOp | undefined;
 
   /** Literal value (if comparing to constant) */
-  value?: SqlValue;
+  value?: SqlValue | undefined;
 
   /** Whether this predicate can use an index */
   indexable: boolean;

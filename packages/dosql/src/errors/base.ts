@@ -22,17 +22,17 @@
  */
 export interface ErrorContext {
   /** Request ID for tracing */
-  requestId?: string;
+  requestId?: string | undefined;
   /** Transaction ID if within a transaction */
-  transactionId?: string;
+  transactionId?: string | undefined;
   /** SQL statement that caused the error */
-  sql?: string;
+  sql?: string | undefined;
   /** Table name involved */
-  table?: string;
+  table?: string | undefined;
   /** Column name involved */
-  column?: string;
+  column?: string | undefined;
   /** Additional metadata */
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | undefined;
 }
 
 /**
@@ -48,11 +48,11 @@ export interface SerializedError {
   /** Timestamp when error occurred */
   timestamp: number;
   /** Error context */
-  context?: ErrorContext;
+  context?: ErrorContext | undefined;
   /** Stack trace (optional, may be omitted in production) */
-  stack?: string;
+  stack?: string | undefined;
   /** Serialized cause error */
-  cause?: SerializedError;
+  cause?: SerializedError | undefined;
 }
 
 /**
@@ -68,7 +68,7 @@ export interface ErrorLogEntry {
     name: string;
     code: string;
     message: string;
-    stack?: string;
+    stack?: string | undefined;
   };
   /** Additional metadata */
   metadata: Record<string, unknown>;

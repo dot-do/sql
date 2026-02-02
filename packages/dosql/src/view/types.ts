@@ -34,10 +34,10 @@ export interface ViewColumn {
   expression: string;
 
   /** Inferred or declared type */
-  type?: string;
+  type?: string | undefined;
 
   /** Whether this column is nullable */
-  nullable?: boolean;
+  nullable?: boolean | undefined;
 }
 
 /**
@@ -48,16 +48,16 @@ export interface ParsedView {
   name: string;
 
   /** Optional schema name */
-  schema?: string;
+  schema?: string | undefined;
 
   /** Column aliases (if specified) */
-  columns?: string[];
+  columns?: string[] | undefined;
 
   /** The SELECT query that defines the view */
   selectQuery: string;
 
   /** Parsed column definitions */
-  columnDefinitions?: ViewColumn[];
+  columnDefinitions?: ViewColumn[] | undefined;
 
   /** Whether CREATE OR REPLACE was used */
   orReplace: boolean;
@@ -69,7 +69,7 @@ export interface ParsedView {
   temporary: boolean;
 
   /** WITH CHECK OPTION clause */
-  checkOption?: CheckOption;
+  checkOption?: CheckOption | undefined;
 
   /** Original SQL statement */
   rawSql: string;
@@ -80,7 +80,7 @@ export interface ParsedView {
  */
 export interface ViewDefinition extends ParsedView {
   /** Unique identifier */
-  id?: string;
+  id?: string | undefined;
 
   /** View type */
   type: ViewType;
@@ -107,10 +107,10 @@ export interface ViewDefinition extends ParsedView {
   enabled: boolean;
 
   /** Optional description */
-  description?: string;
+  description?: string | undefined;
 
   /** Optional tags */
-  tags?: string[];
+  tags?: string[] | undefined;
 }
 
 // =============================================================================
@@ -125,13 +125,13 @@ export interface DropViewStatement {
   name: string;
 
   /** Optional schema */
-  schema?: string;
+  schema?: string | undefined;
 
   /** Whether IF EXISTS was used */
   ifExists: boolean;
 
   /** CASCADE or RESTRICT behavior */
-  cascade?: boolean;
+  cascade?: boolean | undefined;
 }
 
 // =============================================================================
@@ -146,13 +146,13 @@ export interface ViewQueryContext {
   view: ViewDefinition;
 
   /** Parameters for the query */
-  parameters?: Record<string, unknown>;
+  parameters?: Record<string, unknown> | undefined;
 
   /** Request ID for tracing */
-  requestId?: string;
+  requestId?: string | undefined;
 
   /** Transaction ID if within a transaction */
-  txnId?: string;
+  txnId?: string | undefined;
 }
 
 /**
@@ -192,16 +192,16 @@ export interface ViewDMLContext<T = Record<string, unknown>> {
   operation: ViewDMLOperation;
 
   /** Old row (for UPDATE/DELETE) */
-  old?: T;
+  old?: T | undefined;
 
   /** New row (for INSERT/UPDATE) */
-  new?: T;
+  new?: T | undefined;
 
   /** Request ID for tracing */
-  requestId?: string;
+  requestId?: string | undefined;
 
   /** Transaction ID */
-  txnId?: string;
+  txnId?: string | undefined;
 }
 
 /**
@@ -215,7 +215,7 @@ export interface ViewDMLResult {
   rowsAffected: number;
 
   /** Error message if failed */
-  error?: string;
+  error?: string | undefined;
 }
 
 /**
@@ -257,13 +257,13 @@ export interface InsteadOfTrigger<T = Record<string, unknown>> {
  */
 export interface RegisterViewOptions {
   /** Replace existing view with same name */
-  replace?: boolean;
+  replace?: boolean | undefined;
 
   /** Description */
-  description?: string;
+  description?: string | undefined;
 
   /** Tags */
-  tags?: string[];
+  tags?: string[] | undefined;
 }
 
 /**
@@ -271,22 +271,22 @@ export interface RegisterViewOptions {
  */
 export interface ListViewsOptions {
   /** Filter by schema */
-  schema?: string;
+  schema?: string | undefined;
 
   /** Filter by type */
-  type?: ViewType;
+  type?: ViewType | undefined;
 
   /** Filter by referenced table */
-  referencedTable?: string;
+  referencedTable?: string | undefined;
 
   /** Filter by enabled status */
-  enabled?: boolean;
+  enabled?: boolean | undefined;
 
   /** Filter by tag */
-  tag?: string;
+  tag?: string | undefined;
 
   /** Include temporary views */
-  includeTemporary?: boolean;
+  includeTemporary?: boolean | undefined;
 }
 
 /**
@@ -363,19 +363,19 @@ export interface ViewRegistry {
  */
 export interface ViewExecutionOptions {
   /** Request ID for tracing */
-  requestId?: string;
+  requestId?: string | undefined;
 
   /** Transaction ID */
-  txnId?: string;
+  txnId?: string | undefined;
 
   /** Query timeout in ms */
-  timeout?: number;
+  timeout?: number | undefined;
 
   /** Maximum rows to return */
-  limit?: number;
+  limit?: number | undefined;
 
   /** Offset for pagination */
-  offset?: number;
+  offset?: number | undefined;
 }
 
 /**
@@ -489,7 +489,7 @@ export interface ViewMetadata {
   name: string;
 
   /** Schema name */
-  schema?: string;
+  schema?: string | undefined;
 
   /** Column information */
   columns: ViewColumn[];
@@ -504,7 +504,7 @@ export interface ViewMetadata {
   updatable: boolean;
 
   /** Check option */
-  checkOption?: CheckOption;
+  checkOption?: CheckOption | undefined;
 
   /** View type */
   type: ViewType;

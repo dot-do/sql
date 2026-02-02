@@ -24,7 +24,7 @@ export type SpanStatus = 'UNSET' | 'OK' | 'ERROR';
 export interface SpanEvent {
   name: string;
   timestamp: number;
-  attributes?: Map<string, AttributeValue>;
+  attributes?: Map<string, AttributeValue> | undefined;
 }
 
 /**
@@ -38,13 +38,13 @@ export type AttributeValue = string | number | boolean | string[] | number[] | b
 export interface Span {
   readonly spanId: string;
   readonly traceId: string;
-  readonly parentSpanId?: string;
+  readonly parentSpanId?: string | undefined;
   readonly name: string;
   readonly kind: SpanKind;
   readonly startTime: number;
-  endTime?: number;
+  endTime?: number | undefined;
   status: SpanStatus;
-  statusMessage?: string;
+  statusMessage?: string | undefined;
   readonly attributes: Map<string, AttributeValue>;
   readonly events: SpanEvent[];
 
@@ -63,17 +63,17 @@ export interface TraceContext {
   traceId: string;
   spanId: string;
   traceFlags: number;
-  traceState?: string;
+  traceState?: string | undefined;
 }
 
 /**
  * Span creation options
  */
 export interface SpanOptions {
-  kind?: SpanKind;
-  parent?: TraceContext;
-  attributes?: Record<string, AttributeValue>;
-  startTime?: number;
+  kind?: SpanKind | undefined;
+  parent?: TraceContext | undefined;
+  attributes?: Record<string, AttributeValue> | undefined;
+  startTime?: number | undefined;
 }
 
 /**

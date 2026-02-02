@@ -53,13 +53,13 @@ export interface WALEntry {
   /** Target table name (empty for transaction control ops) */
   table: string;
   /** Primary key for UPDATE/DELETE operations */
-  key?: Uint8Array;
+  key?: Uint8Array | undefined;
   /** Previous value for UPDATE/DELETE operations (enables rollback) */
-  before?: Uint8Array;
+  before?: Uint8Array | undefined;
   /** New value for INSERT/UPDATE operations */
-  after?: Uint8Array;
+  after?: Uint8Array | undefined;
   /** HLC timestamp for causal ordering in CDC (optional for backward compatibility) */
-  hlc?: HLCTimestamp;
+  hlc?: HLCTimestamp | undefined;
 }
 
 /**
@@ -80,7 +80,7 @@ export interface WALSegment {
   /** Segment creation timestamp */
   createdAt: number;
   /** Whether this segment has been archived/compacted */
-  archived?: boolean;
+  archived?: boolean | undefined;
 }
 
 // =============================================================================
@@ -140,7 +140,7 @@ export interface Checkpoint {
   /** Transaction IDs that were in-progress at checkpoint time (branded type) */
   activeTransactions: TransactionId[];
   /** Schema version at checkpoint time */
-  schemaVersion?: number;
+  schemaVersion?: number | undefined;
 }
 
 /**
@@ -156,7 +156,7 @@ export interface RecoveryState {
   /** Recovery start time */
   startedAt: number;
   /** Recovery end time */
-  completedAt?: number;
+  completedAt?: number | undefined;
   /** Any errors encountered during recovery (branded type for LSN) */
   errors: Array<{ lsn: LSN; error: string }>;
 }
@@ -184,7 +184,7 @@ export interface AppendResult {
   /** Whether segment was flushed as part of this append */
   flushed: boolean;
   /** Segment ID if flushed */
-  segmentId?: string;
+  segmentId?: string | undefined;
 }
 
 /**

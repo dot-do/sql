@@ -42,9 +42,9 @@ export interface ColumnReference {
   /** Column name */
   name: string;
   /** Table name or alias (optional) */
-  table?: string;
+  table?: string | undefined;
   /** Schema name (optional, for schema.table.column syntax) */
-  schema?: string;
+  schema?: string | undefined;
 }
 
 /**
@@ -55,9 +55,9 @@ export interface FunctionCall {
   name: string;
   args: Expression[];
   /** Whether DISTINCT is used (e.g., COUNT(DISTINCT x)) */
-  distinct?: boolean;
+  distinct?: boolean | undefined;
   /** Whether this function has an OVER clause (window function) */
-  hasOver?: boolean;
+  hasOver?: boolean | undefined;
 }
 
 /**
@@ -92,9 +92,9 @@ export interface SubqueryExpression {
  */
 export interface CaseExpression {
   type: 'case';
-  operand?: Expression;
+  operand?: Expression | undefined;
   when: Array<{ condition: Expression; result: Expression }>;
-  else?: Expression;
+  else?: Expression | undefined;
 }
 
 /**
@@ -203,7 +203,7 @@ export interface ConflictClause {
 export interface OnConflictClause {
   type: 'on_conflict';
   /** Conflict target (columns that trigger conflict) */
-  target?: ConflictTarget;
+  target?: ConflictTarget | undefined;
   /** Action to take on conflict */
   action: OnConflictAction;
 }
@@ -215,7 +215,7 @@ export interface ConflictTarget {
   /** Column names that form the conflict target */
   columns: string[];
   /** Optional WHERE clause for partial unique index */
-  where?: Expression;
+  where?: Expression | undefined;
 }
 
 /**
@@ -238,7 +238,7 @@ export interface OnConflictDoUpdate {
   /** SET clauses for update */
   set: SetClause[];
   /** Optional WHERE clause for conditional update */
-  where?: Expression;
+  where?: Expression | undefined;
 }
 
 // =============================================================================
@@ -288,19 +288,19 @@ export interface InsertDefault {
 export interface InsertStatement {
   type: 'insert';
   /** Conflict handling (OR REPLACE, OR IGNORE, etc.) */
-  conflict?: ConflictClause;
+  conflict?: ConflictClause | undefined;
   /** Target table name */
   table: string;
   /** Optional table alias */
-  alias?: string;
+  alias?: string | undefined;
   /** Column names (optional - can be omitted for VALUES) */
-  columns?: string[];
+  columns?: string[] | undefined;
   /** Source of values */
   source: InsertSource;
   /** ON CONFLICT clause (UPSERT) */
-  onConflict?: OnConflictClause;
+  onConflict?: OnConflictClause | undefined;
   /** RETURNING clause columns */
-  returning?: ReturningClause;
+  returning?: ReturningClause | undefined;
 }
 
 // =============================================================================
@@ -324,23 +324,23 @@ export interface SetClause {
 export interface UpdateStatement {
   type: 'update';
   /** Conflict handling (OR REPLACE, OR IGNORE, etc.) */
-  conflict?: ConflictClause;
+  conflict?: ConflictClause | undefined;
   /** Target table name */
   table: string;
   /** Optional table alias */
-  alias?: string;
+  alias?: string | undefined;
   /** SET clauses */
   set: SetClause[];
   /** Optional FROM clause for UPDATE ... FROM */
-  from?: FromClause;
+  from?: FromClause | undefined;
   /** Optional WHERE clause */
-  where?: WhereClause;
+  where?: WhereClause | undefined;
   /** ORDER BY clause (SQLite extension) */
-  orderBy?: OrderByClause;
+  orderBy?: OrderByClause | undefined;
   /** LIMIT clause (SQLite extension) */
-  limit?: LimitClause;
+  limit?: LimitClause | undefined;
   /** RETURNING clause columns */
-  returning?: ReturningClause;
+  returning?: ReturningClause | undefined;
 }
 
 // =============================================================================

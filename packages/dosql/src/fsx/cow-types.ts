@@ -33,7 +33,7 @@ export interface BlobRef {
   /** Type of reference */
   type: BlobRefType;
   /** Target path for references (where actual data lives) */
-  target?: string;
+  target?: string | undefined;
   /** Version number (incremented on each write) */
   version: number;
   /** Reference count (how many refs point to this blob) */
@@ -41,7 +41,7 @@ export interface BlobRef {
   /** Size of the blob in bytes */
   size: number;
   /** Content hash for integrity verification */
-  hash?: string;
+  hash?: string | undefined;
   /** Creation timestamp */
   createdAt: number;
   /** Last modified timestamp */
@@ -57,7 +57,7 @@ export interface StoredBlob {
   /** Blob reference metadata */
   ref: BlobRef;
   /** Inline data for small blobs */
-  data?: ArrayBuffer;
+  data?: ArrayBuffer | undefined;
 }
 
 // =============================================================================
@@ -139,9 +139,9 @@ export interface Branch {
  */
 export interface BranchOptions {
   /** Create from specific snapshot (default: latest) */
-  snapshot?: SnapshotId;
+  snapshot?: SnapshotId | undefined;
   /** Make branch read-only */
-  readonly?: boolean;
+  readonly?: boolean | undefined;
 }
 
 // =============================================================================
@@ -187,7 +187,7 @@ export interface Snapshot {
   /** Creation timestamp */
   createdAt: number;
   /** Optional description */
-  message?: string;
+  message?: string | undefined;
   /** Manifest of paths + versions at snapshot time */
   manifest: SnapshotManifest;
 }
@@ -203,7 +203,7 @@ export interface ManifestEntry {
   /** Size in bytes */
   size: number;
   /** Content hash */
-  hash?: string;
+  hash?: string | undefined;
 }
 
 /**
@@ -401,7 +401,7 @@ export interface MergeConflict {
   /** Version number of this path in the target branch */
   targetVersion: number;
   /** Version number at the common ancestor (if determinable) */
-  baseVersion?: number;
+  baseVersion?: number | undefined;
   /** Timestamp when source branch last modified this path */
   sourceModifiedAt: number;
   /** Timestamp when target branch last modified this path */
@@ -472,7 +472,7 @@ export interface MergeResult {
   /** The strategy that was used for conflict resolution */
   strategy: MergeStrategy;
   /** Snapshot ID created for the merged state (undefined if no changes or merge failed) */
-  snapshot?: SnapshotId;
+  snapshot?: SnapshotId | undefined;
   /** Paths that were added or updated in the target branch */
   updated: string[];
   /** Paths that were deleted from the target branch */
@@ -506,13 +506,13 @@ export interface GCResult {
  */
 export interface GCOptions {
   /** Only GC blobs older than this (ms) */
-  olderThan?: number;
+  olderThan?: number | undefined;
   /** Dry run - report what would be deleted without deleting */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
   /** Maximum number of blobs to delete in one run */
-  limit?: number;
+  limit?: number | undefined;
   /** Only GC blobs in specific branches */
-  branches?: string[];
+  branches?: string[] | undefined;
 }
 
 // =============================================================================

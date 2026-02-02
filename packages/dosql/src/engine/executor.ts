@@ -143,13 +143,15 @@ class UnionOperator implements Operator {
       await input.open(this.ctx);
     }
     if (this.inputs.length > 0) {
-      this.outputColumns = this.inputs[0].columns();
+      // Non-null assertion: inputs.length > 0 checked above
+      this.outputColumns = this.inputs[0]!.columns();
     }
   }
 
   async next(): Promise<Row | null> {
     while (this.currentIndex < this.inputs.length) {
-      const row = await this.inputs[this.currentIndex].next();
+      // Non-null assertion: currentIndex < inputs.length guarantees valid access
+      const row = await this.inputs[this.currentIndex]!.next();
 
       if (row === null) {
         this.currentIndex++;
@@ -212,7 +214,8 @@ class MergeOperator implements Operator {
     this.buffers = await Promise.all(this.inputs.map(input => input.next()));
 
     if (this.inputs.length > 0) {
-      this.outputColumns = this.inputs[0].columns();
+      // Non-null assertion: inputs.length > 0 checked above
+      this.outputColumns = this.inputs[0]!.columns();
     }
   }
 
@@ -247,7 +250,8 @@ class MergeOperator implements Operator {
     }
 
     // Refill the buffer
-    this.buffers[minIndex] = await this.inputs[minIndex].next();
+    // Non-null assertion: minIndex was set from valid index above
+    this.buffers[minIndex] = await this.inputs[minIndex]!.next();
 
     return minRow;
   }
@@ -271,11 +275,15 @@ class MergeOperator implements Operator {
       const bVal = b[colName];
 
       let cmp = 0;
-      if (aVal === null && bVal === null) cmp = 0;
-      else if (aVal === null) cmp = 1;
-      else if (bVal === null) cmp = -1;
-      else if (aVal < bVal) cmp = -1;
-      else if (aVal > bVal) cmp = 1;
+      if (aVal === null || aVal === undefined) {
+        cmp = bVal === null || bVal === undefined ? 0 : 1;
+      } else if (bVal === null || bVal === undefined) {
+        cmp = -1;
+      } else if (aVal < bVal) {
+        cmp = -1;
+      } else if (aVal > bVal) {
+        cmp = 1;
+      }
 
       if (cmp !== 0) {
         return spec.direction === 'desc' ? -cmp : cmp;

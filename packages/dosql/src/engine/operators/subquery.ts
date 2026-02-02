@@ -111,9 +111,9 @@ export interface DerivedTablePlan {
  */
 export interface SubqueryContext extends ExecutionContext {
   /** Current row from outer query (for correlated subqueries) */
-  outerRow?: Row;
+  outerRow?: Row | undefined;
   /** Stack of outer rows for nested correlated subqueries */
-  outerRowStack?: Row[];
+  outerRowStack?: Row[] | undefined;
 }
 
 // =============================================================================

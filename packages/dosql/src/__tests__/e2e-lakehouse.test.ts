@@ -22,7 +22,7 @@
  * @packageDocumentation
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
 
 // =============================================================================
 // Type Definitions for E2E Testing
@@ -1810,8 +1810,12 @@ describe('E2E Lakehouse - Transaction Handling', () => {
       // Expected
     }
 
-    // Short wait
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Short wait using fake timers
+    vi.useFakeTimers();
+    const waitPromise = new Promise(resolve => setTimeout(resolve, 2000));
+    await vi.advanceTimersByTimeAsync(2000);
+    await waitPromise;
+    vi.useRealTimers();
 
     // Lakehouse should still show original balance
     const result = await dolake.query('SELECT balance FROM accounts WHERE id = 1');
@@ -1844,8 +1848,12 @@ describe('E2E Lakehouse - Transaction Handling', () => {
 
     await Promise.all(txPromises);
 
-    // Wait for sync
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for sync using fake timers
+    vi.useFakeTimers();
+    const syncWaitPromise = new Promise(resolve => setTimeout(resolve, 5000));
+    await vi.advanceTimersByTimeAsync(5000);
+    await syncWaitPromise;
+    vi.useRealTimers();
 
     // All updates should be reflected
     const result = await dolake.query('SELECT * FROM accounts ORDER BY id');
@@ -2142,8 +2150,12 @@ describe('E2E Lakehouse - Error Recovery', () => {
       lastLSN = result.lsn;
     }
 
-    // Wait a bit for events to be processed
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Wait a bit for events to be processed using fake timers
+    vi.useFakeTimers();
+    const processWaitPromise = new Promise(resolve => setTimeout(resolve, 1000));
+    await vi.advanceTimersByTimeAsync(1000);
+    await processWaitPromise;
+    vi.useRealTimers();
 
     // Should have caught batch2 events
     const batch2Events = events.filter(e => e.after?.event_type === 'batch2');
@@ -2236,7 +2248,12 @@ describe('E2E Lakehouse - Exactly-Once Guarantees', () => {
       await dosql.update('orders', { status: 'confirmed' }, { id: 1 });
     }
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Wait using fake timers
+    vi.useFakeTimers();
+    const idempotentWaitPromise = new Promise(resolve => setTimeout(resolve, 3000));
+    await vi.advanceTimersByTimeAsync(3000);
+    await idempotentWaitPromise;
+    vi.useRealTimers();
 
     // Should only see one row with final status
     const result = await dolake.query('SELECT * FROM orders WHERE id = 1');
@@ -2330,7 +2347,12 @@ describe('E2E Lakehouse - Ordering Guarantees', () => {
       });
     }
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Wait using fake timers
+    vi.useFakeTimers();
+    const lsnWaitPromise = new Promise(resolve => setTimeout(resolve, 3000));
+    await vi.advanceTimersByTimeAsync(3000);
+    await lsnWaitPromise;
+    vi.useRealTimers();
 
     // Verify LSN ordering
     for (let i = 1; i < events.length; i++) {
@@ -2528,8 +2550,12 @@ describe('E2E Lakehouse - Checkpoint/Resume', () => {
     await dolake.close();
     await dosql.close();
 
-    // Wake up after some time
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Wake up after some time using fake timers
+    vi.useFakeTimers();
+    const hibernationWaitPromise = new Promise(resolve => setTimeout(resolve, 2000));
+    await vi.advanceTimersByTimeAsync(2000);
+    await hibernationWaitPromise;
+    vi.useRealTimers();
 
     // Reconnect
     dosql = await createDoSQLClient({ dbName: testDbName });
@@ -2882,8 +2908,12 @@ describe('E2E Lakehouse - Performance', () => {
     // Get initial chunk count
     const chunksBefore = await dolake.getChunks('events');
 
-    // Wait for compaction (if automatic) or trigger it
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for compaction (if automatic) or trigger it using fake timers
+    vi.useFakeTimers();
+    const compactionWaitPromise = new Promise(resolve => setTimeout(resolve, 5000));
+    await vi.advanceTimersByTimeAsync(5000);
+    await compactionWaitPromise;
+    vi.useRealTimers();
 
     const chunksAfter = await dolake.getChunks('events');
 

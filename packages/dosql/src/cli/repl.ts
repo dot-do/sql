@@ -58,8 +58,8 @@ export interface ExecutionResult {
   rows: Record<string, unknown>[];
   columns: string[];
   rowCount: number;
-  changes?: number;
-  lastInsertRowid?: number | bigint;
+  changes?: number | undefined;
+  lastInsertRowid?: number | bigint | undefined;
   duration: number;
 }
 

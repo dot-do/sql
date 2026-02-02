@@ -27,7 +27,7 @@ interface RowMetadata {
   lastModifiedAt: number;
 
   /** LSN of the last modification */
-  lsn?: bigint;
+  lsn?: bigint | undefined;
 
   /** Estimated size in bytes */
   sizeBytes: number;

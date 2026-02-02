@@ -41,11 +41,11 @@ import type { DatabaseSchema, TableSchema } from '../parser.js';
  */
 export interface Schema {
   type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' | 'any';
-  properties?: Record<string, Schema>;
-  items?: Schema;
-  required?: string[];
-  nullable?: boolean;
-  description?: string;
+  properties?: Record<string, Schema> | undefined;
+  items?: Schema | undefined;
+  required?: string[] | undefined;
+  nullable?: boolean | undefined;
+  description?: string | undefined;
 }
 
 /**
@@ -350,13 +350,13 @@ export interface ProcedureMetadata {
   updatedAt: Date;
 
   /** Procedure description */
-  description?: string;
+  description?: string | undefined;
 
   /** Author/owner */
-  author?: string;
+  author?: string | undefined;
 
   /** Tags for categorization */
-  tags?: string[];
+  tags?: string[] | undefined;
 }
 
 /**
@@ -403,19 +403,19 @@ export interface Procedure<
   code: string;
 
   /** Schema for input parameters validation */
-  inputSchema?: InputSchema;
+  inputSchema?: InputSchema | undefined;
 
   /** Schema for return value validation */
-  outputSchema?: OutputSchema;
+  outputSchema?: OutputSchema | undefined;
 
   /** Procedure metadata */
   metadata: ProcedureMetadata;
 
   /** Execution timeout in milliseconds */
-  timeout?: number;
+  timeout?: number | undefined;
 
   /** Memory limit in MB */
-  memoryLimit?: number;
+  memoryLimit?: number | undefined;
 }
 
 /**
@@ -694,11 +694,11 @@ export interface ParsedProcedure {
   parameters?: Array<{
     name: string;
     type: string;
-    defaultValue?: string;
-  }>;
+    defaultValue?: string | undefined;
+  }> | undefined;
 
   /** Return type annotation */
-  returnType?: string;
+  returnType?: string | undefined;
 
   /** Raw SQL statement */
   rawSql: string;
@@ -733,7 +733,7 @@ export interface ParsedProcedure {
  */
 export interface ParseError {
   message: string;
-  position?: number;
-  line?: number;
-  column?: number;
+  position?: number | undefined;
+  line?: number | undefined;
+  column?: number | undefined;
 }

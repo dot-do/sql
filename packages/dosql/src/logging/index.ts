@@ -70,19 +70,19 @@ export interface LogEntry {
   /** Trace ID for request correlation */
   traceId: string;
   /** Additional context data */
-  context?: Record<string, unknown>;
+  context?: Record<string, unknown> | undefined;
   /** Error details if logging an error */
   error?: {
     name: string;
-    code?: string;
+    code?: string | undefined;
     message: string;
-    stack?: string;
-  };
+    stack?: string | undefined;
+  } | undefined;
   /** Source location (file, line) if enabled */
   source?: {
     file: string;
     line: number;
-  };
+  } | undefined;
 }
 
 /**
@@ -90,8 +90,8 @@ export interface LogEntry {
  */
 export interface LogSink {
   write(entry: LogEntry): void | Promise<void>;
-  flush?(): void | Promise<void>;
-  close?(): void | Promise<void>;
+  flush?(): void | Promise<void> | undefined;
+  close?(): void | Promise<void> | undefined;
 }
 
 /**
@@ -99,27 +99,27 @@ export interface LogSink {
  */
 export interface LoggerConfig {
   /** Minimum log level to output */
-  level?: LogLevel;
+  level?: LogLevel | undefined;
   /** Custom log sink */
-  sink?: LogSink;
+  sink?: LogSink | undefined;
   /** Fallback sink when primary fails */
-  fallbackSink?: LogSink;
+  fallbackSink?: LogSink | undefined;
   /** Whether to include stack traces */
-  includeStackTraces?: boolean;
+  includeStackTraces?: boolean | undefined;
   /** Additional default context */
-  defaultContext?: Record<string, unknown>;
+  defaultContext?: Record<string, unknown> | undefined;
   /** Format timestamps in ISO 8601 (default true) */
-  isoTimestamps?: boolean;
+  isoTimestamps?: boolean | undefined;
   /** Pretty print JSON (for development) */
-  prettyPrint?: boolean;
+  prettyPrint?: boolean | undefined;
   /** Include source location (file, line) in log entries */
-  includeSourceLocation?: boolean;
+  includeSourceLocation?: boolean | undefined;
   /** Use high-resolution timestamps with microseconds */
-  highResolutionTimestamp?: boolean;
+  highResolutionTimestamp?: boolean | undefined;
   /** Use object pooling for log entries */
-  usePooling?: boolean;
+  usePooling?: boolean | undefined;
   /** Initial trace ID */
-  traceId?: string;
+  traceId?: string | undefined;
 }
 
 /**

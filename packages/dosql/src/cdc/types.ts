@@ -170,11 +170,11 @@ export interface ChangeEvent<T = unknown> {
   /** LSN of the change */
   lsn: bigint;
   /** The new value (for insert/update) */
-  data?: T;
+  data?: T | undefined;
   /** The previous value (for update/delete) */
-  oldData?: T;
+  oldData?: T | undefined;
   /** Primary key (if available) */
-  key?: Uint8Array;
+  key?: Uint8Array | undefined;
 }
 
 /**
@@ -350,7 +350,7 @@ export interface SubscriptionStatus {
   /** Subscription start time */
   startedAt: Date;
   /** Last entry received time */
-  lastEntryAt?: Date;
+  lastEntryAt?: Date | undefined;
 }
 
 /**
@@ -455,9 +455,9 @@ export interface ReplicationSlot {
   /** When the slot was last used */
   lastUsedAt: Date;
   /** Associated filter (optional) */
-  filter?: CDCFilter;
+  filter?: CDCFilter | undefined;
   /** Custom metadata */
-  metadata?: Record<string, string>;
+  metadata?: Record<string, string> | undefined;
 }
 
 /**
@@ -712,7 +712,7 @@ export interface LakehouseStreamConfig {
   /** Source DO identifier */
   sourceDoId: string;
   /** Source shard name (optional) */
-  sourceShardName?: string;
+  sourceShardName?: string | undefined;
   /** Maximum batch size for transfer */
   maxBatchSize: number;
   /** Maximum batch age before forced flush (ms) */

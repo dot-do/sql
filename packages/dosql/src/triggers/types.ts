@@ -35,13 +35,13 @@ export interface ParsedSQLTrigger {
   name: string;
 
   /** Optional schema for the trigger */
-  schema?: string;
+  schema?: string | undefined;
 
   /** Table the trigger is attached to */
   table: string;
 
   /** Optional schema for the table */
-  tableSchema?: string;
+  tableSchema?: string | undefined;
 
   /** When the trigger fires (BEFORE, AFTER, INSTEAD OF) */
   timing: SQLTriggerTiming;
@@ -53,10 +53,10 @@ export interface ParsedSQLTrigger {
   events: SQLTriggerEvent[];
 
   /** Columns that trigger UPDATE OF (only for UPDATE events) */
-  columns?: string[];
+  columns?: string[] | undefined;
 
   /** WHEN clause condition */
-  whenClause?: string;
+  whenClause?: string | undefined;
 
   /** Trigger body (SQL statements) */
   body: string;
@@ -88,7 +88,7 @@ export interface ParsedSQLTrigger {
  */
 export interface SQLTriggerDefinition extends ParsedSQLTrigger {
   /** Unique identifier */
-  id?: string;
+  id?: string | undefined;
 
   /** Whether the trigger is enabled */
   enabled: boolean;
@@ -106,10 +106,10 @@ export interface SQLTriggerDefinition extends ParsedSQLTrigger {
   updatedAt: Date;
 
   /** Optional description */
-  description?: string;
+  description?: string | undefined;
 
   /** Optional tags */
-  tags?: string[];
+  tags?: string[] | undefined;
 }
 
 /**
@@ -120,7 +120,7 @@ export interface DropTriggerStatement {
   name: string;
 
   /** Optional schema */
-  schema?: string;
+  schema?: string | undefined;
 
   /** Whether IF EXISTS was specified */
   ifExists: boolean;
@@ -134,7 +134,7 @@ export interface WhenClauseResult {
   shouldFire: boolean;
 
   /** Any error that occurred during evaluation */
-  error?: string;
+  error?: string | undefined;
 }
 
 /**
@@ -147,7 +147,7 @@ export type RaiseType = 'IGNORE' | 'ROLLBACK' | 'ABORT' | 'FAIL';
  */
 export interface RaiseResult {
   type: RaiseType;
-  message?: string;
+  message?: string | undefined;
 }
 
 // =============================================================================
@@ -195,19 +195,19 @@ export interface TriggerContext<T extends Record<string, unknown> = Record<strin
    * Previous row value (for update/delete operations)
    * Undefined for insert operations
    */
-  old?: T;
+  old?: T | undefined;
 
   /**
    * New row value (for insert/update operations)
    * Undefined for delete operations
    */
-  new?: T;
+  new?: T | undefined;
 
   /** Database context for accessing other tables */
   db: DatabaseContext;
 
   /** Transaction ID if within a transaction */
-  txnId?: string;
+  txnId?: string | undefined;
 
   /** Trigger execution metadata */
   meta: TriggerExecutionMeta;
@@ -289,16 +289,16 @@ export interface TriggerDefinition<T extends Record<string, unknown> = Record<st
   handler: TriggerHandler<T>;
 
   /** Priority for ordering (lower runs first, default: 100) */
-  priority?: number;
+  priority?: number | undefined;
 
   /** Whether this trigger is currently enabled */
-  enabled?: boolean;
+  enabled?: boolean | undefined;
 
   /** Optional description */
-  description?: string;
+  description?: string | undefined;
 
   /** Optional condition (SQL WHERE clause or predicate) */
-  condition?: string | ((ctx: TriggerContext<T>) => boolean);
+  condition?: string | ((ctx: TriggerContext<T>) => boolean) | undefined;
 }
 
 /**
@@ -316,10 +316,10 @@ export interface TriggerConfig<T extends Record<string, unknown> = Record<string
   updatedAt: Date;
 
   /** Author/creator */
-  author?: string;
+  author?: string | undefined;
 
   /** Tags for categorization */
-  tags?: string[];
+  tags?: string[] | undefined;
 }
 
 // =============================================================================
@@ -331,13 +331,13 @@ export interface TriggerConfig<T extends Record<string, unknown> = Record<string
  */
 export interface RegisterTriggerOptions {
   /** Replace existing trigger with same name (default: false) */
-  replace?: boolean;
+  replace?: boolean | undefined;
 
   /** Author name */
-  author?: string;
+  author?: string | undefined;
 
   /** Tags for categorization */
-  tags?: string[];
+  tags?: string[] | undefined;
 }
 
 /**
@@ -345,19 +345,19 @@ export interface RegisterTriggerOptions {
  */
 export interface ListTriggersOptions {
   /** Filter by table name */
-  table?: string;
+  table?: string | undefined;
 
   /** Filter by timing */
-  timing?: TriggerTiming | SQLTriggerTiming;
+  timing?: TriggerTiming | SQLTriggerTiming | undefined;
 
   /** Filter by event */
-  event?: TriggerEvent | SQLTriggerEvent;
+  event?: TriggerEvent | SQLTriggerEvent | undefined;
 
   /** Filter by enabled status */
-  enabled?: boolean;
+  enabled?: boolean | undefined;
 
   /** Filter by tag */
-  tag?: string;
+  tag?: string | undefined;
 }
 
 /**
@@ -430,10 +430,10 @@ export interface BeforeTriggerResult<T extends Record<string, unknown>> {
   proceed: boolean;
 
   /** The (potentially modified) row data */
-  row?: T;
+  row?: T | undefined;
 
   /** Error if trigger rejected the operation */
-  error?: Error;
+  error?: Error | undefined;
 
   /** Execution details for each trigger */
   executions: TriggerExecution[];
@@ -473,10 +473,10 @@ export interface TriggerExecution {
   duration: number;
 
   /** Error if failed */
-  error?: string;
+  error?: string | undefined;
 
   /** Whether the row was modified (BEFORE only) */
-  modified?: boolean;
+  modified?: boolean | undefined;
 }
 
 /**
@@ -484,22 +484,22 @@ export interface TriggerExecution {
  */
 export interface TriggerExecutionOptions {
   /** Transaction ID */
-  txnId?: string;
+  txnId?: string | undefined;
 
   /** Request ID for tracing */
-  requestId?: string;
+  requestId?: string | undefined;
 
   /** Maximum trigger depth (default: 10) */
-  maxDepth?: number;
+  maxDepth?: number | undefined;
 
   /** Current depth (for internal use) */
-  currentDepth?: number;
+  currentDepth?: number | undefined;
 
   /** Timeout per trigger in ms (default: 5000) */
-  timeout?: number;
+  timeout?: number | undefined;
 
   /** Skip disabled triggers (default: true) */
-  skipDisabled?: boolean;
+  skipDisabled?: boolean | undefined;
 }
 
 /**
@@ -561,9 +561,9 @@ export interface WALEntryWithTriggers {
   txnId: string;
   op: 'INSERT' | 'UPDATE' | 'DELETE';
   table: string;
-  key?: Uint8Array;
-  before?: Uint8Array;
-  after?: Uint8Array;
+  key?: Uint8Array | undefined;
+  before?: Uint8Array | undefined;
+  after?: Uint8Array | undefined;
 
   /** Triggers that were executed */
   triggersExecuted?: Array<{
@@ -571,7 +571,7 @@ export interface WALEntryWithTriggers {
     timing: TriggerTiming;
     success: boolean;
     duration: number;
-  }>;
+  }> | undefined;
 }
 
 /**

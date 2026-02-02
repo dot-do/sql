@@ -26,7 +26,7 @@ export interface CTEDefinition {
   /** CTE name (table alias) */
   name: string;
   /** Optional column list for aliasing result columns */
-  columns?: string[];
+  columns?: string[] | undefined;
   /** The query that defines this CTE (as raw SQL string) */
   query: string;
   /** Whether this CTE is recursive */
@@ -36,8 +36,8 @@ export interface CTEDefinition {
    * - anchorQuery: The non-recursive base case (before UNION ALL)
    * - recursiveQuery: The recursive part (after UNION ALL, references self)
    */
-  anchorQuery?: string;
-  recursiveQuery?: string;
+  anchorQuery?: string | undefined;
+  recursiveQuery?: string | undefined;
 }
 
 /**
@@ -69,7 +69,7 @@ export interface WithClause {
 export interface SelectWithCTE {
   type: 'select_with_cte';
   /** The WITH clause (if present) */
-  with?: WithClause;
+  with?: WithClause | undefined;
   /** The main SELECT query (as raw SQL, to be parsed separately) */
   mainQuery: string;
 }
@@ -91,7 +91,7 @@ export type CTEMaterializationHint =
  */
 export interface CTEDefinitionWithHints extends CTEDefinition {
   /** Materialization hint (PostgreSQL 12+ feature) */
-  materialization?: CTEMaterializationHint;
+  materialization?: CTEMaterializationHint | undefined;
 }
 
 // =============================================================================
@@ -211,7 +211,7 @@ export interface CTEReference {
   /** Name of the CTE being referenced */
   name: string;
   /** Optional alias for this reference */
-  alias?: string;
+  alias?: string | undefined;
 }
 
 /**

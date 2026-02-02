@@ -62,7 +62,7 @@ export interface Token {
  * Base expression node with optional location
  */
 export interface ExpressionBase {
-  location?: SourceLocation;
+  location?: SourceLocation | undefined;
 }
 
 /**
@@ -71,7 +71,7 @@ export interface ExpressionBase {
 export interface ColumnExpr extends ExpressionBase {
   type: 'column';
   name: string;
-  table?: string;
+  table?: string | undefined;
 }
 
 /**
@@ -81,7 +81,7 @@ export interface LiteralExpr extends ExpressionBase {
   type: 'literal';
   value: string | number | boolean | null;
   /** Raw string representation */
-  raw?: string;
+  raw?: string | undefined;
 }
 
 /**
@@ -110,7 +110,7 @@ export interface FunctionExpr extends ExpressionBase {
   type: 'function';
   name: string;
   args: BaseExpr[];
-  distinct?: boolean;
+  distinct?: boolean | undefined;
 }
 
 /**
@@ -120,7 +120,7 @@ export interface AggregateExpr extends ExpressionBase {
   type: 'aggregate';
   name: string;
   arg: BaseExpr | '*';
-  distinct?: boolean;
+  distinct?: boolean | undefined;
 }
 
 /**
@@ -131,7 +131,7 @@ export interface BetweenExpr extends ExpressionBase {
   expr: BaseExpr;
   low: BaseExpr;
   high: BaseExpr;
-  not?: boolean;
+  not?: boolean | undefined;
 }
 
 /**
@@ -141,7 +141,7 @@ export interface InExpr extends ExpressionBase {
   type: 'in';
   expr: BaseExpr;
   values: BaseExpr[] | SubqueryExpr;
-  not?: boolean;
+  not?: boolean | undefined;
 }
 
 /**
@@ -175,7 +175,7 @@ export interface ExistsExpr extends ExpressionBase {
  */
 export interface StarExpr extends ExpressionBase {
   type: 'star';
-  table?: string;
+  table?: string | undefined;
 }
 
 /**
@@ -276,9 +276,9 @@ export type UnaryOperator = 'NOT' | '-' | '+' | '~';
  */
 export interface ParseSuccessBase<T> {
   success: true;
-  statement?: T;
-  ast?: T;
-  remaining?: string;
+  statement?: T | undefined;
+  ast?: T | undefined;
+  remaining?: string | undefined;
 }
 
 /**
@@ -287,10 +287,10 @@ export interface ParseSuccessBase<T> {
 export interface ParseErrorBase {
   success: false;
   error: string;
-  position?: number;
-  line?: number;
-  column?: number;
-  input?: string;
+  position?: number | undefined;
+  line?: number | undefined;
+  column?: number | undefined;
+  input?: string | undefined;
 }
 
 /**

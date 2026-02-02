@@ -99,7 +99,9 @@ export class SQLParser {
     // Check for DISTINCT
     const selectIndex = findKeywordIndex(tokens, 'SELECT');
     if (selectIndex !== -1 && selectIndex + 1 < tokens.length) {
-      parsed.distinct = tokens[selectIndex + 1].type === 'keyword' && tokens[selectIndex + 1].value === 'DISTINCT';
+      // Non-null assertion: bounds checked above
+      const nextToken = tokens[selectIndex + 1]!;
+      parsed.distinct = nextToken.type === 'keyword' && nextToken.value === 'DISTINCT';
     }
 
     // Extract columns (between SELECT and FROM)
@@ -155,7 +157,9 @@ export class SQLParser {
       // Find the BY that follows ORDER
       let orderByIndex = -1;
       for (let i = orderIndex + 1; i < tokens.length; i++) {
-        if (tokens[i].type === 'keyword' && tokens[i].value === 'BY') {
+        // Non-null assertion: i < tokens.length guarantees valid access
+        const token = tokens[i]!;
+        if (token.type === 'keyword' && token.value === 'BY') {
           orderByIndex = i;
           break;
         }
@@ -169,7 +173,8 @@ export class SQLParser {
     // Extract LIMIT
     const limitIndex = findKeywordIndex(tokens, 'LIMIT');
     if (limitIndex !== -1 && limitIndex + 1 < tokens.length) {
-      const limitToken = tokens[limitIndex + 1];
+      // Non-null assertion: bounds checked above
+      const limitToken = tokens[limitIndex + 1]!;
       if (limitToken.type === 'number') {
         parsed.limit = parseInt(limitToken.value, 10);
       }
@@ -178,7 +183,8 @@ export class SQLParser {
     // Extract OFFSET
     const offsetIndex = findKeywordIndex(tokens, 'OFFSET');
     if (offsetIndex !== -1 && offsetIndex + 1 < tokens.length) {
-      const offsetToken = tokens[offsetIndex + 1];
+      // Non-null assertion: bounds checked above
+      const offsetToken = tokens[offsetIndex + 1]!;
       if (offsetToken.type === 'number') {
         parsed.offset = parseInt(offsetToken.value, 10);
       }
@@ -191,7 +197,8 @@ export class SQLParser {
 
     if (unionIndex !== -1) {
       // Check for UNION ALL (UNION followed by ALL)
-      if (unionIndex + 1 < tokens.length && tokens[unionIndex + 1].type === 'keyword' && tokens[unionIndex + 1].value === 'ALL') {
+      // Non-null assertion: bounds checked in condition
+      if (unionIndex + 1 < tokens.length && tokens[unionIndex + 1]!.type === 'keyword' && tokens[unionIndex + 1]!.value === 'ALL') {
         parsed.compound = { type: 'UNION ALL' };
       } else {
         parsed.compound = { type: 'UNION' };
@@ -208,7 +215,8 @@ export class SQLParser {
   private parseTableReference(tokens: SQLToken[], startIndex: number): TableReference | null {
     if (startIndex >= tokens.length) return null;
 
-    const nameToken = tokens[startIndex];
+    // Non-null assertion: bounds checked above
+    const nameToken = tokens[startIndex]!;
     if (nameToken.type !== 'identifier' && nameToken.type !== 'keyword') {
       // Handle quoted identifier
       if (nameToken.type === 'string' || nameToken.original?.startsWith('"')) {
@@ -221,10 +229,12 @@ export class SQLParser {
 
     // Check for alias
     if (startIndex + 1 < tokens.length) {
-      const nextToken = tokens[startIndex + 1];
+      // Non-null assertion: bounds checked above
+      const nextToken = tokens[startIndex + 1]!;
       if (nextToken.type === 'keyword' && nextToken.value === 'AS') {
-        if (startIndex + 2 < tokens.length && tokens[startIndex + 2].type === 'identifier') {
-          table.alias = tokens[startIndex + 2].value;
+        // Non-null assertion: bounds checked in condition
+        if (startIndex + 2 < tokens.length && tokens[startIndex + 2]!.type === 'identifier') {
+          table.alias = tokens[startIndex + 2]!.value;
         }
       } else if (nextToken.type === 'identifier') {
         // Implicit alias (no AS keyword)
@@ -237,7 +247,8 @@ export class SQLParser {
 
   private parseColumnList(tokens: SQLToken[]): ColumnReference[] {
     // Check for *
-    if (tokens.length === 1 && tokens[0].value === '*') {
+    // Non-null assertion: length === 1 guarantees tokens[0] exists
+    if (tokens.length === 1 && tokens[0]!.value === '*') {
       return [{ name: '*' }];
     }
 
@@ -258,15 +269,18 @@ export class SQLParser {
     if (tokens.length === 0) return null;
 
     // Check for aggregate function
-    if (tokens[0].type === 'keyword' && ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'].includes(tokens[0].value)) {
-      const aggName = tokens[0].value;
+    // Non-null assertion: length > 0 checked above
+    const firstToken = tokens[0]!;
+    if (firstToken.type === 'keyword' && ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'].includes(firstToken.value)) {
+      const aggName = firstToken.value;
       // Find the column inside parentheses
       let parenDepth = 0;
       let columnName = '';
       let alias: string | undefined;
 
       for (let i = 1; i < tokens.length; i++) {
-        const t = tokens[i];
+        // Non-null assertion: i < tokens.length guarantees valid access
+        const t = tokens[i]!;
         if (t.value === '(') {
           parenDepth++;
         } else if (t.value === ')') {
@@ -274,8 +288,9 @@ export class SQLParser {
         } else if (parenDepth === 1 && (t.type === 'identifier' || t.value === '*')) {
           columnName = t.value;
         } else if (parenDepth === 0 && t.type === 'keyword' && t.value === 'AS') {
-          if (i + 1 < tokens.length && tokens[i + 1].type === 'identifier') {
-            alias = tokens[i + 1].value;
+          // Non-null assertion: bounds checked in condition
+          if (i + 1 < tokens.length && tokens[i + 1]!.type === 'identifier') {
+            alias = tokens[i + 1]!.value;
           }
         }
       }
@@ -288,15 +303,18 @@ export class SQLParser {
     }
 
     // Check for table.column
-    if (tokens.length >= 3 && tokens[1].value === '.') {
-      const table = tokens[0].value;
-      const name = tokens[2].value;
+    // Non-null assertion: bounds checked in condition
+    if (tokens.length >= 3 && tokens[1]!.value === '.') {
+      const table = tokens[0]!.value;
+      const name = tokens[2]!.value;
       let alias: string | undefined;
 
       // Check for AS alias
       for (let i = 3; i < tokens.length; i++) {
-        if (tokens[i].type === 'keyword' && tokens[i].value === 'AS' && i + 1 < tokens.length) {
-          alias = tokens[i + 1].value;
+        // Non-null assertion: i < tokens.length guarantees valid access
+        const t = tokens[i]!;
+        if (t.type === 'keyword' && t.value === 'AS' && i + 1 < tokens.length) {
+          alias = tokens[i + 1]!.value;
           break;
         }
       }
@@ -307,8 +325,10 @@ export class SQLParser {
     // Check for column AS alias
     if (tokens.length >= 3) {
       for (let i = 0; i < tokens.length - 1; i++) {
-        if (tokens[i].type === 'keyword' && tokens[i].value === 'AS') {
-          const name = tokens.slice(0, i).map(t => t.value).join('');
+        // Non-null assertion: i < tokens.length - 1 guarantees valid access
+        const t = tokens[i]!;
+        if (t.type === 'keyword' && t.value === 'AS') {
+          const name = tokens.slice(0, i).map(tok => tok.value).join('');
           const alias = tokens[i + 1]?.value;
           return { name, alias };
         }
@@ -316,8 +336,9 @@ export class SQLParser {
     }
 
     // Simple column name
-    if (tokens.length === 1 && (tokens[0].type === 'identifier' || tokens[0].value === '*')) {
-      return { name: tokens[0].value };
+    // Non-null assertion: length === 1 guarantees tokens[0] exists
+    if (tokens.length === 1 && (tokens[0]!.type === 'identifier' || tokens[0]!.value === '*')) {
+      return { name: tokens[0]!.value };
     }
 
     // Fallback: join all tokens as name
@@ -329,7 +350,8 @@ export class SQLParser {
     const aggKeywords = ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX'];
 
     for (let i = 0; i < tokens.length; i++) {
-      const t = tokens[i];
+      // Non-null assertion: i < tokens.length guarantees valid access
+      const t = tokens[i]!;
       if (t.type === 'keyword' && aggKeywords.includes(t.value)) {
         // Find the column inside parentheses
         let parenDepth = 0;
@@ -337,15 +359,17 @@ export class SQLParser {
         let alias: string | undefined;
 
         for (let j = i + 1; j < tokens.length; j++) {
-          const next = tokens[j];
+          // Non-null assertion: j < tokens.length guarantees valid access
+          const next = tokens[j]!;
           if (next.value === '(') {
             parenDepth++;
           } else if (next.value === ')') {
             parenDepth--;
             if (parenDepth === 0) {
               // Check for AS alias after closing paren
-              if (j + 2 < tokens.length && tokens[j + 1].value === 'AS') {
-                alias = tokens[j + 2].value;
+              // Non-null assertion: bounds checked in condition
+              if (j + 2 < tokens.length && tokens[j + 1]!.value === 'AS') {
+                alias = tokens[j + 2]!.value;
               }
               break;
             }
@@ -373,10 +397,11 @@ export class SQLParser {
     for (const group of groups) {
       if (group.length > 0) {
         // Handle table.column
-        if (group.length >= 3 && group[1].value === '.') {
-          columns.push(`${group[0].value}.${group[2].value}`);
-        } else if (group[0].type === 'identifier') {
-          columns.push(group[0].value);
+        // Non-null assertion: bounds checked in condition
+        if (group.length >= 3 && group[1]!.value === '.') {
+          columns.push(`${group[0]!.value}.${group[2]!.value}`);
+        } else if (group[0]!.type === 'identifier') {
+          columns.push(group[0]!.value);
         }
       }
     }
@@ -396,10 +421,11 @@ export class SQLParser {
       let nulls: 'FIRST' | 'LAST' | undefined;
 
       // Handle table.column
-      if (order.length >= 3 && order[1].value === '.') {
-        column = `${order[0].value}.${order[2].value}`;
-      } else if (order[0].type === 'identifier') {
-        column = order[0].value;
+      // Non-null assertion: bounds checked in condition (length > 0 from continue check)
+      if (order.length >= 3 && order[1]!.value === '.') {
+        column = `${order[0]!.value}.${order[2]!.value}`;
+      } else if (order[0]!.type === 'identifier') {
+        column = order[0]!.value;
       }
 
       // Find direction
@@ -426,7 +452,8 @@ export class SQLParser {
       throw new Error('Invalid INSERT statement');
     }
 
-    const tableToken = tokens[intoIndex + 1];
+    // Non-null assertion: bounds checked above
+    const tableToken = tokens[intoIndex + 1]!;
     if (tableToken.type !== 'identifier') {
       throw new Error('Invalid INSERT statement');
     }
@@ -444,10 +471,12 @@ export class SQLParser {
         const columnTokens: SQLToken[] = [];
         let depth = 1;
         for (let i = intoIndex + 3; i < valuesIndex && depth > 0; i++) {
-          if (tokens[i].value === '(') depth++;
-          else if (tokens[i].value === ')') depth--;
-          else if (depth === 1 && tokens[i].type === 'identifier') {
-            columnTokens.push(tokens[i]);
+          // Non-null assertion: i < valuesIndex < tokens.length guarantees valid access
+          const t = tokens[i]!;
+          if (t.value === '(') depth++;
+          else if (t.value === ')') depth--;
+          else if (depth === 1 && t.type === 'identifier') {
+            columnTokens.push(t);
           }
         }
         parsed.columns = columnTokens.map(t => ({ name: t.value }));
@@ -463,7 +492,8 @@ export class SQLParser {
       throw new Error('Invalid UPDATE statement');
     }
 
-    const tableToken = tokens[updateIndex + 1];
+    // Non-null assertion: bounds checked above
+    const tableToken = tokens[updateIndex + 1]!;
     if (tableToken.type !== 'identifier') {
       throw new Error('Invalid UPDATE statement');
     }
@@ -498,7 +528,8 @@ export class SQLParser {
       throw new Error('Invalid DELETE statement');
     }
 
-    const tableToken = tokens[fromIndex + 1];
+    // Non-null assertion: bounds checked above
+    const tableToken = tokens[fromIndex + 1]!;
     if (tableToken.type !== 'identifier') {
       throw new Error('Invalid DELETE statement');
     }
@@ -561,10 +592,12 @@ export class SQLParser {
     const endKeywordSet = new Set(endKeywords);
 
     for (let i = startIndex; i < tokens.length; i++) {
-      if (tokens[i].type === 'keyword' && endKeywordSet.has(tokens[i].value)) {
+      // Non-null assertion: i < tokens.length guarantees valid access
+      const t = tokens[i]!;
+      if (t.type === 'keyword' && endKeywordSet.has(t.value)) {
         break;
       }
-      result.push(tokens[i]);
+      result.push(t);
     }
 
     return result;

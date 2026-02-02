@@ -58,8 +58,14 @@ export const WebSocketReadyState = {
 } as const;
 
 /**
- * Mock WebSocket implementation for testing.
- * Provides type-safe event handling without requiring `as any`.
+ * Fake WebSocket implementation for testing.
+ * This is a TEST DOUBLE (not a mock) - it implements real WebSocket behavior
+ * in-memory for testing without network calls.
+ *
+ * Per NO MOCKS philosophy: This is a valid test double that provides real
+ * behavior (event emission, state tracking) rather than mocked return values.
+ *
+ * @deprecated Alias for FakeWebSocket - use FakeWebSocket for clarity
  */
 export class MockWebSocket {
   static READY_STATE_CONNECTING = WebSocketReadyState.CONNECTING;
@@ -145,7 +151,14 @@ export class MockWebSocket {
 }
 
 /**
- * Container for tracking MockWebSocket instances in tests
+ * Alias for MockWebSocket - preferred name to indicate this is a test double
+ * (fake), not a mock per NO MOCKS philosophy.
+ */
+export { MockWebSocket as FakeWebSocket };
+
+/**
+ * Container for tracking FakeWebSocket instances in tests.
+ * @deprecated Use FakeWebSocketTracker for clarity
  */
 export class MockWebSocketTracker {
   instances: MockWebSocket[] = [];
@@ -178,8 +191,14 @@ export class MockWebSocketTracker {
   }
 }
 
+/**
+ * Alias for MockWebSocketTracker - preferred name to indicate this tracks
+ * test doubles (fakes), not mocks per NO MOCKS philosophy.
+ */
+export { MockWebSocketTracker as FakeWebSocketTracker };
+
 // =============================================================================
-// Global WebSocket Mocking
+// Global WebSocket Test Double Setup
 // =============================================================================
 
 /**

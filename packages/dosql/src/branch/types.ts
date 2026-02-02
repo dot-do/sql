@@ -38,7 +38,7 @@ export interface BranchMetadata {
   /** Whether branch is archived (read-only) */
   archived: boolean;
   /** Optional description */
-  description?: string;
+  description?: string | undefined;
   /** Latest commit on this branch */
   head: CommitId | null;
 }
@@ -50,11 +50,11 @@ export interface CreateBranchOptions {
   /** Branch name */
   name: BranchId;
   /** Source branch to create from (default: current branch) */
-  from?: BranchId;
+  from?: BranchId | undefined;
   /** Specific commit to branch from (default: HEAD of source) */
-  commit?: CommitId;
+  commit?: CommitId | undefined;
   /** Optional description */
-  description?: string;
+  description?: string | undefined;
 }
 
 /**
@@ -62,9 +62,9 @@ export interface CreateBranchOptions {
  */
 export interface DeleteBranchOptions {
   /** Force delete even if not merged */
-  force?: boolean;
+  force?: boolean | undefined;
   /** Delete remote tracking branch */
-  deleteRemote?: boolean;
+  deleteRemote?: boolean | undefined;
 }
 
 // =============================================================================
@@ -95,7 +95,7 @@ export interface CommitMetadata {
   /** Timestamp */
   timestamp: number;
   /** Additional metadata */
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | undefined;
 }
 
 /**
@@ -103,7 +103,7 @@ export interface CommitMetadata {
  */
 export interface AuthorInfo {
   name: string;
-  email?: string;
+  email?: string | undefined;
 }
 
 /**
@@ -122,9 +122,9 @@ export interface TreeEntry {
   /** Hash of content or subtree */
   hash: string;
   /** Size in bytes (for blobs) */
-  size?: number;
+  size?: number | undefined;
   /** File mode (permissions) */
-  mode?: number;
+  mode?: number | undefined;
 }
 
 // =============================================================================
@@ -136,11 +136,11 @@ export interface TreeEntry {
  */
 export interface CheckoutOptions {
   /** Create branch if it doesn't exist */
-  create?: boolean;
+  create?: boolean | undefined;
   /** Force checkout (discard uncommitted changes) */
-  force?: boolean;
+  force?: boolean | undefined;
   /** Checkout specific commit instead of branch HEAD */
-  commit?: CommitId;
+  commit?: CommitId | undefined;
 }
 
 /**
@@ -149,8 +149,8 @@ export interface CheckoutOptions {
 export interface CheckoutResult {
   /** Previous branch/commit */
   previous: {
-    branch?: BranchId;
-    commit?: CommitId;
+    branch?: BranchId | undefined;
+    commit?: CommitId | undefined;
   };
   /** Current branch/commit after checkout */
   current: {
@@ -160,7 +160,7 @@ export interface CheckoutResult {
   /** Files that were changed */
   changed: string[];
   /** Files that had conflicts (when force=false) */
-  conflicts?: string[];
+  conflicts?: string[] | undefined;
 }
 
 // =============================================================================
@@ -183,13 +183,13 @@ export type MergeStrategy =
  */
 export interface MergeOptions {
   /** Merge strategy */
-  strategy?: MergeStrategy;
+  strategy?: MergeStrategy | undefined;
   /** Commit message for merge commit */
-  message?: string;
+  message?: string | undefined;
   /** Abort merge on conflict */
-  abortOnConflict?: boolean;
+  abortOnConflict?: boolean | undefined;
   /** Auto-resolve conflicts with given resolution */
-  autoResolve?: 'ours' | 'theirs';
+  autoResolve?: 'ours' | 'theirs' | undefined;
 }
 
 /**
@@ -201,7 +201,7 @@ export interface MergeResult {
   /** Type of merge performed */
   mergeType: 'fast-forward' | 'merge-commit' | 'squash' | 'aborted';
   /** Resulting commit (if successful) */
-  commit?: CommitId;
+  commit?: CommitId | undefined;
   /** Source branch */
   source: BranchId;
   /** Target branch */
@@ -225,15 +225,15 @@ export interface MergeConflict {
   /** Type of conflict */
   type: 'content' | 'add-add' | 'modify-delete' | 'rename';
   /** Our version (target branch) */
-  ours?: ConflictVersion;
+  ours?: ConflictVersion | undefined;
   /** Their version (source branch) */
-  theirs?: ConflictVersion;
+  theirs?: ConflictVersion | undefined;
   /** Base version (common ancestor) */
-  base?: ConflictVersion;
+  base?: ConflictVersion | undefined;
   /** Resolution status */
   resolved: boolean;
   /** Resolution if resolved */
-  resolution?: 'ours' | 'theirs' | 'merged' | 'deleted';
+  resolution?: 'ours' | 'theirs' | 'merged' | 'deleted' | undefined;
 }
 
 /**
@@ -269,17 +269,17 @@ export interface BranchLogEntry {
  */
 export interface BranchLogOptions {
   /** Maximum number of entries to return */
-  limit?: number;
+  limit?: number | undefined;
   /** Skip this many entries */
-  skip?: number;
+  skip?: number | undefined;
   /** Only include commits after this date */
-  since?: Date;
+  since?: Date | undefined;
   /** Only include commits before this date */
-  until?: Date;
+  until?: Date | undefined;
   /** Only include commits affecting these paths */
-  paths?: string[];
+  paths?: string[] | undefined;
   /** Include commits from all branches */
-  all?: boolean;
+  all?: boolean | undefined;
 }
 
 /**
@@ -311,11 +311,11 @@ export interface FileDiff {
   /** Type of change */
   status: 'added' | 'modified' | 'deleted' | 'renamed';
   /** Old path (for renames) */
-  oldPath?: string;
+  oldPath?: string | undefined;
   /** Additions count */
-  additions?: number;
+  additions?: number | undefined;
   /** Deletions count */
-  deletions?: number;
+  deletions?: number | undefined;
 }
 
 // =============================================================================
@@ -328,8 +328,8 @@ export interface FileDiff {
 export interface CreateBranchStatement {
   type: 'CREATE_BRANCH';
   name: BranchId;
-  from?: BranchId;
-  commit?: CommitId;
+  from?: BranchId | undefined;
+  commit?: CommitId | undefined;
 }
 
 /**
@@ -338,7 +338,7 @@ export interface CreateBranchStatement {
 export interface CheckoutBranchStatement {
   type: 'CHECKOUT_BRANCH';
   name: BranchId;
-  create?: boolean;
+  create?: boolean | undefined;
 }
 
 /**
@@ -348,7 +348,7 @@ export interface MergeBranchStatement {
   type: 'MERGE_BRANCH';
   source: BranchId;
   into: BranchId;
-  strategy?: MergeStrategy;
+  strategy?: MergeStrategy | undefined;
 }
 
 /**
@@ -357,7 +357,7 @@ export interface MergeBranchStatement {
 export interface DeleteBranchStatement {
   type: 'DELETE_BRANCH';
   name: BranchId;
-  force?: boolean;
+  force?: boolean | undefined;
 }
 
 /**
@@ -365,8 +365,8 @@ export interface DeleteBranchStatement {
  */
 export interface ShowBranchesStatement {
   type: 'SHOW_BRANCHES';
-  pattern?: string;
-  all?: boolean;
+  pattern?: string | undefined;
+  all?: boolean | undefined;
 }
 
 /**
@@ -374,8 +374,8 @@ export interface ShowBranchesStatement {
  */
 export interface BranchLogStatement {
   type: 'BRANCH_LOG';
-  branch?: BranchId;
-  limit?: number;
+  branch?: BranchId | undefined;
+  limit?: number | undefined;
 }
 
 /**
@@ -502,7 +502,7 @@ export interface WorkingTreeStatus {
 export interface FileChange {
   path: string;
   status: 'added' | 'modified' | 'deleted' | 'renamed';
-  oldPath?: string;
+  oldPath?: string | undefined;
 }
 
 // =============================================================================

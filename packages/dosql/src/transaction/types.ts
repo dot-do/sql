@@ -144,15 +144,15 @@ export interface TransactionLogEntry {
   /** Target table name */
   table: string;
   /** Primary key of affected row */
-  key?: Uint8Array;
+  key?: Uint8Array | undefined;
   /** Value before the operation (for undo) */
-  beforeValue?: Uint8Array;
+  beforeValue?: Uint8Array | undefined;
   /** Value after the operation (for redo) */
-  afterValue?: Uint8Array;
+  afterValue?: Uint8Array | undefined;
   /** Savepoint name (for savepoint operations) */
-  savepointName?: string;
+  savepointName?: string | undefined;
   /** LSN from WAL (links to durability layer, branded type) */
-  walLsn?: LSN;
+  walLsn?: LSN | undefined;
   /** Timestamp of the operation */
   timestamp: number;
   /** Sequence within transaction */
@@ -196,11 +196,11 @@ export interface RowVersion {
   /** Transaction ID that created this version (branded type) */
   createdBy: TransactionId;
   /** Transaction ID that deleted this version (or null if active, branded type) */
-  deletedBy?: TransactionId;
+  deletedBy?: TransactionId | undefined;
   /** LSN when created (branded type) */
   createdLsn: LSN;
   /** LSN when deleted (if applicable, branded type) */
-  deletedLsn?: LSN;
+  deletedLsn?: LSN | undefined;
   /** The actual row data */
   data: Uint8Array;
 }
@@ -250,7 +250,7 @@ export interface LockRequest {
   /** Request timestamp */
   timestamp: number;
   /** Request timeout in ms */
-  timeout?: number;
+  timeout?: number | undefined;
 }
 
 /**
@@ -260,11 +260,11 @@ export interface LockResult {
   /** Whether lock was acquired */
   acquired: boolean;
   /** Lock type that was granted (may differ from requested) */
-  grantedType?: LockType;
+  grantedType?: LockType | undefined;
   /** If not acquired, the blocking transaction (branded type) */
-  blockedBy?: TransactionId;
+  blockedBy?: TransactionId | undefined;
   /** Wait time in ms if lock was acquired after waiting */
-  waitTime?: number;
+  waitTime?: number | undefined;
 }
 
 /**
@@ -302,7 +302,7 @@ export interface TransactionContext {
   /** Transaction log for rollback */
   log: TransactionLog;
   /** MVCC snapshot (for snapshot isolation) */
-  snapshot?: Snapshot;
+  snapshot?: Snapshot | undefined;
   /** Currently held locks */
   locks: HeldLock[];
   /** Transaction start time */
@@ -312,9 +312,9 @@ export interface TransactionContext {
   /** Auto-commit flag (transaction ends after each statement) */
   autoCommit: boolean;
   /** Timestamp when transaction expires (for timeout enforcement) */
-  expiresAt?: number;
+  expiresAt?: number | undefined;
   /** Number of timeout extensions granted */
-  extensionCount?: number;
+  extensionCount?: number | undefined;
 }
 
 /**
@@ -322,17 +322,17 @@ export interface TransactionContext {
  */
 export interface TransactionOptions {
   /** Transaction mode (default: DEFERRED) */
-  mode?: TransactionMode;
+  mode?: TransactionMode | undefined;
   /** Isolation level (default: SERIALIZABLE) */
-  isolationLevel?: IsolationLevel;
+  isolationLevel?: IsolationLevel | undefined;
   /** Whether transaction is read-only */
-  readOnly?: boolean;
+  readOnly?: boolean | undefined;
   /** Lock timeout in milliseconds */
-  lockTimeout?: number;
+  lockTimeout?: number | undefined;
   /** Custom transaction ID (auto-generated if not provided, branded type) */
-  txnId?: TransactionId;
+  txnId?: TransactionId | undefined;
   /** Transaction timeout in milliseconds */
-  timeoutMs?: number;
+  timeoutMs?: number | undefined;
 }
 
 // =============================================================================
@@ -950,9 +950,9 @@ export interface LongRunningTransactionLog {
     op: TransactionLogOperation;
     table: string;
     timestamp: number;
-  }>;
+  }> | undefined;
   /** Locks held by the transaction */
-  heldLocks?: HeldLock[];
+  heldLocks?: HeldLock[] | undefined;
 }
 
 /**

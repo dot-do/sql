@@ -20,7 +20,7 @@
  * @see packages/dosql/src/distributed-tx/cross-shard-executor.ts - Cross-shard executor
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ShardId } from '../sharding/types.js';
 import { createShardId } from '../sharding/types.js';
 import {
@@ -510,17 +510,30 @@ describe('Distributed Transactions - Timeout Handling', () => {
    * 2. Send ROLLBACK to all participants
    */
   it('prepare timeout causes abort', async () => {
+    // Import the direct coordinator creator to pass options
+    const { createDistributedTransactionCoordinator } = await import('../distributed-tx/coordinator.js');
+
     // Create a mock RPC that simulates slow response
+    // Using a short delay that's still longer than the 50ms prepareTimeoutMs
     const mockRpc = createMockShardRPC();
     mockRpc.prepare = async (shardId: string) => {
-      // Simulate slow participant - this will be caught by timeout
-      await new Promise((resolve) => setTimeout(resolve, 20000));
+      // Simulate slow participant - uses a delay longer than the prepareTimeoutMs
+      await new Promise((resolve) => setTimeout(resolve, 200));
       return { vote: 'YES' as ParticipantVote };
     };
 
-    const coordinator = createTestCoordinator('test-coordinator', mockRpc);
+    const coordinator = createDistributedTransactionCoordinator(
+      mockRpc,
+      new InMemoryTransactionLog(),
+      {
+        coordinatorId: 'test-coordinator',
+        prepareTimeoutMs: 50,
+        maxRetries: 1,
+        retryDelayMs: 1,
+      }
+    );
 
-    await coordinator.begin(shards, { timeout: 100 });
+    await coordinator.begin(shards);
     await coordinator.execute(shards[0], 'INSERT INTO data VALUES (1)', []);
 
     // Prepare should timeout
@@ -532,7 +545,7 @@ describe('Distributed Transactions - Timeout Handling', () => {
     }
 
     expect(coordinator.getState()).toBe('ABORTING');
-  }, 15000);
+  });
 });
 
 // =============================================================================

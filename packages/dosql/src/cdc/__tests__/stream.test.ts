@@ -807,10 +807,18 @@ describe('CDC Stream - Convenience Functions', () => {
       }
     };
 
-    await Promise.race([
-      collectEvents(),
-      new Promise<void>(resolve => setTimeout(resolve, 2000)),
-    ]);
+    vi.useFakeTimers();
+    try {
+      const racePromise = Promise.race([
+        collectEvents(),
+        new Promise<void>(resolve => setTimeout(resolve, 2000)),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(2000);
+      await racePromise;
+    } finally {
+      vi.useRealTimers();
+    }
 
     // Should only get 'users' table events
     expect(events.length).toBeGreaterThanOrEqual(1);

@@ -60,16 +60,16 @@ export interface AuthOptions {
   basic?: {
     username: string;
     password: string;
-  };
+  } | undefined;
   /** Bearer token authentication */
-  bearer?: string;
+  bearer?: string | undefined;
   /** API key authentication */
   apiKey?: {
     header: string;
     value: string;
-  };
+  } | undefined;
   /** Custom headers for authentication */
-  headers?: Record<string, string>;
+  headers?: Record<string, string> | undefined;
 }
 
 /**
@@ -112,55 +112,55 @@ export interface AuthOptions {
  */
 export interface URLSourceOptions {
   /** Data format (auto-detected if not specified) */
-  format?: VirtualTableFormat;
+  format?: VirtualTableFormat | undefined;
 
   /** HTTP headers to include in requests */
-  headers?: Record<string, string>;
+  headers?: Record<string, string> | undefined;
 
   /** Authentication configuration */
-  auth?: AuthOptions;
+  auth?: AuthOptions | undefined;
 
   /** Request timeout in milliseconds */
-  timeout?: number;
+  timeout?: number | undefined;
 
   /** HTTP method (default: GET) */
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | undefined;
 
   /** Request body for POST requests */
-  body?: string | Record<string, unknown>;
+  body?: string | Record<string, unknown> | undefined;
 
   /** Follow redirects (default: follow) */
-  redirect?: 'follow' | 'error' | 'manual';
+  redirect?: 'follow' | 'error' | 'manual' | undefined;
 
   /** Credentials mode */
-  credentials?: 'omit' | 'same-origin' | 'include';
+  credentials?: 'omit' | 'same-origin' | 'include' | undefined;
 
   // CSV-specific options
   /** CSV delimiter (default: ',') */
-  delimiter?: string;
+  delimiter?: string | undefined;
 
   /** CSV quote character (default: '"') */
-  quote?: string;
+  quote?: string | undefined;
 
   /** Whether CSV has header row (default: true) */
-  csvHeaders?: boolean;
+  csvHeaders?: boolean | undefined;
 
   // Caching options
   /** Enable caching with Cache API */
-  cache?: boolean;
+  cache?: boolean | undefined;
 
   /** Cache TTL in seconds (default: 300) */
-  cacheTtl?: number;
+  cacheTtl?: number | undefined;
 
   /** Cache key prefix */
-  cacheKeyPrefix?: string;
+  cacheKeyPrefix?: string | undefined;
 
   // Schema options
   /** Explicit schema definition */
-  schema?: Record<string, ColumnType>;
+  schema?: Record<string, ColumnType> | undefined;
 
   /** Maximum samples for schema inference */
-  schemaSampleSize?: number;
+  schemaSampleSize?: number | undefined;
 }
 
 /**
@@ -190,43 +190,43 @@ export interface URLSourceOptions {
  */
 export interface WithClauseOptions {
   /** Data format */
-  format?: VirtualTableFormat;
+  format?: VirtualTableFormat | undefined;
 
   /** Whether data has headers (CSV) */
-  headers?: boolean;
+  headers?: boolean | undefined;
 
   /** Field delimiter (CSV) */
-  delimiter?: string;
+  delimiter?: string | undefined;
 
   /** Quote character (CSV) */
-  quote?: string;
+  quote?: string | undefined;
 
   /** Request timeout in milliseconds */
-  timeout?: number;
+  timeout?: number | undefined;
 
   /** Enable caching */
-  cache?: boolean;
+  cache?: boolean | undefined;
 
   /** Cache TTL in seconds */
-  cacheTtl?: number;
+  cacheTtl?: number | undefined;
 
   /** Authentication type */
-  auth?: 'basic' | 'bearer' | 'api-key';
+  auth?: 'basic' | 'bearer' | 'api-key' | undefined;
 
   /** Auth username (for basic auth) */
-  username?: string;
+  username?: string | undefined;
 
   /** Auth password (for basic auth) */
-  password?: string;
+  password?: string | undefined;
 
   /** Auth token (for bearer auth) */
-  token?: string;
+  token?: string | undefined;
 
   /** API key header name */
-  apiKeyHeader?: string;
+  apiKeyHeader?: string | undefined;
 
   /** API key value */
-  apiKeyValue?: string;
+  apiKeyValue?: string | undefined;
 }
 
 // =============================================================================
@@ -273,10 +273,10 @@ export interface VirtualTableSchema {
   columns: Record<string, ColumnType>;
 
   /** Primary key columns (if any) */
-  primaryKey?: string[];
+  primaryKey?: string[] | undefined;
 
   /** Estimated row count (for query planning) */
-  estimatedRows?: number;
+  estimatedRows?: number | undefined;
 }
 
 /**
@@ -310,13 +310,13 @@ export interface VirtualTableSchema {
  */
 export interface VirtualTableStats {
   /** Total rows (if known) */
-  rowCount?: number;
+  rowCount?: number | undefined;
 
   /** Size in bytes (if known) */
-  sizeBytes?: number;
+  sizeBytes?: number | undefined;
 
   /** Last modified time */
-  lastModified?: Date;
+  lastModified?: Date | undefined;
 
   /** Whether stats are estimated or exact */
   isEstimate: boolean;
@@ -511,10 +511,10 @@ export interface VirtualTable {
  */
 export interface VirtualTableScanOptions extends ScanOptions {
   /** Force refresh cache */
-  noCache?: boolean;
+  noCache?: boolean | undefined;
 
   /** Maximum concurrent requests (for partitioned data) */
-  concurrency?: number;
+  concurrency?: number | undefined;
 }
 
 // =============================================================================
@@ -660,19 +660,19 @@ export interface ParsedVirtualTableUrl {
   host: string;
 
   /** Port number (if specified) */
-  port?: number;
+  port?: number | undefined;
 
   /** Path within the host/bucket */
   path: string;
 
   /** Query parameters */
-  query?: Record<string, string>;
+  query?: Record<string, string> | undefined;
 
   /** Fragment (hash) */
-  fragment?: string;
+  fragment?: string | undefined;
 
   /** Detected format from extension */
-  detectedFormat?: VirtualTableFormat;
+  detectedFormat?: VirtualTableFormat | undefined;
 }
 
 // =============================================================================

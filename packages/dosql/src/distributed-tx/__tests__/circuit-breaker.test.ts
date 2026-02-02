@@ -12,7 +12,7 @@
  * - Integration with coordinator
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   createCircuitBreaker,
   CircuitBreakerOpenError,
@@ -60,12 +60,17 @@ describe('CircuitBreaker', () => {
   let circuitBreaker: CircuitBreaker;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     circuitBreaker = createCircuitBreaker({
       failureThreshold: 3,
       resetTimeoutMs: 1000,
       successThreshold: 2,
       failureWindowMs: 5000,
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe('initial state', () => {
@@ -139,8 +144,8 @@ describe('CircuitBreaker', () => {
       }
       expect(circuitBreaker.getState('shard-a')).toBe('OPEN');
 
-      // Wait for reset timeout
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      // Advance time past reset timeout
+      vi.advanceTimersByTime(1100);
 
       // State should transition on next check
       expect(circuitBreaker.getState('shard-a')).toBe('HALF_OPEN');
@@ -152,8 +157,8 @@ describe('CircuitBreaker', () => {
         circuitBreaker.recordFailure('shard-a');
       }
 
-      // Wait for reset timeout
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      // Advance time past reset timeout
+      vi.advanceTimersByTime(1100);
 
       expect(circuitBreaker.canExecute('shard-a')).toBe(true);
     });
@@ -166,8 +171,8 @@ describe('CircuitBreaker', () => {
         circuitBreaker.recordFailure('shard-a');
       }
 
-      // Wait for reset timeout
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      // Advance time past reset timeout
+      vi.advanceTimersByTime(1100);
       expect(circuitBreaker.getState('shard-a')).toBe('HALF_OPEN');
 
       // Record successes
@@ -186,8 +191,8 @@ describe('CircuitBreaker', () => {
         circuitBreaker.recordFailure('shard-a');
       }
 
-      // Wait for reset timeout
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      // Advance time past reset timeout
+      vi.advanceTimersByTime(1100);
       expect(circuitBreaker.getState('shard-a')).toBe('HALF_OPEN');
 
       // Any failure in half-open goes back to open
@@ -210,8 +215,8 @@ describe('CircuitBreaker', () => {
       shortWindowBreaker.recordFailure('shard-a');
       shortWindowBreaker.recordFailure('shard-a');
 
-      // Wait for failures to expire
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Advance time past failure window
+      vi.advanceTimersByTime(150);
 
       // This failure should not trigger open (previous ones expired)
       shortWindowBreaker.recordFailure('shard-a');
@@ -485,31 +490,36 @@ describe('DistributedTransactionCoordinator with CircuitBreaker', () => {
     });
 
     it('should allow transaction to proceed after circuit recovers', async () => {
-      const coordinator = createDistributedTransactionCoordinator(rpc, txnLog, {
-        coordinatorId: 'coord-1',
-        circuitBreaker: {
-          failureThreshold: 2,
-          resetTimeoutMs: 50, // Very short for test
-          successThreshold: 1,
-        },
-      });
+      vi.useFakeTimers();
+      try {
+        const coordinator = createDistributedTransactionCoordinator(rpc, txnLog, {
+          coordinatorId: 'coord-1',
+          circuitBreaker: {
+            failureThreshold: 2,
+            resetTimeoutMs: 50, // Very short for test
+            successThreshold: 1,
+          },
+        });
 
-      const cb = coordinator.getCircuitBreaker()!;
+        const cb = coordinator.getCircuitBreaker()!;
 
-      // Trip the circuit
-      cb.forceOpen('shard-a');
-      expect(cb.getState('shard-a')).toBe('OPEN');
+        // Trip the circuit
+        cb.forceOpen('shard-a');
+        expect(cb.getState('shard-a')).toBe('OPEN');
 
-      // Wait for reset timeout
-      await new Promise((resolve) => setTimeout(resolve, 60));
+        // Advance time past reset timeout
+        vi.advanceTimersByTime(60);
 
-      // Now should be half-open and allow request
-      await coordinator.begin([shardA]);
-      const votes = await coordinator.prepare();
+        // Now should be half-open and allow request
+        await coordinator.begin([shardA]);
+        const votes = await coordinator.prepare();
 
-      // Should succeed and close circuit
-      expect(votes.get('shard-a')).toBe('YES');
-      expect(cb.getState('shard-a')).toBe('CLOSED');
+        // Should succeed and close circuit
+        expect(votes.get('shard-a')).toBe('YES');
+        expect(cb.getState('shard-a')).toBe('CLOSED');
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('should maintain separate circuits for each shard', async () => {

@@ -115,7 +115,8 @@ export function serializePage(page: Page): Uint8Array {
   let keyDataOffset = 0;
 
   for (let i = 0; i < keyCount; i++) {
-    const key = page.keys[i];
+    // Non-null assertion: i < keyCount === page.keys.length guarantees valid access
+    const key = page.keys[i]!;
     view.setUint32(offset, keyDataOffset, false);
     view.setUint32(offset + 4, key.byteLength, false);
     offset += 8;
@@ -128,7 +129,8 @@ export function serializePage(page: Page): Uint8Array {
     let valueDataOffset = 0;
 
     for (let i = 0; i < keyCount; i++) {
-      const value = page.values[i];
+      // Non-null assertion: i < keyCount guarantees valid access (values match keys)
+      const value = page.values[i]!;
       view.setUint32(offset, valueDataOffset, false);
       view.setUint32(offset + 4, value.byteLength, false);
       offset += 8;
@@ -357,8 +359,9 @@ export function binarySearch(
 export function compareBytes(a: Uint8Array, b: Uint8Array): number {
   const minLen = Math.min(a.length, b.length);
   for (let i = 0; i < minLen; i++) {
-    if (a[i] < b[i]) return -1;
-    if (a[i] > b[i]) return 1;
+    // Non-null assertion: i < minLen guarantees valid access in both arrays
+    if (a[i]! < b[i]!) return -1;
+    if (a[i]! > b[i]!) return 1;
   }
   return a.length - b.length;
 }

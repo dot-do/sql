@@ -45,14 +45,14 @@ export type ParsedExpr =
 export interface ColumnExpr {
   type: 'column';
   name: string;
-  table?: string;
-  location?: SourceLocation;
+  table?: string | undefined;
+  location?: SourceLocation | undefined;
 }
 
 export interface LiteralExpr {
   type: 'literal';
   value: string | number | boolean | null;
-  location?: SourceLocation;
+  location?: SourceLocation | undefined;
 }
 
 export interface BinaryExpr {
@@ -60,29 +60,29 @@ export interface BinaryExpr {
   op: string;
   left: ParsedExpr;
   right: ParsedExpr;
-  location?: SourceLocation;
+  location?: SourceLocation | undefined;
 }
 
 export interface UnaryExpr {
   type: 'unary';
   op: string;
   operand: ParsedExpr;
-  location?: SourceLocation;
+  location?: SourceLocation | undefined;
 }
 
 export interface FunctionExpr {
   type: 'function';
   name: string;
   args: ParsedExpr[];
-  location?: SourceLocation;
+  location?: SourceLocation | undefined;
 }
 
 export interface AggregateExpr {
   type: 'aggregate';
   name: string;
   arg: ParsedExpr | '*';
-  distinct?: boolean;
-  location?: SourceLocation;
+  distinct?: boolean | undefined;
+  location?: SourceLocation | undefined;
 }
 
 export interface BetweenExpr {
@@ -90,41 +90,41 @@ export interface BetweenExpr {
   expr: ParsedExpr;
   low: ParsedExpr;
   high: ParsedExpr;
-  location?: SourceLocation;
+  location?: SourceLocation | undefined;
 }
 
 export interface InExpr {
   type: 'in';
   expr: ParsedExpr;
   values: ParsedExpr[] | SubqueryExpr;
-  not?: boolean;
-  location?: SourceLocation;
+  not?: boolean | undefined;
+  location?: SourceLocation | undefined;
 }
 
 export interface IsNullExpr {
   type: 'isNull';
   expr: ParsedExpr;
   isNot: boolean;
-  location?: SourceLocation;
+  location?: SourceLocation | undefined;
 }
 
 export interface SubqueryExpr {
   type: 'subquery';
   subqueryType: 'scalar' | 'in' | 'exists' | 'any' | 'all';
   query: ParsedSelect;
-  location?: SourceLocation;
+  location?: SourceLocation | undefined;
 }
 
 export interface ExistsExpr {
   type: 'exists';
   query: ParsedSelect;
-  location?: SourceLocation;
+  location?: SourceLocation | undefined;
 }
 
 export interface StarExpr {
   type: 'star';
-  table?: string;
-  location?: SourceLocation;
+  table?: string | undefined;
+  location?: SourceLocation | undefined;
 }
 
 // =============================================================================
@@ -137,12 +137,12 @@ export interface StarExpr {
 export interface BaseCaseExpression {
   type: 'case';
   whenClauses: WhenClause[];
-  elseClause?: ParsedExpr;
-  location?: SourceLocation;
+  elseClause?: ParsedExpr | undefined;
+  location?: SourceLocation | undefined;
   /** Inferred result type */
-  inferredType?: 'string' | 'number' | 'boolean' | 'date' | 'unknown';
+  inferredType?: 'string' | 'number' | 'boolean' | 'date' | 'unknown' | undefined;
   /** Whether result can be NULL */
-  nullable?: boolean;
+  nullable?: boolean | undefined;
 }
 
 /**
@@ -196,46 +196,46 @@ export interface SearchedWhenClause extends WhenClause {
 
 export interface ParsedColumn {
   expr: ParsedExpr;
-  alias?: string;
-  location?: SourceLocation;
+  alias?: string | undefined;
+  location?: SourceLocation | undefined;
 }
 
 export interface ParsedFrom {
   type: 'table' | 'derived';
-  table?: string;
-  alias?: string;
-  query?: ParsedSelect;
-  location?: SourceLocation;
+  table?: string | undefined;
+  alias?: string | undefined;
+  query?: ParsedSelect | undefined;
+  location?: SourceLocation | undefined;
 }
 
 export interface ParsedJoin {
   type: 'inner' | 'left' | 'right' | 'full' | 'cross';
   table: ParsedFrom;
-  alias?: string;
-  on?: ParsedExpr;
-  location?: SourceLocation;
+  alias?: string | undefined;
+  on?: ParsedExpr | undefined;
+  location?: SourceLocation | undefined;
 }
 
 export interface ParsedOrderBy {
   expr: ParsedExpr;
   direction: 'asc' | 'desc';
-  nullsFirst?: boolean;
-  location?: SourceLocation;
+  nullsFirst?: boolean | undefined;
+  location?: SourceLocation | undefined;
 }
 
 export interface ParsedSelect {
   type: 'select';
   columns: ParsedColumn[];
   from: ParsedFrom;
-  joins?: ParsedJoin[];
-  where?: ParsedExpr;
-  groupBy?: ParsedExpr[];
-  having?: ParsedExpr;
-  orderBy?: ParsedOrderBy[];
-  limit?: number;
-  offset?: number;
-  distinct?: boolean;
-  location?: SourceLocation;
+  joins?: ParsedJoin[] | undefined;
+  where?: ParsedExpr | undefined;
+  groupBy?: ParsedExpr[] | undefined;
+  having?: ParsedExpr | undefined;
+  orderBy?: ParsedOrderBy[] | undefined;
+  limit?: number | undefined;
+  offset?: number | undefined;
+  distinct?: boolean | undefined;
+  location?: SourceLocation | undefined;
 }
 
 // =============================================================================

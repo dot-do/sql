@@ -50,7 +50,7 @@ export interface DMLExecutionResult<T = Record<string, unknown>> {
   /** Number of rows affected */
   changes: number;
   /** Last inserted row ID (for INSERT) */
-  lastInsertRowid?: number | bigint;
+  lastInsertRowid?: number | bigint | undefined;
   /** Rows returned by RETURNING clause */
   rows: T[];
   /** Column names in result */

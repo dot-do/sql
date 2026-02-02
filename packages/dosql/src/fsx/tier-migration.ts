@@ -38,15 +38,15 @@ export interface TierIndexEntry {
   /** Last access timestamp */
   lastAccessed: number;
   /** When migrated to cold storage (if applicable) */
-  migratedAt?: number;
+  migratedAt?: number | undefined;
   /** ETag from R2 (for cache validation) */
-  r2Etag?: string;
+  r2Etag?: string | undefined;
   /** Access count for prioritizing which files to migrate */
   accessCount: number;
   /** Whether file is pinned to hot tier */
-  pinned?: boolean;
+  pinned?: boolean | undefined;
   /** Write version counter for detecting concurrent writes during migration */
-  writeVersion?: number;
+  writeVersion?: number | undefined;
 }
 
 /**
@@ -180,7 +180,7 @@ export class MigrationProgressTracker {
   getStats(): {
     migrationCount: number;
     totalBytesMigrated: number;
-    lastMigration?: Date;
+    lastMigration?: Date | undefined;
     recentHistory: MigrationHistoryEntry[];
   } {
     return {

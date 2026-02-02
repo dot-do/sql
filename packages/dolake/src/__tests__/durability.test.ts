@@ -80,8 +80,19 @@ function createP3Event(overrides: Partial<CDCEvent> = {}): CDCEvent {
   });
 }
 
-// Simple in-memory storage implementations for testing
-class MockR2Storage {
+// =============================================================================
+// In-Memory Test Doubles (Fakes)
+// =============================================================================
+// NOTE: These are TEST DOUBLES (fakes), not mocks. Per NO MOCKS philosophy,
+// they implement real behavior in-memory rather than using vi.fn()/jest.fn().
+// The "Mock" prefix is a misnomer - these should be called "Fake" for clarity.
+
+/**
+ * Fake R2 storage implementation for testing.
+ * Provides real in-memory storage behavior with optional failure injection.
+ * This is a TEST DOUBLE, not a mock - it has real implementations.
+ */
+class FakeR2Storage {
   private storage = new Map<string, Uint8Array>();
   private failureCount = 0;
   private shouldFailPermanently = false;
@@ -121,7 +132,15 @@ class MockR2Storage {
   }
 }
 
-class MockKVStorage {
+// Backward compatibility alias
+const MockR2Storage = FakeR2Storage;
+
+/**
+ * Fake KV storage implementation for testing.
+ * Provides real in-memory storage behavior with optional failure injection.
+ * This is a TEST DOUBLE, not a mock - it has real implementations.
+ */
+class FakeKVStorage {
   private storage = new Map<string, string>();
   private failureCount = 0;
   private shouldFailPermanently = false;
@@ -161,7 +180,15 @@ class MockKVStorage {
   }
 }
 
-class MockVFSStorage {
+// Backward compatibility alias
+const MockKVStorage = FakeKVStorage;
+
+/**
+ * Fake VFS storage implementation for testing.
+ * Provides real in-memory storage behavior.
+ * This is a TEST DOUBLE, not a mock - it has real implementations.
+ */
+class FakeVFSStorage {
   private storage = new Map<string, unknown>();
 
   async write(key: string, data: unknown): Promise<void> {
@@ -194,6 +221,9 @@ class MockVFSStorage {
     this.storage.clear();
   }
 }
+
+// Backward compatibility alias
+const MockVFSStorage = FakeVFSStorage;
 
 // =============================================================================
 // FlushStrategy Tests

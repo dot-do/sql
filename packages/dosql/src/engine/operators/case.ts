@@ -41,7 +41,7 @@ export interface SimpleCaseExpr {
   caseStyle: 'simple';
   operand: Expression;
   when: SimpleCaseWhen[];
-  else?: Expression;
+  else?: Expression | undefined;
 }
 
 export interface SimpleCaseWhen {
@@ -56,7 +56,7 @@ export interface SearchedCaseExpr {
   type: 'case';
   caseStyle: 'searched';
   when: SearchedCaseWhen[];
-  else?: Expression;
+  else?: Expression | undefined;
 }
 
 export interface SearchedCaseWhen {
