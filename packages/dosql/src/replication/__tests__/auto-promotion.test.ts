@@ -7,6 +7,16 @@
  * - Leader election protocol
  * - Promotion eligibility checks (replication lag, data freshness)
  *
+ * TIMING NOTE: Tests use real timers with 100ms delays for heartbeat timeout testing.
+ * Real timers are required because:
+ * - The replica tracks lastHeartbeat using Date.now()
+ * - Heartbeat timeout detection compares timestamps against current time
+ * - The auto-promotion logic depends on actual elapsed time
+ *
+ * Timeout values are kept small (50-100ms) to minimize test duration while still
+ * validating the time-based promotion eligibility logic. These delays are
+ * acceptable as they test real temporal behavior rather than mocked time.
+ *
  * @packageDocumentation
  */
 

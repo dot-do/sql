@@ -11,10 +11,19 @@
  *
  * Issue: sql-zhy.25 - Stream State Cleanup
  *
+ * TIMING NOTE: Tests in this file use real timers with small delays (10-150ms).
+ * Real timers are required because:
+ * - DoSQLTarget uses Date.now() internally for lastActivity tracking
+ * - The TTL cleanup logic compares current time against stored timestamps
+ * - Fake timers don't affect Date.now() unless explicitly mocked
+ *
+ * The delays are kept short (< 200ms) to minimize flakiness while still
+ * testing the time-based behavior.
+ *
  * @packageDocumentation
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { DoSQLTarget } from '../server.js';
 import type { CDCManager, CDCSubscription, CDCSubscribeOptions, StreamManager } from '../server.js';
 import { MockQueryExecutor } from '../../__tests__/utils/index.js';
@@ -80,12 +89,18 @@ describe('Stream State Cleanup - TTL-Based Expiration', () => {
   let target: DoSQLTarget;
 
   beforeEach(() => {
+    // Use fake timers with Date mocking for deterministic TTL testing
+    vi.useFakeTimers();
     executor = new MockQueryExecutor();
     executor.addTable('users', ['id', 'name'], ['number', 'string'], [
       [1, 'Alice'],
       [2, 'Bob'],
       [3, 'Charlie'],
     ]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('should cleanup streams after inactivity timeout via cleanupExpiredStreams()', async () => {
@@ -104,8 +119,8 @@ describe('Stream State Cleanup - TTL-Based Expiration', () => {
 
     expect(target.getStreamStats().activeStreams).toBe(1);
 
-    // Wait for TTL to expire
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Advance time past TTL expiration using fake timers
+    vi.advanceTimersByTime(150);
 
     // Manually trigger cleanup (in production, this is called by DO alarm)
     const cleaned = target.cleanupExpiredStreams();
@@ -128,10 +143,10 @@ describe('Stream State Cleanup - TTL-Based Expiration', () => {
     });
 
     // Activity within TTL - fetching resets lastActivity
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    vi.advanceTimersByTime(50);
     await target._nextChunk(streamId); // Activity resets TTL timer
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    vi.advanceTimersByTime(50);
     await target._nextChunk(streamId); // Another activity
 
     // Trigger cleanup - should not clean up because activity was recent
@@ -160,8 +175,8 @@ describe('Stream State Cleanup - TTL-Based Expiration', () => {
     expect(info1!.lastActivity).toBeGreaterThanOrEqual(beforeInit);
     expect(info1!.createdAt).toBeGreaterThanOrEqual(beforeInit);
 
-    // Wait and fetch to update lastActivity
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Advance time and fetch to update lastActivity
+    vi.advanceTimersByTime(10);
     const beforeFetch = Date.now();
     await target._nextChunk(streamId);
 
@@ -185,8 +200,8 @@ describe('Stream State Cleanup - TTL-Based Expiration', () => {
       chunkSize: 1,
     });
 
-    // Wait for query TTL but not CDC TTL
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Advance time past query TTL but not CDC TTL
+    vi.advanceTimersByTime(100);
 
     // Query stream should be expired
     const cleaned = target.cleanupExpiredStreams();

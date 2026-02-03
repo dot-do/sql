@@ -9,6 +9,20 @@
  * - Error handling and edge cases
  *
  * Tests run using workers-vitest-pool (NO MOCKS).
+ *
+ * TIMING NOTE: Many tests in this file use real timers with setTimeout for:
+ * 1. Controlling test duration via `collectWithTimeout()` helper
+ * 2. Breaking out of infinite polling loops in subscription tests
+ * 3. Waiting for async iterator events to propagate
+ *
+ * Real timers are necessary because:
+ * - Async generators (for await...of) don't work well with fake timers
+ * - The CDC subscription uses Promise-based polling that requires real event loop
+ * - Stream pause/resume semantics depend on actual async scheduling
+ *
+ * Short timeouts (< 1000ms) are used to minimize test duration while still
+ * providing enough time for async operations to complete. Tests use the
+ * `collectWithTimeout()` helper which combines timeout with max item count.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';

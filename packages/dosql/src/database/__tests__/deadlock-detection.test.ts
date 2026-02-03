@@ -21,6 +21,16 @@
  * - Tests using `it.fails()` document missing features that SHOULD exist
  * - Tests using `it()` verify existing behavior or expected failures
  *
+ * TIMING NOTE: Tests use small delays (5-50ms) via delay() helper.
+ * Real timers are required because:
+ * - Deadlock tests involve concurrent lock acquisitions that must interleave
+ * - Lock wait queues depend on actual Promise scheduling order
+ * - Timeout-based deadlock detection uses real time elapsed
+ *
+ * The small delays ensure lock requests are properly queued before
+ * attempting operations that would trigger deadlock detection. These
+ * are testing concurrent behavior, not time-based logic.
+ *
  * @packageDocumentation
  */
 

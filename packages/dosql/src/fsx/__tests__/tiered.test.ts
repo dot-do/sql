@@ -16,6 +16,16 @@
  * 9. Failed migrations should be retried with backoff
  * 10. Per-tier size limits should be enforced
  *
+ * TIMING NOTE: Tests use real timers with sleep() helper (5-100ms delays).
+ * Real timers are required because:
+ * - TieredStorageBackend tracks file access times using Date.now()
+ * - LRU eviction decisions are based on actual last-access timestamps
+ * - Age-based tier transitions compare creation time against current time
+ *
+ * Short delays (5-20ms) are used to ensure timestamp ordering without
+ * significantly impacting test duration. Tests that require longer waits
+ * (50-100ms) are testing actual time-based eviction behavior.
+ *
  * @packageDocumentation
  */
 

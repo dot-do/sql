@@ -15,6 +15,19 @@
  * 5. Long-running transaction logging - Log transactions exceeding thresholds
  * 6. Timeout behavior during blocking operations - Handle timeout during locks/I/O
  *
+ * TIMING NOTE: Tests use real timers with delay() helper (100-850ms delays).
+ * Real timers are required because:
+ * - Transaction timeout logic uses Date.now() for start time tracking
+ * - The timeout checking compares elapsed time against configured limits
+ * - Lock wait timeouts depend on actual time passage
+ *
+ * Timeout configurations are set to short values (100-200ms) to minimize
+ * test duration while still validating the timeout enforcement logic.
+ *
+ * POTENTIAL IMPROVEMENT: Consider injecting a clock abstraction into
+ * TransactionManager to enable fake timer testing for more deterministic
+ * and faster tests.
+ *
  * @packageDocumentation
  */
 
