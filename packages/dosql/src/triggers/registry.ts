@@ -314,8 +314,10 @@ export function createTriggerRegistry(options: TriggerRegistryOptions = {}): Tri
           // Store SQL-specific properties
           condition: trigger.whenClause,
           description: `SQL Trigger: ${trigger.timing} ${trigger.event} ON ${trigger.table}`,
-          // Store the full SQL trigger definition for execution
-          ...(trigger as unknown as Record<string, unknown>),
+          // Store SQL trigger definition properties explicitly for type safety
+          body: trigger.body,
+          event: trigger.event,
+          originalTiming: trigger.timing,
         } as TriggerConfig<T>;
 
         // Remove old index if replacing
@@ -382,8 +384,10 @@ export function createTriggerRegistry(options: TriggerRegistryOptions = {}): Tri
         triggers = triggers.filter(t => {
           const triggerTiming = t.timing.toLowerCase();
           // Handle INSTEAD OF mapping to before
+          // Check originalTiming property (stored for SQL triggers) for INSTEAD OF
           if (normalizedTiming === 'instead of' || normalizedTiming === 'instead_of') {
-            return triggerTiming === 'before' && (t as unknown as Record<string, unknown>).timing === 'INSTEAD OF';
+            const originalTiming = 'originalTiming' in t ? t.originalTiming : t.timing;
+            return triggerTiming === 'before' && originalTiming === 'INSTEAD OF';
           }
           return triggerTiming === normalizedTiming ||
             t.timing?.toUpperCase() === options.timing?.toUpperCase();

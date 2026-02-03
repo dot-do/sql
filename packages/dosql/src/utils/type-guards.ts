@@ -618,3 +618,153 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   const proto = Object.getPrototypeOf(value);
   return proto === null || proto === Object.prototype;
 }
+
+// =============================================================================
+// HONO CONTEXT TYPE GUARDS
+// =============================================================================
+
+/**
+ * Interface representing a Hono context with get/set methods
+ * Used to safely access properties from Hono context objects
+ */
+export interface ContextWithGet {
+  get(key: string): unknown;
+  set?(key: string, value: unknown): void;
+}
+
+/**
+ * Type guard for objects with a get method (like Hono context)
+ */
+export function hasGetMethod(obj: unknown): obj is ContextWithGet {
+  return isObject(obj) && typeof (obj as Record<string, unknown>).get === 'function';
+}
+
+/**
+ * Safely get a value from a context-like object
+ */
+export function getContextValue<T>(ctx: unknown, key: string): T | undefined {
+  if (hasGetMethod(ctx)) {
+    return ctx.get(key) as T | undefined;
+  }
+  return undefined;
+}
+
+// =============================================================================
+// SQL TRIGGER TYPE GUARDS
+// =============================================================================
+
+/**
+ * Valid SQL trigger timing values
+ */
+export type SQLTriggerTimingValue = 'BEFORE' | 'AFTER' | 'INSTEAD OF';
+
+/**
+ * Check if a string is a valid SQL trigger timing
+ */
+export function isSQLTriggerTiming(value: unknown): value is SQLTriggerTimingValue {
+  return typeof value === 'string' && ['BEFORE', 'AFTER', 'INSTEAD OF'].includes(value);
+}
+
+/**
+ * Interface for parsed SQL trigger objects
+ */
+export interface ParsedSQLTriggerShape {
+  name?: string;
+  table?: string;
+  timing: SQLTriggerTimingValue;
+  body?: string;
+  events?: unknown[];
+  event?: string;
+  whenClause?: string;
+}
+
+/**
+ * Type guard for parsed SQL trigger objects
+ */
+export function isParsedSQLTrigger(value: unknown): value is ParsedSQLTriggerShape {
+  if (!isObject(value)) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    isSQLTriggerTiming(v.timing) &&
+    v.body !== undefined
+  );
+}
+
+/**
+ * Get the original timing value from a trigger config (may be uppercase SQL or lowercase JS)
+ */
+export function getTriggerOriginalTiming(trigger: Record<string, unknown>): string | undefined {
+  if (hasStringProperty(trigger, 'timing')) {
+    return trigger.timing;
+  }
+  return undefined;
+}
+
+// =============================================================================
+// CALLABLE METHOD TYPE GUARDS
+// =============================================================================
+
+/**
+ * Interface for objects with callable methods
+ */
+export interface ObjectWithMethod<K extends string, Args extends unknown[], R> {
+  [key: string]: unknown;
+}
+
+/**
+ * Check if an object has a method with the given name
+ */
+export function hasMethod<K extends string>(
+  obj: unknown,
+  methodName: K
+): obj is Record<K, (...args: unknown[]) => unknown> {
+  return isObject(obj) && typeof (obj as Record<string, unknown>)[methodName] === 'function';
+}
+
+/**
+ * Safely call a method on an object
+ * Returns undefined if the method doesn't exist
+ */
+export async function callMethod<R = unknown>(
+  obj: unknown,
+  methodName: string,
+  args: unknown[]
+): Promise<R | undefined> {
+  if (!hasMethod(obj, methodName)) {
+    return undefined;
+  }
+  const fn = (obj as Record<string, (...args: unknown[]) => unknown>)[methodName];
+  return fn.apply(obj, args) as R;
+}
+
+// =============================================================================
+// RECORD WITH ID TYPE GUARDS
+// =============================================================================
+
+/**
+ * Interface for records that have an id property
+ */
+export interface RecordWithId extends Record<string, unknown> {
+  id: string | number;
+}
+
+/**
+ * Check if a record has an id property
+ */
+export function hasId(record: unknown): record is RecordWithId {
+  if (!isObject(record)) return false;
+  const id = (record as Record<string, unknown>).id;
+  return typeof id === 'string' || typeof id === 'number';
+}
+
+/**
+ * Create a new record with an id added
+ * This properly types the result as T with a known id property
+ */
+export function createRecordWithId<T extends Record<string, unknown>>(
+  record: Omit<T, 'id'>,
+  id: string | number,
+  idKey = 'id'
+): T & Record<typeof idKey, typeof id> {
+  return { ...record, [idKey]: id } as T & Record<typeof idKey, typeof id>;
+}

@@ -245,6 +245,17 @@ export function authMiddleware(config?: AuthConfig): MiddlewareHandler {
 }
 
 /**
+ * Type guard for context objects with a get method
+ */
+function hasGetMethod(ctx: unknown): ctx is { get(key: string): unknown } {
+  return (
+    typeof ctx === 'object' &&
+    ctx !== null &&
+    typeof (ctx as Record<string, unknown>).get === 'function'
+  )
+}
+
+/**
  * Helper to get the authenticated user from context
  *
  * @example
@@ -256,5 +267,16 @@ export function authMiddleware(config?: AuthConfig): MiddlewareHandler {
  * ```
  */
 export function getUser(c: HonoContext): AuthUser | null {
-  return (c as unknown as { get(key: string): unknown }).get('user') as AuthUser | null
+  if (!hasGetMethod(c)) {
+    return null
+  }
+  const user = c.get('user')
+  if (
+    user !== null &&
+    typeof user === 'object' &&
+    typeof (user as AuthUser).userId === 'string'
+  ) {
+    return user as AuthUser
+  }
+  return null
 }

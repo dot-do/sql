@@ -297,9 +297,18 @@ export function createOutboundRpcHandler(
             return new Response(`Table '${table}' not found`, { status: 404 });
           }
 
-          const fn = (tableAccessor as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[method];
-          if (typeof fn !== 'function') {
+          // Validate method exists on the table accessor
+          // TableAccessor methods are: get, where, all, count, insert, update, delete
+          const validMethods = ['get', 'where', 'all', 'count', 'insert', 'update', 'delete'] as const;
+          if (!validMethods.includes(method as typeof validMethods[number])) {
             return new Response(`Method '${method}' not found`, { status: 404 });
+          }
+
+          // Access the method safely using the validated method name
+          const accessor = tableAccessor as Record<string, (...methodArgs: unknown[]) => Promise<unknown>>;
+          const fn = accessor[method];
+          if (typeof fn !== 'function') {
+            return new Response(`Method '${method}' not callable`, { status: 404 });
           }
 
           const result = await fn.apply(tableAccessor, args);

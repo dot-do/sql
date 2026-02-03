@@ -386,7 +386,9 @@ export function createInMemoryAdapter<T extends Record<string, unknown>>(
 
     async insert(record: Omit<T, 'id'>): Promise<T> {
       const id = idCounter++;
-      const newRecord = { ...record, id } as unknown as T;
+      // Create new record with id - the type assertion is necessary because
+      // we're adding the 'id' property back to a type that had it omitted
+      const newRecord: T = Object.assign({}, record, { id }) as T;
       data.set(id, newRecord);
       return newRecord;
     },

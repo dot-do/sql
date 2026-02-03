@@ -289,6 +289,15 @@ export class ColumnarReader {
 
   /**
    * Decode a single column chunk.
+   * This method is public to allow direct decoding of column chunks
+   * from outside the class (e.g., in readColumnarChunk).
+   */
+  decodeColumnChunk(chunk: ColumnChunk): unknown[] {
+    return this.decodeColumn(chunk);
+  }
+
+  /**
+   * Decode a single column chunk (internal implementation).
    */
   private decodeColumn(chunk: ColumnChunk): unknown[] {
     const { dataType, encoding, data, nullBitmap, rowCount } = chunk;
@@ -545,7 +554,8 @@ export function readColumnarChunk(
     const chunk = rowGroup.columns.get(name);
     if (!chunk) continue;
 
-    const values = (reader as unknown as { decodeColumn(chunk: ColumnChunk): unknown[] }).decodeColumn(chunk);
+    // Use the public decodeColumnChunk method instead of casting to access private method
+    const values = reader.decodeColumnChunk(chunk);
     result.set(name, values);
   }
 

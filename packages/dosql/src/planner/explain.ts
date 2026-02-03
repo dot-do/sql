@@ -620,8 +620,13 @@ function formatPredicate(pred: Predicate): string {
     case 'isNull':
       return `${formatExpression(pred.expr)} IS ${pred.isNot ? 'NOT ' : ''}NULL`;
 
-    default:
-      return assertNever(pred, `Unknown predicate type: ${(pred as unknown as { type: string }).type}`);
+    default: {
+      // Extract type safely for error message - pred is narrowed to 'never' here
+      // but we need a fallback message in case the type system is bypassed
+      const unknownPred = pred as { type?: string };
+      const typeDesc = unknownPred.type ?? 'unknown';
+      return assertNever(pred, `Unknown predicate type: ${typeDesc}`);
+    }
   }
 }
 
@@ -668,8 +673,13 @@ function formatExpression(expr: Expression): string {
     case 'subquery':
       return '(subquery)';
 
-    default:
-      return assertNever(expr, `Unknown expression type: ${(expr as unknown as { type: string }).type}`);
+    default: {
+      // Extract type safely for error message - expr is narrowed to 'never' here
+      // but we need a fallback message in case the type system is bypassed
+      const unknownExpr = expr as { type?: string };
+      const typeDesc = unknownExpr.type ?? 'unknown';
+      return assertNever(expr, `Unknown expression type: ${typeDesc}`);
+    }
   }
 }
 

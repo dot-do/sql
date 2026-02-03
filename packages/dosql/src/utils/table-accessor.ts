@@ -113,7 +113,9 @@ export function createSimpleTableAccessor<T extends Record<string, unknown>>(
       const id = data.length > 0
         ? Math.max(...data.map((r) => typeof r[primaryKey] === 'number' ? r[primaryKey] as number : 0)) + 1
         : 1;
-      const newRecord = { ...record, [primaryKey]: id } as unknown as T;
+      // Create new record with id - type assertion needed because we're adding
+      // the primary key back to a type that had it omitted via generic constraint
+      const newRecord: T = Object.assign({}, record, { [primaryKey]: id }) as T;
       data.push(newRecord);
       return newRecord;
     },
