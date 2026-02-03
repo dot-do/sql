@@ -3447,3 +3447,36 @@ export function createRetryConfig(config: RetryConfig): RetryConfig {
     maxDelayMs: config.maxDelayMs,
   };
 }
+
+// =============================================================================
+// Additional Branded Types (PageId, SchemaVersion)
+// =============================================================================
+
+/**
+ * Additional branded types for DoSQL ecosystem.
+ *
+ * These types are used for:
+ * - `PageId`: B-tree page identifiers (number-based, non-negative integers)
+ * - `SchemaVersion`: Schema versioning for CDC and schema evolution (bigint-based)
+ *
+ * @public
+ * @stability stable
+ * @since 0.3.0
+ */
+export {
+  // Number-based factory utilities
+  createBrandedNumberFactory,
+  createBrandedNumberGuard,
+  // PageId
+  type PageId,
+  createPageId,
+  isValidPageId,
+  // SchemaVersion
+  type SchemaVersion,
+  createSchemaVersion,
+  isValidSchemaVersion,
+  compareSchemaVersion,
+  incrementSchemaVersion,
+  serializeSchemaVersion,
+  deserializeSchemaVersion,
+} from './branded-types.js';

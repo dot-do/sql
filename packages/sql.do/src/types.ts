@@ -100,6 +100,8 @@ export {
   type UUID,
   type Email,
   type Timestamp,
+  type PageId,
+  type SchemaVersion,
 
   // Brand constructors
   createTransactionId,
@@ -109,17 +111,27 @@ export {
   createUUID,
   createEmail,
   createTimestamp,
+  createPageId,
+  createSchemaVersion,
 
   // Generic branded type factory pattern
   createBrandedTypeFactory,
   createBrandedBigintFactory,
   createBrandedTypeGuard,
   createBrandedBigintGuard,
+  createBrandedNumberFactory,
+  createBrandedNumberGuard,
 
   // LSN utilities
   compareLSN,
   incrementLSN,
   lsnValue,
+
+  // SchemaVersion utilities
+  compareSchemaVersion,
+  incrementSchemaVersion,
+  serializeSchemaVersion,
+  deserializeSchemaVersion,
 
   // Timestamp utilities
   timestampValue,
@@ -135,6 +147,8 @@ export {
   isValidUUID,
   isValidEmail,
   isValidTimestamp,
+  isValidPageId,
+  isValidSchemaVersion,
 
   // Dev mode configuration
   setDevMode,

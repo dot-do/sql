@@ -76,11 +76,12 @@ import { PlanningContext, getDefaultPlanningContext, resetDefaultPlanningContext
  * @stability stable
  * @since 0.1.0
  */
-export type { LSN, TransactionId, ShardId } from 'sql.do';
+export type { LSN, TransactionId, ShardId, PageId } from 'sql.do';
 export {
   createLSN,
   createTransactionId,
   createShardId,
+  createPageId,
   // LSN utilities
   compareLSN,
   incrementLSN,
@@ -89,56 +90,11 @@ export {
   isValidLSN,
   isValidTransactionId,
   isValidShardId,
+  isValidPageId,
 } from 'sql.do';
 
 // Import for local use
-import type { LSN, TransactionId, ShardId } from 'sql.do';
-
-// =============================================================================
-// PAGE ID - Engine-specific branded type
-// =============================================================================
-
-/** Brand symbol for Page ID */
-declare const PageIdBrand: unique symbol;
-
-/**
- * Page ID - A branded number type for B-tree page identifiers.
- * Page IDs identify a specific page in the B-tree storage.
- *
- * @example
- * const pageId = createPageId(42);
- * // pageId is PageId, not assignable from plain number
- */
-export type PageId = number & { readonly [PageIdBrand]: never };
-
-/**
- * Create a branded PageId from a number value.
- * This is the only safe way to create a PageId.
- *
- * @param value - The number value for the page ID
- * @returns A branded PageId value
- * @throws {Error} If value is negative or not an integer
- */
-export function createPageId(value: number): PageId {
-  if (value < 0) {
-    throw new Error(`PageId cannot be negative: ${value}`);
-  }
-  if (!Number.isInteger(value)) {
-    throw new Error(`PageId must be an integer: ${value}`);
-  }
-  return value as PageId;
-}
-
-// =============================================================================
-// PAGE ID UTILITIES
-// =============================================================================
-
-/**
- * Type guard to check if a value is a valid PageId candidate.
- */
-export function isValidPageId(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
-}
+import type { LSN, TransactionId, ShardId, PageId } from 'sql.do';
 
 // =============================================================================
 // VALUE TYPES
