@@ -107,7 +107,7 @@ export class BindingError extends DoSQLError {
     const error = new BindingError(
       json.code as BindingErrorCode,
       json.message,
-      { context: json.context }
+      json.context !== undefined ? { context: json.context } : {}
     );
     return error;
   }

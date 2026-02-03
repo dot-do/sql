@@ -557,7 +557,10 @@ export class CDCError extends DoSQLError {
       lsn?: bigint;
     }
   ) {
-    super(message, { cause: options?.cause, context: options?.context });
+    super(message, {
+      ...(options?.cause !== undefined ? { cause: options.cause } : {}),
+      ...(options?.context !== undefined ? { context: options.context } : {}),
+    });
     this.name = 'CDCError';
     this.code = code;
     this.lsn = options?.lsn;
@@ -689,8 +692,8 @@ export class CDCError extends DoSQLError {
       json.code as CDCErrorCode,
       json.message,
       {
-        context: json.context,
-        lsn: lsnStr !== undefined ? BigInt(lsnStr) : undefined,
+        ...(json.context !== undefined ? { context: json.context } : {}),
+        ...(lsnStr !== undefined ? { lsn: BigInt(lsnStr) } : {}),
       }
     );
   }

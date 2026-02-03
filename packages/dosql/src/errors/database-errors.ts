@@ -128,7 +128,7 @@ export class DatabaseError extends DoSQLError {
     const error = new DatabaseError(
       json.code as DatabaseErrorCode,
       json.message,
-      { context: json.context }
+      json.context !== undefined ? { context: json.context } : {}
     );
     return error;
   }

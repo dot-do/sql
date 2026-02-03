@@ -248,7 +248,7 @@ export function deserializeError(json: SerializedError): DoSQLError {
 
   // Fallback: create a GenericDoSQLError
   return new GenericDoSQLError(json.code, json.message, {
-    context: json.context,
+    ...(json.context !== undefined ? { context: json.context } : {}),
   });
 }
 

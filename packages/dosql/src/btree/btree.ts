@@ -100,7 +100,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   private readonly keyCodec: KeyCodec<K>;
   private readonly valueCodec: ValueCodec<V>;
   private readonly config: BTreeConfig;
-  private readonly userOnEvict?: (pageId: number, page: Page, dirty: boolean) => void | Promise<void>;
+  private readonly userOnEvict: ((pageId: number, page: Page, dirty: boolean) => void | Promise<void>) | undefined;
 
   private metadata: BTreeMetadata | null = null;
   private readonly pageCache: LRUCache<number, Page>;
@@ -123,9 +123,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     // Initialize LRU page cache
     this.pageCache = new LRUCache<number, Page>({
       maxSize: cacheConfig.maxBytes ?? cacheConfig.maxPages,
-      sizeCalculator: cacheConfig.maxBytes
-        ? (page) => calculatePageSize(page)
-        : undefined,
+      ...(cacheConfig.maxBytes ? { sizeCalculator: (page: Page) => calculatePageSize(page) } : {}),
       onEvict: async (pageId, page, dirty) => {
         // Write back dirty pages before eviction
         if (dirty) {
@@ -484,7 +482,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     await this.writePage(newLeaf);
 
     // The promoted key is the first key of the new leaf
-    const promotedKey = newLeaf.keys[0];
+    // Non-null assertion: newLeaf was just created with keys from the split, so keys[0] exists
+    const promotedKey = newLeaf.keys[0]!;
 
     // Insert the promoted key into the parent
     await this.insertIntoParent(path, path.length - 2, promotedKey, newLeaf.id);
@@ -555,7 +554,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
 
     // Find split point
     const midIndex = Math.floor(node.keys.length / 2);
-    const promotedKey = node.keys[midIndex];
+    // Non-null assertion: midIndex is calculated from node.keys.length, guaranteed to be valid
+    const promotedKey = node.keys[midIndex]!;
 
     // Create new right sibling
     const newPageId = this.allocPageId();
@@ -737,7 +737,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     } else {
       // For internal nodes:
       // 1. Move separator key from parent down to beginning of node
-      node.keys.unshift(parent.keys[separatorKeyIndex]);
+      // Non-null assertion: separatorKeyIndex is validated during redistribution logic
+      node.keys.unshift(parent.keys[separatorKeyIndex]!);
 
       // 2. Move last key from left sibling up to parent as new separator
       parent.keys[separatorKeyIndex] = leftSibling.keys.pop()!;
@@ -775,7 +776,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     } else {
       // For internal nodes:
       // 1. Move separator key from parent down to end of node
-      node.keys.push(parent.keys[separatorKeyIndex]);
+      // Non-null assertion: separatorKeyIndex is validated during redistribution logic
+      node.keys.push(parent.keys[separatorKeyIndex]!);
 
       // 2. Move first key from right sibling up to parent as new separator
       parent.keys[separatorKeyIndex] = rightSibling.keys.shift()!;

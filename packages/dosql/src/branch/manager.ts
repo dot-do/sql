@@ -1219,7 +1219,8 @@ export class DOBranchManager implements BranchManager {
     // Simple fallback hash
     let hash = 2166136261;
     for (let i = 0; i < data.length; i++) {
-      hash ^= data[i];
+      // Non-null assertion: i is within bounds of data array
+      hash ^= data[i]!;
       hash = (hash * 16777619) >>> 0;
     }
     return hash.toString(16).padStart(8, '0') + Date.now().toString(16);

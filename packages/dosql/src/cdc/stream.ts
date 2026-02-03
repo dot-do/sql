@@ -603,7 +603,7 @@ export function createReplicationSlotManager(
 
       return createCDCSubscription(reader, {
         fromLSN: slot.acknowledgedLSN,
-        filter: slot.filter,
+        ...(slot.filter !== undefined ? { filter: slot.filter } : {}),
       });
     },
   };

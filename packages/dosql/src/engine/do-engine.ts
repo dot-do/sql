@@ -782,8 +782,9 @@ export class DOQueryEngine {
     }
 
     for (let i = 0; i < keysToDelete.length; i++) {
-      const key = keysToDelete[i];
-      const row = rowsToDelete[i];
+      // Non-null assertions: i is within bounds of keysToDelete and rowsToDelete arrays
+      const key = keysToDelete[i]!;
+      const row = rowsToDelete[i]!;
 
       // Execute BEFORE DELETE triggers
       const beforeResult = await executor.executeBefore(tableName, 'delete', row, undefined);
@@ -812,7 +813,7 @@ export class DOQueryEngine {
           type: 'delete',
           table: tableName,
           key,
-          before: row,
+          ...(row !== undefined ? { before: row } : {}),
           timestamp: Date.now(),
         });
       }

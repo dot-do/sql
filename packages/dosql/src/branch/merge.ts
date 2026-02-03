@@ -166,9 +166,10 @@ export function diff(original: string, modified: string): DiffResult {
     }
 
     // Handle equal line
+    // Non-null assertion: origMatch is from LCS which only contains valid indices
     ops.push({
       type: 'equal',
-      lines: [originalLines[origMatch]],
+      lines: [originalLines[origMatch]!],
       originalStart: origMatch,
       modifiedStart: modMatch,
     });
@@ -288,7 +289,8 @@ export function threeWayMerge(
     if (!oursChange && !theirsChange) {
       // No changes at this position - keep base line
       if (baseIdx < baseLines.length) {
-        result.push(baseLines[baseIdx]);
+        // Non-null assertion: we just checked baseIdx < baseLines.length
+        result.push(baseLines[baseIdx]!);
       }
       baseIdx++;
     } else if (oursChange && !theirsChange) {
@@ -443,7 +445,8 @@ export function extractConflicts(content: string): MergeConflictRegion[] {
   let theirs: string[] = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    // Non-null assertion: i is within bounds of lines array
+    const line = lines[i]!;
 
     if (line.startsWith('<<<<<<<')) {
       inConflict = true;
@@ -508,7 +511,8 @@ export function isBinary(data: Uint8Array): boolean {
   const checkSize = Math.min(data.length, 8192);
 
   for (let i = 0; i < checkSize; i++) {
-    if (data[i] === 0) {
+    // Non-null assertion: i is within bounds (i < checkSize <= data.length)
+    if (data[i]! === 0) {
       return true;
     }
   }
@@ -516,7 +520,8 @@ export function isBinary(data: Uint8Array): boolean {
   // Check for high ratio of non-printable characters
   let nonPrintable = 0;
   for (let i = 0; i < checkSize; i++) {
-    const byte = data[i];
+    // Non-null assertion: i is within bounds (i < checkSize <= data.length)
+    const byte = data[i]!;
     if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) {
       nonPrintable++;
     }
@@ -575,14 +580,15 @@ function computeLCS(original: string[], modified: string[]): Array<[number, numb
   // Build DP table
   const dp: number[][] = Array(m + 1)
     .fill(null)
-    .map(() => Array(n + 1).fill(0));
+    .map(() => Array(n + 1).fill(0) as number[]);
 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
       if (original[i - 1] === modified[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
+        // Non-null assertions: dp is initialized with (m+1) x (n+1) cells
+        dp[i]![j] = dp[i - 1]![j - 1]! + 1;
       } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
       }
     }
   }
@@ -597,7 +603,7 @@ function computeLCS(original: string[], modified: string[]): Array<[number, numb
       result.unshift([i - 1, j - 1]);
       i--;
       j--;
-    } else if (dp[i - 1][j] > dp[i][j - 1]) {
+    } else if (dp[i - 1]![j]! > dp[i]![j - 1]!) {
       i--;
     } else {
       j--;

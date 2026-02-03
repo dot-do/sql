@@ -116,7 +116,8 @@ export class SQLTokenizer {
     }
 
     const start = this.pos;
-    const char = this.sql[this.pos];
+    // Non-null assertion: we checked this.pos < this.sql.length above
+    const char = this.sql[this.pos]!;
     const nextChar = this.sql[this.pos + 1];
 
     // Block comment: /* ... */
@@ -165,12 +166,12 @@ export class SQLTokenizer {
     }
 
     // Numbers (including negative)
-    if (this.isDigit(char) || (char === '-' && this.isDigit(nextChar) && this.shouldBeNumber())) {
+    if (this.isDigit(char) || (char === '-' && nextChar !== undefined && this.isDigit(nextChar) && this.shouldBeNumber())) {
       return this.readNumber(start);
     }
 
     // Multi-character operators
-    const twoChar = char + (nextChar || '');
+    const twoChar = char + (nextChar ?? '');
     if (MULTI_CHAR_OPERATORS.includes(twoChar)) {
       this.pos += 2;
       return {
@@ -281,8 +282,13 @@ export class SQLTokenizer {
   private tryReadDollarQuotedString(start: number): SQLToken | null {
     // Find the opening tag
     let tagEnd = this.pos + 1;
-    while (tagEnd < this.sql.length && (this.isIdentifierPart(this.sql[tagEnd]) || this.sql[tagEnd] === '$')) {
-      if (this.sql[tagEnd] === '$') {
+    while (tagEnd < this.sql.length) {
+      // Non-null assertion: we checked tagEnd < this.sql.length
+      const tagChar = this.sql[tagEnd]!;
+      if (!this.isIdentifierPart(tagChar) && tagChar !== '$') {
+        break;
+      }
+      if (tagChar === '$') {
         tagEnd++;
         break;
       }
@@ -421,7 +427,7 @@ export class SQLTokenizer {
     if (char === ':') {
       this.pos++;
       // Named parameter :name
-      while (this.pos < this.sql.length && this.isIdentifierPart(this.sql[this.pos])) {
+      while (this.pos < this.sql.length && this.isIdentifierPart(this.sql[this.pos]!)) {
         this.pos++;
       }
       const value = this.sql.slice(start, this.pos);
@@ -437,7 +443,7 @@ export class SQLTokenizer {
     if (char === '$') {
       this.pos++;
       // Positional parameter $1, $2, etc.
-      while (this.pos < this.sql.length && this.isDigit(this.sql[this.pos])) {
+      while (this.pos < this.sql.length && this.isDigit(this.sql[this.pos]!)) {
         this.pos++;
       }
       const value = this.sql.slice(start, this.pos);

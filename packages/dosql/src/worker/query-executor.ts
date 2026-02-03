@@ -137,8 +137,9 @@ export class QueryExecutor {
       );
     }
 
-    const tableName = multiValueMatch[1];
-    const columnsStr = multiValueMatch[2];
+    // Non-null assertions: multiValueMatch groups are validated by regex pattern
+    const tableName = multiValueMatch[1]!;
+    const columnsStr = multiValueMatch[2]!;
     const columns = columnsStr.split(',').map((c) => c.trim());
 
     const schema = this.schemaManager.getSchema(tableName);
@@ -151,7 +152,7 @@ export class QueryExecutor {
 
     // Parse all value rows
     const insertedRows: Record<string, unknown>[] = [];
-    let valuesStr = multiValueMatch[3];
+    let valuesStr = multiValueMatch[3]!;
 
     // Remove ON CONFLICT clause from values string if present
     const onConflictIdx = valuesStr.toUpperCase().indexOf(' ON CONFLICT');
@@ -163,7 +164,8 @@ export class QueryExecutor {
     const valueMatches = valuesStr.matchAll(/\(([^)]+)\)/g);
 
     for (const valueMatch of valueMatches) {
-      const values = valueMatch[1].split(',').map((v) => parseSqlValue(v.trim()));
+      // Non-null assertion: valueMatch[1] is the captured group from regex
+      const values = valueMatch[1]!.split(',').map((v) => parseSqlValue(v.trim()));
 
       // Build row object
       const row: Record<string, unknown> = {};
@@ -199,13 +201,15 @@ export class QueryExecutor {
             continue;
           } else if (doUpdateMatch) {
             // DO UPDATE - update the existing row
-            const setClauseStr = doUpdateMatch[1];
+            // Non-null assertion: doUpdateMatch[1] is the captured group from regex
+            const setClauseStr = doUpdateMatch[1]!;
             const setMatches = setClauseStr.matchAll(/(\w+)\s*=\s*(\w+(?:\s*[+\-*/]\s*\w+)?)/g);
             const updatedRow = { ...existingRow };
 
             for (const setMatch of setMatches) {
-              const setCol = setMatch[1];
-              const setExpr = setMatch[2];
+              // Non-null assertions: setMatch groups are validated by regex pattern
+              const setCol = setMatch[1]!;
+              const setExpr = setMatch[2]!;
               updatedRow[setCol] = evaluateExpression(setExpr, existingRow, schemaColumns);
             }
 
@@ -261,9 +265,10 @@ export class QueryExecutor {
     returning: ParsedReturning | null,
     match: RegExpMatchArray
   ): Promise<QueryResult> {
-    const tableName = match[1];
-    const columnsStr = match[2];
-    const selectPart = match[3];
+    // Non-null assertions: match groups are validated by the regex pattern
+    const tableName = match[1]!;
+    const columnsStr = match[2]!;
+    const selectPart = match[3]!;
 
     const columns = columnsStr.split(',').map((c) => c.trim());
 
@@ -289,7 +294,8 @@ export class QueryExecutor {
         // Map selected columns to insert columns
         const sourceKeys = Object.keys(sourceRow);
         if (i < sourceKeys.length) {
-          row[col] = sourceRow[sourceKeys[i]];
+          // Non-null assertion: we just checked i < sourceKeys.length
+          row[col] = sourceRow[sourceKeys[i]!];
         }
       });
 
@@ -350,8 +356,9 @@ export class QueryExecutor {
       );
     }
 
-    const _selectCols = match[1];
-    const tableName = match[2];
+    // Non-null assertions: match groups are validated by the regex pattern
+    const _selectCols = match[1]!;
+    const tableName = match[2]!;
     const whereClause = match[3];
 
     const schema = this.schemaManager.getSchema(tableName);
@@ -368,8 +375,9 @@ export class QueryExecutor {
       if (whereClause) {
         const filterMatch = whereClause.match(/(\w+)\s*=\s*('(?:[^']|'')*'|[^'\s]+)/);
         if (filterMatch) {
-          const filterCol = filterMatch[1];
-          const filterVal = parseSqlValue(filterMatch[2]) as string;
+          // Non-null assertions: filterMatch groups are validated by regex pattern
+          const filterCol = filterMatch[1]!;
+          const filterVal = parseSqlValue(filterMatch[2]!) as string;
           if (String(value[filterCol]) !== String(filterVal)) {
             continue;
           }
@@ -406,8 +414,9 @@ export class QueryExecutor {
       );
     }
 
-    const tableName = match[1];
-    let setClauseStr = match[2];
+    // Non-null assertions: match groups are validated by the regex pattern
+    const tableName = match[1]!;
+    let setClauseStr = match[2]!;
     const whereClause = match[3];
 
     const schema = this.schemaManager.getSchema(tableName);
@@ -428,10 +437,12 @@ export class QueryExecutor {
     for (const clause of setClauses) {
       const setMatch = clause.trim().match(/^([\w.]+)\s*=\s*(.+)$/);
       if (setMatch) {
-        const colName = setMatch[1].includes('.') ? setMatch[1].split('.').pop()! : setMatch[1];
+        // Non-null assertions: setMatch groups are validated by regex pattern
+        const setMatchCol = setMatch[1]!;
+        const colName = setMatchCol.includes('.') ? setMatchCol.split('.').pop()! : setMatchCol;
         setUpdates.push({
           col: colName,
-          expr: setMatch[2].trim(),
+          expr: setMatch[2]!.trim(),
         });
       }
     }

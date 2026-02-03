@@ -453,19 +453,21 @@ export class AttachSchemaResolver implements SchemaResolver {
     }
 
     if (candidates.length === 1) {
-      const match = candidates[0];
+      // Non-null assertion: we just checked candidates.length === 1
+      const match = candidates[0]!;
       const db = this._manager.get(match.database)!;
       const tableDef = db.schema.tables.get(tableName)!;
+      const firstCol = tableDef.columns[0];
 
       return {
         isAmbiguous: false,
         resolved: {
           database: match.database,
           table: tableName,
-          columnDef: tableDef.columns[0] ? {
-            name: tableDef.columns[0].name,
-            type: tableDef.columns[0].type,
-            nullable: tableDef.columns[0].nullable,
+          columnDef: firstCol ? {
+            name: firstCol.name,
+            type: firstCol.type,
+            nullable: firstCol.nullable,
           } : { name: '', type: 'string', nullable: true },
           qualifiedName: `${match.database}.${tableName}`,
         },
