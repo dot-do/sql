@@ -72,10 +72,17 @@ import {
 // =============================================================================
 
 /**
+ * Generic row type for window function testing.
+ * Represents a row with arbitrary column values that can be used
+ * with window functions like LAG, LEAD, SUM, AVG, etc.
+ */
+type WindowTestRow = Record<string, string | number | boolean | null | undefined>;
+
+/**
  * Create a simple window context for testing
  */
 function createWindowContext(
-  rows: Record<string, any>[],
+  rows: WindowTestRow[],
   currentIndex: number,
   options: {
     orderBy?: { column: string; direction: 'asc' | 'desc' }[];

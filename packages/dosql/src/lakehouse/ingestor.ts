@@ -9,7 +9,7 @@
  */
 
 import type { WALEntry, WALOperation } from '../wal/types.js';
-import type { ColumnarTableSchema, ColumnDefinition, RowGroup } from '../columnar/types.js';
+import type { ColumnarTableSchema, ColumnDefinition, RowGroup, ColumnStats } from '../columnar/types.js';
 import { ColumnarWriter, inferSchema } from '../columnar/writer.js';
 import { serializeRowGroup } from '../columnar/chunk.js';
 
@@ -487,7 +487,7 @@ export class Ingestor {
     });
 
     // Calculate column stats
-    const columnStats: Record<string, any> = {};
+    const columnStats: Record<string, ColumnStats> = {};
     for (const rg of rowGroups) {
       for (const [colName, chunk] of rg.columns) {
         if (!columnStats[colName]) {
