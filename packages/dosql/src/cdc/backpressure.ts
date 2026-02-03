@@ -18,6 +18,9 @@ import type { BackpressureSignal } from './types.js';
 import type { LSN } from '../wal/types.js';
 import { assertNever } from '../utils/assert-never.js';
 import { createLSN, compareLSN } from '../engine/types.js';
+import { createLogger } from '../logging/index.js';
+
+const logger = createLogger({ defaultContext: { module: 'cdc-backpressure' } });
 
 // =============================================================================
 // Configuration Types
@@ -490,7 +493,12 @@ export class BackpressureController {
       try {
         callback(this.state, previousState, metrics);
       } catch (error) {
-        console.error('Error in backpressure state change callback:', error);
+        logger.error('Error in backpressure state change callback', error instanceof Error ? error : new Error(String(error)), {
+          component: 'BackpressureController',
+          callbackType: 'stateChange',
+          currentState: this.state,
+          previousState,
+        });
       }
     }
   }
@@ -503,7 +511,12 @@ export class BackpressureController {
       try {
         callback(this.currentDelayMs, this.currentBatchSize);
       } catch (error) {
-        console.error('Error in batch parameter change callback:', error);
+        logger.error('Error in batch parameter change callback', error instanceof Error ? error : new Error(String(error)), {
+          component: 'BackpressureController',
+          callbackType: 'batchParameterChange',
+          currentDelayMs: this.currentDelayMs,
+          currentBatchSize: this.currentBatchSize,
+        });
       }
     }
   }
@@ -806,7 +819,12 @@ export class WatermarkController {
       try {
         callback(newState, utilization);
       } catch (error) {
-        console.error('Error in watermark state change callback:', error);
+        logger.error('Error in watermark state change callback', error instanceof Error ? error : new Error(String(error)), {
+          component: 'WatermarkController',
+          callbackType: 'stateChange',
+          watermarkState: newState,
+          bufferUtilization: utilization,
+        });
       }
     }
   }

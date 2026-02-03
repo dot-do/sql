@@ -17,6 +17,9 @@ import type {
   TransactionEvent,
   CDCEvent,
 } from './types.js';
+import { createLogger } from '../logging/index.js';
+
+const logger = createLogger({ defaultContext: { module: 'cdc-pool' } });
 
 // =============================================================================
 // Pool Configuration Types
@@ -1015,7 +1018,10 @@ export class CDCConsumerPool {
         try {
           listener(data);
         } catch (error) {
-          console.error(`Error in ${event} listener:`, error);
+          logger.error('Error in pool event listener', error instanceof Error ? error : new Error(String(error)), {
+            component: 'CDCConsumerPool',
+            eventType: event,
+          });
         }
       }
     }
