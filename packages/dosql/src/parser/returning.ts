@@ -29,6 +29,7 @@ import type {
   ReplaceStatement,
 } from './dml-types.js';
 import { sqlLikeMatch } from '../utils/like.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -379,8 +380,12 @@ export function evaluateExpression(
       // CASE expressions need special handling
       return null;
 
-    default:
+    case 'star':
+      // Star expressions should be expanded before evaluation
       return null;
+
+    default:
+      return assertNever(expr, `Unknown expression type: ${(expr as Expression).type}`);
   }
 }
 
@@ -584,8 +589,20 @@ function generateExpressionSql(expr: Expression): string {
     case 'parameter':
       return expr.raw;
 
+    case 'subquery':
+      return '(SELECT ...)';
+
+    case 'default':
+      return 'DEFAULT';
+
+    case 'case':
+      return 'CASE ... END';
+
+    case 'star':
+      return '*';
+
     default:
-      return '?';
+      return assertNever(expr, `Unknown expression type: ${(expr as Expression).type}`);
   }
 }
 
