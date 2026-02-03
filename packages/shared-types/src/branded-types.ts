@@ -373,3 +373,369 @@ export function serializeSchemaVersion(version: SchemaVersion): string {
 export function deserializeSchemaVersion(value: string): SchemaVersion {
   return createSchemaVersion(BigInt(value));
 }
+
+// =============================================================================
+// TableId - String-based branded type for table identifiers
+// =============================================================================
+
+/** Brand symbol for Table ID */
+declare const TableIdBrand: unique symbol;
+
+/**
+ * Table ID - A branded string type for table identifiers.
+ *
+ * TableId uniquely identifies a table within a database.
+ * Must be a non-empty string, max 255 characters.
+ *
+ * @example
+ * ```typescript
+ * import { createTableId, TableId } from '@dotdo/sql-types';
+ *
+ * const tableId: TableId = createTableId('users');
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export type TableId = string & { readonly [TableIdBrand]: never };
+
+/**
+ * Create a branded TableId from a string value.
+ *
+ * @param value - The string value for the table ID
+ * @returns A branded TableId value
+ * @throws {Error} If value is empty, whitespace-only, or exceeds max length (in dev mode)
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export function createTableId(value: string): TableId {
+  if (_isDevModeInternal() || _isStrictModeInternal()) {
+    if (typeof value !== 'string') {
+      throw new Error('TableId must be a string');
+    }
+    if (value.trim().length === 0) {
+      throw new Error('TableId cannot be empty');
+    }
+    if (value.length > 255) {
+      throw new Error('TableId exceeds maximum length of 255');
+    }
+  }
+  return value as TableId;
+}
+
+/**
+ * Type guard to check if a value is a valid TableId candidate.
+ *
+ * @param value - The value to check
+ * @returns True if the value is a non-empty string of at most 255 characters
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export function isValidTableId(value: unknown): value is TableId {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= 255;
+}
+
+// =============================================================================
+// IndexId - String-based branded type for index identifiers
+// =============================================================================
+
+/** Brand symbol for Index ID */
+declare const IndexIdBrand: unique symbol;
+
+/**
+ * Index ID - A branded string type for index identifiers.
+ *
+ * IndexId uniquely identifies an index within a table.
+ * Must be a non-empty string, max 255 characters.
+ *
+ * @example
+ * ```typescript
+ * import { createIndexId, IndexId } from '@dotdo/sql-types';
+ *
+ * const indexId: IndexId = createIndexId('idx_users_email');
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export type IndexId = string & { readonly [IndexIdBrand]: never };
+
+/**
+ * Create a branded IndexId from a string value.
+ *
+ * @param value - The string value for the index ID
+ * @returns A branded IndexId value
+ * @throws {Error} If value is empty, whitespace-only, or exceeds max length (in dev mode)
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export function createIndexId(value: string): IndexId {
+  if (_isDevModeInternal() || _isStrictModeInternal()) {
+    if (typeof value !== 'string') {
+      throw new Error('IndexId must be a string');
+    }
+    if (value.trim().length === 0) {
+      throw new Error('IndexId cannot be empty');
+    }
+    if (value.length > 255) {
+      throw new Error('IndexId exceeds maximum length of 255');
+    }
+  }
+  return value as IndexId;
+}
+
+/**
+ * Type guard to check if a value is a valid IndexId candidate.
+ *
+ * @param value - The value to check
+ * @returns True if the value is a non-empty string of at most 255 characters
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export function isValidIndexId(value: unknown): value is IndexId {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= 255;
+}
+
+// =============================================================================
+// ColumnId - Number-based branded type for column identifiers
+// =============================================================================
+
+/** Brand symbol for Column ID */
+declare const ColumnIdBrand: unique symbol;
+
+/**
+ * Column ID - A branded number type for column identifiers.
+ *
+ * ColumnId uniquely identifies a column within a table schema.
+ * Must be a positive integer (zero is not allowed).
+ *
+ * @example
+ * ```typescript
+ * import { createColumnId, ColumnId } from '@dotdo/sql-types';
+ *
+ * const colId: ColumnId = createColumnId(1);
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export type ColumnId = number & { readonly [ColumnIdBrand]: never };
+
+/**
+ * Create a branded ColumnId from a number value.
+ *
+ * @param value - The number value for the column ID (must be positive integer)
+ * @returns A branded ColumnId value
+ * @throws {Error} If value is not a positive integer (in dev mode)
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export const createColumnId = createBrandedNumberFactory<typeof ColumnIdBrand, ColumnId>(
+  'ColumnId',
+  { allowZero: false, allowNegative: false, requireInteger: true }
+);
+
+/**
+ * Type guard to check if a value is a valid ColumnId candidate.
+ *
+ * @param value - The value to check
+ * @returns True if the value is a positive integer
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export const isValidColumnId = createBrandedNumberGuard<ColumnId>(
+  'ColumnId',
+  { allowZero: false, allowNegative: false, requireInteger: true }
+);
+
+// =============================================================================
+// PageOffset - Number-based branded type for byte offsets within a page
+// =============================================================================
+
+/** Brand symbol for Page Offset */
+declare const PageOffsetBrand: unique symbol;
+
+/**
+ * Page Offset - A branded number type for byte offsets within a B-tree page.
+ *
+ * PageOffset represents a byte position within a serialized page.
+ * Must be a non-negative integer.
+ *
+ * @example
+ * ```typescript
+ * import { createPageOffset, PageOffset } from '@dotdo/sql-types';
+ *
+ * const offset: PageOffset = createPageOffset(32); // After header
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export type PageOffset = number & { readonly [PageOffsetBrand]: never };
+
+/**
+ * Create a branded PageOffset from a number value.
+ *
+ * @param value - The number value for the page offset
+ * @returns A branded PageOffset value
+ * @throws {Error} If value is negative or not an integer (in dev mode)
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export const createPageOffset = createBrandedNumberFactory<typeof PageOffsetBrand, PageOffset>(
+  'PageOffset',
+  { allowNegative: false, requireInteger: true }
+);
+
+/**
+ * Type guard to check if a value is a valid PageOffset candidate.
+ *
+ * @param value - The value to check
+ * @returns True if the value is a non-negative integer
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export const isValidPageOffset = createBrandedNumberGuard<PageOffset>(
+  'PageOffset',
+  { allowNegative: false, requireInteger: true }
+);
+
+// =============================================================================
+// ByteOffset - Number-based branded type for generic byte offsets
+// =============================================================================
+
+/** Brand symbol for Byte Offset */
+declare const ByteOffsetBrand: unique symbol;
+
+/**
+ * Byte Offset - A branded number type for generic byte offsets in binary data.
+ *
+ * ByteOffset represents a byte position within any binary buffer.
+ * Must be a non-negative integer.
+ *
+ * @example
+ * ```typescript
+ * import { createByteOffset, ByteOffset } from '@dotdo/sql-types';
+ *
+ * const offset: ByteOffset = createByteOffset(1024);
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export type ByteOffset = number & { readonly [ByteOffsetBrand]: never };
+
+/**
+ * Create a branded ByteOffset from a number value.
+ *
+ * @param value - The number value for the byte offset
+ * @returns A branded ByteOffset value
+ * @throws {Error} If value is negative or not an integer (in dev mode)
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export const createByteOffset = createBrandedNumberFactory<typeof ByteOffsetBrand, ByteOffset>(
+  'ByteOffset',
+  { allowNegative: false, requireInteger: true }
+);
+
+/**
+ * Type guard to check if a value is a valid ByteOffset candidate.
+ *
+ * @param value - The value to check
+ * @returns True if the value is a non-negative integer
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export const isValidByteOffset = createBrandedNumberGuard<ByteOffset>(
+  'ByteOffset',
+  { allowNegative: false, requireInteger: true }
+);
+
+// =============================================================================
+// RequestId - String-based branded type for request identifiers
+// =============================================================================
+
+/** Brand symbol for Request ID */
+declare const RequestIdBrand: unique symbol;
+
+/**
+ * Request ID - A branded string type for request identifiers.
+ *
+ * RequestId uniquely identifies an API or RPC request for tracing
+ * and correlation. Must be a non-empty string.
+ *
+ * @example
+ * ```typescript
+ * import { createRequestId, RequestId } from '@dotdo/sql-types';
+ *
+ * const reqId: RequestId = createRequestId('req-abc-123');
+ * ```
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export type RequestId = string & { readonly [RequestIdBrand]: never };
+
+/**
+ * Create a branded RequestId from a string value.
+ *
+ * @param value - The string value for the request ID
+ * @returns A branded RequestId value
+ * @throws {Error} If value is empty or whitespace-only (in dev mode)
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export function createRequestId(value: string): RequestId {
+  if (_isDevModeInternal() || _isStrictModeInternal()) {
+    if (typeof value !== 'string') {
+      throw new Error('RequestId must be a string');
+    }
+    if (value.trim().length === 0) {
+      throw new Error('RequestId cannot be empty');
+    }
+  }
+  return value as RequestId;
+}
+
+/**
+ * Type guard to check if a value is a valid RequestId candidate.
+ *
+ * @param value - The value to check
+ * @returns True if the value is a non-empty string
+ *
+ * @public
+ * @stability stable
+ * @since 0.4.0
+ */
+export function isValidRequestId(value: unknown): value is RequestId {
+  return typeof value === 'string' && value.trim().length > 0;
+}

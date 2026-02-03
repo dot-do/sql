@@ -13,7 +13,7 @@ import {
   type QueryRequest,
   type BatchRequest,
 } from './index.js';
-import { MockQueryExecutor } from '../__tests__/utils/index.js';
+import { MockQueryExecutor } from '../__tests__/test-utils.js';
 
 describe('DoSQL RPC', () => {
   describe('MockQueryExecutor', () => {

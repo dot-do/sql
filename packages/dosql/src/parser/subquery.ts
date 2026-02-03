@@ -804,7 +804,7 @@ export class SubqueryParser {
     }
 
     // IN / NOT IN
-    if (this.matchKeyword('in') || (this.matchKeyword('not') && this.peek(1).value === 'in')) {
+    if (this.matchKeyword('in') || (this.matchKeyword('not') && this.peek(1).value.toLowerCase() === 'in')) {
       const not = this.matchKeyword('not');
       if (not) this.advance();
       this.advance(); // IN
@@ -813,7 +813,7 @@ export class SubqueryParser {
     }
 
     // NOT BETWEEN
-    if (this.matchKeyword('not') && this.peek(1).value === 'between') {
+    if (this.matchKeyword('not') && this.peek(1).value.toLowerCase() === 'between') {
       this.advance(); // NOT
       this.advance(); // BETWEEN
       const low = this.parseAddSub();
@@ -832,7 +832,7 @@ export class SubqueryParser {
 
       // Check for ANY/ALL/SOME
       if (this.matchKeyword('any', 'all', 'some')) {
-        const quantifier = this.advance().value as 'any' | 'all' | 'some';
+        const quantifier = this.advance().value.toLowerCase() as 'any' | 'all' | 'some';
         this.expect('punctuation', '(');
         const subquery = this.parseSubquery('any');
         this.expect('punctuation', ')');

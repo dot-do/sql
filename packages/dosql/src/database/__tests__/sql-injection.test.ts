@@ -40,7 +40,7 @@ function getStatements(sql: string): string[] {
 // SECURITY VULNERABILITY: SEMICOLON IN STRING LITERALS
 // =============================================================================
 
-describe('SQL Injection Security: exec() Statement Splitting', () => {
+describe('SQL Injection Security - exec() Statement Splitting', () => {
   let db: Database;
 
   beforeEach(() => {

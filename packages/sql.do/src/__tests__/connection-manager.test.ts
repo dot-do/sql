@@ -40,7 +40,7 @@ afterEach(async () => {
 // Basic Connection Management
 // =============================================================================
 
-describe('ConnectionManager: Basic Connection', () => {
+describe('ConnectionManager - Basic Connection', () => {
   it('should create manager with URL', () => {
     const manager = new ConnectionManager({ url: 'ws://localhost:8080' });
 
@@ -119,7 +119,7 @@ describe('ConnectionManager: Basic Connection', () => {
 // Event Handling
 // =============================================================================
 
-describe('ConnectionManager: Event Handling', () => {
+describe('ConnectionManager - Event Handling', () => {
   it('should emit connected event', async () => {
     const manager = new ConnectionManager({ url: 'ws://localhost:8080' });
     const connectedHandler = vi.fn();
@@ -209,7 +209,7 @@ describe('ConnectionManager: Event Handling', () => {
 // Message Handling
 // =============================================================================
 
-describe('ConnectionManager: Message Handling', () => {
+describe('ConnectionManager - Message Handling', () => {
   it('should set message handler', async () => {
     const manager = new ConnectionManager({ url: 'ws://localhost:8080' });
     const messageHandler = vi.fn();
@@ -265,7 +265,7 @@ describe('ConnectionManager: Message Handling', () => {
 // Pool Configuration
 // =============================================================================
 
-describe('ConnectionManager: Pool Configuration', () => {
+describe('ConnectionManager - Pool Configuration', () => {
   it('should not have pool by default', () => {
     const manager = new ConnectionManager({ url: 'ws://localhost:8080' });
 
@@ -363,7 +363,7 @@ describe('ConnectionManager: Pool Configuration', () => {
 // Connection Release
 // =============================================================================
 
-describe('ConnectionManager: Connection Release', () => {
+describe('ConnectionManager - Connection Release', () => {
   it('should release pooled connection', async () => {
     const manager = new ConnectionManager({
       url: 'ws://localhost:8080',
@@ -388,7 +388,7 @@ describe('ConnectionManager: Connection Release', () => {
 // Pool Event Forwarding
 // =============================================================================
 
-describe('ConnectionManager: Pool Event Forwarding', () => {
+describe('ConnectionManager - Pool Event Forwarding', () => {
   it('should forward pool:connection-created event', async () => {
     const manager = new ConnectionManager({
       url: 'ws://localhost:8080',
@@ -485,7 +485,7 @@ describe('ConnectionManager: Pool Event Forwarding', () => {
 // Error Scenarios
 // =============================================================================
 
-describe('ConnectionManager: Error Scenarios', () => {
+describe('ConnectionManager - Error Scenarios', () => {
   it('should throw ConnectionError on WebSocket error', async () => {
     // Create a WebSocket that fails to connect
     const failingClass = class extends FakeWebSocket {
@@ -525,7 +525,7 @@ describe('ConnectionManager: Error Scenarios', () => {
 // Reconnection After Close
 // =============================================================================
 
-describe('ConnectionManager: Reconnection', () => {
+describe('ConnectionManager - Reconnection', () => {
   it('should allow reconnection after close', async () => {
     const manager = new ConnectionManager({ url: 'ws://localhost:8080' });
 
@@ -564,7 +564,7 @@ describe('ConnectionManager: Reconnection', () => {
 // Pool Closure
 // =============================================================================
 
-describe('ConnectionManager: Pool Closure', () => {
+describe('ConnectionManager - Pool Closure', () => {
   it('should close pool on manager close', async () => {
     const manager = new ConnectionManager({
       url: 'ws://localhost:8080',

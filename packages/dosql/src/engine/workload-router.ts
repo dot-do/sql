@@ -593,7 +593,7 @@ export interface ExecutionPath {
 /**
  * Execution result from a path
  */
-export interface ExecutionResult<T> {
+export interface ExecutionResult<T extends Record<string, unknown>> {
   /** Result rows */
   rows: T[];
 

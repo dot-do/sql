@@ -76,7 +76,7 @@ export function decodeString(data: BufferSource): string {
  * @param obj - The object to encode
  * @returns UTF-8 encoded JSON bytes
  */
-export function encodeJson<T>(obj: T): Uint8Array {
+export function encodeJson<T extends Record<string, unknown> | unknown[]>(obj: T): Uint8Array {
   return textEncoder.encode(JSON.stringify(obj));
 }
 
@@ -86,7 +86,7 @@ export function encodeJson<T>(obj: T): Uint8Array {
  * @param data - The bytes to decode
  * @returns Parsed object
  */
-export function decodeJson<T>(data: BufferSource): T {
+export function decodeJson<T extends Record<string, unknown> | unknown[]>(data: BufferSource): T {
   const str = textDecoder.decode(data);
   return JSON.parse(str) as T;
 }

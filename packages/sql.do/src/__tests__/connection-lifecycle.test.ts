@@ -44,7 +44,7 @@ afterEach(() => {
 // Connection Lifecycle: Connect
 // =============================================================================
 
-describe('Connection Lifecycle: Connect', () => {
+describe('Connection Lifecycle - Connect', () => {
   it('should establish connection on first connect() call', async () => {
     const client = new DoSQLClient({ url: 'ws://localhost:8080' });
 
@@ -117,7 +117,7 @@ describe('Connection Lifecycle: Connect', () => {
 // Connection Lifecycle: Disconnect
 // =============================================================================
 
-describe('Connection Lifecycle: Disconnect', () => {
+describe('Connection Lifecycle - Disconnect', () => {
   it('should close connection on close() call', async () => {
     const client = new DoSQLClient({ url: 'ws://localhost:8080' });
 
@@ -194,7 +194,7 @@ describe('Connection Lifecycle: Disconnect', () => {
 // Connection Lifecycle: Reconnect
 // =============================================================================
 
-describe('Connection Lifecycle: Reconnect', () => {
+describe('Connection Lifecycle - Reconnect', () => {
   it('should allow reconnection after disconnect', async () => {
     const client = new DoSQLClient({ url: 'ws://localhost:8080' });
 

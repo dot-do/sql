@@ -22,6 +22,8 @@ import {
   DEFAULT_WAL_CONFIG,
   WALError,
   WALErrorCode,
+  createLSN,
+  createTransactionId,
 } from './types.js';
 import { createWALReader } from './reader.js';
 
@@ -50,10 +52,10 @@ function decodeCheckpoint(data: Uint8Array): Checkpoint {
   const json = new TextDecoder().decode(data);
   const obj = JSON.parse(json);
   return {
-    lsn: BigInt(obj.lsn),
+    lsn: createLSN(BigInt(obj.lsn)),
     timestamp: obj.timestamp,
     segmentId: obj.segmentId,
-    activeTransactions: obj.activeTransactions,
+    activeTransactions: (obj.activeTransactions as string[]).map((t: string) => createTransactionId(t)),
     schemaVersion: obj.schemaVersion,
   };
 }
@@ -147,10 +149,10 @@ export function createCheckpointManager(
       }
 
       const checkpoint: Checkpoint = {
-        lsn,
+        lsn: createLSN(lsn),
         timestamp: Date.now(),
         segmentId,
-        activeTransactions,
+        activeTransactions: activeTransactions.map((t) => createTransactionId(t)),
       };
 
       // Write checkpoint to storage

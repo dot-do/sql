@@ -52,6 +52,7 @@ export default defineWorkersConfig({
             PERFORMANCE_BENCHMARK_DO: { className: 'PerformanceBenchmarkDO', useSQLite: true },
             PERFORMANCE_REGRESSION_DO: { className: 'PerformanceRegressionDO', useSQLite: true },
             PRODUCTION_BENCHMARK_DO: { className: 'ProductionBenchmarkDO', useSQLite: true },
+            BENCHMARK_VALIDATION_DO: { className: 'BenchmarkValidationDO', useSQLite: true },
           },
           r2Buckets: ['TEST_R2_BUCKET'],
           d1Databases: ['TEST_D1'],

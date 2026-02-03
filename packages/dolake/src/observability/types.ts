@@ -97,6 +97,7 @@ export interface WebSocketTraceAttachment {
   traceContext?: {
     traceparent?: string;
     tracestate?: string;
+    correlationId?: string;
   };
 }
 

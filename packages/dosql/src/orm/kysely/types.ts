@@ -73,7 +73,7 @@ export interface DoSQLDialectConfig {
 /**
  * Extended query result with DoSQL-specific metadata
  */
-export interface DoSQLKyselyResult<T> {
+export interface DoSQLKyselyResult<T extends Record<string, unknown>> {
   /** Rows returned by the query */
   rows: T[];
 
@@ -105,19 +105,19 @@ export type InferDatabase<S extends Record<string, Record<string, unknown>>> = {
 /**
  * Helper to make all properties optional (for updates)
  */
-export type Updateable<T> = Partial<T>;
+export type Updateable<T extends Record<string, unknown>> = Partial<T>;
 
 /**
  * Helper to make ID optional (for inserts)
  */
-export type Insertable<T> = T extends { id: number | string }
+export type Insertable<T extends Record<string, unknown>> = T extends { id: number | string }
   ? Omit<T, 'id'> & { id?: T['id'] }
   : T;
 
 /**
  * Selection type helper
  */
-export type Selectable<T> = T;
+export type Selectable<T extends Record<string, unknown>> = T;
 
 // =============================================================================
 // COLUMN TYPE MAPPINGS

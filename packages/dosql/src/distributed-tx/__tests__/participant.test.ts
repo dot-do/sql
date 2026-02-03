@@ -530,8 +530,10 @@ describe('TransactionParticipant', () => {
 
   describe('queryCoordinatorDecision', () => {
     it('should commit when coordinator says COMMIT', async () => {
-      const commitSpy = vi.fn().mockResolvedValue(undefined);
-      const testExecutor = createTestLocalExecutor({ commitLocal: commitSpy });
+      let commitCallCount = 0;
+      const testExecutor = createTestLocalExecutor({
+        async commitLocal() { commitCallCount++; },
+      });
       const testRpc = createTestRPC({
         async queryDecision() {
           return 'COMMIT' as CoordinatorDecision;
@@ -548,13 +550,15 @@ describe('TransactionParticipant', () => {
       // Manually trigger decision query
       await participant.queryCoordinatorDecision('txn-1');
 
-      expect(commitSpy).toHaveBeenCalledOnce();
+      expect(commitCallCount).toBe(1);
       expect(participant.getState('txn-1')).toBeUndefined(); // cleaned up
     });
 
     it('should abort when coordinator says ABORT', async () => {
-      const rollbackSpy = vi.fn().mockResolvedValue(undefined);
-      const testExecutor = createTestLocalExecutor({ rollbackLocal: rollbackSpy });
+      let rollbackCallCount = 0;
+      const testExecutor = createTestLocalExecutor({
+        async rollbackLocal() { rollbackCallCount++; },
+      });
       const testRpc = createTestRPC({
         async queryDecision() {
           return 'ABORT' as CoordinatorDecision;
@@ -569,7 +573,7 @@ describe('TransactionParticipant', () => {
       await participant.prepare('txn-1', [makeOp('INSERT', 'INSERT INTO t VALUES (1)')]);
       await participant.queryCoordinatorDecision('txn-1');
 
-      expect(rollbackSpy).toHaveBeenCalled();
+      expect(rollbackCallCount).toBeGreaterThan(0);
       expect(participant.getState('txn-1')).toBeUndefined();
     });
 

@@ -37,7 +37,7 @@ beforeEach(() => {
 // INSERT TESTS
 // =============================================================================
 
-describe('DMLExecutor: INSERT', () => {
+describe('DMLExecutor - INSERT', () => {
   it('inserts a single row with literal values', async () => {
     const result = await executor.execute(
       "INSERT INTO users (name, email, age) VALUES ('Alice', 'alice@test.com', 30)"
@@ -129,7 +129,7 @@ describe('DMLExecutor: INSERT', () => {
 // INSERT WITH RETURNING TESTS
 // =============================================================================
 
-describe('DMLExecutor: INSERT with RETURNING', () => {
+describe('DMLExecutor - INSERT with RETURNING', () => {
   it('returns all columns with RETURNING *', async () => {
     const result = await executor.execute(
       "INSERT INTO users (name, email, age) VALUES ('Alice', 'alice@test.com', 30) RETURNING *"
@@ -173,7 +173,7 @@ describe('DMLExecutor: INSERT with RETURNING', () => {
 // UPDATE TESTS
 // =============================================================================
 
-describe('DMLExecutor: UPDATE', () => {
+describe('DMLExecutor - UPDATE', () => {
   beforeEach(async () => {
     await executor.execute(
       "INSERT INTO users (name, email, age) VALUES ('Alice', 'alice@test.com', 30)"
@@ -263,7 +263,7 @@ describe('DMLExecutor: UPDATE', () => {
 // UPDATE WITH RETURNING TESTS
 // =============================================================================
 
-describe('DMLExecutor: UPDATE with RETURNING', () => {
+describe('DMLExecutor - UPDATE with RETURNING', () => {
   beforeEach(async () => {
     await executor.execute(
       "INSERT INTO users (name, email, age) VALUES ('Alice', 'alice@test.com', 30)"
@@ -300,7 +300,7 @@ describe('DMLExecutor: UPDATE with RETURNING', () => {
 // DELETE TESTS
 // =============================================================================
 
-describe('DMLExecutor: DELETE', () => {
+describe('DMLExecutor - DELETE', () => {
   beforeEach(async () => {
     await executor.execute(
       "INSERT INTO users (name, email, age) VALUES ('Alice', 'alice@test.com', 30)"
@@ -369,7 +369,7 @@ describe('DMLExecutor: DELETE', () => {
 // DELETE WITH RETURNING TESTS
 // =============================================================================
 
-describe('DMLExecutor: DELETE with RETURNING', () => {
+describe('DMLExecutor - DELETE with RETURNING', () => {
   beforeEach(async () => {
     await executor.execute(
       "INSERT INTO users (name, email, age) VALUES ('Alice', 'alice@test.com', 30)"
@@ -418,7 +418,7 @@ describe('DMLExecutor: DELETE with RETURNING', () => {
 // REPLACE TESTS
 // =============================================================================
 
-describe('DMLExecutor: REPLACE', () => {
+describe('DMLExecutor - REPLACE', () => {
   it('inserts via REPLACE INTO', async () => {
     const result = await executor.execute(
       "REPLACE INTO users (name, email, age) VALUES ('Alice', 'alice@test.com', 30)"
@@ -447,7 +447,7 @@ describe('DMLExecutor: REPLACE', () => {
 // WHERE CLAUSE OPERATORS
 // =============================================================================
 
-describe('DMLExecutor: WHERE clause operators', () => {
+describe('DMLExecutor - WHERE clause operators', () => {
   beforeEach(async () => {
     await executor.execute(
       "INSERT INTO users (name, email, age) VALUES ('Alice', 'alice@test.com', 30)"
@@ -521,7 +521,7 @@ describe('DMLExecutor: WHERE clause operators', () => {
 // PARAMETERIZED QUERIES
 // =============================================================================
 
-describe('DMLExecutor: parameterized queries', () => {
+describe('DMLExecutor - parameterized queries', () => {
   it('INSERT with parameter placeholders', async () => {
     const result = await executor.execute(
       'INSERT INTO users (name, email, age) VALUES (?, ?, ?)',
@@ -549,7 +549,7 @@ describe('DMLExecutor: parameterized queries', () => {
 // BINARY OPERATIONS IN UPDATE
 // =============================================================================
 
-describe('DMLExecutor: binary operations in UPDATE SET', () => {
+describe('DMLExecutor - binary operations in UPDATE SET', () => {
   beforeEach(async () => {
     await executor.execute(
       "INSERT INTO users (name, email, age) VALUES ('Alice', 'alice@test.com', 30)"
@@ -589,7 +589,7 @@ describe('DMLExecutor: binary operations in UPDATE SET', () => {
 // EDGE CASES
 // =============================================================================
 
-describe('DMLExecutor: edge cases', () => {
+describe('DMLExecutor - edge cases', () => {
   it('handles empty table for DELETE', async () => {
     const result = await executor.execute('DELETE FROM users');
     expect(result.changes).toBe(0);
@@ -628,7 +628,7 @@ describe('DMLExecutor: edge cases', () => {
 // FUNCTION EVALUATOR
 // =============================================================================
 
-describe('DMLExecutor: custom function evaluator', () => {
+describe('DMLExecutor - custom function evaluator', () => {
   it('uses custom function in INSERT values', async () => {
     const result = await executor.execute(
       "INSERT INTO users (name, email, age) VALUES (UPPER('alice'), 'a@t.com', 30)",
@@ -652,7 +652,7 @@ describe('DMLExecutor: custom function evaluator', () => {
 // FACTORY FUNCTIONS
 // =============================================================================
 
-describe('DMLExecutor: factory functions', () => {
+describe('DMLExecutor - factory functions', () => {
   it('createDMLExecutor creates executor with custom storage', () => {
     const customStorage = new InMemoryDMLStorage();
     const exec = createDMLExecutor(customStorage);

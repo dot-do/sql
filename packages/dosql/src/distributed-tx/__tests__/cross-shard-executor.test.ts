@@ -8,7 +8,7 @@
  * - Isolation level configuration
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { createCrossShardExecutor } from '../cross-shard-executor.js';
 import { createDistributedTransactionCoordinator } from '../coordinator.js';
 import { InMemoryTransactionLog } from '../types.js';

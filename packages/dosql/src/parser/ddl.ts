@@ -1569,5 +1569,35 @@ export function parseDropView(sql: string): ParseResult<DropViewStatement> {
   return { success: true, statement: result.statement };
 }
 
+/**
+ * Parse a CREATE TRIGGER statement
+ *
+ * @param sql - The CREATE TRIGGER SQL string
+ * @returns ParseResult with the parsed CreateTriggerStatement or an error
+ */
+export function parseCreateTrigger(sql: string): ParseResult<CreateTriggerStatement> {
+  const result = parseDDL(sql);
+  if (!result.success) return result;
+  if (result.statement.type !== 'CREATE TRIGGER') {
+    return { success: false, error: 'Expected CREATE TRIGGER statement' };
+  }
+  return { success: true, statement: result.statement };
+}
+
+/**
+ * Parse a DROP TRIGGER statement
+ *
+ * @param sql - The DROP TRIGGER SQL string
+ * @returns ParseResult with the parsed DropTriggerStatement or an error
+ */
+export function parseDropTrigger(sql: string): ParseResult<DropTriggerStatement> {
+  const result = parseDDL(sql);
+  if (!result.success) return result;
+  if (result.statement.type !== 'DROP TRIGGER') {
+    return { success: false, error: 'Expected DROP TRIGGER statement' };
+  }
+  return { success: true, statement: result.statement };
+}
+
 // Re-export types for convenience
 export * from './ddl-types.js';

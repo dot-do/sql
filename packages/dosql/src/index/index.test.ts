@@ -41,8 +41,14 @@ import {
   selectIndex,
   analyzePredicate,
   estimateJoinCost,
+  estimateJoinSelectivity,
   suggestJoinOrder,
+  calculateJoinOrderCost,
+  flattenJoinTree,
   DEFAULT_COST_MODEL,
+  type JoinEdge,
+  type JoinTableStats,
+  type JoinOrderResult,
 } from './optimizer.js';
 
 // Import explain
