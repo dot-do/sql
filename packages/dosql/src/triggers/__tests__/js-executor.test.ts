@@ -10,7 +10,7 @@
  * - Conditional triggers
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   createJSTriggerExecutor,
   buildTriggerContext,
@@ -29,6 +29,91 @@ import { TriggerError, TriggerErrorCode } from '../types.js';
 import type { DatabaseContext } from '../../proc/types.js';
 
 // =============================================================================
+// Test Doubles (Fakes) - NO MOCKS per testing philosophy
+// =============================================================================
+
+/**
+ * Fake handler that tracks calls and can be configured with custom behavior
+ */
+class FakeHandler<T = unknown> {
+  calls: TriggerContext<T>[] = [];
+  private returnValue: T | void = undefined;
+  private shouldThrow: Error | null = null;
+  private asyncDelay: number = 0;
+
+  setReturnValue(value: T | void): void {
+    this.returnValue = value;
+  }
+
+  setError(error: Error): void {
+    this.shouldThrow = error;
+  }
+
+  setDelay(ms: number): void {
+    this.asyncDelay = ms;
+  }
+
+  async invoke(ctx: TriggerContext<T>): Promise<T | void> {
+    this.calls.push(ctx);
+    if (this.asyncDelay > 0) {
+      await new Promise(resolve => setTimeout(resolve, this.asyncDelay));
+    }
+    if (this.shouldThrow) {
+      throw this.shouldThrow;
+    }
+    return this.returnValue;
+  }
+
+  wasCalled(): boolean {
+    return this.calls.length > 0;
+  }
+
+  callCount(): number {
+    return this.calls.length;
+  }
+}
+
+/**
+ * Fake error callback tracker
+ */
+class FakeErrorCallback {
+  calls: Array<{ name: string; error: Error }> = [];
+
+  invoke(name: string, error: Error): void {
+    this.calls.push({ name, error });
+  }
+
+  wasCalled(): boolean {
+    return this.calls.length > 0;
+  }
+
+  wasCalledWith(name: string): boolean {
+    return this.calls.some(c => c.name === name);
+  }
+}
+
+/**
+ * Fake operation executor for executeAll tests
+ */
+class FakeOperation<T = unknown> {
+  calls: T[] = [];
+  private returnValue: T | null = null;
+
+  setReturnValue(value: T): void {
+    this.returnValue = value;
+  }
+
+  async invoke(row: T): Promise<T | undefined> {
+    this.calls.push(row);
+    return this.returnValue ?? row;
+  }
+
+  wasCalled(): boolean {
+    return this.calls.length > 0;
+  }
+}
+
+// =============================================================================
 // Test Data and Helpers
 // =============================================================================
 
@@ -40,15 +125,18 @@ interface UserRow {
   created_at?: string;
 }
 
-function createMockDatabaseContext(): DatabaseContext {
+/**
+ * Creates a fake database context for testing
+ */
+function createFakeDatabaseContext(): DatabaseContext {
   return {
     tables: {},
-    execute: vi.fn().mockResolvedValue([]),
-    query: vi.fn().mockResolvedValue([]),
-    get: vi.fn().mockResolvedValue(null),
-    insert: vi.fn().mockResolvedValue(undefined),
-    update: vi.fn().mockResolvedValue(0),
-    delete: vi.fn().mockResolvedValue(0),
+    async execute() { return []; },
+    async query() { return []; },
+    async get() { return null; },
+    async insert() { return undefined; },
+    async update() { return 0; },
+    async delete() { return 0; },
   } as unknown as DatabaseContext;
 }
 
@@ -62,11 +150,19 @@ function createTestTrigger(
     table: options.table ?? 'users',
     timing: options.timing ?? 'before',
     events: options.events ?? ['insert'],
-    handler: handler as any,
+    handler: handler as unknown as TriggerDefinition<UserRow>['handler'],
     priority: options.priority,
     enabled: options.enabled,
     condition: options.condition,
   };
+}
+
+function createTestTriggerWithFake(
+  name: string,
+  fake: FakeHandler<UserRow>,
+  options: Partial<TriggerDefinition<UserRow>> = {}
+): TriggerDefinition<UserRow> {
+  return createTestTrigger(name, (ctx) => fake.invoke(ctx), options);
 }
 
 // =============================================================================
@@ -74,7 +170,7 @@ function createTestTrigger(
 // =============================================================================
 
 describe('Trigger Context Building', () => {
-  const db = createMockDatabaseContext();
+  const db = createFakeDatabaseContext();
 
   describe('buildTriggerContext()', () => {
     it('should build context for INSERT', () => {
@@ -160,14 +256,14 @@ describe('BEFORE Trigger Execution', () => {
 
   beforeEach(() => {
     registry = createTriggerRegistry();
-    db = createMockDatabaseContext();
+    db = createFakeDatabaseContext();
     executor = createJSTriggerExecutor({ registry, db });
   });
 
   describe('Basic Execution', () => {
     it('should execute BEFORE INSERT trigger', async () => {
-      const handler = vi.fn();
-      registry.register(createTestTrigger('before_insert', handler));
+      const handler = new FakeHandler<UserRow>();
+      registry.register(createTestTriggerWithFake('before_insert', handler));
 
       const result = await executor.executeBefore<UserRow>(
         'users',
@@ -177,14 +273,14 @@ describe('BEFORE Trigger Execution', () => {
       );
 
       expect(result.proceed).toBe(true);
-      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler.callCount()).toBe(1);
       expect(result.executions).toHaveLength(1);
       expect(result.executions[0].success).toBe(true);
     });
 
     it('should execute BEFORE UPDATE trigger', async () => {
-      const handler = vi.fn();
-      registry.register(createTestTrigger('before_update', handler, {
+      const handler = new FakeHandler<UserRow>();
+      registry.register(createTestTriggerWithFake('before_update', handler, {
         timing: 'before',
         events: ['update'],
       }));
@@ -197,12 +293,12 @@ describe('BEFORE Trigger Execution', () => {
       );
 
       expect(result.proceed).toBe(true);
-      expect(handler).toHaveBeenCalled();
+      expect(handler.wasCalled()).toBe(true);
     });
 
     it('should execute BEFORE DELETE trigger', async () => {
-      const handler = vi.fn();
-      registry.register(createTestTrigger('before_delete', handler, {
+      const handler = new FakeHandler<UserRow>();
+      registry.register(createTestTriggerWithFake('before_delete', handler, {
         timing: 'before',
         events: ['delete'],
       }));
@@ -215,7 +311,7 @@ describe('BEFORE Trigger Execution', () => {
       );
 
       expect(result.proceed).toBe(true);
-      expect(handler).toHaveBeenCalled();
+      expect(handler.wasCalled()).toBe(true);
     });
   });
 
@@ -302,8 +398,8 @@ describe('BEFORE Trigger Execution', () => {
 
   describe('Conditional Triggers', () => {
     it('should skip trigger when function condition returns false', async () => {
-      const handler = vi.fn();
-      registry.register(createTestTrigger('conditional', handler, {
+      const handler = new FakeHandler<UserRow>();
+      registry.register(createTestTriggerWithFake('conditional', handler, {
         condition: (ctx) => ctx.new?.status === 'vip',
       }));
 
@@ -315,13 +411,13 @@ describe('BEFORE Trigger Execution', () => {
       );
 
       expect(result.proceed).toBe(true);
-      expect(handler).not.toHaveBeenCalled();
+      expect(handler.wasCalled()).toBe(false);
       expect(result.executions).toHaveLength(0);
     });
 
     it('should execute trigger when function condition returns true', async () => {
-      const handler = vi.fn();
-      registry.register(createTestTrigger('conditional', handler, {
+      const handler = new FakeHandler<UserRow>();
+      registry.register(createTestTriggerWithFake('conditional', handler, {
         condition: (ctx) => ctx.new?.status === 'vip',
       }));
 
@@ -332,14 +428,14 @@ describe('BEFORE Trigger Execution', () => {
         { id: 1, name: 'Alice', email: 'alice@example.com', status: 'vip' }
       );
 
-      expect(handler).toHaveBeenCalled();
+      expect(handler.wasCalled()).toBe(true);
     });
   });
 
   describe('Disabled Triggers', () => {
     it('should skip disabled triggers by default', async () => {
-      const handler = vi.fn();
-      registry.register(createTestTrigger('disabled_trigger', handler, { enabled: false }));
+      const handler = new FakeHandler<UserRow>();
+      registry.register(createTestTriggerWithFake('disabled_trigger', handler, { enabled: false }));
 
       const result = await executor.executeBefore<UserRow>(
         'users',
@@ -348,13 +444,13 @@ describe('BEFORE Trigger Execution', () => {
         { id: 1, name: 'Alice', email: 'alice@example.com', status: 'active' }
       );
 
-      expect(handler).not.toHaveBeenCalled();
+      expect(handler.wasCalled()).toBe(false);
       expect(result.executions).toHaveLength(0);
     });
 
     it('should execute disabled triggers when skipDisabled is false', async () => {
-      const handler = vi.fn();
-      registry.register(createTestTrigger('disabled_trigger', handler, { enabled: false }));
+      const handler = new FakeHandler<UserRow>();
+      registry.register(createTestTriggerWithFake('disabled_trigger', handler, { enabled: false }));
 
       const result = await executor.executeBefore<UserRow>(
         'users',
@@ -364,7 +460,7 @@ describe('BEFORE Trigger Execution', () => {
         { skipDisabled: false }
       );
 
-      expect(handler).toHaveBeenCalled();
+      expect(handler.wasCalled()).toBe(true);
     });
   });
 
@@ -383,7 +479,8 @@ describe('BEFORE Trigger Execution', () => {
     });
 
     it('should proceed when no triggers match table', async () => {
-      registry.register(createTestTrigger('other_table_trigger', vi.fn(), { table: 'orders' }));
+      const otherHandler = new FakeHandler<UserRow>();
+      registry.register(createTestTriggerWithFake('other_table_trigger', otherHandler, { table: 'orders' }));
 
       const result = await executor.executeBefore<UserRow>(
         'users',
@@ -409,14 +506,14 @@ describe('AFTER Trigger Execution', () => {
 
   beforeEach(() => {
     registry = createTriggerRegistry();
-    db = createMockDatabaseContext();
+    db = createFakeDatabaseContext();
     executor = createJSTriggerExecutor({ registry, db });
   });
 
   describe('Basic Execution', () => {
     it('should execute AFTER INSERT trigger', async () => {
-      const handler = vi.fn();
-      registry.register(createTestTrigger('after_insert', handler, {
+      const handler = new FakeHandler<UserRow>();
+      registry.register(createTestTriggerWithFake('after_insert', handler, {
         timing: 'after',
         events: ['insert'],
       }));
@@ -429,13 +526,13 @@ describe('AFTER Trigger Execution', () => {
       );
 
       expect(result.success).toBe(true);
-      expect(handler).toHaveBeenCalled();
+      expect(handler.wasCalled()).toBe(true);
       expect(result.executions).toHaveLength(1);
     });
 
     it('should execute AFTER UPDATE trigger', async () => {
-      const handler = vi.fn();
-      registry.register(createTestTrigger('after_update', handler, {
+      const handler = new FakeHandler<UserRow>();
+      registry.register(createTestTriggerWithFake('after_update', handler, {
         timing: 'after',
         events: ['update'],
       }));
@@ -448,12 +545,12 @@ describe('AFTER Trigger Execution', () => {
       );
 
       expect(result.success).toBe(true);
-      expect(handler).toHaveBeenCalled();
+      expect(handler.wasCalled()).toBe(true);
     });
 
     it('should execute AFTER DELETE trigger', async () => {
-      const handler = vi.fn();
-      registry.register(createTestTrigger('after_delete', handler, {
+      const handler = new FakeHandler<UserRow>();
+      registry.register(createTestTriggerWithFake('after_delete', handler, {
         timing: 'after',
         events: ['delete'],
       }));
@@ -466,19 +563,19 @@ describe('AFTER Trigger Execution', () => {
       );
 
       expect(result.success).toBe(true);
-      expect(handler).toHaveBeenCalled();
+      expect(handler.wasCalled()).toBe(true);
     });
   });
 
   describe('Error Handling', () => {
     it('should continue execution after trigger error', async () => {
-      const secondHandler = vi.fn();
+      const secondHandler = new FakeHandler<UserRow>();
 
       registry.register(createTestTrigger('failing_trigger', () => {
         throw new Error('Trigger failed');
       }, { timing: 'after', priority: 10 }));
 
-      registry.register(createTestTrigger('second_trigger', secondHandler, {
+      registry.register(createTestTriggerWithFake('second_trigger', secondHandler, {
         timing: 'after',
         priority: 20,
       }));
@@ -492,7 +589,7 @@ describe('AFTER Trigger Execution', () => {
 
       expect(result.success).toBe(false);
       expect(result.errors).toHaveLength(1);
-      expect(secondHandler).toHaveBeenCalled();
+      expect(secondHandler.wasCalled()).toBe(true);
     });
 
     it('should collect all errors', async () => {
@@ -516,8 +613,12 @@ describe('AFTER Trigger Execution', () => {
     });
 
     it('should call error handler when provided', async () => {
-      const onAfterError = vi.fn();
-      executor = createJSTriggerExecutor({ registry, db, onAfterError });
+      const errorCallback = new FakeErrorCallback();
+      executor = createJSTriggerExecutor({
+        registry,
+        db,
+        onAfterError: (name, error) => errorCallback.invoke(name, error)
+      });
 
       registry.register(createTestTrigger('failing_trigger', () => {
         throw new Error('Trigger failed');
@@ -530,7 +631,7 @@ describe('AFTER Trigger Execution', () => {
         { id: 1, name: 'Alice', email: 'alice@example.com', status: 'active' }
       );
 
-      expect(onAfterError).toHaveBeenCalledWith('failing_trigger', expect.any(Error));
+      expect(errorCallback.wasCalledWith('failing_trigger')).toBe(true);
     });
   });
 

@@ -36,17 +36,17 @@ const logger = createLogger({ defaultContext: { module: 'leader-election' } });
 // =============================================================================
 
 /**
- * Generate a new fencing token
+ * Generate a new fencing token with cryptographically secure signature
  */
-export function generateFencingToken(
+export async function generateFencingToken(
   epoch: bigint,
   generatedBy: ReplicaId
-): FencingToken {
+): Promise<FencingToken> {
   const timestamp = Date.now();
   const data = `${epoch}:${timestamp}:${serializeReplicaId(generatedBy)}`;
 
-  // Simple signature using hash - in production, use proper cryptographic signing
-  const signature = simpleHash(data);
+  // Use SHA-256 for cryptographically secure signing
+  const signature = await sha256Hash(data);
 
   return {
     epoch,
@@ -57,11 +57,11 @@ export function generateFencingToken(
 }
 
 /**
- * Validate a fencing token
+ * Validate a fencing token signature using SHA-256
  */
-export function validateFencingTokenSignature(token: FencingToken): boolean {
+export async function validateFencingTokenSignature(token: FencingToken): Promise<boolean> {
   const data = `${token.epoch}:${token.generatedAt}:${serializeReplicaId(token.generatedBy)}`;
-  const expectedSignature = simpleHash(data);
+  const expectedSignature = await sha256Hash(data);
   return token.signature === expectedSignature;
 }
 
@@ -90,17 +90,17 @@ export function isFencingTokenExpired(token: FencingToken, ttlMs: number): boole
 }
 
 /**
- * Simple hash function for signatures
- * In production, use crypto.subtle or similar
+ * Compute SHA-256 hash of data string
+ * Uses Web Crypto API for cryptographically secure hashing
  */
-function simpleHash(data: string): string {
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    const char = data.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
-  }
-  return hash.toString(16);
+async function sha256Hash(data: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const dataBuffer = encoder.encode(data);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+  const hashArray = new Uint8Array(hashBuffer);
+  return Array.from(hashArray)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 // =============================================================================
@@ -198,7 +198,7 @@ export class LeaderElectionStateMachine {
   /**
    * Start a new election
    */
-  startElection(currentLSN: bigint): VoteRequest {
+  async startElection(currentLSN: bigint): Promise<VoteRequest> {
     // Increment term
     this.currentTerm += 1n;
 
@@ -211,7 +211,7 @@ export class LeaderElectionStateMachine {
     this.currentLeader = null;
 
     // Generate new fencing token
-    this.fencingToken = generateFencingToken(this.currentTerm, this.selfId);
+    this.fencingToken = await generateFencingToken(this.currentTerm, this.selfId);
 
     // Reset election timeout with jitter
     this.electionTimeout = this.calculateElectionTimeout();
@@ -232,10 +232,10 @@ export class LeaderElectionStateMachine {
   /**
    * Handle vote request from another candidate
    */
-  handleVoteRequest(
+  async handleVoteRequest(
     request: VoteRequest,
     ourLSN: bigint
-  ): VoteResponse {
+  ): Promise<VoteResponse> {
     const reason: string[] = [];
     let voteGranted = false;
 
@@ -257,7 +257,7 @@ export class LeaderElectionStateMachine {
       reason.push(`Candidate LSN ${request.lastLSN} < our LSN ${ourLSN}`);
     }
     // Validate fencing token
-    else if (!validateFencingTokenSignature(request.fencingToken)) {
+    else if (!(await validateFencingTokenSignature(request.fencingToken))) {
       reason.push('Invalid fencing token signature');
     }
     // Grant vote
@@ -285,7 +285,7 @@ export class LeaderElectionStateMachine {
    * Handle vote response
    * Returns true if we have won the election
    */
-  handleVoteResponse(response: VoteResponse): boolean {
+  async handleVoteResponse(response: VoteResponse): Promise<boolean> {
     // Ignore if we're not a candidate anymore
     if (this.role !== 'candidate') {
       return false;
@@ -307,7 +307,7 @@ export class LeaderElectionStateMachine {
 
     // Check if we have quorum
     if (this.hasQuorum()) {
-      this.becomeLeader();
+      await this.becomeLeader();
       return true;
     }
 
@@ -360,9 +360,9 @@ export class LeaderElectionStateMachine {
   /**
    * Validate a fencing token against our current state
    */
-  validateFencingToken(token: FencingToken): boolean {
+  async validateFencingToken(token: FencingToken): Promise<boolean> {
     // Check signature
-    if (!validateFencingTokenSignature(token)) {
+    if (!(await validateFencingTokenSignature(token))) {
       return false;
     }
 
@@ -504,13 +504,13 @@ export class LeaderElectionStateMachine {
     return yesVotes >= quorumSize;
   }
 
-  private becomeLeader(): void {
+  private async becomeLeader(): Promise<void> {
     this.role = 'leader';
     this.currentLeader = this.selfId;
     this.electionStartedAt = null;
 
     // Generate fresh fencing token as new leader
-    this.fencingToken = generateFencingToken(this.currentTerm, this.selfId);
+    this.fencingToken = await generateFencingToken(this.currentTerm, this.selfId);
 
     logger.info('Became leader', {
       term: this.currentTerm.toString(),

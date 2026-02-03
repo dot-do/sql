@@ -64,119 +64,119 @@ function createReplicaInfo(
 
 describe('Fencing Tokens', () => {
   describe('Token Generation', () => {
-    it('generates token with correct epoch', () => {
+    it('generates token with correct epoch', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
 
       expect(token.epoch).toBe(1n);
     });
 
-    it('generates token with generator info', () => {
+    it('generates token with generator info', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
 
       expect(token.generatedBy).toEqual(replicaId);
     });
 
-    it('generates token with timestamp', () => {
+    it('generates token with timestamp', async () => {
       const before = Date.now();
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
       const after = Date.now();
 
       expect(token.generatedAt).toBeGreaterThanOrEqual(before);
       expect(token.generatedAt).toBeLessThanOrEqual(after);
     });
 
-    it('generates token with signature', () => {
+    it('generates token with signature', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
 
       expect(token.signature).toBeDefined();
       expect(typeof token.signature).toBe('string');
     });
 
-    it('generates unique tokens for different epochs', () => {
+    it('generates unique tokens for different epochs', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token1 = generateFencingToken(1n, replicaId);
-      const token2 = generateFencingToken(2n, replicaId);
+      const token1 = await generateFencingToken(1n, replicaId);
+      const token2 = await generateFencingToken(2n, replicaId);
 
       expect(token1.epoch).not.toBe(token2.epoch);
     });
 
-    it('generates unique tokens for different generators', () => {
+    it('generates unique tokens for different generators', async () => {
       const r1 = createReplicaId('us-west', 'r1');
       const r2 = createReplicaId('us-west', 'r2');
 
-      const token1 = generateFencingToken(1n, r1);
-      const token2 = generateFencingToken(1n, r2);
+      const token1 = await generateFencingToken(1n, r1);
+      const token2 = await generateFencingToken(1n, r2);
 
       expect(token1.signature).not.toBe(token2.signature);
     });
   });
 
   describe('Token Validation', () => {
-    it('validates valid token signature', () => {
+    it('validates valid token signature', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
 
-      expect(validateFencingTokenSignature(token)).toBe(true);
+      expect(await validateFencingTokenSignature(token)).toBe(true);
     });
 
-    it('rejects token with tampered epoch', () => {
+    it('rejects token with tampered epoch', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
 
       const tamperedToken: FencingToken = {
         ...token,
         epoch: 999n,
       };
 
-      expect(validateFencingTokenSignature(tamperedToken)).toBe(false);
+      expect(await validateFencingTokenSignature(tamperedToken)).toBe(false);
     });
 
-    it('rejects token with tampered timestamp', () => {
+    it('rejects token with tampered timestamp', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
 
       const tamperedToken: FencingToken = {
         ...token,
         generatedAt: token.generatedAt + 1000,
       };
 
-      expect(validateFencingTokenSignature(tamperedToken)).toBe(false);
+      expect(await validateFencingTokenSignature(tamperedToken)).toBe(false);
     });
 
-    it('rejects token with tampered generator', () => {
+    it('rejects token with tampered generator', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
 
       const tamperedToken: FencingToken = {
         ...token,
         generatedBy: createReplicaId('eu-central', 'attacker'),
       };
 
-      expect(validateFencingTokenSignature(tamperedToken)).toBe(false);
+      expect(await validateFencingTokenSignature(tamperedToken)).toBe(false);
     });
 
-    it('rejects token with tampered signature', () => {
+    it('rejects token with tampered signature', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
 
       const tamperedToken: FencingToken = {
         ...token,
         signature: 'invalid-signature',
       };
 
-      expect(validateFencingTokenSignature(tamperedToken)).toBe(false);
+      expect(await validateFencingTokenSignature(tamperedToken)).toBe(false);
     });
   });
 
   describe('Token Comparison', () => {
-    it('compares tokens with different epochs', () => {
+    it('compares tokens with different epochs', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token1 = generateFencingToken(1n, replicaId);
-      const token2 = generateFencingToken(2n, replicaId);
+      const token1 = await generateFencingToken(1n, replicaId);
+      const token2 = await generateFencingToken(2n, replicaId);
 
       expect(compareFencingTokens(token2, token1)).toBeGreaterThan(0);
       expect(compareFencingTokens(token1, token2)).toBeLessThan(0);
@@ -184,7 +184,7 @@ describe('Fencing Tokens', () => {
 
     it('compares tokens with same epoch by timestamp', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token1 = generateFencingToken(1n, replicaId);
+      const token1 = await generateFencingToken(1n, replicaId);
 
       await new Promise(resolve => setTimeout(resolve, 10));
 
@@ -196,16 +196,16 @@ describe('Fencing Tokens', () => {
       expect(compareFencingTokens(token2, token1)).toBeGreaterThan(0);
     });
 
-    it('returns 0 for equal tokens', () => {
+    it('returns 0 for equal tokens', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
 
       expect(compareFencingTokens(token, token)).toBe(0);
     });
 
-    it('handles null tokens', () => {
+    it('handles null tokens', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
 
       expect(compareFencingTokens(null, null)).toBe(0);
       expect(compareFencingTokens(token, null)).toBe(1);
@@ -214,27 +214,27 @@ describe('Fencing Tokens', () => {
   });
 
   describe('Token Expiration', () => {
-    it('token is not expired within TTL', () => {
+    it('token is not expired within TTL', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
-      const token = generateFencingToken(1n, replicaId);
+      const token = await generateFencingToken(1n, replicaId);
 
       expect(isFencingTokenExpired(token, 60000)).toBe(false);
     });
 
-    it('token expires after TTL', () => {
+    it('token expires after TTL', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
       const token: FencingToken = {
-        ...generateFencingToken(1n, replicaId),
+        ...(await generateFencingToken(1n, replicaId)),
         generatedAt: Date.now() - 120000, // 2 minutes ago
       };
 
       expect(isFencingTokenExpired(token, 60000)).toBe(true);
     });
 
-    it('token at exact TTL boundary is expired', () => {
+    it('token at exact TTL boundary is expired', async () => {
       const replicaId = createReplicaId('us-west', 'r1');
       const token: FencingToken = {
-        ...generateFencingToken(1n, replicaId),
+        ...(await generateFencingToken(1n, replicaId)),
         generatedAt: Date.now() - 60001, // Just past 60 seconds
       };
 
@@ -281,7 +281,7 @@ describe('LeaderElectionStateMachine', () => {
   });
 
   describe('Election Timeout', () => {
-    it('should not start election if recently heard from leader', () => {
+    it('should not start election if recently heard from leader', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const machine = new LeaderElectionStateMachine(selfId, {
         heartbeatTimeoutMs: 15000,
@@ -289,7 +289,7 @@ describe('LeaderElectionStateMachine', () => {
 
       // Simulate recent heartbeat
       const leaderId = createReplicaId('us-east', 'primary');
-      const token = generateFencingToken(1n, leaderId);
+      const token = await generateFencingToken(1n, leaderId);
       const heartbeat: LeaderHeartbeat = {
         leaderId,
         term: 1n,
@@ -317,7 +317,7 @@ describe('LeaderElectionStateMachine', () => {
       expect(machine.shouldStartElection()).toBe(true);
     });
 
-    it('should not start election if already leader', () => {
+    it('should not start election if already leader', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const machine = new LeaderElectionStateMachine(selfId, {
         quorumSize: 1, // Only need self vote
@@ -327,11 +327,11 @@ describe('LeaderElectionStateMachine', () => {
       machine.registerReplica(createReplicaInfo(createReplicaId('us-east', 'r2')));
 
       // Start election - we need enough votes for quorum
-      machine.startElection(100n);
+      await machine.startElection(100n);
 
       // Add another yes vote to achieve quorum
       const currentTerm = machine.getState().term;
-      machine.handleVoteResponse({
+      await machine.handleVoteResponse({
         voterId: createReplicaId('us-east', 'r2'),
         term: currentTerm,
         voteGranted: true,

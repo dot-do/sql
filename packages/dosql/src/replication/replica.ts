@@ -681,7 +681,7 @@ export function createReplicaDO(
     }
 
     // Start the election
-    const voteRequest = electionStateMachine.startElection(state.currentLSN);
+    const voteRequest = await electionStateMachine.startElection(state.currentLSN);
 
     logger.info('Started election', {
       replicaId: serializeReplicaId(state.info.id),
@@ -702,7 +702,7 @@ export function createReplicaDO(
     if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
     if (!electionStateMachine) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Election state machine not initialized');
 
-    const response = electionStateMachine.handleVoteRequest(request, state.currentLSN);
+    const response = await electionStateMachine.handleVoteRequest(request, state.currentLSN);
 
     // If we granted the vote, update our observed leaders
     if (response.voteGranted) {
@@ -760,7 +760,7 @@ export function createReplicaDO(
     if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
     if (!electionStateMachine) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Election state machine not initialized');
 
-    return electionStateMachine.validateFencingToken(token);
+    return await electionStateMachine.validateFencingToken(token);
   }
 
   /**
@@ -806,14 +806,14 @@ export function createReplicaDO(
       });
 
       // Use the split-brain resolver to determine if we should proceed
-      const leaders = splitBrainCheck.conflictingLeaders.map(id => ({
+      const leaders = await Promise.all(splitBrainCheck.conflictingLeaders.map(async id => ({
         id,
-        token: state.currentFencingToken ?? generateFencingToken(0n, id),
+        token: state.currentFencingToken ?? await generateFencingToken(0n, id),
         lsn: state.currentLSN,
-      }));
+      })));
 
       // Add ourselves as a potential leader
-      const ourToken = generateFencingToken(electionStateMachine.getState().term + 1n, state.info.id);
+      const ourToken = await generateFencingToken(electionStateMachine.getState().term + 1n, state.info.id);
       leaders.push({
         id: state.info.id,
         token: ourToken,
@@ -869,7 +869,7 @@ export function createReplicaDO(
       };
 
       // This will call becomeLeader() if we have quorum
-      const wonElection = electionStateMachine.handleVoteResponse(selfVoteResponse);
+      const wonElection = await electionStateMachine.handleVoteResponse(selfVoteResponse);
 
       if (wonElection || electionStateMachine.getRole() === 'leader') {
         const newToken = electionStateMachine.getFencingToken();
@@ -958,7 +958,7 @@ export function createReplicaDO(
     if (!state) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Replica not initialized');
     if (!electionStateMachine) throw new ReplicationError(ReplicationErrorCode.NOT_INITIALIZED, 'Election state machine not initialized');
 
-    const wonElection = electionStateMachine.handleVoteResponse(response);
+    const wonElection = await electionStateMachine.handleVoteResponse(response);
 
     if (wonElection) {
       const newToken = electionStateMachine.getFencingToken();

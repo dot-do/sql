@@ -593,6 +593,11 @@ export {
   type BatchSendResult,
   type TailWorkerLoadMetrics,
   type DurabilityTier as TailWorkerDurabilityTier,
+  // ACK timeout handling types
+  type PendingAck,
+  type AckTimeoutResult,
+  type DeadLetterEntry,
+  type AckMetrics,
   DEFAULT_TAIL_WORKER_CONFIG,
 } from './tail-worker.js';
 

@@ -216,6 +216,84 @@ export interface TailWorkerLoadMetrics {
 }
 
 // =============================================================================
+// ACK Timeout Types
+// =============================================================================
+
+/**
+ * Pending ACK tracking for timeout handling
+ */
+export interface PendingAck {
+  /** Unique message ID for correlation */
+  messageId: string;
+  /** Sequence number being acknowledged */
+  sequenceNumber: number;
+  /** Shard this message was sent to */
+  shardId: string;
+  /** Timestamp when message was sent */
+  sentAt: number;
+  /** Number of retry attempts */
+  retryCount: number;
+  /** The original batch message for retrying */
+  message: CDCBatchMessage;
+  /** Events in this batch for dead-letter */
+  events: TraceCDCEvent[];
+}
+
+/**
+ * ACK timeout result
+ */
+export interface AckTimeoutResult {
+  /** Message ID that timed out */
+  messageId: string;
+  /** Shard where timeout occurred */
+  shardId: string;
+  /** Whether the message was retried */
+  retried: boolean;
+  /** Whether the message was dead-lettered */
+  deadLettered: boolean;
+  /** Error message if any */
+  error?: string;
+}
+
+/**
+ * Dead-letter entry for failed messages
+ */
+export interface DeadLetterEntry {
+  /** Original message ID */
+  messageId: string;
+  /** Original shard */
+  shardId: string;
+  /** Events that failed to be delivered */
+  events: TraceCDCEvent[];
+  /** Reason for dead-lettering */
+  reason: 'timeout' | 'max_retries' | 'connection_failed';
+  /** Timestamp when dead-lettered */
+  deadLetteredAt: number;
+  /** Number of retry attempts made */
+  retryAttempts: number;
+}
+
+/**
+ * ACK metrics for monitoring
+ */
+export interface AckMetrics {
+  /** Total ACKs received */
+  acksReceived: number;
+  /** Total ACK timeouts */
+  ackTimeouts: number;
+  /** Total retries due to timeout */
+  ackRetries: number;
+  /** Total messages dead-lettered */
+  deadLetteredCount: number;
+  /** Average ACK latency in ms */
+  avgAckLatencyMs: number;
+  /** P99 ACK latency in ms */
+  p99AckLatencyMs: number;
+  /** Currently pending ACKs */
+  pendingAcks: number;
+}
+
+// =============================================================================
 // Shard State
 // =============================================================================
 
@@ -265,6 +343,16 @@ export class TailWorkerCDCStreamer {
   private totalDroppedEvents: number = 0;
   private requestCount: number = 0;
   private requestStartTime: number = Date.now();
+
+  // ACK timeout tracking
+  private pendingAcks: Map<string, PendingAck> = new Map();
+  private deadLetterQueue: DeadLetterEntry[] = [];
+  private ackLatencies: number[] = [];
+  private ackTimeoutCount: number = 0;
+  private ackRetryCount: number = 0;
+  private acksReceivedCount: number = 0;
+  private ackTimeoutTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private messageIdCounter: number = 0;
 
   constructor(config: Partial<TailWorkerConfig> = {}) {
     this.config = {
@@ -550,8 +638,8 @@ export class TailWorkerCDCStreamer {
           }
         }
 
-        // Send with retry
-        const success = await this.sendWithRetry(shardId, message);
+        // Send with retry, passing original events for dead-letter tracking
+        const success = await this.sendWithRetry(shardId, message, batch);
         const durationMs = Date.now() - startTime;
 
         // Track latency
@@ -588,9 +676,17 @@ export class TailWorkerCDCStreamer {
   }
 
   /**
+   * Generate a unique message ID for ACK tracking
+   */
+  private generateMessageId(shardId: string): string {
+    this.messageIdCounter++;
+    return `${shardId}-${Date.now()}-${this.messageIdCounter}`;
+  }
+
+  /**
    * Send message with retry and exponential backoff
    */
-  private async sendWithRetry(shardId: string, message: CDCBatchMessage): Promise<boolean> {
+  private async sendWithRetry(shardId: string, message: CDCBatchMessage, events: TraceCDCEvent[] = []): Promise<boolean> {
     const state = this.shardStates.get(shardId);
     let attempts = 0;
 
@@ -601,14 +697,58 @@ export class TailWorkerCDCStreamer {
           throw new Error('WebSocket not open');
         }
 
-        ws.send(JSON.stringify(message));
+        // Generate message ID and add to message for correlation
+        const messageId = this.generateMessageId(shardId);
+        const messageWithId = {
+          ...message,
+          correlationId: messageId,
+        };
 
-        // TODO: Wait for ACK with timeout
-        // For now, we assume success if send doesn't throw
-        if (state) {
-          state.reconnectAttempts = 0;
+        // Track pending ACK
+        const pendingAck: PendingAck = {
+          messageId,
+          sequenceNumber: message.sequenceNumber,
+          shardId,
+          sentAt: Date.now(),
+          retryCount: attempts,
+          message: messageWithId,
+          events: events.length > 0 ? events : (message.events as TraceCDCEvent[]),
+        };
+        this.pendingAcks.set(messageId, pendingAck);
+
+        // Send the message
+        ws.send(JSON.stringify(messageWithId));
+
+        // Wait for ACK with timeout
+        const ackReceived = await this.waitForAck(messageId);
+
+        if (ackReceived) {
+          if (state) {
+            state.reconnectAttempts = 0;
+          }
+          return true;
         }
-        return true;
+
+        // ACK timeout - will be retried if attempts remain
+        this.ackTimeoutCount++;
+        attempts++;
+
+        if (attempts < this.config.maxRetries) {
+          this.ackRetryCount++;
+          const delay = this.getReconnectDelay(shardId, attempts);
+          await this.sleep(delay);
+
+          // Update retry count in pending ACK
+          pendingAck.retryCount = attempts;
+
+          // Try to reconnect if needed
+          if (!ws || ws.readyState !== WebSocket.OPEN) {
+            await this.connectToShard(shardId);
+          }
+        } else {
+          // Max retries exceeded - dead-letter the message
+          this.deadLetterMessage(pendingAck, 'max_retries');
+        }
       } catch (error) {
         attempts++;
         if (attempts < this.config.maxRetries) {
@@ -622,6 +762,59 @@ export class TailWorkerCDCStreamer {
     }
 
     return false;
+  }
+
+  /**
+   * Wait for ACK with timeout
+   */
+  private waitForAck(messageId: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const timeoutMs = this.config.ackTimeoutMs;
+
+      // Set up timeout
+      const timeoutTimer = setTimeout(() => {
+        // Clean up pending ACK on timeout
+        const pendingAck = this.pendingAcks.get(messageId);
+        if (pendingAck) {
+          // Don't remove yet - let retry logic handle it
+          this.ackTimeoutTimers.delete(messageId);
+        }
+        resolve(false);
+      }, timeoutMs);
+
+      this.ackTimeoutTimers.set(messageId, timeoutTimer);
+
+      // Check if already acknowledged (race condition handling)
+      if (!this.pendingAcks.has(messageId)) {
+        clearTimeout(timeoutTimer);
+        this.ackTimeoutTimers.delete(messageId);
+        resolve(true);
+      }
+    });
+  }
+
+  /**
+   * Move message to dead-letter queue
+   */
+  private deadLetterMessage(pendingAck: PendingAck, reason: DeadLetterEntry['reason']): void {
+    const entry: DeadLetterEntry = {
+      messageId: pendingAck.messageId,
+      shardId: pendingAck.shardId,
+      events: pendingAck.events,
+      reason,
+      deadLetteredAt: Date.now(),
+      retryAttempts: pendingAck.retryCount,
+    };
+
+    this.deadLetterQueue.push(entry);
+    this.pendingAcks.delete(pendingAck.messageId);
+
+    // Clean up timeout timer if exists
+    const timer = this.ackTimeoutTimers.get(pendingAck.messageId);
+    if (timer) {
+      clearTimeout(timer);
+      this.ackTimeoutTimers.delete(pendingAck.messageId);
+    }
   }
 
   /**
@@ -701,9 +894,45 @@ export class TailWorkerCDCStreamer {
         // Decrease pending count based on acknowledged events
         const ackedCount = message.details?.eventsProcessed ?? 1;
         state.pendingMessages = Math.max(0, state.pendingMessages - ackedCount);
+
+        // Handle correlation ID for ACK timeout tracking
+        const correlationId = message.correlationId;
+        if (correlationId) {
+          this.processAckResponse(correlationId);
+        }
       }
     } catch {
       // Ignore parse errors
+    }
+  }
+
+  /**
+   * Process ACK response and update metrics
+   */
+  private processAckResponse(messageId: string): void {
+    const pendingAck = this.pendingAcks.get(messageId);
+    if (!pendingAck) return;
+
+    // Calculate and record latency
+    const latencyMs = Date.now() - pendingAck.sentAt;
+    this.ackLatencies.push(latencyMs);
+
+    // Keep latency array bounded (last 1000 samples)
+    if (this.ackLatencies.length > 1000) {
+      this.ackLatencies.shift();
+    }
+
+    // Increment ACKs received count
+    this.acksReceivedCount++;
+
+    // Clean up pending ACK
+    this.pendingAcks.delete(messageId);
+
+    // Clear timeout timer
+    const timer = this.ackTimeoutTimers.get(messageId);
+    if (timer) {
+      clearTimeout(timer);
+      this.ackTimeoutTimers.delete(messageId);
     }
   }
 
@@ -838,11 +1067,23 @@ export class TailWorkerCDCStreamer {
     // Flush all pending events
     await this.flush();
 
-    // Clear all timers
+    // Clear all flush timers
     for (const timer of this.flushTimers.values()) {
       clearTimeout(timer);
     }
     this.flushTimers.clear();
+
+    // Clear all ACK timeout timers
+    for (const timer of this.ackTimeoutTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.ackTimeoutTimers.clear();
+
+    // Dead-letter any remaining pending ACKs
+    for (const pendingAck of this.pendingAcks.values()) {
+      this.deadLetterMessage(pendingAck, 'timeout');
+    }
+    this.pendingAcks.clear();
 
     // Close all connections
     for (const [shardId, ws] of this.connections) {
@@ -923,6 +1164,162 @@ export class TailWorkerCDCStreamer {
       requestsPerSecond: rps,
       activeConnections: this.connections.size,
     };
+  }
+
+  /**
+   * Get ACK-related metrics for monitoring
+   */
+  getAckMetrics(): AckMetrics {
+    // Calculate average ACK latency
+    const avgAckLatencyMs = this.ackLatencies.length > 0
+      ? this.ackLatencies.reduce((sum, lat) => sum + lat, 0) / this.ackLatencies.length
+      : 0;
+
+    // Calculate P99 ACK latency
+    let p99AckLatencyMs = 0;
+    if (this.ackLatencies.length > 0) {
+      const sorted = [...this.ackLatencies].sort((a, b) => a - b);
+      const p99Index = Math.floor(sorted.length * 0.99);
+      p99AckLatencyMs = sorted[p99Index] ?? sorted[sorted.length - 1] ?? 0;
+    }
+
+    return {
+      acksReceived: this.acksReceivedCount,
+      ackTimeouts: this.ackTimeoutCount,
+      ackRetries: this.ackRetryCount,
+      deadLetteredCount: this.deadLetterQueue.length,
+      avgAckLatencyMs,
+      p99AckLatencyMs,
+      pendingAcks: this.pendingAcks.size,
+    };
+  }
+
+  /**
+   * Get dead-letter queue entries
+   */
+  getDeadLetterQueue(): DeadLetterEntry[] {
+    return [...this.deadLetterQueue];
+  }
+
+  /**
+   * Get dead-letter queue size
+   */
+  getDeadLetterQueueSize(): number {
+    return this.deadLetterQueue.length;
+  }
+
+  /**
+   * Clear dead-letter queue (after processing/exporting)
+   */
+  clearDeadLetterQueue(): DeadLetterEntry[] {
+    const entries = [...this.deadLetterQueue];
+    this.deadLetterQueue = [];
+    return entries;
+  }
+
+  /**
+   * Get pending ACKs count
+   */
+  getPendingAcksCount(): number {
+    return this.pendingAcks.size;
+  }
+
+  /**
+   * Manually trigger ACK for testing
+   */
+  simulateAckResponse(messageId: string): boolean {
+    if (!this.pendingAcks.has(messageId)) {
+      return false;
+    }
+    this.processAckResponse(messageId);
+    return true;
+  }
+
+  /**
+   * Get pending ACK by message ID (for testing)
+   */
+  getPendingAck(messageId: string): PendingAck | undefined {
+    return this.pendingAcks.get(messageId);
+  }
+
+  /**
+   * Check for timed out pending ACKs and handle them
+   * This can be called periodically or on demand
+   */
+  async checkAndHandleTimeouts(): Promise<AckTimeoutResult[]> {
+    const results: AckTimeoutResult[] = [];
+    const now = Date.now();
+
+    for (const [messageId, pendingAck] of this.pendingAcks) {
+      const elapsed = now - pendingAck.sentAt;
+
+      if (elapsed >= this.config.ackTimeoutMs) {
+        this.ackTimeoutCount++;
+
+        if (pendingAck.retryCount < this.config.maxRetries - 1) {
+          // Retry the message
+          this.ackRetryCount++;
+          pendingAck.retryCount++;
+          pendingAck.sentAt = now; // Reset sent time for retry
+
+          // Try to resend
+          try {
+            const ws = this.connections.get(pendingAck.shardId);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify(pendingAck.message));
+              results.push({
+                messageId,
+                shardId: pendingAck.shardId,
+                retried: true,
+                deadLettered: false,
+              });
+            } else {
+              // Connection not available - dead-letter
+              this.deadLetterMessage(pendingAck, 'connection_failed');
+              results.push({
+                messageId,
+                shardId: pendingAck.shardId,
+                retried: false,
+                deadLettered: true,
+                error: 'Connection not available for retry',
+              });
+            }
+          } catch (error) {
+            // Send failed - dead-letter
+            this.deadLetterMessage(pendingAck, 'connection_failed');
+            results.push({
+              messageId,
+              shardId: pendingAck.shardId,
+              retried: false,
+              deadLettered: true,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            });
+          }
+        } else {
+          // Max retries exceeded - dead-letter
+          this.deadLetterMessage(pendingAck, 'max_retries');
+          results.push({
+            messageId,
+            shardId: pendingAck.shardId,
+            retried: false,
+            deadLettered: true,
+            error: 'Max retries exceeded',
+          });
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Reset ACK metrics (for testing)
+   */
+  resetAckMetrics(): void {
+    this.ackLatencies = [];
+    this.ackTimeoutCount = 0;
+    this.ackRetryCount = 0;
+    this.acksReceivedCount = 0;
   }
 
   // ===========================================================================
