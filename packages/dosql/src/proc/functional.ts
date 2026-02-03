@@ -133,9 +133,46 @@ export type InferProcedureCall<P, DB extends DatabaseSchema = DatabaseSchema> =
 
 /**
  * Type for procedure definitions map.
+ *
+ * ## Why `any[]` and `any` are used here
+ *
+ * This type represents a heterogeneous collection of procedures where each procedure
+ * can have different argument types and return types. TypeScript requires existential
+ * types (or wildcards) to express "a procedure with some arguments returning some value."
+ *
+ * **Why not `unknown[]` and `unknown`?**
+ *
+ * Using `unknown` would break type inference in `InferProcedures`. When we map over
+ * procedure definitions with `InferProcedureCall`, TypeScript needs to infer the actual
+ * `Args` and `R` types from each procedure. With `unknown`, the inference fails because
+ * `unknown` is not assignable to specific types during conditional type evaluation.
+ *
+ * **The `any` here is safe because:**
+ *
+ * 1. It's only used as a type constraint for the map's value type
+ * 2. Actual procedures are defined with specific types that get inferred
+ * 3. `InferProcedures` extracts the real types, so callers get full type safety
+ * 4. The `any` never "leaks" to user-facing APIs
+ *
+ * @example
+ * ```typescript
+ * // The map accepts procedures with any signature:
+ * const defs: ProcedureDefinitions<MyDB> = {
+ *   foo: (id: string, ctx) => ctx.db.users.get(id),      // Args=[string], R=User
+ *   bar: (a: number, b: number, ctx) => a + b,           // Args=[number,number], R=number
+ * };
+ *
+ * // But InferProcedures extracts the real types:
+ * type Procs = InferProcedures<typeof defs, MyDB>;
+ * // Procs.foo: (id: string) => Promise<User>
+ * // Procs.bar: (a: number, b: number) => Promise<number>
+ * ```
+ *
+ * @see https://www.typescriptlang.org/docs/handbook/2/generics.html#using-type-parameters-in-generic-constraints
  */
 export type ProcedureDefinitions<DB extends DatabaseSchema = DatabaseSchema> = Record<
   string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Required for heterogeneous procedure map type inference
   ProcedureDef<any[], any, DB>
 >;
 

@@ -140,8 +140,18 @@ export interface Statement<T = unknown, P extends BindParameters = BindParameter
   /**
    * Bind parameters to the statement (chainable)
    *
-   * @param params - Parameters to bind
+   * @param params - Parameters to bind. Uses conditional spread: if P is an array type,
+   *                 parameters are spread directly; otherwise P is wrapped in a tuple.
+   *                 This allows both `stmt.bind(1, 2)` and `stmt.bind({ id: 1 })` patterns.
    * @returns this (for chaining)
+   *
+   * @remarks
+   * The conditional type `P extends readonly unknown[] ? P : [P]` enables flexible parameter binding:
+   * - For positional parameters (arrays): spreads the array as rest params
+   * - For named parameters (objects): wraps single object in tuple for spread
+   *
+   * We use `readonly unknown[]` instead of `any[]` as the type constraint because we only need
+   * to check if P is array-like for branching logic, not access its element types.
    *
    * @example
    * ```typescript
@@ -149,13 +159,13 @@ export interface Statement<T = unknown, P extends BindParameters = BindParameter
    * const user = stmt.bind(123).get();
    * ```
    */
-  bind(...params: P extends any[] ? P : [P]): this;
+  bind(...params: P extends readonly unknown[] ? P : [P]): this;
 
   /**
    * Execute the statement and return run result
    * For INSERT, UPDATE, DELETE statements
    *
-   * @param params - Optional parameters to bind
+   * @param params - Optional parameters to bind (see {@link bind} for spread behavior)
    * @returns RunResult with changes and lastInsertRowid
    *
    * @example
@@ -164,12 +174,12 @@ export interface Statement<T = unknown, P extends BindParameters = BindParameter
    * console.log(result.lastInsertRowid); // 1
    * ```
    */
-  run(...params: P extends any[] ? P : [P]): RunResult;
+  run(...params: P extends readonly unknown[] ? P : [P]): RunResult;
 
   /**
    * Execute the statement and return the first row
    *
-   * @param params - Optional parameters to bind
+   * @param params - Optional parameters to bind (see {@link bind} for spread behavior)
    * @returns First row or undefined if no results
    *
    * @example
@@ -177,12 +187,12 @@ export interface Statement<T = unknown, P extends BindParameters = BindParameter
    * const user = db.prepare('SELECT * FROM users WHERE id = ?').get(1);
    * ```
    */
-  get(...params: P extends any[] ? P : [P]): T | undefined;
+  get(...params: P extends readonly unknown[] ? P : [P]): T | undefined;
 
   /**
    * Execute the statement and return all rows
    *
-   * @param params - Optional parameters to bind
+   * @param params - Optional parameters to bind (see {@link bind} for spread behavior)
    * @returns Array of all matching rows
    *
    * @example
@@ -190,12 +200,12 @@ export interface Statement<T = unknown, P extends BindParameters = BindParameter
    * const adults = db.prepare('SELECT * FROM users WHERE age > ?').all(21);
    * ```
    */
-  all(...params: P extends any[] ? P : [P]): T[];
+  all(...params: P extends readonly unknown[] ? P : [P]): T[];
 
   /**
    * Execute the statement and return an iterator
    *
-   * @param params - Optional parameters to bind
+   * @param params - Optional parameters to bind (see {@link bind} for spread behavior)
    * @returns Iterator over result rows
    *
    * @example
@@ -205,7 +215,7 @@ export interface Statement<T = unknown, P extends BindParameters = BindParameter
    * }
    * ```
    */
-  iterate(...params: P extends any[] ? P : [P]): IterableIterator<T>;
+  iterate(...params: P extends readonly unknown[] ? P : [P]): IterableIterator<T>;
 
   /**
    * Get column metadata for the result set

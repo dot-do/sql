@@ -253,7 +253,7 @@ export class PreparedStatement<T = unknown, P extends BindParameters = BindParam
   /**
    * Bind parameters to the statement
    */
-  bind(...params: P extends any[] ? P : [P]): this {
+  bind(...params: P extends readonly unknown[] ? P : [P]): this {
     this.checkUsable();
     validateParameters(this.parsed, ...params);
     this.boundParams = bindParameters(this.parsed, ...params);
@@ -263,7 +263,7 @@ export class PreparedStatement<T = unknown, P extends BindParameters = BindParam
   /**
    * Execute the statement and return run result
    */
-  run(...params: P extends any[] ? P : [P]): RunResult {
+  run(...params: P extends readonly unknown[] ? P : [P]): RunResult {
     this.checkUsable();
     const values = this.getParams(...params);
     return this.engine.run(this.parsed.normalizedSql, values);
@@ -272,7 +272,7 @@ export class PreparedStatement<T = unknown, P extends BindParameters = BindParam
   /**
    * Execute and return the first row
    */
-  get(...params: P extends any[] ? P : [P]): T | undefined {
+  get(...params: P extends readonly unknown[] ? P : [P]): T | undefined {
     this.checkUsable();
     const values = this.getParams(...params);
     const result = this.engine.execute(this.parsed.normalizedSql, values);
@@ -287,7 +287,7 @@ export class PreparedStatement<T = unknown, P extends BindParameters = BindParam
   /**
    * Execute and return all rows
    */
-  all(...params: P extends any[] ? P : [P]): T[] {
+  all(...params: P extends readonly unknown[] ? P : [P]): T[] {
     this.checkUsable();
     const values = this.getParams(...params);
     const result = this.engine.execute(this.parsed.normalizedSql, values);
@@ -297,7 +297,7 @@ export class PreparedStatement<T = unknown, P extends BindParameters = BindParam
   /**
    * Execute and return an iterator
    */
-  *iterate(...params: P extends any[] ? P : [P]): IterableIterator<T> {
+  *iterate(...params: P extends readonly unknown[] ? P : [P]): IterableIterator<T> {
     this.checkUsable();
     const values = this.getParams(...params);
     const result = this.engine.execute(this.parsed.normalizedSql, values);
