@@ -566,7 +566,8 @@ function parseColumnsWithJsDoc(
             }
           }
 
-          columns[colName] = { ...colDef, jsDoc };
+          // Only include jsDoc property if it's defined (exactOptionalPropertyTypes)
+          columns[colName] = jsDoc !== undefined ? { ...colDef, jsDoc } : { ...colDef };
         }
       }
     }
@@ -754,11 +755,12 @@ function extractTableSchemasFromAst(
           }
 
           if (Object.keys(columns).length > 0) {
-            schemas.push({
-              tableName,
-              columns,
-              columnsWithJsDoc,
-            });
+            // Only include columnsWithJsDoc if defined (exactOptionalPropertyTypes)
+            const schema: TableSchemaWithJsDoc = { tableName, columns };
+            if (columnsWithJsDoc !== undefined) {
+              schema.columnsWithJsDoc = columnsWithJsDoc;
+            }
+            schemas.push(schema);
           }
         }
       }
