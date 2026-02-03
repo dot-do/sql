@@ -351,7 +351,7 @@ class SimulatedReplicationNetwork {
 // PRIMARY TO REPLICA WAL STREAMING TESTS
 // =============================================================================
 
-describe('Cross-DO Replication: Primary to Replica WAL Streaming', () => {
+describe('Cross-DO Replication - Primary to Replica WAL Streaming', () => {
   let network: SimulatedReplicationNetwork;
 
   beforeEach(() => {
@@ -505,7 +505,7 @@ describe('Cross-DO Replication: Primary to Replica WAL Streaming', () => {
 // REPLICA CATCH-UP AFTER DISCONNECT TESTS
 // =============================================================================
 
-describe('Cross-DO Replication: Replica Catch-Up After Disconnect', () => {
+describe('Cross-DO Replication - Replica Catch-Up After Disconnect', () => {
   let network: SimulatedReplicationNetwork;
 
   beforeEach(() => {
@@ -673,7 +673,7 @@ describe('Cross-DO Replication: Replica Catch-Up After Disconnect', () => {
 // LEADER ELECTION ON PRIMARY FAILURE TESTS
 // =============================================================================
 
-describe('Cross-DO Replication: Leader Election on Primary Failure', () => {
+describe('Cross-DO Replication - Leader Election on Primary Failure', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -960,7 +960,7 @@ describe('Cross-DO Replication: Leader Election on Primary Failure', () => {
 // READ-YOUR-WRITES CONSISTENCY TESTS
 // =============================================================================
 
-describe('Cross-DO Replication: Read-Your-Writes Consistency', () => {
+describe('Cross-DO Replication - Read-Your-Writes Consistency', () => {
   describe('Session-Based Consistency', () => {
     it('routes to primary when replica is behind session LSN', async () => {
       const primaryId = createReplicaId('us-east', 'primary');
@@ -1183,7 +1183,7 @@ describe('Cross-DO Replication: Read-Your-Writes Consistency', () => {
 // MULTI-REGION REPLICATION SIMULATION TESTS
 // =============================================================================
 
-describe('Cross-DO Replication: Multi-Region Replication Simulation', () => {
+describe('Cross-DO Replication - Multi-Region Replication Simulation', () => {
   describe('Region-Aware Routing', () => {
     it('routes to nearest replica in same region', async () => {
       const primaryId = createReplicaId('us-east', 'primary');

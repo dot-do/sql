@@ -51,7 +51,7 @@ beforeEach(() => {
 // PARSER TESTS - INSERT RETURNING
 // =============================================================================
 
-describe('RETURNING Parser: INSERT', () => {
+describe('RETURNING Parser - INSERT', () => {
   it('parses INSERT with RETURNING *', () => {
     const result = parseInsert("INSERT INTO t1 VALUES (1, 'a') RETURNING *");
 
@@ -154,7 +154,7 @@ describe('RETURNING Parser: INSERT', () => {
 // PARSER TESTS - UPDATE RETURNING
 // =============================================================================
 
-describe('RETURNING Parser: UPDATE', () => {
+describe('RETURNING Parser - UPDATE', () => {
   it('parses UPDATE with RETURNING *', () => {
     const result = parseUpdate("UPDATE t1 SET name = 'b' WHERE id = 1 RETURNING *");
 
@@ -211,7 +211,7 @@ describe('RETURNING Parser: UPDATE', () => {
 // PARSER TESTS - DELETE RETURNING
 // =============================================================================
 
-describe('RETURNING Parser: DELETE', () => {
+describe('RETURNING Parser - DELETE', () => {
   it('parses DELETE with RETURNING *', () => {
     const result = parseDelete('DELETE FROM t1 WHERE id = 1 RETURNING *');
 
@@ -273,7 +273,7 @@ describe('RETURNING Parser: DELETE', () => {
 // EXECUTION TESTS - INSERT RETURNING
 // =============================================================================
 
-describe('RETURNING Execution: INSERT', () => {
+describe('RETURNING Execution - INSERT', () => {
   it('INSERT RETURNING * returns all inserted columns', async () => {
     const result = await executor.execute(
       "INSERT INTO t1 (name, value) VALUES ('alice', 100) RETURNING *"
@@ -334,7 +334,7 @@ describe('RETURNING Execution: INSERT', () => {
 // EXECUTION TESTS - UPDATE RETURNING
 // =============================================================================
 
-describe('RETURNING Execution: UPDATE', () => {
+describe('RETURNING Execution - UPDATE', () => {
   beforeEach(async () => {
     await executor.execute("INSERT INTO t1 (name, value) VALUES ('alice', 100)");
     await executor.execute("INSERT INTO t1 (name, value) VALUES ('bob', 200)");
@@ -394,7 +394,7 @@ describe('RETURNING Execution: UPDATE', () => {
 // EXECUTION TESTS - DELETE RETURNING
 // =============================================================================
 
-describe('RETURNING Execution: DELETE', () => {
+describe('RETURNING Execution - DELETE', () => {
   beforeEach(async () => {
     await executor.execute("INSERT INTO t1 (name, value) VALUES ('alice', 100)");
     await executor.execute("INSERT INTO t1 (name, value) VALUES ('bob', 200)");

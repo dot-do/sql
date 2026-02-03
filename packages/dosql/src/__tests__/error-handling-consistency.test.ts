@@ -87,7 +87,7 @@ function isStandardError(error: unknown): error is StandardError {
 // 1. THROW VS RETURN PATTERN CONSISTENCY
 // =============================================================================
 
-describe('Error Pattern Consistency: Throw vs Return', () => {
+describe('Error Pattern Consistency - Throw vs Return', () => {
   describe('Database class methods', () => {
     it('Database.prepare() throws on closed database', () => {
       const db = createDatabase();

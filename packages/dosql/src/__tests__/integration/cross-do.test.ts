@@ -400,7 +400,7 @@ class TestShardCoordinator {
 // SHARD-TO-SHARD QUERY ROUTING TESTS
 // =============================================================================
 
-describe('Cross-DO Communication: Shard-to-Shard Query Routing', () => {
+describe('Cross-DO Communication - Shard-to-Shard Query Routing', () => {
   let rpc: SimulatedShardRPC;
   let shards: ShardConfig[];
   let vschema: VSchema;
@@ -559,7 +559,7 @@ describe('Cross-DO Communication: Shard-to-Shard Query Routing', () => {
 // SCATTER-GATHER QUERY EXECUTION TESTS
 // =============================================================================
 
-describe('Cross-DO Communication: Scatter-Gather Query Execution', () => {
+describe('Cross-DO Communication - Scatter-Gather Query Execution', () => {
   let rpc: SimulatedShardRPC;
   let shards: ShardConfig[];
   let vschema: VSchema;
@@ -852,7 +852,7 @@ describe('Cross-DO Communication: Scatter-Gather Query Execution', () => {
 // COORDINATOR-TO-WORKER RPC TESTS
 // =============================================================================
 
-describe('Cross-DO Communication: Coordinator-to-Worker RPC', () => {
+describe('Cross-DO Communication - Coordinator-to-Worker RPC', () => {
   let coordinator: TestShardCoordinator;
 
   beforeEach(() => {
@@ -991,7 +991,7 @@ describe('Cross-DO Communication: Coordinator-to-Worker RPC', () => {
 // REPLICATION STATE SYNCHRONIZATION TESTS
 // =============================================================================
 
-describe('Cross-DO Communication: Replication State Synchronization', () => {
+describe('Cross-DO Communication - Replication State Synchronization', () => {
   let primaryBackend: DOStorageBackend;
   let primaryWalWriter: WALWriter;
   let primaryWalReader: WALReader;
@@ -1257,7 +1257,7 @@ describe('Cross-DO Communication: Replication State Synchronization', () => {
 // REPLICA PROMOTION SCENARIO TESTS
 // =============================================================================
 
-describe('Cross-DO Communication: Replica Promotion Scenarios', () => {
+describe('Cross-DO Communication - Replica Promotion Scenarios', () => {
   let primaryBackend: DOStorageBackend;
   let primaryWalWriter: WALWriter;
   let primaryWalReader: WALReader;
@@ -1457,7 +1457,7 @@ describe('Cross-DO Communication: Replica Promotion Scenarios', () => {
 // NETWORK FAILURE HANDLING TESTS
 // =============================================================================
 
-describe('Cross-DO Communication: Network Failure Handling', () => {
+describe('Cross-DO Communication - Network Failure Handling', () => {
   let rpc: SimulatedShardRPC;
   let shards: ShardConfig[];
   let vschema: VSchema;
@@ -1781,7 +1781,7 @@ describe('Cross-DO Communication: Network Failure Handling', () => {
 // INTEGRATION: END-TO-END CROSS-DO SCENARIOS
 // =============================================================================
 
-describe('Cross-DO Communication: End-to-End Integration', () => {
+describe('Cross-DO Communication - End-to-End Integration', () => {
   describe('Multi-Shard Transaction', () => {
     it('coordinates write across multiple shards', async () => {
       const rpc = new SimulatedShardRPC();

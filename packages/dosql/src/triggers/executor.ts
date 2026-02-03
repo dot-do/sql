@@ -51,30 +51,9 @@ export {
 // =============================================================================
 
 import type { TriggerRegistry, TriggerExecutor, TriggerExecutionOptions } from './types.js';
-import type { DatabaseContext, DatabaseSchema } from '../proc/types.js';
-import { createJSTriggerExecutor, type JSTriggerExecutorOptions } from './js-executor.js';
-import { createSQLTriggerExecutor, type SQLTriggerExecutorOptions } from './sql-trigger-executor.js';
+import type { DatabaseContext } from '../proc/types.js';
+import { createSQLTriggerExecutor } from './sql-trigger-executor.js';
 
-/**
- * Options for creating a trigger executor
- * @deprecated Use JSTriggerExecutorOptions or SQLTriggerExecutorOptions instead
- */
-export interface TriggerExecutorOptions<DB extends DatabaseSchema = DatabaseSchema>
-  extends JSTriggerExecutorOptions<DB> {}
-
-/**
- * Create a trigger executor (backward-compatible alias)
- *
- * For JavaScript-only triggers, use createJSTriggerExecutor.
- * For SQL triggers support, use createSQLTriggerExecutor.
- *
- * @deprecated Use createJSTriggerExecutor or createSQLTriggerExecutor instead
- */
-export function createTriggerExecutor<DB extends DatabaseSchema = DatabaseSchema>(
-  options: TriggerExecutorOptions<DB>
-): TriggerExecutor {
-  return createJSTriggerExecutor(options);
-}
 
 // =============================================================================
 // Helper Functions

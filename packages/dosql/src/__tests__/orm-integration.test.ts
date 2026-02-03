@@ -617,7 +617,7 @@ interface KyselyTestDatabase {
 // =============================================================================
 // =============================================================================
 
-describe('ORM Integration: Drizzle', () => {
+describe('ORM Integration - Drizzle', () => {
   let backend: InMemoryDrizzleBackend;
 
   beforeEach(() => {
@@ -934,7 +934,7 @@ describe('ORM Integration: Drizzle', () => {
 // =============================================================================
 // =============================================================================
 
-describe('ORM Integration: Prisma', () => {
+describe('ORM Integration - Prisma', () => {
   let prismaBackend: InMemoryPrismaBackend;
   let adapter: PrismaDoSQLAdapter;
 
@@ -1157,7 +1157,7 @@ describe('ORM Integration: Prisma', () => {
 // =============================================================================
 // =============================================================================
 
-describe('ORM Integration: Kysely', () => {
+describe('ORM Integration - Kysely', () => {
   let kyselyBackend: MockDoSQLBackend;
   let db: Kysely<KyselyTestDatabase>;
 
@@ -1371,7 +1371,7 @@ describe('ORM Integration: Kysely', () => {
 // =============================================================================
 // =============================================================================
 
-describe('ORM Integration: Feature Support Matrix', () => {
+describe('ORM Integration - Feature Support Matrix', () => {
   /**
    * This section validates and documents which features are
    * supported or unsupported across all three ORMs.

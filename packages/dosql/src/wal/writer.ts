@@ -18,6 +18,9 @@ import {
   DEFAULT_WAL_CONFIG,
   WALError,
   WALErrorCode,
+  type TransactionId,
+  createLSN,
+  createTransactionId,
 } from './types.js';
 import {
   createHLCClock,

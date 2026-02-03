@@ -63,7 +63,7 @@ interface ExtendedReturningClause extends ReturningClause {
 // INSERT ... RETURNING * Tests
 // =============================================================================
 
-describe('RETURNING Clause: INSERT ... RETURNING *', () => {
+describe('RETURNING Clause - INSERT ... RETURNING *', () => {
   it('should parse INSERT with RETURNING * and mark wildcard for schema expansion', () => {
     // Gap: Parser should track metadata about wildcard expansion requirements
     const result = parseInsert(
@@ -97,7 +97,7 @@ describe('RETURNING Clause: INSERT ... RETURNING *', () => {
 // INSERT ... RETURNING column1, column2 Tests
 // =============================================================================
 
-describe('RETURNING Clause: INSERT ... RETURNING column1, column2', () => {
+describe('RETURNING Clause - INSERT ... RETURNING column1, column2', () => {
   it('should parse RETURNING with backtick-quoted identifiers (gap: hyphenated names)', () => {
     // Gap: Backtick-quoted identifiers with special characters in RETURNING
     const result = parseInsert(
@@ -130,7 +130,7 @@ describe('RETURNING Clause: INSERT ... RETURNING column1, column2', () => {
 // INSERT ... RETURNING id AS new_id Tests
 // =============================================================================
 
-describe('RETURNING Clause: INSERT ... RETURNING id AS new_id', () => {
+describe('RETURNING Clause - INSERT ... RETURNING id AS new_id', () => {
   it('should parse RETURNING with quoted aliases containing hyphens (gap: special char aliases)', () => {
     // Gap: Quoted aliases with hyphens/special characters
     const result = parseInsert(
@@ -164,7 +164,7 @@ describe('RETURNING Clause: INSERT ... RETURNING id AS new_id', () => {
 // UPDATE ... RETURNING * Tests
 // =============================================================================
 
-describe('RETURNING Clause: UPDATE ... RETURNING *', () => {
+describe('RETURNING Clause - UPDATE ... RETURNING *', () => {
   it('should parse UPDATE FROM join with RETURNING * (gap: FROM clause)', () => {
     // Gap: UPDATE ... FROM ... RETURNING syntax
     const result = parseUpdate(`
@@ -203,7 +203,7 @@ describe('RETURNING Clause: UPDATE ... RETURNING *', () => {
 // UPDATE ... RETURNING column reference patterns
 // =============================================================================
 
-describe('RETURNING Clause: UPDATE column reference patterns', () => {
+describe('RETURNING Clause - UPDATE column reference patterns', () => {
   it('should parse RETURNING with table alias qualified columns (gap: alias.column)', () => {
     // Gap: Table alias qualification in RETURNING (u.id, u.name)
     const result = parseUpdate(`
@@ -243,7 +243,7 @@ describe('RETURNING Clause: UPDATE column reference patterns', () => {
 // DELETE ... RETURNING * Tests
 // =============================================================================
 
-describe('RETURNING Clause: DELETE ... RETURNING *', () => {
+describe('RETURNING Clause - DELETE ... RETURNING *', () => {
   it('should parse DELETE with INDEXED BY and RETURNING (gap: INDEXED BY hint)', () => {
     // Gap: INDEXED BY clause combined with RETURNING
     const result = parseDelete(`
@@ -277,7 +277,7 @@ describe('RETURNING Clause: DELETE ... RETURNING *', () => {
 // RETURNING with expressions Tests
 // =============================================================================
 
-describe('RETURNING Clause: Expressions', () => {
+describe('RETURNING Clause - Expressions', () => {
   it('should parse RETURNING with complex nested arithmetic (gap: operator precedence)', () => {
     // Gap: Complex arithmetic expressions with correct precedence
     const result = parseInsert(`
@@ -462,7 +462,7 @@ describe('RETURNING Clause: Expressions', () => {
 // RETURNING with subqueries Tests
 // =============================================================================
 
-describe('RETURNING Clause: Subqueries', () => {
+describe('RETURNING Clause - Subqueries', () => {
   it('should parse RETURNING with scalar subquery (gap: subquery expression)', () => {
     // Gap: Scalar subquery in RETURNING
     const result = parseInsert(`
@@ -523,7 +523,7 @@ describe('RETURNING Clause: Subqueries', () => {
 // Batch operations Tests
 // =============================================================================
 
-describe('RETURNING Clause: Batch Operations', () => {
+describe('RETURNING Clause - Batch Operations', () => {
   it('should parse multi-row INSERT with RETURNING expressions (gap: batch + expressions)', () => {
     // Gap: Multi-value INSERT with computed RETURNING expressions
     const result = parseInsert(`
@@ -596,7 +596,7 @@ describe('RETURNING Clause: Batch Operations', () => {
 // Edge Cases Tests
 // =============================================================================
 
-describe('RETURNING Clause: Edge Cases', () => {
+describe('RETURNING Clause - Edge Cases', () => {
   it('should parse RETURNING with TYPEOF function (gap: TYPEOF)', () => {
     // Gap: TYPEOF() in RETURNING
     const result = parseInsert(`
@@ -665,7 +665,7 @@ describe('RETURNING Clause: Edge Cases', () => {
 // REPLACE Statement Tests
 // =============================================================================
 
-describe('RETURNING Clause: REPLACE Statement', () => {
+describe('RETURNING Clause - REPLACE Statement', () => {
   it('should parse REPLACE with multiple RETURNING expressions (gap: REPLACE expressions)', () => {
     // Gap: Complex expressions in REPLACE RETURNING
     const result = parseReplace(`
@@ -708,7 +708,7 @@ describe('RETURNING Clause: REPLACE Statement', () => {
 // Error Validation Tests - Features that SHOULD produce errors
 // =============================================================================
 
-describe('RETURNING Clause: Error Validation', () => {
+describe('RETURNING Clause - Error Validation', () => {
   it('should reject window functions in RETURNING (gap: window function validation)', () => {
     // Window functions are NOT allowed in RETURNING per SQL standard
     const result = parseInsert(`

@@ -139,24 +139,36 @@ export function createObservability(config: Partial<ObservabilityConfig> = {}): 
 // =============================================================================
 
 /**
- * Instrument CDC batch processing
+ * Instrument CDC batch processing with cross-package correlation ID propagation.
+ *
+ * When a CDC batch arrives from DoSQL with a correlationId, it is automatically
+ * attached to the processing span as a `correlation.id` attribute. This enables
+ * end-to-end request tracing from the original DoSQL query through CDC streaming
+ * into DoLake's Parquet/Iceberg pipeline.
  */
 export async function instrumentCDCBatch<T>(
   observability: Observability,
   dolakeMetrics: DoLakeMetrics,
-  batchInfo: { batchId: string; sourceId: string; table: string; eventCount: number; sizeBytes: number },
+  batchInfo: { batchId: string; sourceId: string; table: string; eventCount: number; sizeBytes: number; correlationId?: string },
   execute: () => Promise<T & CDCProcessResult>
 ): Promise<T & CDCProcessResult> {
   const { tracer } = observability;
 
+  const spanAttributes: Record<string, string | number> = {
+    'cdc.batch_id': batchInfo.batchId,
+    'cdc.source_id': batchInfo.sourceId,
+    'cdc.table': batchInfo.table,
+    'cdc.event_count': batchInfo.eventCount,
+  };
+
+  // Propagate correlation ID from the incoming CDC batch for cross-package tracing
+  if (batchInfo.correlationId) {
+    spanAttributes['correlation.id'] = batchInfo.correlationId;
+  }
+
   const span = tracer.startSpan('dolake.processCDCBatch', {
     kind: 'CONSUMER',
-    attributes: {
-      'cdc.batch_id': batchInfo.batchId,
-      'cdc.source_id': batchInfo.sourceId,
-      'cdc.table': batchInfo.table,
-      'cdc.event_count': batchInfo.eventCount,
-    },
+    attributes: spanAttributes,
   });
 
   const startTime = performance.now();

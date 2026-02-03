@@ -605,7 +605,7 @@ describe('createVSchema', () => {
 // INTEGRATION TESTS
 // =============================================================================
 
-describe('Integration: Complete VSchema Configuration', () => {
+describe('Integration - Complete VSchema Configuration', () => {
   it('should create a production-like VSchema', () => {
     const shards: ShardConfig[] = Array.from({ length: 4 }, (_, i) =>
       shard(createShardId(`shard-${i + 1}`), 'user-do', {

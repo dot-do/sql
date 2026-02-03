@@ -951,3 +951,20 @@ export function assertErrorCode<E extends Error & { code: string }>(
   }
   return error;
 }
+
+// =============================================================================
+// Re-exports from Mock Query Executor
+// =============================================================================
+// Consolidated from __tests__/utils/mock-query-executor.ts for single-location imports
+
+export {
+  MockQueryExecutor,
+  FakeQueryExecutor,
+  tokenizeSql,
+  hasMultipleStatements,
+  extractTableFromSelect,
+  extractTableFromCreateTable,
+  getStatementType,
+  hasUnionKeyword,
+  hasImplicitJoin,
+} from './utils/mock-query-executor.js';

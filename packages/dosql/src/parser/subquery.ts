@@ -822,6 +822,14 @@ export class SubqueryParser {
       return { type: 'unary', op: 'not', operand: { type: 'between', expr: left, low, high, location: loc }, location: loc };
     }
 
+    // NOT LIKE / NOT ILIKE
+    if (this.matchKeyword('not') && (this.peek(1).value.toLowerCase() === 'like' || this.peek(1).value.toLowerCase() === 'ilike')) {
+      this.advance(); // NOT
+      const likeOp = this.advance().value.toLowerCase(); // LIKE or ILIKE
+      const right = this.parseAddSub();
+      return { type: 'unary', op: 'not', operand: { type: 'binary', op: likeOp, left, right, location: loc }, location: loc };
+    }
+
     // Comparison with ANY/ALL/SOME
     const compOps: Record<string, ComparisonOp> = {
       '=': 'eq', '<>': 'ne', '!=': 'ne', '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge',
@@ -853,7 +861,7 @@ export class SubqueryParser {
 
     // LIKE / ILIKE
     if (this.matchKeyword('like', 'ilike')) {
-      const op = this.advance().value;
+      const op = this.advance().value.toLowerCase();
       const right = this.parseAddSub();
       return { type: 'binary', op, left, right, location: loc };
     }

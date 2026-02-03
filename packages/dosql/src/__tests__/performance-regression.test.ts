@@ -253,7 +253,7 @@ export class PerformanceRegressionDO extends DurableObject {
 // QUERY LATENCY REGRESSION TESTS
 // =============================================================================
 
-describe('performance regression: Query Latency Baselines', () => {
+describe('performance regression - Query Latency Baselines', () => {
   describe('Simple SELECT Latency', () => {
     it('should maintain P50 latency < 5ms for simple SELECT', async () => {
       const stub = getUniqueStub();
@@ -378,7 +378,7 @@ describe('performance regression: Query Latency Baselines', () => {
 // INSERT THROUGHPUT REGRESSION TESTS
 // =============================================================================
 
-describe('performance regression: INSERT Throughput Baselines', () => {
+describe('performance regression - INSERT Throughput Baselines', () => {
   describe('Single INSERT Throughput', () => {
     it('should achieve > 100 single INSERTs per second', async () => {
       const stub = getUniqueStub();
@@ -482,7 +482,7 @@ describe('performance regression: INSERT Throughput Baselines', () => {
 // SELECT THROUGHPUT REGRESSION TESTS
 // =============================================================================
 
-describe('performance regression: SELECT Throughput Baselines', () => {
+describe('performance regression - SELECT Throughput Baselines', () => {
   describe('Point Query Throughput', () => {
     it('should achieve > 500 point queries per second', async () => {
       const stub = getUniqueStub();
@@ -557,7 +557,7 @@ describe('performance regression: SELECT Throughput Baselines', () => {
 // TRANSACTION COMMIT LATENCY REGRESSION TESTS
 // =============================================================================
 
-describe('performance regression: Transaction Commit Latency Baselines', () => {
+describe('performance regression - Transaction Commit Latency Baselines', () => {
   describe('Single-Operation Transaction', () => {
     it('should maintain P50 latency < 10ms for single UPDATE transaction', async () => {
       const stub = getUniqueStub();
@@ -665,7 +665,7 @@ describe('performance regression: Transaction Commit Latency Baselines', () => {
 // COMPREHENSIVE REGRESSION GUARD TESTS
 // =============================================================================
 
-describe('performance regression: Comprehensive Baseline Guards', () => {
+describe('performance regression - Comprehensive Baseline Guards', () => {
   it('should not regress on mixed workload performance', async () => {
     const stub = getUniqueStub();
     await runInDurableObject(stub, async (instance: PerformanceRegressionDO) => {

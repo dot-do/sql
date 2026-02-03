@@ -545,7 +545,7 @@ describe('Concurrent Query Planning (Race Condition Tests)', () => {
 // SCENARIO 6b: Test isolation with PlanningContext
 // With PlanningContext, tests are deterministic without global state reset.
 // =============================================================================
-describe('Scenario 6b: Test isolation with PlanningContext', () => {
+describe('Scenario 6b - Test isolation with PlanningContext', () => {
   /**
    * With PlanningContext, tests are deterministic without global reset.
    * Each test creates its own context, ensuring isolation.

@@ -3449,7 +3449,7 @@ export function createRetryConfig(config: RetryConfig): RetryConfig {
 }
 
 // =============================================================================
-// Additional Branded Types (PageId, SchemaVersion)
+// Additional Branded Types (PageId, SchemaVersion, TableId, IndexId, ColumnId, PageOffset, ByteOffset, RequestId)
 // =============================================================================
 
 /**
@@ -3458,6 +3458,12 @@ export function createRetryConfig(config: RetryConfig): RetryConfig {
  * These types are used for:
  * - `PageId`: B-tree page identifiers (number-based, non-negative integers)
  * - `SchemaVersion`: Schema versioning for CDC and schema evolution (bigint-based)
+ * - `TableId`: Table identifiers (string-based, max 255 chars)
+ * - `IndexId`: Index identifiers (string-based, max 255 chars)
+ * - `ColumnId`: Column identifiers (number-based, positive integers)
+ * - `PageOffset`: Byte offsets within a B-tree page (number-based, non-negative integers)
+ * - `ByteOffset`: Generic byte offsets in binary data (number-based, non-negative integers)
+ * - `RequestId`: Request identifiers for tracing (string-based)
  *
  * @public
  * @stability stable
@@ -3479,6 +3485,30 @@ export {
   incrementSchemaVersion,
   serializeSchemaVersion,
   deserializeSchemaVersion,
+  // TableId
+  type TableId,
+  createTableId,
+  isValidTableId,
+  // IndexId
+  type IndexId,
+  createIndexId,
+  isValidIndexId,
+  // ColumnId
+  type ColumnId,
+  createColumnId,
+  isValidColumnId,
+  // PageOffset
+  type PageOffset,
+  createPageOffset,
+  isValidPageOffset,
+  // ByteOffset
+  type ByteOffset,
+  createByteOffset,
+  isValidByteOffset,
+  // RequestId
+  type RequestId,
+  createRequestId,
+  isValidRequestId,
 } from './branded-types.js';
 
 // =============================================================================

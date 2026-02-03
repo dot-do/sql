@@ -41,7 +41,8 @@ describe('SchemaVersionRegistry', () => {
       expect(schema.version).toBe(createSchemaVersion(1));
       expect(schema.tableName).toBe('users');
       expect(schema.columns).toHaveLength(3);
-      expect(schema.checksum).toBeTruthy();
+      expect(typeof schema.checksum).toBe('string');
+      expect(schema.checksum.length).toBeGreaterThan(0);
     });
 
     it('should assign unique column IDs', () => {
@@ -95,8 +96,8 @@ describe('SchemaVersionRegistry', () => {
       });
 
       const schema = registry.getSchema('users');
-      expect(schema).toBeTruthy();
-      expect(schema?.tableName).toBe('users');
+      expect(schema).not.toBeNull();
+      expect(schema).toHaveProperty('tableName', 'users');
     });
 
     it('should return null for non-existent table', () => {
@@ -131,7 +132,7 @@ describe('SchemaVersionRegistry', () => {
       const schema = registry.getSchema('users');
       expect(schema?.version).toBe(createSchemaVersion(2));
       expect(schema?.columns).toHaveLength(3);
-      expect(schema?.columns.find(c => c.name === 'created_at')).toBeTruthy();
+      expect(schema?.columns.find(c => c.name === 'created_at')).toMatchObject({ name: 'created_at', type: 'TIMESTAMP' });
 
       expect(event.changeType).toBe('ADD_COLUMN');
       expect(event.column).toBe('created_at');
@@ -209,9 +210,10 @@ describe('SchemaVersionRegistry', () => {
 
     it('should preserve old column info in event', () => {
       const event = registry.dropColumn('users', 'deprecated_field', 1n, 'txn-1');
-      expect(event.oldColumn).toBeTruthy();
-      expect(event.oldColumn?.name).toBe('deprecated_field');
-      expect(event.oldColumn?.type).toBe('TEXT');
+      expect(event.oldColumn).toMatchObject({
+        name: 'deprecated_field',
+        type: 'TEXT',
+      });
     });
   });
 
@@ -238,7 +240,8 @@ describe('SchemaVersionRegistry', () => {
       const schemaAfter = registry.getSchema('users')!;
       const newColumn = schemaAfter.columns.find(c => c.name === 'username');
 
-      expect(newColumn).toBeTruthy();
+      expect(newColumn).not.toBeUndefined();
+      expect(newColumn).toHaveProperty('name', 'username');
       expect(newColumn?.columnId).toBe(oldColumnId);
       expect(event.changeType).toBe('RENAME_COLUMN');
       expect(event.oldColumnName).toBe('user_name');
@@ -452,7 +455,8 @@ describe('SchemaAwareCDCProcessor', () => {
       const enriched = processor.enrichEvent(event);
 
       expect(enriched.schemaVersion).toBe(createSchemaVersion(1));
-      expect(enriched.schemaChecksum).toBeTruthy();
+      expect(typeof enriched.schemaChecksum).toBe('string');
+      expect(enriched.schemaChecksum.length).toBeGreaterThan(0);
       expect(enriched.columnIds).toHaveLength(3);
     });
 

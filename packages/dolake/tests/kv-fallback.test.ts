@@ -603,7 +603,7 @@ describe('Chunking for Large Batches (>25MB)', () => {
 // 5. Recovery Tests (Retry R2 from KV)
 // =============================================================================
 
-describe('Recovery: Retry R2 from KV', () => {
+describe('Recovery - Retry R2 from KV', () => {
   let kvAdapter: ReturnType<typeof createKVAdapter>;
   let r2Adapter: ReturnType<typeof createR2Adapter>;
   let fallbackStorage: KVFallbackStorage;

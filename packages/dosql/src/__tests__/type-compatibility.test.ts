@@ -553,7 +553,7 @@ describe('Type Duplication - Lake.do vs DoLake Compatibility', () => {
 // Solution Verification Tests
 // =============================================================================
 
-describe('Solution: Shared Types Package', () => {
+describe('Solution - Shared Types Package', () => {
   it('should provide unified CDCEvent type', () => {
     // The unified CDCEvent from shared-types includes all fields needed by all consumers
     const unifiedEvent: ClientCDCEvent = {

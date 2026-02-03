@@ -244,7 +244,7 @@ export function createCheckpointManager(
       applyFn: (entry: WALEntry) => Promise<void>
     ): Promise<RecoveryState> {
       const state: RecoveryState = {
-        lastLSN: 0n,
+        lastLSN: createLSN(0n),
         entriesReplayed: 0,
         rolledBackTransactions: [],
         startedAt: Date.now(),
@@ -265,7 +265,7 @@ export function createCheckpointManager(
       const txnEntries = new Map<string, WALEntry[]>();
 
       // Determine starting LSN for replay
-      const startLSN = checkpoint?.lsn ?? 0n;
+      const startLSN = checkpoint?.lsn ?? createLSN(0n);
       state.lastLSN = startLSN;
 
       // First pass: identify committed and rolled back transactions
@@ -292,7 +292,7 @@ export function createCheckpointManager(
         rolledBackTransactions.add(txnId);
       }
 
-      state.rolledBackTransactions = Array.from(rolledBackTransactions);
+      state.rolledBackTransactions = Array.from(rolledBackTransactions).map((t) => createTransactionId(t));
 
       // Second pass: apply only committed transaction entries
       for (const entry of allEntries) {
@@ -434,7 +434,7 @@ export async function needsRecovery(
 
   // Check if there are entries after the checkpoint
   const entries = await reader.readEntries({
-    fromLSN: checkpoint.lsn + 1n,
+    fromLSN: createLSN(checkpoint.lsn + 1n),
     limit: 1,
   });
 

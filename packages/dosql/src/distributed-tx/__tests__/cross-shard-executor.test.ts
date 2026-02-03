@@ -104,7 +104,7 @@ describe('CrossShardExecutor', () => {
   });
 
   it('should rollback on execution error', async () => {
-    const abortSpy = vi.fn().mockResolvedValue(undefined);
+    let abortCallCount = 0;
     let callCount = 0;
     const rpc = createTestRPC({
       async execute() {
@@ -114,7 +114,7 @@ describe('CrossShardExecutor', () => {
         }
         return { rows: [], rowsAffected: 1 };
       },
-      abort: abortSpy,
+      async abort() { abortCallCount++; },
     });
 
     const txnLog = new InMemoryTransactionLog();

@@ -18,7 +18,7 @@ import { describe, it, expect } from 'vitest';
 // Latency Metrics Tests (p50/p95/p99)
 // =============================================================================
 
-describe('Benchmark: Latency Metrics', () => {
+describe('Benchmark - Latency Metrics', () => {
   describe('Query Latency Measurement', () => {
     it.fails('should measure p50 (median) latency for point queries', async () => {
       // RED: Need to implement latency histogram collection that captures:
@@ -112,7 +112,7 @@ describe('Benchmark: Latency Metrics', () => {
 // Throughput Tests (QPS)
 // =============================================================================
 
-describe('Benchmark: Throughput (QPS)', () => {
+describe('Benchmark - Throughput (QPS)', () => {
   describe('Queries Per Second', () => {
     it.fails('should measure peak QPS for point queries', async () => {
       // RED: Need to measure maximum sustainable queries per second
@@ -181,7 +181,7 @@ describe('Benchmark: Throughput (QPS)', () => {
 // Cold Start Tests
 // =============================================================================
 
-describe('Benchmark: Cold Start Time', () => {
+describe('Benchmark - Cold Start Time', () => {
   describe('Cold Start Measurement', () => {
     it.fails('should measure time to first query after cold start', async () => {
       // RED: Need to measure actual cold start time including:
@@ -239,7 +239,7 @@ describe('Benchmark: Cold Start Time', () => {
 // D1 and DO SQLite Comparison Tests
 // =============================================================================
 
-describe('Benchmark: D1 and DO SQLite Comparison', () => {
+describe('Benchmark - D1 and DO SQLite Comparison', () => {
   describe('Adapter Availability', () => {
     it.fails('should have D1 benchmark adapter', async () => {
       // RED: Need to implement D1BenchmarkAdapter that:
@@ -323,7 +323,7 @@ describe('Benchmark: D1 and DO SQLite Comparison', () => {
 // Results Persistence and Publishing Tests
 // =============================================================================
 
-describe('Benchmark: Results Persistence and Publishing', () => {
+describe('Benchmark - Results Persistence and Publishing', () => {
   describe('Result Storage', () => {
     it.fails('should save benchmark results to JSON file', async () => {
       // RED: Need to implement result persistence that:
@@ -433,7 +433,7 @@ describe('Benchmark: Results Persistence and Publishing', () => {
 // Additional Benchmark Requirements
 // =============================================================================
 
-describe('Benchmark: Additional Requirements', () => {
+describe('Benchmark - Additional Requirements', () => {
   describe('Memory Usage', () => {
     it.fails('should measure memory usage during benchmark', async () => {
       // RED: Need memory profiling that tracks:

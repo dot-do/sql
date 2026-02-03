@@ -16,11 +16,11 @@
  */
 export interface SourceLocation {
   /** 1-based line number */
-  line: number;
+  readonly line: number;
   /** 1-based column number */
-  column: number;
+  readonly column: number;
   /** 0-based character offset */
-  offset: number;
+  readonly offset: number;
 }
 
 // =============================================================================
@@ -47,11 +47,11 @@ export type TokenType =
  */
 export interface Token {
   /** Token type classification */
-  type: TokenType;
+  readonly type: TokenType;
   /** Raw token value */
-  value: string;
+  readonly value: string;
   /** Source location of the token */
-  location: SourceLocation;
+  readonly location: SourceLocation;
 }
 
 // =============================================================================
@@ -62,143 +62,143 @@ export interface Token {
  * Base expression node with optional location
  */
 export interface ExpressionBase {
-  location?: SourceLocation | undefined;
+  readonly location?: SourceLocation | undefined;
 }
 
 /**
  * Column reference expression
  */
 export interface ColumnExpr extends ExpressionBase {
-  type: 'column';
-  name: string;
-  table?: string | undefined;
+  readonly type: 'column';
+  readonly name: string;
+  readonly table?: string | undefined;
 }
 
 /**
  * Literal value expression
  */
 export interface LiteralExpr extends ExpressionBase {
-  type: 'literal';
-  value: string | number | boolean | null;
+  readonly type: 'literal';
+  readonly value: string | number | boolean | null;
   /** Raw string representation */
-  raw?: string | undefined;
+  readonly raw?: string | undefined;
 }
 
 /**
  * Binary operation expression
  */
 export interface BinaryExpr extends ExpressionBase {
-  type: 'binary';
-  op: string;
-  left: BaseExpr;
-  right: BaseExpr;
+  readonly type: 'binary';
+  readonly op: string;
+  readonly left: BaseExpr;
+  readonly right: BaseExpr;
 }
 
 /**
  * Unary operation expression
  */
 export interface UnaryExpr extends ExpressionBase {
-  type: 'unary';
-  op: string;
-  operand: BaseExpr;
+  readonly type: 'unary';
+  readonly op: string;
+  readonly operand: BaseExpr;
 }
 
 /**
  * Function call expression
  */
 export interface FunctionExpr extends ExpressionBase {
-  type: 'function';
-  name: string;
-  args: BaseExpr[];
-  distinct?: boolean | undefined;
+  readonly type: 'function';
+  readonly name: string;
+  readonly args: readonly BaseExpr[];
+  readonly distinct?: boolean | undefined;
 }
 
 /**
  * Aggregate function expression
  */
 export interface AggregateExpr extends ExpressionBase {
-  type: 'aggregate';
-  name: string;
-  arg: BaseExpr | '*';
-  distinct?: boolean | undefined;
+  readonly type: 'aggregate';
+  readonly name: string;
+  readonly arg: BaseExpr | '*';
+  readonly distinct?: boolean | undefined;
 }
 
 /**
  * BETWEEN expression
  */
 export interface BetweenExpr extends ExpressionBase {
-  type: 'between';
-  expr: BaseExpr;
-  low: BaseExpr;
-  high: BaseExpr;
-  not?: boolean | undefined;
+  readonly type: 'between';
+  readonly expr: BaseExpr;
+  readonly low: BaseExpr;
+  readonly high: BaseExpr;
+  readonly not?: boolean | undefined;
 }
 
 /**
  * IN expression
  */
 export interface InExpr extends ExpressionBase {
-  type: 'in';
-  expr: BaseExpr;
-  values: BaseExpr[] | SubqueryExpr;
-  not?: boolean | undefined;
+  readonly type: 'in';
+  readonly expr: BaseExpr;
+  readonly values: readonly BaseExpr[] | SubqueryExpr;
+  readonly not?: boolean | undefined;
 }
 
 /**
  * IS NULL expression
  */
 export interface IsNullExpr extends ExpressionBase {
-  type: 'isNull';
-  expr: BaseExpr;
-  isNot: boolean;
+  readonly type: 'isNull';
+  readonly expr: BaseExpr;
+  readonly isNot: boolean;
 }
 
 /**
  * Subquery expression
  */
 export interface SubqueryExpr extends ExpressionBase {
-  type: 'subquery';
-  subqueryType: 'scalar' | 'in' | 'exists' | 'any' | 'all';
-  query: unknown; // ParsedSelect - avoiding circular import
+  readonly type: 'subquery';
+  readonly subqueryType: 'scalar' | 'in' | 'exists' | 'any' | 'all';
+  readonly query: unknown; // ParsedSelect - avoiding circular import
 }
 
 /**
  * EXISTS expression
  */
 export interface ExistsExpr extends ExpressionBase {
-  type: 'exists';
-  query: unknown; // ParsedSelect
+  readonly type: 'exists';
+  readonly query: unknown; // ParsedSelect
 }
 
 /**
  * Star (wildcard) expression
  */
 export interface StarExpr extends ExpressionBase {
-  type: 'star';
-  table?: string | undefined;
+  readonly type: 'star';
+  readonly table?: string | undefined;
 }
 
 /**
  * NULL expression (standalone)
  */
 export interface NullExpr extends ExpressionBase {
-  type: 'null';
+  readonly type: 'null';
 }
 
 /**
  * DEFAULT expression (used in INSERT)
  */
 export interface DefaultExpr extends ExpressionBase {
-  type: 'default';
+  readonly type: 'default';
 }
 
 /**
  * Parameter placeholder expression
  */
 export interface ParameterExpr extends ExpressionBase {
-  type: 'parameter';
-  name: string | number;
-  raw: string;
+  readonly type: 'parameter';
+  readonly name: string | number;
+  readonly raw: string;
 }
 
 /**
@@ -275,22 +275,22 @@ export type UnaryOperator = 'NOT' | '-' | '+' | '~';
  * Successful parse result (generic)
  */
 export interface ParseSuccessBase<T> {
-  success: true;
-  statement?: T | undefined;
-  ast?: T | undefined;
-  remaining?: string | undefined;
+  readonly success: true;
+  readonly statement?: T | undefined;
+  readonly ast?: T | undefined;
+  readonly remaining?: string | undefined;
 }
 
 /**
  * Failed parse result
  */
 export interface ParseErrorBase {
-  success: false;
-  error: string;
-  position?: number | undefined;
-  line?: number | undefined;
-  column?: number | undefined;
-  input?: string | undefined;
+  readonly success: false;
+  readonly error: string;
+  readonly position?: number | undefined;
+  readonly line?: number | undefined;
+  readonly column?: number | undefined;
+  readonly input?: string | undefined;
 }
 
 /**

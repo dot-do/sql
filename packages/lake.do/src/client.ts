@@ -29,14 +29,14 @@ import { DEFAULT_RETRY_CONFIG } from './types.js';
 import { WebSocketConnectionManager, type ConnectionEventHandler } from './connection/index.js';
 import { CDCStreamController } from './cdc-stream/index.js';
 import { QueryExecutor } from './query/index.js';
-import { LakeError, ConnectionError, QueryError, TimeoutError } from './errors.js';
+import { LakeError, ConnectionError, QueryError, TimeoutError, ConfigurationError } from './errors.js';
 import { DEFAULT_TIMEOUT_MS } from './constants.js';
 
 // =============================================================================
 // Re-exports for backward compatibility
 // =============================================================================
 
-export { LakeError, ConnectionError, QueryError } from './errors.js';
+export { LakeError, ConnectionError, QueryError, ConfigurationError } from './errors.js';
 
 /**
  * Re-export CDCStreamController for backward compatibility.
@@ -187,22 +187,46 @@ export class DoLakeClient implements LakeClient {
    * ```
    */
   constructor(config: LakeClientConfig) {
-    // Validate URL
+    // Validate URL (using ConfigurationError for consistency with sql.do)
     if (!config.url || config.url.trim() === '') {
-      throw new Error('URL is required and cannot be empty');
+      throw new ConfigurationError('URL is required and cannot be empty', 'url');
     }
 
     // Validate URL format
+    let parsedUrl: URL;
     try {
-      const url = new URL(config.url);
-      if (!url.protocol.match(/^https?:$/)) {
-        throw new Error('URL must use http or https protocol');
+      parsedUrl = new URL(config.url);
+    } catch {
+      throw new ConfigurationError(`Invalid URL format: ${config.url}`, 'url');
+    }
+
+    // Validate URL protocol
+    const validProtocols = ['http:', 'https:'];
+    if (!validProtocols.includes(parsedUrl.protocol)) {
+      throw new ConfigurationError(`URL must use http or https protocol, got: ${parsedUrl.protocol}`, 'url');
+    }
+
+    // Validate timeout is positive (consistent with sql.do)
+    if (config.timeout !== undefined && config.timeout <= 0) {
+      throw new ConfigurationError('Timeout must be a positive number', 'timeout');
+    }
+
+    // Validate retry config (consistent with sql.do)
+    if (config.retry) {
+      if (config.retry.maxRetries !== undefined && config.retry.maxRetries < 0) {
+        throw new ConfigurationError('maxRetries must be non-negative', 'retry.maxRetries');
       }
-    } catch (e) {
-      if (e instanceof TypeError) {
-        throw new Error(`Invalid URL format: ${config.url}`);
+      if (config.retry.baseDelayMs !== undefined && config.retry.baseDelayMs < 0) {
+        throw new ConfigurationError('baseDelayMs must be non-negative', 'retry.baseDelayMs');
       }
-      throw e;
+      if (config.retry.maxDelayMs !== undefined && config.retry.maxDelayMs < 0) {
+        throw new ConfigurationError('maxDelayMs must be non-negative', 'retry.maxDelayMs');
+      }
+      const baseDelay = config.retry.baseDelayMs ?? 100;
+      const maxDelay = config.retry.maxDelayMs ?? 5000;
+      if (baseDelay > maxDelay) {
+        throw new ConfigurationError('baseDelayMs cannot exceed maxDelayMs', 'retry');
+      }
     }
 
     this.config = {

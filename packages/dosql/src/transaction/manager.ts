@@ -827,7 +827,7 @@ export function createTransactionManager(
 /**
  * Result type for transaction execution
  */
-export interface TransactionResult<T> {
+export interface TransactionResult<T = unknown> {
   /** Whether transaction was committed */
   committed: boolean;
   /** Result value (if committed) */

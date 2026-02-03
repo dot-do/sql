@@ -501,7 +501,7 @@ describe('Integration with Real DoLake DOs', () => {
 // Test: E2E Flow - Trace to R2
 // =============================================================================
 
-describe('E2E: Trace Events to R2', () => {
+describe('E2E - Trace Events to R2', () => {
   let streamer: TailWorkerCDCStreamer;
   let factory: WebSocketFactory;
 

@@ -4,9 +4,50 @@
  * A compile-time SQL parser that infers result types from SQL queries.
  * Case-sensitive for identifiers (like ClickHouse, not SQLite).
  *
+ * ## Stability
+ *
+ * This package follows semantic versioning. Exports are marked with stability annotations:
+ *
+ * - **stable**: No breaking changes in minor versions. Safe for production use.
+ * - **experimental**: May change in any version. Use with caution.
+ * - **deprecated**: Scheduled for removal; see deprecation notice for migration path.
+ *
+ * See {@link APIStabilityEntry} and {@link DOSQL_STABLE_EXPORTS} for the formal manifest.
+ *
  * @packageDocumentation
  */
 
+// =============================================================================
+// API STABILITY POLICY
+// =============================================================================
+
+/**
+ * API stability definitions and validation utilities.
+ * @public
+ * @stable
+ */
+export {
+  type StabilityLevel,
+  type APIStabilityEntry,
+  DOSQL_STABLE_EXPORTS,
+  DOSQL_EXPERIMENTAL_EXPORTS,
+  validateStableExports,
+  getRuntimeExports,
+  getExportsByStability,
+} from './api-stability.js';
+
+// =============================================================================
+// CORE PARSER (stable)
+// =============================================================================
+
+/**
+ * Core SQL type-level parser and runtime utilities.
+ *
+ * These are the foundational APIs for compile-time SQL type inference.
+ *
+ * @public
+ * @stable
+ */
 export {
   // Type exports
   type ColumnType,
@@ -21,7 +62,20 @@ export {
   createQuery,
 } from './parser.js';
 
-// Aggregate and expression type exports
+// =============================================================================
+// AGGREGATE AND EXPRESSION TYPES (experimental)
+// =============================================================================
+
+/**
+ * Aggregate function and expression type-level utilities.
+ *
+ * These types power compile-time inference for GROUP BY, aggregate functions,
+ * and arithmetic expressions. The type-level API surface is still evolving.
+ *
+ * @public
+ * @experimental
+ * @since 0.1.0
+ */
 export {
   type AggregateFunctionName,
   type IsAggregateFunction,
@@ -42,31 +96,69 @@ export {
 } from './aggregates.js';
 
 // =============================================================================
-// URL TABLE SOURCES
+// URL TABLE SOURCES (experimental)
 // =============================================================================
 
-// Re-export all sources module exports
+/**
+ * URL and R2 table source support (ClickHouse-style FROM 'url' syntax).
+ *
+ * Enables querying remote CSV, JSON, NDJSON, and Parquet data sources
+ * directly from SQL. The wire format and options API are still evolving.
+ *
+ * @public
+ * @experimental
+ * @since 0.1.0
+ */
 export * from './sources/index.js';
 
 // =============================================================================
-// WAL (Write-Ahead Log)
+// WAL - Write-Ahead Log (experimental)
 // =============================================================================
 
-// Re-export WAL module
+/**
+ * Write-ahead log for durability and recovery.
+ *
+ * Provides segment-based WAL with CRC32 checksums, checkpointing,
+ * and retention management. The storage format may change between versions.
+ *
+ * @public
+ * @experimental
+ * @since 0.1.0
+ */
 export * from './wal/index.js';
 
 // =============================================================================
-// CDC (Change Data Capture)
+// CDC - Change Data Capture (experimental)
 // =============================================================================
 
-// Re-export CDC module
+/**
+ * Change Data Capture streaming for real-time replication.
+ *
+ * Provides subscription-based CDC with replication slots, backpressure,
+ * and lakehouse streaming integration. The protocol is versioned but
+ * the API surface is still experimental.
+ *
+ * @public
+ * @experimental
+ * @since 0.1.0
+ */
 export * from './cdc/index.js';
 
 // =============================================================================
-// ESM STORED PROCEDURES
+// ESM STORED PROCEDURES (experimental)
 // =============================================================================
 
-// Re-export procedure module (selective to avoid conflicts with sources SchemaToType)
+/**
+ * ESM-based stored procedure system.
+ *
+ * Allows defining, registering, and executing stored procedures as
+ * ES modules within the Durable Object. The procedure API, context
+ * shape, and registry interface are still evolving.
+ *
+ * @public
+ * @experimental
+ * @since 0.1.0
+ */
 export {
   // Re-exported schema types
   type DatabaseSchema as ProcDatabaseSchema,
@@ -160,17 +252,36 @@ export {
 } from './proc/index.js';
 
 // =============================================================================
-// SHARDING
+// SHARDING (experimental)
 // =============================================================================
 
-// Re-export sharding module
+/**
+ * Native sharding with vindexes, query routing, and distributed execution.
+ *
+ * Inspired by Vitess but with real SQL parsing, cost-based routing,
+ * and native replica support. The sharding topology, vindex types,
+ * and migration APIs are still experimental.
+ *
+ * @public
+ * @experimental
+ * @since 0.1.0
+ */
 export * from './sharding/index.js';
 
 // =============================================================================
-// TRANSACTIONS
+// TRANSACTIONS (stable)
 // =============================================================================
 
-// Re-export transaction module (selective to avoid conflicts)
+/**
+ * ACID transaction support with MVCC, savepoints, and isolation levels.
+ *
+ * Provides a complete transaction system including lock management,
+ * multi-version concurrency control, and configurable isolation.
+ * The core transaction APIs are stable.
+ *
+ * @public
+ * @stable
+ */
 export {
   // State enums
   TransactionState,
@@ -232,8 +343,18 @@ export {
 } from './transaction/index.js';
 
 // =============================================================================
-// VIRTUAL TABLES
+// VIRTUAL TABLES (experimental)
 // =============================================================================
 
-// Re-export virtual table module
+/**
+ * Virtual table support for querying remote data sources via SQL.
+ *
+ * Enables SELECT from URLs, R2 objects, and other external sources
+ * with automatic format detection and schema inference. The virtual
+ * table interface and registry API are still evolving.
+ *
+ * @public
+ * @experimental
+ * @since 0.1.0
+ */
 export * from './virtual/index.js';

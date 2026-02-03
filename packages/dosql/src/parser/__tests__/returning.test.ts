@@ -34,7 +34,7 @@ import {
 // TEST: INSERT with RETURNING
 // =============================================================================
 
-describe('RETURNING Clause Execution: INSERT', () => {
+describe('RETURNING Clause Execution - INSERT', () => {
   /**
    * Test: INSERT with RETURNING * returns all columns
    *
@@ -354,7 +354,7 @@ describe('RETURNING Clause Execution: INSERT', () => {
 // TEST: UPDATE with RETURNING
 // =============================================================================
 
-describe('RETURNING Clause Execution: UPDATE', () => {
+describe('RETURNING Clause Execution - UPDATE', () => {
   /**
    * Test: UPDATE with RETURNING * returns all updated rows
    *
@@ -515,7 +515,7 @@ describe('RETURNING Clause Execution: UPDATE', () => {
 // TEST: DELETE with RETURNING
 // =============================================================================
 
-describe('RETURNING Clause Execution: DELETE', () => {
+describe('RETURNING Clause Execution - DELETE', () => {
   /**
    * Test: DELETE with RETURNING * returns deleted rows
    *
@@ -696,7 +696,7 @@ describe('RETURNING Clause Execution: DELETE', () => {
 // TEST: RETURNING with Functions
 // =============================================================================
 
-describe('RETURNING Clause Execution: Functions', () => {
+describe('RETURNING Clause Execution - Functions', () => {
   /**
    * Test: RETURNING with string functions (UPPER, LOWER)
    *
@@ -817,7 +817,7 @@ describe('RETURNING Clause Execution: Functions', () => {
 // TEST: RETURNING with String Concatenation
 // =============================================================================
 
-describe('RETURNING Clause Execution: String Operations', () => {
+describe('RETURNING Clause Execution - String Operations', () => {
   /**
    * Test: RETURNING with || concatenation
    *
@@ -846,7 +846,7 @@ describe('RETURNING Clause Execution: String Operations', () => {
 // TEST: RETURNING Edge Cases and Error Handling
 // =============================================================================
 
-describe('RETURNING Clause Execution: Edge Cases', () => {
+describe('RETURNING Clause Execution - Edge Cases', () => {
   /**
    * Test: RETURNING with aggregate function should error
    *
@@ -981,7 +981,7 @@ describe('RETURNING Clause Execution: Edge Cases', () => {
 // TEST: RETURNING with Table Aliases
 // =============================================================================
 
-describe('RETURNING Clause Execution: Table Aliases', () => {
+describe('RETURNING Clause Execution - Table Aliases', () => {
   /**
    * Test: INSERT with table alias and RETURNING using alias prefix
    *
@@ -1064,7 +1064,7 @@ describe('RETURNING Clause Execution: Table Aliases', () => {
 // TEST: REPLACE with RETURNING
 // =============================================================================
 
-describe('RETURNING Clause Execution: REPLACE', () => {
+describe('RETURNING Clause Execution - REPLACE', () => {
   /**
    * Test: REPLACE with RETURNING *
    *
@@ -1126,7 +1126,7 @@ describe('RETURNING Clause Execution: REPLACE', () => {
 // TEST: INSERT SELECT with RETURNING
 // =============================================================================
 
-describe('RETURNING Clause Execution: INSERT SELECT', () => {
+describe('RETURNING Clause Execution - INSERT SELECT', () => {
   /**
    * Test: INSERT ... SELECT with RETURNING
    *
@@ -1171,7 +1171,7 @@ describe('RETURNING Clause Execution: INSERT SELECT', () => {
 // TEST: RETURNING with Complex WHERE Clauses
 // =============================================================================
 
-describe('RETURNING Clause Execution: Complex WHERE', () => {
+describe('RETURNING Clause Execution - Complex WHERE', () => {
   /**
    * Test: UPDATE with IN clause and RETURNING
    *

@@ -53,7 +53,7 @@ export interface ConsistentHashVindexConfig {
 /**
  * Range boundary definition for range-based sharding
  */
-export interface RangeBoundary<T = unknown> {
+export interface RangeBoundary<T extends string | number | bigint | Date = string | number | bigint | Date> {
   /** Target shard ID (branded type) */
   shard: ShardId;
   /** Minimum value (inclusive) */
@@ -65,7 +65,7 @@ export interface RangeBoundary<T = unknown> {
 /**
  * Configuration for range-based vindex
  */
-export interface RangeVindexConfig<T = unknown> {
+export interface RangeVindexConfig<T extends string | number | bigint | Date = string | number | bigint | Date> {
   type: 'range';
   /** Ordered list of range boundaries */
   boundaries: RangeBoundary<T>[];
@@ -74,7 +74,7 @@ export interface RangeVindexConfig<T = unknown> {
 /**
  * Union type for all vindex configurations
  */
-export type VindexConfig<T = unknown> =
+export type VindexConfig<T extends string | number | bigint | Date = string | number | bigint | Date> =
   | HashVindexConfig
   | ConsistentHashVindexConfig
   | RangeVindexConfig<T>;
@@ -95,7 +95,7 @@ export type TableShardingType = 'sharded' | 'unsharded' | 'reference';
 /**
  * Configuration for a sharded table
  */
-export interface ShardedTableConfig<T = unknown> {
+export interface ShardedTableConfig<T extends string | number | bigint | Date = string | number | bigint | Date> {
   type: 'sharded';
   /** Column used as shard key */
   shardKey: string;
@@ -127,7 +127,7 @@ export interface ReferenceTableConfig {
 /**
  * Union type for all table sharding configurations
  */
-export type TableShardingConfig<T = unknown> =
+export type TableShardingConfig<T extends string | number | bigint | Date = string | number | bigint | Date> =
   | ShardedTableConfig<T>
   | UnshardedTableConfig
   | ReferenceTableConfig;
@@ -439,7 +439,7 @@ export type ShardKeyType<T extends TypedTableSchema> =
 /**
  * Type-safe shard key extraction helper
  */
-export type ShardKey<T, K extends keyof T> = T[K];
+export type ShardKey<T extends Record<string, unknown>, K extends keyof T> = T[K];
 
 // =============================================================================
 // COMPILE-TIME QUERY TYPE DETECTION
@@ -525,14 +525,14 @@ export function consistentHashVindex(
 /**
  * Create a range vindex configuration
  */
-export function rangeVindex<T>(boundaries: RangeBoundary<T>[]): RangeVindexConfig<T> {
+export function rangeVindex<T extends string | number | bigint | Date>(boundaries: RangeBoundary<T>[]): RangeVindexConfig<T> {
   return { type: 'range', boundaries };
 }
 
 /**
  * Create a sharded table configuration
  */
-export function shardedTable<T>(
+export function shardedTable<T extends string | number | bigint | Date>(
   shardKey: string,
   vindex: VindexConfig<T>
 ): ShardedTableConfig<T> {

@@ -235,7 +235,7 @@ describe('SQL Trigger Executor', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: 'SELECT 1', // Simple body that doesn't raise
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -253,7 +253,7 @@ describe('SQL Trigger Executor', () => {
         event: 'UPDATE',
         events: ['UPDATE'],
         body: 'SELECT 1',
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -271,7 +271,7 @@ describe('SQL Trigger Executor', () => {
         event: 'DELETE',
         events: ['DELETE'],
         body: 'SELECT 1',
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -288,7 +288,7 @@ describe('SQL Trigger Executor', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: "SELECT CASE WHEN NEW.status = 'blocked' THEN RAISE(ABORT, 'Cannot insert blocked user') END",
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -306,7 +306,7 @@ describe('SQL Trigger Executor', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: "SELECT CASE WHEN NEW.status = 'duplicate' THEN RAISE(IGNORE) END",
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -325,7 +325,7 @@ describe('SQL Trigger Executor', () => {
         timing: 'AFTER',
         event: 'INSERT',
         body: 'INSERT INTO audit_log (action) VALUES ("insert")',
-      }) as any);
+      }));
 
       const result = await executor.executeAfter<TestRow>(
         'users',
@@ -343,7 +343,7 @@ describe('SQL Trigger Executor', () => {
         event: 'UPDATE',
         events: ['UPDATE'],
         body: 'INSERT INTO audit_log (action) VALUES ("update")',
-      }) as any);
+      }));
 
       const result = await executor.executeAfter<TestRow>(
         'users',
@@ -361,7 +361,7 @@ describe('SQL Trigger Executor', () => {
         event: 'DELETE',
         events: ['DELETE'],
         body: 'INSERT INTO audit_log (action) VALUES ("delete")',
-      }) as any);
+      }));
 
       const result = await executor.executeAfter<TestRow>(
         'users',
@@ -378,7 +378,7 @@ describe('SQL Trigger Executor', () => {
         timing: 'AFTER',
         event: 'INSERT',
         body: "RAISE(FAIL, 'After trigger error')",
-      }) as any);
+      }));
 
       const result = await executor.executeAfter<TestRow>(
         'users',
@@ -399,7 +399,7 @@ describe('SQL Trigger Executor', () => {
         event: 'INSERT',
         whenClause: "NEW.status = 'vip'",
         body: "RAISE(ABORT, 'VIP validation')",
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -418,7 +418,7 @@ describe('SQL Trigger Executor', () => {
         event: 'INSERT',
         whenClause: "NEW.status = 'vip'",
         body: "RAISE(ABORT, 'VIP validation failed')",
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -437,7 +437,7 @@ describe('SQL Trigger Executor', () => {
         events: ['UPDATE'],
         whenClause: "OLD.status = 'active' AND NEW.status = 'deleted'",
         body: "RAISE(ABORT, 'Cannot delete active user directly')",
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -458,7 +458,7 @@ describe('SQL Trigger Executor', () => {
         events: ['UPDATE'],
         columns: ['email'],
         body: "RAISE(ABORT, 'Email changed')",
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -477,7 +477,7 @@ describe('SQL Trigger Executor', () => {
         events: ['UPDATE'],
         columns: ['email'],
         body: "RAISE(ABORT, 'Email changed')",
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -496,7 +496,7 @@ describe('SQL Trigger Executor', () => {
         events: ['UPDATE'],
         columns: ['email', 'status'],
         body: "RAISE(ABORT, 'Critical field changed')",
-      }) as any);
+      }));
 
       // Neither email nor status changed
       const result1 = await executor.executeBefore<TestRow>(
@@ -524,7 +524,7 @@ describe('SQL Trigger Executor', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: 'SELECT 1',
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -548,7 +548,7 @@ describe('SQL Trigger Executor', () => {
       });
 
       // Register and then disable
-      registry.register(trigger as any);
+      registry.register(trigger);
       registry.disable('disabled_trigger');
 
       const result = await executor.executeBefore<TestRow>(
@@ -571,7 +571,7 @@ describe('SQL Trigger Executor', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: 'INSERT INTO audit VALUES (NEW.id)',
-      }) as any);
+      }));
 
       await executor.executeBefore<TestRow>(
         'users',
@@ -599,7 +599,7 @@ describe('SQL Trigger Executor', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: 'INSERT INTO audit VALUES (NEW.id)',
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -632,7 +632,7 @@ describe('SQL Trigger Executor', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: 'SELECT 1',
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -652,7 +652,7 @@ describe('SQL Trigger Executor', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: 'SELECT 1',
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -693,7 +693,7 @@ describe('RAISE Type Behaviors', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: 'RAISE(IGNORE)',
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -713,7 +713,7 @@ describe('RAISE Type Behaviors', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: "RAISE(ABORT, 'Operation aborted by trigger')",
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -733,7 +733,7 @@ describe('RAISE Type Behaviors', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: "RAISE(FAIL, 'Validation failed')",
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',
@@ -753,7 +753,7 @@ describe('RAISE Type Behaviors', () => {
         timing: 'BEFORE',
         event: 'INSERT',
         body: "RAISE(ROLLBACK, 'Transaction rolled back')",
-      }) as any);
+      }));
 
       const result = await executor.executeBefore<TestRow>(
         'users',

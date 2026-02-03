@@ -8,9 +8,12 @@
  * - All leaves are linked for efficient range scans
  */
 
+import type { PageId } from '@dotdo/sql-types';
 import type { StorageInterface } from '../storage/interface.js';
 import type { StorageProvider } from '../storage/provider.js';
 import type { PageStorage } from '../storage/page-storage.js';
+
+export type { PageId };
 
 // Re-export storage interfaces - prefer StorageProvider for new code
 export type { StorageInterface, StorageProvider, PageStorage };
@@ -42,7 +45,7 @@ export const enum PageType {
  */
 export interface Page {
   /** Unique page identifier */
-  id: number;
+  id: PageId;
 
   /** Page type (leaf or internal) */
   type: PageType;
@@ -58,13 +61,13 @@ export interface Page {
    *  - children[i] points to keys < keys[i]
    *  - children[n] points to keys >= keys[n-1]
    */
-  children: number[];
+  children: PageId[];
 
   /** Next page ID for leaf chain (for range scans), -1 if none */
-  nextLeaf: number;
+  nextLeaf: PageId;
 
   /** Previous page ID for leaf chain, -1 if none */
-  prevLeaf: number;
+  prevLeaf: PageId;
 }
 
 /**

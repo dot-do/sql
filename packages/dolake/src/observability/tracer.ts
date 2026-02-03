@@ -255,6 +255,14 @@ export class TracerImpl implements Tracer {
   }
 
   /**
+   * Extract correlation ID from WebSocket attachment
+   * Used for cross-package correlation of CDC batches from DoSQL
+   */
+  extractCorrelationIdFromWebSocket(attachment: WebSocketTraceAttachment): string | undefined {
+    return attachment.traceContext?.correlationId;
+  }
+
+  /**
    * Inject W3C Trace Context into HTTP headers
    */
   injectContext(headers: Headers, context: TraceContext): void {

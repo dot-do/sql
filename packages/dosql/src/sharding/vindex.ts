@@ -217,7 +217,7 @@ export class ConsistentHashVindex implements Vindex {
  * Range-based vindex implementation
  * Routes based on boundary definitions
  */
-export class RangeVindex<T> implements Vindex {
+export class RangeVindex<T extends string | number | bigint | Date> implements Vindex {
   private readonly boundaries: RangeBoundary<T>[];
   private readonly allShardIds: string[];
 
