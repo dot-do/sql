@@ -346,41 +346,41 @@ describe('LeaderElectionStateMachine', () => {
   });
 
   describe('Starting Election', () => {
-    it('transitions to candidate role', () => {
+    it('transitions to candidate role', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      machine.startElection(100n);
+      await machine.startElection(100n);
 
       expect(machine.getRole()).toBe('candidate');
     });
 
-    it('increments term', () => {
+    it('increments term', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      machine.startElection(100n);
+      await machine.startElection(100n);
       const state = machine.getState();
 
       expect(state.term).toBe(1n);
     });
 
-    it('votes for self', () => {
+    it('votes for self', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      machine.startElection(100n);
+      await machine.startElection(100n);
       const state = machine.getState();
 
       expect(state.votedFor).toEqual(selfId);
       expect(state.votes.get(serializeReplicaId(selfId))).toBe(true);
     });
 
-    it('generates vote request with fencing token', () => {
+    it('generates vote request with fencing token', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      const request = machine.startElection(100n);
+      const request = await machine.startElection(100n);
 
       expect(request.candidateId).toEqual(selfId);
       expect(request.term).toBe(1n);
@@ -388,24 +388,24 @@ describe('LeaderElectionStateMachine', () => {
       expect(request.fencingToken).toBeDefined();
     });
 
-    it('generates fencing token', () => {
+    it('generates fencing token', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      machine.startElection(100n);
+      await machine.startElection(100n);
 
       const token = machine.getFencingToken();
       expect(token).not.toBeNull();
       expect(token!.epoch).toBe(1n);
     });
 
-    it('clears previous leader', () => {
+    it('clears previous leader', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const leaderId = createReplicaId('us-east', 'primary');
       const machine = new LeaderElectionStateMachine(selfId);
 
       // Accept a leader first
-      const token = generateFencingToken(1n, leaderId);
+      const token = await generateFencingToken(1n, leaderId);
       machine.handleLeaderHeartbeat({
         leaderId,
         term: 1n,
@@ -415,7 +415,7 @@ describe('LeaderElectionStateMachine', () => {
       });
 
       // Then start election
-      machine.startElection(100n);
+      await machine.startElection(100n);
       const state = machine.getState();
 
       expect(state.leader).toBeNull();
@@ -423,12 +423,12 @@ describe('LeaderElectionStateMachine', () => {
   });
 
   describe('Handling Vote Requests', () => {
-    it('grants vote for valid request', () => {
+    it('grants vote for valid request', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const candidateId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      const token = generateFencingToken(1n, candidateId);
+      const token = await generateFencingToken(1n, candidateId);
       const request: VoteRequest = {
         candidateId,
         term: 1n,
@@ -436,22 +436,22 @@ describe('LeaderElectionStateMachine', () => {
         fencingToken: token,
       };
 
-      const response = machine.handleVoteRequest(request, 50n);
+      const response = await machine.handleVoteRequest(request, 50n);
 
       expect(response.voteGranted).toBe(true);
       expect(response.voterId).toEqual(selfId);
     });
 
-    it('rejects vote for stale term', () => {
+    it('rejects vote for stale term', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const candidateId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId);
 
       // Advance our term by starting election
-      machine.startElection(100n);
+      await machine.startElection(100n);
 
       // Receive request from older term
-      const token = generateFencingToken(0n, candidateId);
+      const token = await generateFencingToken(0n, candidateId);
       const request: VoteRequest = {
         candidateId,
         term: 0n,
@@ -459,21 +459,21 @@ describe('LeaderElectionStateMachine', () => {
         fencingToken: token,
       };
 
-      const response = machine.handleVoteRequest(request, 100n);
+      const response = await machine.handleVoteRequest(request, 100n);
 
       expect(response.voteGranted).toBe(false);
       expect(response.reason).toContain('Stale term');
     });
 
-    it('rejects vote if already voted for another', () => {
+    it('rejects vote if already voted for another', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const candidate1 = createReplicaId('us-east', 'r2');
       const candidate2 = createReplicaId('eu-central', 'r3');
       const machine = new LeaderElectionStateMachine(selfId);
 
       // Vote for first candidate
-      const token1 = generateFencingToken(1n, candidate1);
-      machine.handleVoteRequest({
+      const token1 = await generateFencingToken(1n, candidate1);
+      await machine.handleVoteRequest({
         candidateId: candidate1,
         term: 1n,
         lastLSN: 100n,
@@ -481,8 +481,8 @@ describe('LeaderElectionStateMachine', () => {
       }, 50n);
 
       // Try to vote for second candidate in same term
-      const token2 = generateFencingToken(1n, candidate2);
-      const response = machine.handleVoteRequest({
+      const token2 = await generateFencingToken(1n, candidate2);
+      const response = await machine.handleVoteRequest({
         candidateId: candidate2,
         term: 1n,
         lastLSN: 100n,
@@ -493,12 +493,12 @@ describe('LeaderElectionStateMachine', () => {
       expect(response.reason).toContain('Already voted');
     });
 
-    it('rejects vote if candidate log is behind', () => {
+    it('rejects vote if candidate log is behind', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const candidateId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      const token = generateFencingToken(1n, candidateId);
+      const token = await generateFencingToken(1n, candidateId);
       const request: VoteRequest = {
         candidateId,
         term: 1n,
@@ -506,13 +506,13 @@ describe('LeaderElectionStateMachine', () => {
         fencingToken: token,
       };
 
-      const response = machine.handleVoteRequest(request, 100n); // We're at LSN 100
+      const response = await machine.handleVoteRequest(request, 100n); // We're at LSN 100
 
       expect(response.voteGranted).toBe(false);
       expect(response.reason).toContain('Candidate LSN');
     });
 
-    it('rejects vote for invalid fencing token', () => {
+    it('rejects vote for invalid fencing token', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const candidateId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId);
@@ -531,24 +531,24 @@ describe('LeaderElectionStateMachine', () => {
         fencingToken: invalidToken,
       };
 
-      const response = machine.handleVoteRequest(request, 50n);
+      const response = await machine.handleVoteRequest(request, 50n);
 
       expect(response.voteGranted).toBe(false);
       expect(response.reason).toContain('Invalid fencing token');
     });
 
-    it('steps down if request has higher term', () => {
+    it('steps down if request has higher term', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const candidateId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId);
 
       // Start election at term 1
-      machine.startElection(100n);
+      await machine.startElection(100n);
       expect(machine.getRole()).toBe('candidate');
 
       // Receive vote request from higher term
-      const token = generateFencingToken(5n, candidateId);
-      machine.handleVoteRequest({
+      const token = await generateFencingToken(5n, candidateId);
+      await machine.handleVoteRequest({
         candidateId,
         term: 5n,
         lastLSN: 100n,
@@ -559,7 +559,7 @@ describe('LeaderElectionStateMachine', () => {
       expect(machine.getState().term).toBe(5n);
     });
 
-    it('resets election timeout on granting vote', () => {
+    it('resets election timeout on granting vote', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const candidateId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId, {
@@ -570,8 +570,8 @@ describe('LeaderElectionStateMachine', () => {
 
       // Wait for timeout to approach
       // Then grant vote - should reset timeout
-      const token = generateFencingToken(1n, candidateId);
-      machine.handleVoteRequest({
+      const token = await generateFencingToken(1n, candidateId);
+      await machine.handleVoteRequest({
         candidateId,
         term: 1n,
         lastLSN: 100n,
@@ -583,7 +583,7 @@ describe('LeaderElectionStateMachine', () => {
   });
 
   describe('Handling Vote Responses', () => {
-    it('ignores response if not candidate', () => {
+    it('ignores response if not candidate', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const voterId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId);
@@ -596,16 +596,16 @@ describe('LeaderElectionStateMachine', () => {
         reason: 'Vote granted',
       };
 
-      const won = machine.handleVoteResponse(response);
+      const won = await machine.handleVoteResponse(response);
       expect(won).toBe(false);
     });
 
-    it('steps down on response with higher term', () => {
+    it('steps down on response with higher term', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const voterId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      machine.startElection(100n);
+      await machine.startElection(100n);
 
       const response: VoteResponse = {
         voterId,
@@ -614,19 +614,19 @@ describe('LeaderElectionStateMachine', () => {
         reason: 'Higher term',
       };
 
-      const won = machine.handleVoteResponse(response);
+      const won = await machine.handleVoteResponse(response);
 
       expect(won).toBe(false);
       expect(machine.getRole()).toBe('follower');
       expect(machine.getState().term).toBe(10n);
     });
 
-    it('ignores response from old term', () => {
+    it('ignores response from old term', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const voterId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      machine.startElection(100n);
+      await machine.startElection(100n);
 
       const response: VoteResponse = {
         voterId,
@@ -635,12 +635,12 @@ describe('LeaderElectionStateMachine', () => {
         reason: 'Vote granted',
       };
 
-      const won = machine.handleVoteResponse(response);
+      const won = await machine.handleVoteResponse(response);
       expect(won).toBe(false);
       expect(machine.getRole()).toBe('candidate');
     });
 
-    it('becomes leader with quorum', () => {
+    it('becomes leader with quorum', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const voter1 = createReplicaId('us-east', 'r2');
       const voter2 = createReplicaId('eu-central', 'r3');
@@ -652,11 +652,11 @@ describe('LeaderElectionStateMachine', () => {
       machine.registerReplica(createReplicaInfo(voter1));
       machine.registerReplica(createReplicaInfo(voter2));
 
-      machine.startElection(100n);
+      await machine.startElection(100n);
       const currentTerm = machine.getState().term;
 
       // Receive positive vote - should give us quorum (self + 1 = 2)
-      const won = machine.handleVoteResponse({
+      const won = await machine.handleVoteResponse({
         voterId: voter1,
         term: currentTerm,
         voteGranted: true,
@@ -667,7 +667,7 @@ describe('LeaderElectionStateMachine', () => {
       expect(machine.getRole()).toBe('leader');
     });
 
-    it('does not become leader without quorum', () => {
+    it('does not become leader without quorum', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const voter1 = createReplicaId('us-east', 'r2');
       const voter2 = createReplicaId('eu-central', 'r3');
@@ -680,11 +680,11 @@ describe('LeaderElectionStateMachine', () => {
       machine.registerReplica(createReplicaInfo(voter2));
       machine.registerReplica(createReplicaInfo(voter3));
 
-      machine.startElection(100n);
+      await machine.startElection(100n);
       const currentTerm = machine.getState().term;
 
       // Only one positive vote - not enough for quorum of 3
-      const won = machine.handleVoteResponse({
+      const won = await machine.handleVoteResponse({
         voterId: voter1,
         term: currentTerm,
         voteGranted: true,
@@ -695,15 +695,15 @@ describe('LeaderElectionStateMachine', () => {
       expect(machine.getRole()).toBe('candidate');
     });
 
-    it('tracks rejected votes', () => {
+    it('tracks rejected votes', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const voterId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      machine.startElection(100n);
+      await machine.startElection(100n);
       const currentTerm = machine.getState().term;
 
-      machine.handleVoteResponse({
+      await machine.handleVoteResponse({
         voterId,
         term: currentTerm,
         voteGranted: false,
@@ -716,12 +716,12 @@ describe('LeaderElectionStateMachine', () => {
   });
 
   describe('Handling Leader Heartbeats', () => {
-    it('accepts heartbeat from leader in same term', () => {
+    it('accepts heartbeat from leader in same term', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const leaderId = createReplicaId('us-east', 'primary');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      const token = generateFencingToken(1n, leaderId);
+      const token = await generateFencingToken(1n, leaderId);
       const heartbeat: LeaderHeartbeat = {
         leaderId,
         term: 1n,
@@ -737,17 +737,17 @@ describe('LeaderElectionStateMachine', () => {
       expect(state.fencingToken).toEqual(token);
     });
 
-    it('steps down from candidate on valid heartbeat', () => {
+    it('steps down from candidate on valid heartbeat', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const leaderId = createReplicaId('us-east', 'primary');
       const machine = new LeaderElectionStateMachine(selfId);
 
       // Become candidate
-      machine.startElection(100n);
+      await machine.startElection(100n);
       expect(machine.getRole()).toBe('candidate');
 
       // Receive heartbeat from leader with higher term
-      const token = generateFencingToken(5n, leaderId);
+      const token = await generateFencingToken(5n, leaderId);
       machine.handleLeaderHeartbeat({
         leaderId,
         term: 5n,
@@ -760,17 +760,17 @@ describe('LeaderElectionStateMachine', () => {
       expect(machine.getState().leader).toEqual(leaderId);
     });
 
-    it('ignores heartbeat from old term', () => {
+    it('ignores heartbeat from old term', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const oldLeader = createReplicaId('us-east', 'old-primary');
       const machine = new LeaderElectionStateMachine(selfId);
 
       // Advance term
-      machine.startElection(100n);
+      await machine.startElection(100n);
       const currentTerm = machine.getState().term;
 
       // Receive heartbeat from old term
-      const token = generateFencingToken(0n, oldLeader);
+      const token = await generateFencingToken(0n, oldLeader);
       machine.handleLeaderHeartbeat({
         leaderId: oldLeader,
         term: 0n,
@@ -783,12 +783,12 @@ describe('LeaderElectionStateMachine', () => {
       expect(machine.getState().term).toBe(currentTerm);
     });
 
-    it('updates fencing token on heartbeat', () => {
+    it('updates fencing token on heartbeat', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const leaderId = createReplicaId('us-east', 'primary');
       const machine = new LeaderElectionStateMachine(selfId);
 
-      const token1 = generateFencingToken(1n, leaderId);
+      const token1 = await generateFencingToken(1n, leaderId);
       machine.handleLeaderHeartbeat({
         leaderId,
         term: 1n,
@@ -800,7 +800,7 @@ describe('LeaderElectionStateMachine', () => {
       expect(machine.getFencingToken()).toEqual(token1);
 
       // New heartbeat with updated token
-      const token2 = generateFencingToken(1n, leaderId);
+      const token2 = await generateFencingToken(1n, leaderId);
       machine.handleLeaderHeartbeat({
         leaderId,
         term: 1n,
@@ -821,7 +821,7 @@ describe('LeaderElectionStateMachine', () => {
         electionTimeoutJitterMs: 0,
       });
 
-      const token = generateFencingToken(1n, leaderId);
+      const token = await generateFencingToken(1n, leaderId);
       machine.handleLeaderHeartbeat({
         leaderId,
         term: 1n,
@@ -835,7 +835,7 @@ describe('LeaderElectionStateMachine', () => {
   });
 
   describe('Generating Heartbeats', () => {
-    it('generates heartbeat when leader', () => {
+    it('generates heartbeat when leader', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const voterId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId, {
@@ -846,11 +846,11 @@ describe('LeaderElectionStateMachine', () => {
       machine.registerReplica(createReplicaInfo(voterId));
 
       // Start election
-      machine.startElection(100n);
+      await machine.startElection(100n);
       const currentTerm = machine.getState().term;
 
       // Get vote to become leader
-      machine.handleVoteResponse({
+      await machine.handleVoteResponse({
         voterId,
         term: currentTerm,
         voteGranted: true,
@@ -875,7 +875,7 @@ describe('LeaderElectionStateMachine', () => {
       expect(heartbeat).toBeNull();
     });
 
-    it('includes fencing token in heartbeat', () => {
+    it('includes fencing token in heartbeat', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const voterId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId, {
@@ -886,10 +886,10 @@ describe('LeaderElectionStateMachine', () => {
       machine.registerReplica(createReplicaInfo(voterId));
 
       // Start election and become leader
-      machine.startElection(100n);
+      await machine.startElection(100n);
       const currentTerm = machine.getState().term;
 
-      machine.handleVoteResponse({
+      await machine.handleVoteResponse({
         voterId,
         term: currentTerm,
         voteGranted: true,
@@ -902,18 +902,18 @@ describe('LeaderElectionStateMachine', () => {
 
       expect(heartbeat).not.toBeNull();
       expect(heartbeat!.fencingToken).toBeDefined();
-      expect(validateFencingTokenSignature(heartbeat!.fencingToken)).toBe(true);
+      expect(await validateFencingTokenSignature(heartbeat!.fencingToken)).toBe(true);
     });
   });
 
   describe('Fencing Token Validation', () => {
-    it('accepts valid current term token', () => {
+    it('accepts valid current term token', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const leaderId = createReplicaId('us-east', 'primary');
       const machine = new LeaderElectionStateMachine(selfId);
 
       // Accept leader heartbeat to set term
-      const token = generateFencingToken(1n, leaderId);
+      const token = await generateFencingToken(1n, leaderId);
       machine.handleLeaderHeartbeat({
         leaderId,
         term: 1n,
@@ -922,33 +922,34 @@ describe('LeaderElectionStateMachine', () => {
         timestamp: Date.now(),
       });
 
-      expect(machine.validateFencingToken(token)).toBe(true);
+      expect(await machine.validateFencingToken(token)).toBe(true);
     });
 
-    it('rejects expired token', () => {
+    it('rejects expired token', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const leaderId = createReplicaId('us-east', 'primary');
       const machine = new LeaderElectionStateMachine(selfId, {
         fencingTokenTtlMs: 1000,
       });
 
+      const baseToken = await generateFencingToken(1n, leaderId);
       const expiredToken: FencingToken = {
-        ...generateFencingToken(1n, leaderId),
+        ...baseToken,
         generatedAt: Date.now() - 5000, // Expired
       };
 
       // Need to regenerate signature with correct timestamp for it to pass signature check
       // Since signature includes timestamp, this token will fail signature validation
-      expect(machine.validateFencingToken(expiredToken)).toBe(false);
+      expect(await machine.validateFencingToken(expiredToken)).toBe(false);
     });
 
-    it('rejects token from old term', () => {
+    it('rejects token from old term', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const leaderId = createReplicaId('us-east', 'primary');
       const machine = new LeaderElectionStateMachine(selfId);
 
       // Advance to term 5
-      const newToken = generateFencingToken(5n, leaderId);
+      const newToken = await generateFencingToken(5n, leaderId);
       machine.handleLeaderHeartbeat({
         leaderId,
         term: 5n,
@@ -958,11 +959,11 @@ describe('LeaderElectionStateMachine', () => {
       });
 
       // Old term token
-      const oldToken = generateFencingToken(1n, leaderId);
-      expect(machine.validateFencingToken(oldToken)).toBe(false);
+      const oldToken = await generateFencingToken(1n, leaderId);
+      expect(await machine.validateFencingToken(oldToken)).toBe(false);
     });
 
-    it('rejects token with invalid signature', () => {
+    it('rejects token with invalid signature', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const machine = new LeaderElectionStateMachine(selfId);
 
@@ -973,12 +974,12 @@ describe('LeaderElectionStateMachine', () => {
         signature: 'fake-signature',
       };
 
-      expect(machine.validateFencingToken(invalidToken)).toBe(false);
+      expect(await machine.validateFencingToken(invalidToken)).toBe(false);
     });
   });
 
   describe('Promotion Eligibility', () => {
-    it('is not eligible when already leader', () => {
+    it('is not eligible when already leader', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const voterId = createReplicaId('us-east', 'r2');
       const machine = new LeaderElectionStateMachine(selfId, {
@@ -990,10 +991,10 @@ describe('LeaderElectionStateMachine', () => {
       machine.registerReplica(createReplicaInfo(voterId));
 
       // Start election and become leader
-      machine.startElection(100n);
+      await machine.startElection(100n);
       const currentTerm = machine.getState().term;
 
-      machine.handleVoteResponse({
+      await machine.handleVoteResponse({
         voterId,
         term: currentTerm,
         voteGranted: true,
@@ -1020,7 +1021,7 @@ describe('LeaderElectionStateMachine', () => {
       expect(eligibility.reason).toContain('Auto-failover disabled');
     });
 
-    it('is not eligible when leader is still active', () => {
+    it('is not eligible when leader is still active', async () => {
       const selfId = createReplicaId('us-west', 'r1');
       const leaderId = createReplicaId('us-east', 'primary');
       const machine = new LeaderElectionStateMachine(selfId, {
@@ -1028,7 +1029,7 @@ describe('LeaderElectionStateMachine', () => {
       });
 
       // Receive recent heartbeat
-      const token = generateFencingToken(1n, leaderId);
+      const token = await generateFencingToken(1n, leaderId);
       machine.handleLeaderHeartbeat({
         leaderId,
         term: 1n,
@@ -1175,11 +1176,11 @@ describe('SplitBrainResolver', () => {
       expect(result).toBeNull();
     });
 
-    it('returns single leader with no losers', () => {
+    it('returns single leader with no losers', async () => {
       const resolver = new SplitBrainResolver();
 
       const leader = createReplicaId('us-east', 'primary');
-      const token = generateFencingToken(1n, leader);
+      const token = await generateFencingToken(1n, leader);
 
       const result = resolver.resolveConflict([
         { id: leader, token, lsn: 100n },
@@ -1190,14 +1191,14 @@ describe('SplitBrainResolver', () => {
       expect(result!.losers).toHaveLength(0);
     });
 
-    it('selects leader with higher epoch token', () => {
+    it('selects leader with higher epoch token', async () => {
       const resolver = new SplitBrainResolver();
 
       const leader1 = createReplicaId('us-east', 'primary-1');
       const leader2 = createReplicaId('eu-central', 'primary-2');
 
-      const token1 = generateFencingToken(1n, leader1);
-      const token2 = generateFencingToken(5n, leader2);
+      const token1 = await generateFencingToken(1n, leader1);
+      const token2 = await generateFencingToken(5n, leader2);
 
       const result = resolver.resolveConflict([
         { id: leader1, token: token1, lsn: 100n },
@@ -1214,9 +1215,10 @@ describe('SplitBrainResolver', () => {
       const leader1 = createReplicaId('us-east', 'primary-1');
       const leader2 = createReplicaId('eu-central', 'primary-2');
 
-      const token1 = generateFencingToken(1n, leader1);
+      const token1 = await generateFencingToken(1n, leader1);
+      const baseToken2 = await generateFencingToken(1n, leader2);
       const token2: FencingToken = {
-        ...generateFencingToken(1n, leader2),
+        ...baseToken2,
         generatedAt: token1.generatedAt, // Same timestamp
       };
 
@@ -1228,7 +1230,7 @@ describe('SplitBrainResolver', () => {
       expect(result!.winner).toEqual(leader2);
     });
 
-    it('handles multiple conflicting leaders', () => {
+    it('handles multiple conflicting leaders', async () => {
       const resolver = new SplitBrainResolver();
 
       const leader1 = createReplicaId('us-east', 'primary-1');
@@ -1236,9 +1238,9 @@ describe('SplitBrainResolver', () => {
       const leader3 = createReplicaId('ap-south', 'primary-3');
 
       const result = resolver.resolveConflict([
-        { id: leader1, token: generateFencingToken(1n, leader1), lsn: 100n },
-        { id: leader2, token: generateFencingToken(3n, leader2), lsn: 90n },
-        { id: leader3, token: generateFencingToken(2n, leader3), lsn: 95n },
+        { id: leader1, token: await generateFencingToken(1n, leader1), lsn: 100n },
+        { id: leader2, token: await generateFencingToken(3n, leader2), lsn: 90n },
+        { id: leader3, token: await generateFencingToken(2n, leader3), lsn: 95n },
       ]);
 
       expect(result!.winner).toEqual(leader2); // Highest epoch
@@ -1247,26 +1249,26 @@ describe('SplitBrainResolver', () => {
   });
 
   describe('Fencing Decision', () => {
-    it('should fence leader with lower epoch', () => {
+    it('should fence leader with lower epoch', async () => {
       const resolver = new SplitBrainResolver();
 
       const oldLeader = createReplicaId('us-east', 'old');
       const newLeader = createReplicaId('eu-central', 'new');
 
-      const oldToken = generateFencingToken(1n, oldLeader);
-      const newToken = generateFencingToken(5n, newLeader);
+      const oldToken = await generateFencingToken(1n, oldLeader);
+      const newToken = await generateFencingToken(5n, newLeader);
 
       expect(resolver.shouldFenceLeader(oldToken, newToken)).toBe(true);
     });
 
-    it('should not fence leader with higher epoch', () => {
+    it('should not fence leader with higher epoch', async () => {
       const resolver = new SplitBrainResolver();
 
       const currentLeader = createReplicaId('us-east', 'current');
       const staleLeader = createReplicaId('eu-central', 'stale');
 
-      const currentToken = generateFencingToken(5n, currentLeader);
-      const staleToken = generateFencingToken(1n, staleLeader);
+      const currentToken = await generateFencingToken(5n, currentLeader);
+      const staleToken = await generateFencingToken(1n, staleLeader);
 
       expect(resolver.shouldFenceLeader(currentToken, staleToken)).toBe(false);
     });
@@ -1276,10 +1278,11 @@ describe('SplitBrainResolver', () => {
 
       const leader = createReplicaId('us-east', 'leader');
 
-      const oldToken = generateFencingToken(1n, leader);
+      const oldToken = await generateFencingToken(1n, leader);
       await new Promise(resolve => setTimeout(resolve, 10));
+      const baseToken = await generateFencingToken(1n, leader);
       const newToken: FencingToken = {
-        ...generateFencingToken(1n, leader),
+        ...baseToken,
         generatedAt: oldToken.generatedAt + 100,
       };
 
