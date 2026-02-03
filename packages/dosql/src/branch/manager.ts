@@ -39,6 +39,9 @@ import {
   PROTECTED_BRANCHES,
   isValidBranchName,
   generateCommitId,
+  createBranchId,
+  createCommitId,
+  createTreeId,
 } from './types.js';
 
 // =============================================================================
@@ -62,14 +65,21 @@ const MERGE_STATE_KEY = '_branch/MERGE_HEAD';
  */
 export interface BranchManagerConfig {
   /** Default branch name */
-  defaultBranch?: string;
+  defaultBranch?: BranchId | string;
   /** Default author info */
   author?: AuthorInfo;
   /** Auto-commit on branch operations */
   autoCommit?: boolean;
 }
 
-const DEFAULT_CONFIG: Required<BranchManagerConfig> = {
+/** Internal resolved config type */
+interface ResolvedBranchManagerConfig {
+  defaultBranch: BranchId;
+  author: AuthorInfo;
+  autoCommit: boolean;
+}
+
+const DEFAULT_CONFIG: ResolvedBranchManagerConfig = {
   defaultBranch: DEFAULT_BRANCH,
   author: { name: 'DoSQL System' },
   autoCommit: false,
@@ -105,7 +115,7 @@ interface MergeState {
  */
 export class DOBranchManager implements BranchManager {
   private readonly storage: DurableObjectStorage;
-  private readonly config: Required<BranchManagerConfig>;
+  private readonly config: ResolvedBranchManagerConfig;
   private currentBranch: BranchId;
   private initialized = false;
 
@@ -117,7 +127,14 @@ export class DOBranchManager implements BranchManager {
 
   constructor(storage: DurableObjectStorage, config: BranchManagerConfig = {}) {
     this.storage = storage;
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    const defaultBranch = config.defaultBranch
+      ? createBranchId(config.defaultBranch as string)
+      : DEFAULT_BRANCH;
+    this.config = {
+      defaultBranch,
+      author: config.author ?? DEFAULT_CONFIG.author,
+      autoCommit: config.autoCommit ?? DEFAULT_CONFIG.autoCommit,
+    };
     this.currentBranch = this.config.defaultBranch;
   }
 
@@ -162,54 +179,61 @@ export class DOBranchManager implements BranchManager {
   async createBranch(options: CreateBranchOptions): Promise<BranchMetadata> {
     await this.ensureInitialized();
 
-    const { name, from = this.currentBranch, commit } = options;
+    // Convert strings to branded types
+    const branchName = createBranchId(options.name as string);
+    const fromBranch = options.from
+      ? createBranchId(options.from as string)
+      : this.currentBranch;
+    const commitId = options.commit
+      ? createCommitId(options.commit as string)
+      : undefined;
 
     // Validate branch name
-    if (!isValidBranchName(name)) {
+    if (!isValidBranchName(branchName)) {
       throw new BranchError(
         BranchErrorCode.INVALID_BRANCH_NAME,
-        `Invalid branch name: ${name}`,
-        name
+        `Invalid branch name: ${branchName}`,
+        branchName
       );
     }
 
     // Check if branch already exists
-    const existing = await this.getBranch(name);
+    const existing = await this.getBranch(branchName);
     if (existing) {
       throw new BranchError(
         BranchErrorCode.BRANCH_EXISTS,
-        `Branch already exists: ${name}`,
-        name
+        `Branch already exists: ${branchName}`,
+        branchName
       );
     }
 
     // Get source branch
-    const sourceBranch = await this.getBranch(from);
+    const sourceBranch = await this.getBranch(fromBranch);
     if (!sourceBranch) {
       throw new BranchError(
         BranchErrorCode.BRANCH_NOT_FOUND,
-        `Source branch not found: ${from}`,
-        from
+        `Source branch not found: ${fromBranch}`,
+        fromBranch
       );
     }
 
     // Determine base commit
-    const baseCommit = commit || sourceBranch.head;
+    const baseCommit = commitId || sourceBranch.head;
 
     // If commit specified, verify it exists
-    if (commit) {
-      const commitData = await this.getCommit(commit);
+    if (commitId) {
+      const commitData = await this.getCommit(commitId);
       if (!commitData) {
         throw new BranchError(
           BranchErrorCode.COMMIT_NOT_FOUND,
-          `Commit not found: ${commit}`,
-          name,
-          { commit }
+          `Commit not found: ${commitId}`,
+          branchName,
+          { commit: commitId }
         );
       }
     }
 
-    return this.createBranchInternal(name, from, baseCommit, options.description);
+    return this.createBranchInternal(branchName, fromBranch, baseCommit, options.description);
   }
 
   /**
@@ -243,24 +267,25 @@ export class DOBranchManager implements BranchManager {
   /**
    * Delete a branch
    */
-  async deleteBranch(name: BranchId, options: DeleteBranchOptions = {}): Promise<void> {
+  async deleteBranch(name: BranchId | string, options: DeleteBranchOptions = {}): Promise<void> {
     await this.ensureInitialized();
 
-    const branch = await this.getBranch(name);
+    const branchName = createBranchId(name as string);
+    const branch = await this.getBranch(branchName);
     if (!branch) {
       throw new BranchError(
         BranchErrorCode.BRANCH_NOT_FOUND,
-        `Branch not found: ${name}`,
-        name
+        `Branch not found: ${branchName}`,
+        branchName
       );
     }
 
     // Cannot delete current branch
-    if (name === this.currentBranch) {
+    if (branchName === this.currentBranch) {
       throw new BranchError(
         BranchErrorCode.CANNOT_DELETE_CURRENT,
-        `Cannot delete current branch: ${name}`,
-        name
+        `Cannot delete current branch: ${branchName}`,
+        branchName
       );
     }
 
@@ -268,8 +293,8 @@ export class DOBranchManager implements BranchManager {
     if (branch.protected && !options.force) {
       throw new BranchError(
         BranchErrorCode.BRANCH_PROTECTED,
-        `Cannot delete protected branch: ${name}`,
-        name
+        `Cannot delete protected branch: ${branchName}`,
+        branchName
       );
     }
 
@@ -277,33 +302,34 @@ export class DOBranchManager implements BranchManager {
     if (!options.force) {
       const mainBranch = await this.getBranch(this.config.defaultBranch);
       if (mainBranch && mainBranch.head) {
-        const isMerged = await this.isBranchMerged(name, this.config.defaultBranch);
+        const isMerged = await this.isBranchMerged(branchName, this.config.defaultBranch);
         if (!isMerged) {
           throw new BranchError(
             BranchErrorCode.NOT_MERGED,
-            `Branch ${name} is not fully merged. Use force to delete anyway.`,
-            name
+            `Branch ${branchName} is not fully merged. Use force to delete anyway.`,
+            branchName
           );
         }
       }
     }
 
     // Delete branch metadata
-    await this.storage.delete(BRANCH_PREFIX + name);
-    this.branchCache.delete(name);
+    await this.storage.delete(BRANCH_PREFIX + branchName);
+    this.branchCache.delete(branchName);
   }
 
   /**
    * Get branch metadata
    */
-  async getBranch(name: BranchId): Promise<BranchMetadata | null> {
+  async getBranch(name: BranchId | string): Promise<BranchMetadata | null> {
+    const branchName = createBranchId(name as string);
     // Check cache
-    const cached = this.branchCache.get(name);
+    const cached = this.branchCache.get(branchName);
     if (cached) return cached;
 
-    const branch = await this.storage.get<BranchMetadata>(BRANCH_PREFIX + name);
+    const branch = await this.storage.get<BranchMetadata>(BRANCH_PREFIX + branchName);
     if (branch) {
-      this.branchCache.set(name, branch);
+      this.branchCache.set(branchName, branch);
     }
     return branch || null;
   }
@@ -318,16 +344,17 @@ export class DOBranchManager implements BranchManager {
     const branches: BranchMetadata[] = [];
 
     for (const [key, value] of entries) {
-      const name = key.slice(BRANCH_PREFIX.length);
+      const nameStr = key.slice(BRANCH_PREFIX.length);
 
       // Apply pattern filter if provided
       if (pattern) {
         const regex = new RegExp(pattern.replace(/\*/g, '.*'));
-        if (!regex.test(name)) continue;
+        if (!regex.test(nameStr)) continue;
       }
 
       branches.push(value);
-      this.branchCache.set(name, value);
+      // Cast to BranchId - data from storage is already properly formatted
+      this.branchCache.set(nameStr as BranchId, value);
     }
 
     return branches.sort((a, b) => a.name.localeCompare(b.name));
@@ -336,64 +363,67 @@ export class DOBranchManager implements BranchManager {
   /**
    * Rename a branch
    */
-  async renameBranch(oldName: BranchId, newName: BranchId): Promise<void> {
+  async renameBranch(oldName: BranchId | string, newName: BranchId | string): Promise<void> {
     await this.ensureInitialized();
 
+    const oldBranchName = createBranchId(oldName as string);
+    const newBranchName = createBranchId(newName as string);
+
     // Validate new name
-    if (!isValidBranchName(newName)) {
+    if (!isValidBranchName(newBranchName)) {
       throw new BranchError(
         BranchErrorCode.INVALID_BRANCH_NAME,
-        `Invalid branch name: ${newName}`,
-        newName
+        `Invalid branch name: ${newBranchName}`,
+        newBranchName
       );
     }
 
     // Get old branch
-    const oldBranch = await this.getBranch(oldName);
+    const oldBranch = await this.getBranch(oldBranchName);
     if (!oldBranch) {
       throw new BranchError(
         BranchErrorCode.BRANCH_NOT_FOUND,
-        `Branch not found: ${oldName}`,
-        oldName
+        `Branch not found: ${oldBranchName}`,
+        oldBranchName
       );
     }
 
     // Check new name doesn't exist
-    const existing = await this.getBranch(newName);
+    const existing = await this.getBranch(newBranchName);
     if (existing) {
       throw new BranchError(
         BranchErrorCode.BRANCH_EXISTS,
-        `Branch already exists: ${newName}`,
-        newName
+        `Branch already exists: ${newBranchName}`,
+        newBranchName
       );
     }
 
     // Create new branch with same data
     const newBranch: BranchMetadata = {
       ...oldBranch,
-      name: newName,
+      name: newBranchName,
       updatedAt: Date.now(),
     };
 
     // Update storage atomically
-    await this.storage.put(BRANCH_PREFIX + newName, newBranch);
-    await this.storage.delete(BRANCH_PREFIX + oldName);
+    await this.storage.put(BRANCH_PREFIX + newBranchName, newBranch);
+    await this.storage.delete(BRANCH_PREFIX + oldBranchName);
 
     // Update caches
-    this.branchCache.delete(oldName);
-    this.branchCache.set(newName, newBranch);
+    this.branchCache.delete(oldBranchName);
+    this.branchCache.set(newBranchName, newBranch);
 
     // Update HEAD if current branch was renamed
-    if (this.currentBranch === oldName) {
-      this.currentBranch = newName;
+    if (this.currentBranch === oldBranchName) {
+      this.currentBranch = newBranchName;
       await this.updateHead();
     }
 
     // Update child branches' parent reference
     const allBranches = await this.listBranches();
     for (const branch of allBranches) {
-      if (branch.parent === oldName) {
-        const updated = { ...branch, parent: newName, updatedAt: Date.now() };
+      if (branch.parent === oldBranchName) {
+        const updated = { ...branch, parent: newBranchName, updatedAt: Date.now() };
         await this.storage.put(BRANCH_PREFIX + branch.name, updated);
         this.branchCache.set(branch.name, updated);
       }
@@ -414,8 +444,13 @@ export class DOBranchManager implements BranchManager {
   /**
    * Checkout a branch
    */
-  async checkout(name: BranchId, options: CheckoutOptions = {}): Promise<CheckoutResult> {
+  async checkout(name: BranchId | string, options: CheckoutOptions = {}): Promise<CheckoutResult> {
     await this.ensureInitialized();
+
+    const branchName = createBranchId(name as string);
+    const targetCommitOpt = options.commit
+      ? createCommitId(options.commit as string)
+      : undefined;
 
     const previous = {
       branch: this.currentBranch,
@@ -424,19 +459,19 @@ export class DOBranchManager implements BranchManager {
 
     // Create branch if requested
     if (options.create) {
-      const existing = await this.getBranch(name);
+      const existing = await this.getBranch(branchName);
       if (!existing) {
-        await this.createBranch({ name, from: this.currentBranch });
+        await this.createBranch({ name: branchName, from: this.currentBranch });
       }
     }
 
     // Get target branch
-    const branch = await this.getBranch(name);
+    const branch = await this.getBranch(branchName);
     if (!branch) {
       throw new BranchError(
         BranchErrorCode.BRANCH_NOT_FOUND,
-        `Branch not found: ${name}`,
-        name
+        `Branch not found: ${branchName}`,
+        branchName
       );
     }
 
@@ -444,8 +479,8 @@ export class DOBranchManager implements BranchManager {
     if (branch.archived && !options.force) {
       throw new BranchError(
         BranchErrorCode.BRANCH_ARCHIVED,
-        `Branch is archived: ${name}`,
-        name
+        `Branch is archived: ${branchName}`,
+        branchName
       );
     }
 
@@ -457,19 +492,19 @@ export class DOBranchManager implements BranchManager {
         throw new BranchError(
           BranchErrorCode.UNCOMMITTED_CHANGES,
           'You have uncommitted changes. Commit or stash them, or use force.',
-          name
+          branchName
         );
       }
     }
 
     // Determine target commit
-    const targetCommit = options.commit || branch.head;
+    const targetCommit = targetCommitOpt || branch.head;
 
     // Calculate changed files
     const changed = await this.getChangedFiles(previous.commit || null, targetCommit);
 
     // Switch branch
-    this.currentBranch = name;
+    this.currentBranch = branchName;
     await this.updateHead(targetCommit || undefined);
 
     // Update working tree (copy files from target commit)
@@ -483,7 +518,7 @@ export class DOBranchManager implements BranchManager {
     return {
       previous,
       current: {
-        branch: name,
+        branch: branchName,
         commit: targetCommit,
       },
       changed,
@@ -498,66 +533,68 @@ export class DOBranchManager implements BranchManager {
    * Merge one branch into another
    */
   async merge(
-    source: BranchId,
-    target: BranchId,
+    source: BranchId | string,
+    target: BranchId | string,
     options: MergeOptions = {}
   ): Promise<MergeResult> {
     await this.ensureInitialized();
 
+    const sourceName = createBranchId(source as string);
+    const targetName = createBranchId(target as string);
     const { strategy = 'recursive', message, abortOnConflict = false, autoResolve } = options;
 
     // Get both branches
     const [sourceBranch, targetBranch] = await Promise.all([
-      this.getBranch(source),
-      this.getBranch(target),
+      this.getBranch(sourceName),
+      this.getBranch(targetName),
     ]);
 
     if (!sourceBranch) {
       throw new BranchError(
         BranchErrorCode.BRANCH_NOT_FOUND,
-        `Source branch not found: ${source}`,
-        source
+        `Source branch not found: ${sourceName}`,
+        sourceName
       );
     }
 
     if (!targetBranch) {
       throw new BranchError(
         BranchErrorCode.BRANCH_NOT_FOUND,
-        `Target branch not found: ${target}`,
-        target
+        `Target branch not found: ${targetName}`,
+        targetName
       );
     }
 
     if (targetBranch.archived) {
       throw new BranchError(
         BranchErrorCode.BRANCH_ARCHIVED,
-        `Target branch is archived: ${target}`,
-        target
+        `Target branch is archived: ${targetName}`,
+        targetName
       );
     }
 
     // Checkout target branch first
-    if (this.currentBranch !== target) {
-      await this.checkout(target, { force: true });
+    if (this.currentBranch !== targetName) {
+      await this.checkout(targetName, { force: true });
     }
 
     // Find merge base
-    const mergeBase = await this.findMergeBase(source, target);
+    const mergeBase = await this.findMergeBase(sourceName, targetName);
 
     // Check if fast-forward is possible
     const canFastForward = mergeBase === targetBranch.head;
 
     // Handle fast-forward
     if (canFastForward && strategy !== 'no-ff') {
-      return this.fastForwardMerge(source, target, sourceBranch, targetBranch);
+      return this.fastForwardMerge(sourceName, targetName, sourceBranch, targetBranch);
     }
 
     // Check if fast-forward is required but not possible
     if (strategy === 'fast-forward' && !canFastForward) {
       throw new BranchError(
         BranchErrorCode.NOT_FAST_FORWARD,
-        `Cannot fast-forward ${target} to ${source}`,
-        target
+        `Cannot fast-forward ${targetName} to ${sourceName}`,
+        targetName
       );
     }
 
@@ -574,8 +611,8 @@ export class DOBranchManager implements BranchManager {
         return {
           success: false,
           mergeType: 'aborted',
-          source,
-          target,
+          source: sourceName,
+          target: targetName,
           conflicts: conflicts.map(path => ({
             path,
             type: 'content',
@@ -595,8 +632,8 @@ export class DOBranchManager implements BranchManager {
       } else {
         // Store merge state for manual resolution
         this.mergeState = {
-          source,
-          target,
+          source: sourceName,
+          target: targetName,
           baseCommit: mergeBase,
           conflicts,
           resolved: new Map(),
@@ -606,14 +643,14 @@ export class DOBranchManager implements BranchManager {
         throw new BranchError(
           BranchErrorCode.MERGE_CONFLICT,
           `Merge conflicts in: ${conflicts.join(', ')}`,
-          target,
+          targetName,
           { conflicts }
         );
       }
     }
 
     // Create merge commit
-    const mergeMessage = message || `Merge branch '${source}' into ${target}`;
+    const mergeMessage = message || `Merge branch '${sourceName}' into ${targetName}`;
     const commitId = await this.createMergeCommit(
       mergeMessage,
       [targetBranch.head!, sourceBranch.head!],
@@ -621,7 +658,7 @@ export class DOBranchManager implements BranchManager {
     );
 
     // Update target branch head
-    await this.updateBranchHead(target, commitId);
+    await this.updateBranchHead(targetName, commitId);
 
     // Clear merge state
     this.mergeState = null;
@@ -631,8 +668,8 @@ export class DOBranchManager implements BranchManager {
       success: true,
       mergeType: 'merge-commit',
       commit: commitId,
-      source,
-      target,
+      source: sourceName,
+      target: targetName,
       conflicts: [],
       updated: modified,
       added,
@@ -799,10 +836,12 @@ export class DOBranchManager implements BranchManager {
   /**
    * Get branch history/log
    */
-  async log(branch?: BranchId, options: BranchLogOptions = {}): Promise<BranchLogEntry[]> {
+  async log(branch?: BranchId | string, options: BranchLogOptions = {}): Promise<BranchLogEntry[]> {
     await this.ensureInitialized();
 
-    const branchName = branch || this.currentBranch;
+    const branchName = branch
+      ? createBranchId(branch as string)
+      : this.currentBranch;
     const branchMeta = await this.getBranch(branchName);
     if (!branchMeta) {
       throw new BranchError(
@@ -857,31 +896,34 @@ export class DOBranchManager implements BranchManager {
   /**
    * Compare two branches
    */
-  async compare(source: BranchId, target: BranchId): Promise<BranchComparison> {
+  async compare(source: BranchId | string, target: BranchId | string): Promise<BranchComparison> {
     await this.ensureInitialized();
 
+    const sourceName = createBranchId(source as string);
+    const targetName = createBranchId(target as string);
+
     const [sourceBranch, targetBranch] = await Promise.all([
-      this.getBranch(source),
-      this.getBranch(target),
+      this.getBranch(sourceName),
+      this.getBranch(targetName),
     ]);
 
     if (!sourceBranch) {
       throw new BranchError(
         BranchErrorCode.BRANCH_NOT_FOUND,
-        `Branch not found: ${source}`,
-        source
+        `Branch not found: ${sourceName}`,
+        sourceName
       );
     }
 
     if (!targetBranch) {
       throw new BranchError(
         BranchErrorCode.BRANCH_NOT_FOUND,
-        `Branch not found: ${target}`,
-        target
+        `Branch not found: ${targetName}`,
+        targetName
       );
     }
 
-    const mergeBase = await this.findMergeBase(source, target);
+    const mergeBase = await this.findMergeBase(sourceName, targetName);
 
     // Count commits ahead and behind
     const ahead = await this.countCommits(sourceBranch.head, mergeBase);
@@ -891,8 +933,8 @@ export class DOBranchManager implements BranchManager {
     const diff = await this.getFileDiff(sourceBranch.head, targetBranch.head);
 
     return {
-      source,
-      target,
+      source: sourceName,
+      target: targetName,
       mergeBase,
       ahead,
       behind,
@@ -904,12 +946,15 @@ export class DOBranchManager implements BranchManager {
   /**
    * Find common ancestor of two branches
    */
-  async findMergeBase(branch1: BranchId, branch2: BranchId): Promise<CommitId | null> {
+  async findMergeBase(branch1: BranchId | string, branch2: BranchId | string): Promise<CommitId | null> {
     await this.ensureInitialized();
 
+    const branch1Name = createBranchId(branch1 as string);
+    const branch2Name = createBranchId(branch2 as string);
+
     const [b1, b2] = await Promise.all([
-      this.getBranch(branch1),
-      this.getBranch(branch2),
+      this.getBranch(branch1Name),
+      this.getBranch(branch2Name),
     ]);
 
     if (!b1 || !b2) return null;
@@ -990,14 +1035,15 @@ export class DOBranchManager implements BranchManager {
   /**
    * Get commit metadata
    */
-  async getCommit(id: CommitId): Promise<CommitMetadata | null> {
+  async getCommit(id: CommitId | string): Promise<CommitMetadata | null> {
+    const commitId = createCommitId(id as string);
     // Check cache
-    const cached = this.commitCache.get(id);
+    const cached = this.commitCache.get(commitId);
     if (cached) return cached;
 
-    const commit = await this.storage.get<CommitMetadata>(COMMIT_PREFIX + id);
+    const commit = await this.storage.get<CommitMetadata>(COMMIT_PREFIX + commitId);
     if (commit) {
-      this.commitCache.set(id, commit);
+      this.commitCache.set(commitId, commit);
     }
     return commit || null;
   }
@@ -1064,10 +1110,12 @@ export class DOBranchManager implements BranchManager {
   /**
    * Get diff for branch
    */
-  async diff(branch?: BranchId): Promise<FileDiff[]> {
+  async diff(branch?: BranchId | string): Promise<FileDiff[]> {
     await this.ensureInitialized();
 
-    const branchName = branch || this.currentBranch;
+    const branchName = branch
+      ? createBranchId(branch as string)
+      : this.currentBranch;
     const branchMeta = await this.getBranch(branchName);
 
     if (!branchMeta?.head) {
@@ -1152,9 +1200,10 @@ export class DOBranchManager implements BranchManager {
 
     const content = JSON.stringify(entries);
     const hash = await this.hashContent(new TextEncoder().encode(content));
+    const treeId = createTreeId(hash);
 
-    await this.storage.put(TREE_PREFIX + hash, entries);
-    return hash;
+    await this.storage.put(TREE_PREFIX + treeId, entries);
+    return treeId;
   }
 
   private async readTree(id: TreeId): Promise<TreeEntry[]> {

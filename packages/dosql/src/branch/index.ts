@@ -16,14 +16,24 @@
 
 // Types
 export {
+  // Branded types
   type BranchId,
+  type CommitId,
+  type TreeId,
+  // Factory functions for branded types
+  createBranchId,
+  createCommitId,
+  createTreeId,
+  // Type guards for branded types
+  isValidBranchIdCandidate,
+  isValidCommitIdCandidate,
+  isValidTreeIdCandidate,
+  // Metadata types
   type BranchMetadata,
   type CreateBranchOptions,
   type DeleteBranchOptions,
-  type CommitId,
   type CommitMetadata,
   type AuthorInfo,
-  type TreeId,
   type TreeEntry,
   type CheckoutOptions,
   type CheckoutResult,

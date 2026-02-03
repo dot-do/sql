@@ -11,13 +11,120 @@
  */
 
 // =============================================================================
-// Branch Core Types
+// Branded Types
 // =============================================================================
 
+/** Brand symbol for Branch ID */
+declare const BranchIdBrand: unique symbol;
+
 /**
- * Unique branch identifier
+ * Branch ID - A branded string type for branch identifiers.
+ * Provides type safety to prevent accidental assignment from plain strings.
+ *
+ * @example
+ * const branchId = createBranchId('main');
+ * // branchId is BranchId, not assignable from plain string
  */
-export type BranchId = string;
+export type BranchId = string & { readonly [BranchIdBrand]: never };
+
+/**
+ * Create a branded BranchId from a string value.
+ * This is the only safe way to create a BranchId.
+ *
+ * @param value - The string value for the branch ID
+ * @returns A branded BranchId value
+ * @throws {Error} If value is empty or exceeds MAX_BRANCH_NAME_LENGTH
+ */
+export function createBranchId(value: string): BranchId {
+  if (!value || value.length === 0) {
+    throw new Error('BranchId cannot be empty');
+  }
+  if (value.length > MAX_BRANCH_NAME_LENGTH) {
+    throw new Error(`BranchId exceeds maximum length of ${MAX_BRANCH_NAME_LENGTH}: ${value}`);
+  }
+  return value as BranchId;
+}
+
+/**
+ * Type guard to check if a value is a valid BranchId candidate.
+ */
+export function isValidBranchIdCandidate(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= MAX_BRANCH_NAME_LENGTH;
+}
+
+/** Brand symbol for Commit ID */
+declare const CommitIdBrand: unique symbol;
+
+/**
+ * Commit ID - A branded string type for commit identifiers (content-addressed hash).
+ * Provides type safety to prevent accidental assignment from plain strings.
+ *
+ * @example
+ * const commitId = createCommitId('abc123def456');
+ * // commitId is CommitId, not assignable from plain string
+ */
+export type CommitId = string & { readonly [CommitIdBrand]: never };
+
+/**
+ * Create a branded CommitId from a string value.
+ * This is the only safe way to create a CommitId.
+ *
+ * @param value - The string value for the commit ID (typically a hash)
+ * @returns A branded CommitId value
+ * @throws {Error} If value is empty
+ */
+export function createCommitId(value: string): CommitId {
+  if (!value || value.length === 0) {
+    throw new Error('CommitId cannot be empty');
+  }
+  return value as CommitId;
+}
+
+/**
+ * Type guard to check if a value is a valid CommitId candidate.
+ */
+export function isValidCommitIdCandidate(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+/** Brand symbol for Tree ID */
+declare const TreeIdBrand: unique symbol;
+
+/**
+ * Tree ID - A branded string type for tree identifiers (hash of directory structure).
+ * Provides type safety to prevent accidental assignment from plain strings.
+ *
+ * @example
+ * const treeId = createTreeId('tree123hash');
+ * // treeId is TreeId, not assignable from plain string
+ */
+export type TreeId = string & { readonly [TreeIdBrand]: never };
+
+/**
+ * Create a branded TreeId from a string value.
+ * This is the only safe way to create a TreeId.
+ *
+ * @param value - The string value for the tree ID (typically a hash)
+ * @returns A branded TreeId value
+ * @throws {Error} If value is empty
+ */
+export function createTreeId(value: string): TreeId {
+  if (!value || value.length === 0) {
+    throw new Error('TreeId cannot be empty');
+  }
+  return value as TreeId;
+}
+
+/**
+ * Type guard to check if a value is a valid TreeId candidate.
+ */
+export function isValidTreeIdCandidate(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+// =============================================================================
+// Branch Core Types
+// =============================================================================
 
 /**
  * Branch metadata
@@ -45,14 +152,15 @@ export interface BranchMetadata {
 
 /**
  * Options for creating a new branch
+ * Note: String values are accepted and will be converted to branded types internally.
  */
 export interface CreateBranchOptions {
   /** Branch name */
-  name: BranchId;
+  name: BranchId | string;
   /** Source branch to create from (default: current branch) */
-  from?: BranchId | undefined;
+  from?: BranchId | string | undefined;
   /** Specific commit to branch from (default: HEAD of source) */
-  commit?: CommitId | undefined;
+  commit?: CommitId | string | undefined;
   /** Optional description */
   description?: string | undefined;
 }
@@ -70,11 +178,6 @@ export interface DeleteBranchOptions {
 // =============================================================================
 // Commit Types
 // =============================================================================
-
-/**
- * Unique commit identifier (hash)
- */
-export type CommitId = string;
 
 /**
  * Commit metadata
@@ -107,11 +210,6 @@ export interface AuthorInfo {
 }
 
 /**
- * Tree ID (hash of directory structure)
- */
-export type TreeId = string;
-
-/**
  * Tree entry (file or directory in a commit)
  */
 export interface TreeEntry {
@@ -133,6 +231,7 @@ export interface TreeEntry {
 
 /**
  * Checkout options
+ * Note: String values are accepted and will be converted to branded types internally.
  */
 export interface CheckoutOptions {
   /** Create branch if it doesn't exist */
@@ -140,7 +239,7 @@ export interface CheckoutOptions {
   /** Force checkout (discard uncommitted changes) */
   force?: boolean | undefined;
   /** Checkout specific commit instead of branch HEAD */
-  commit?: CommitId | undefined;
+  commit?: CommitId | string | undefined;
 }
 
 /**
@@ -430,7 +529,7 @@ export class BranchError extends Error {
   constructor(
     public readonly code: BranchErrorCode,
     message: string,
-    public readonly branch?: BranchId,
+    public readonly branch?: BranchId | string,
     public readonly details?: Record<string, unknown>
   ) {
     super(message);
@@ -444,36 +543,38 @@ export class BranchError extends Error {
 
 /**
  * Branch manager interface for git-like operations
+ * Note: Methods accept both branded types and plain strings for convenience.
+ * Plain strings are converted to branded types internally.
  */
 export interface BranchManager {
   // Branch Operations
   createBranch(options: CreateBranchOptions): Promise<BranchMetadata>;
-  deleteBranch(name: BranchId, options?: DeleteBranchOptions): Promise<void>;
-  getBranch(name: BranchId): Promise<BranchMetadata | null>;
+  deleteBranch(name: BranchId | string, options?: DeleteBranchOptions): Promise<void>;
+  getBranch(name: BranchId | string): Promise<BranchMetadata | null>;
   listBranches(pattern?: string): Promise<BranchMetadata[]>;
-  renameBranch(oldName: BranchId, newName: BranchId): Promise<void>;
+  renameBranch(oldName: BranchId | string, newName: BranchId | string): Promise<void>;
 
   // Checkout Operations
   getCurrentBranch(): BranchId;
-  checkout(name: BranchId, options?: CheckoutOptions): Promise<CheckoutResult>;
+  checkout(name: BranchId | string, options?: CheckoutOptions): Promise<CheckoutResult>;
 
   // Merge Operations
-  merge(source: BranchId, target: BranchId, options?: MergeOptions): Promise<MergeResult>;
+  merge(source: BranchId | string, target: BranchId | string, options?: MergeOptions): Promise<MergeResult>;
   abortMerge(): Promise<void>;
   resolveMerge(path: string, resolution: 'ours' | 'theirs' | Uint8Array): Promise<void>;
 
   // History Operations
-  log(branch?: BranchId, options?: BranchLogOptions): Promise<BranchLogEntry[]>;
-  compare(source: BranchId, target: BranchId): Promise<BranchComparison>;
-  findMergeBase(branch1: BranchId, branch2: BranchId): Promise<CommitId | null>;
+  log(branch?: BranchId | string, options?: BranchLogOptions): Promise<BranchLogEntry[]>;
+  compare(source: BranchId | string, target: BranchId | string): Promise<BranchComparison>;
+  findMergeBase(branch1: BranchId | string, branch2: BranchId | string): Promise<CommitId | null>;
 
   // Commit Operations
   commit(message: string, author?: AuthorInfo): Promise<CommitId>;
-  getCommit(id: CommitId): Promise<CommitMetadata | null>;
+  getCommit(id: CommitId | string): Promise<CommitMetadata | null>;
 
   // Working Tree Operations
   status(): Promise<WorkingTreeStatus>;
-  diff(branch?: BranchId): Promise<FileDiff[]>;
+  diff(branch?: BranchId | string): Promise<FileDiff[]>;
 }
 
 /**
@@ -510,7 +611,7 @@ export interface FileChange {
 // =============================================================================
 
 /** Default branch name */
-export const DEFAULT_BRANCH = 'main';
+export const DEFAULT_BRANCH = 'main' as BranchId;
 
 /** Protected branch that cannot be deleted */
 export const PROTECTED_BRANCHES = ['main', 'master'];
@@ -568,6 +669,7 @@ export function generateCommitId(content: string): CommitId {
     hash = ((hash << 5) - hash) + char;
     hash = hash & hash; // Convert to 32-bit integer
   }
-  return Math.abs(hash).toString(16).padStart(8, '0') +
+  const hashString = Math.abs(hash).toString(16).padStart(8, '0') +
          Date.now().toString(16);
+  return createCommitId(hashString);
 }
