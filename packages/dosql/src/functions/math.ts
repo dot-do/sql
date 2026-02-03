@@ -482,6 +482,45 @@ export function iif(condition: SqlValue, x: SqlValue, y: SqlValue): SqlValue {
   return x;
 }
 
+/**
+ * typeof(x) - Returns the type affinity of x as a string
+ * Returns one of: 'null', 'integer', 'real', 'text', 'blob'
+ */
+export function typeof_fn(x: SqlValue): SqlValue {
+  if (x === null) return 'null';
+  if (x instanceof Uint8Array) return 'blob';
+  if (typeof x === 'bigint') return 'integer';
+  if (typeof x === 'number') {
+    return Number.isInteger(x) ? 'integer' : 'real';
+  }
+  if (typeof x === 'boolean') return 'integer'; // SQLite treats booleans as integers
+  if (typeof x === 'string') return 'text';
+  if (x instanceof Date) return 'text'; // Dates are stored as text in SQLite
+  return 'text';
+}
+
+/**
+ * likelihood(x, p) - Returns x, with probability p that x is true (optimizer hint)
+ * In SQLite this is used to help the query planner. We just return x.
+ */
+export function likelihood(x: SqlValue, _p: SqlValue): SqlValue {
+  return x;
+}
+
+/**
+ * likely(x) - Returns x, hint that x is probably true (equivalent to likelihood(x, 0.9375))
+ */
+export function likely(x: SqlValue): SqlValue {
+  return x;
+}
+
+/**
+ * unlikely(x) - Returns x, hint that x is probably false (equivalent to likelihood(x, 0.0625))
+ */
+export function unlikely(x: SqlValue): SqlValue {
+  return x;
+}
+
 // =============================================================================
 // FUNCTION SIGNATURES FOR REGISTRY
 // =============================================================================
@@ -521,6 +560,10 @@ export const mathFunctions: Record<string, SqlFunction> = {
   ifnull: { fn: ifnull, minArgs: 2, maxArgs: 2 },
   coalesce: { fn: coalesce, minArgs: 1, maxArgs: Infinity },
   iif: { fn: iif, minArgs: 3, maxArgs: 3 },
+  typeof: { fn: typeof_fn, minArgs: 1, maxArgs: 1 },
+  likelihood: { fn: likelihood, minArgs: 2, maxArgs: 2 },
+  likely: { fn: likely, minArgs: 1, maxArgs: 1 },
+  unlikely: { fn: unlikely, minArgs: 1, maxArgs: 1 },
 };
 
 export const mathSignatures: Record<string, FunctionSignature> = {
@@ -583,5 +626,32 @@ export const mathSignatures: Record<string, FunctionSignature> = {
     params: [],
     returnType: 'number',
     description: 'Returns the value of pi',
+  },
+  typeof: {
+    name: 'typeof',
+    params: [{ name: 'x', type: 'any' }],
+    returnType: 'string',
+    description: 'Returns the type affinity of x (null, integer, real, text, blob)',
+  },
+  likelihood: {
+    name: 'likelihood',
+    params: [
+      { name: 'x', type: 'any' },
+      { name: 'p', type: 'number' },
+    ],
+    returnType: 'any',
+    description: 'Returns x with probability p that x is true (optimizer hint)',
+  },
+  likely: {
+    name: 'likely',
+    params: [{ name: 'x', type: 'any' }],
+    returnType: 'any',
+    description: 'Returns x, hinting it is probably true',
+  },
+  unlikely: {
+    name: 'unlikely',
+    params: [{ name: 'x', type: 'any' }],
+    returnType: 'any',
+    description: 'Returns x, hinting it is probably false',
   },
 };

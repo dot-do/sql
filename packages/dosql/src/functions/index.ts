@@ -87,6 +87,12 @@ export {
   unicode,
   like,
   glob,
+  soundex,
+  reverse,
+  lpad,
+  rpad,
+  repeat,
+  space,
 
   // Registry data
   stringFunctions,
@@ -129,6 +135,10 @@ export {
   ifnull,
   coalesce,
   iif,
+  typeof_fn,
+  likelihood,
+  likely,
+  unlikely,
 
   // Registry data
   mathFunctions,

@@ -445,6 +445,169 @@ export function glob(pattern: SqlValue, x: SqlValue): SqlValue {
   return safeGlobMatch(str, pat, false);
 }
 
+/**
+ * soundex(x) - Returns the Soundex phonetic encoding of string x
+ * Returns a 4-character code: first letter followed by 3 digits
+ * Returns '?000' for empty/invalid input
+ *
+ * American Soundex algorithm:
+ * 1. Retain first letter
+ * 2. Replace consonants with digits (after first letter)
+ * 3. Remove vowels, H, W, Y (they don't count but also don't separate)
+ * 4. Remove duplicate adjacent digits
+ * 5. Return first 4 characters, padded with zeros
+ */
+export function soundex(x: SqlValue): SqlValue {
+  if (x === null) return null;
+
+  const str = String(x).toUpperCase();
+  if (str.length === 0) return '?000';
+
+  // Find first letter
+  let firstLetter = '';
+  let startIndex = 0;
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] >= 'A' && str[i] <= 'Z') {
+      firstLetter = str[i];
+      startIndex = i + 1;
+      break;
+    }
+  }
+
+  if (!firstLetter) return '?000';
+
+  // Soundex digit mapping
+  const getCode = (c: string): string => {
+    switch (c) {
+      case 'B': case 'F': case 'P': case 'V':
+        return '1';
+      case 'C': case 'G': case 'J': case 'K': case 'Q': case 'S': case 'X': case 'Z':
+        return '2';
+      case 'D': case 'T':
+        return '3';
+      case 'L':
+        return '4';
+      case 'M': case 'N':
+        return '5';
+      case 'R':
+        return '6';
+      case 'A': case 'E': case 'I': case 'O': case 'U':
+        return '0'; // Vowels are "code 0" - they don't produce digits but DO separate adjacent consonants
+      case 'H': case 'W':
+        return ''; // H and W are ignored completely (don't separate)
+      default:
+        return ''; // Y and others are ignored
+    }
+  };
+
+  let result = firstLetter;
+  let prevCode = getCode(firstLetter);
+
+  for (let i = startIndex; i < str.length && result.length < 4; i++) {
+    const c = str[i];
+    if (c < 'A' || c > 'Z') continue;
+
+    const code = getCode(c);
+
+    // H and W are completely ignored (empty code)
+    if (code === '') continue;
+
+    // Vowels (code '0') reset the previous code but don't add a digit
+    if (code === '0') {
+      prevCode = '0';
+      continue;
+    }
+
+    // Only add digit if different from previous
+    if (code !== prevCode) {
+      result += code;
+    }
+    prevCode = code;
+  }
+
+  // Pad with zeros
+  return result.padEnd(4, '0');
+}
+
+/**
+ * reverse(x) - Returns the string x with characters in reverse order
+ */
+export function reverse(x: SqlValue): SqlValue {
+  if (x === null) return null;
+  // Use Array.from to handle Unicode correctly
+  return Array.from(String(x)).reverse().join('');
+}
+
+/**
+ * lpad(x, len, pad) - Left-pad string x to length len with pad characters
+ */
+export function lpad(x: SqlValue, len: SqlValue, pad?: SqlValue): SqlValue {
+  if (x === null || len === null) return null;
+
+  const str = String(x);
+  const targetLen = Math.floor(Number(len));
+  if (isNaN(targetLen) || targetLen < 0) return null;
+
+  if (str.length >= targetLen) return str.slice(0, targetLen);
+
+  const padStr = pad !== undefined && pad !== null ? String(pad) : ' ';
+  if (padStr.length === 0) return str;
+
+  const needed = targetLen - str.length;
+  const fullPads = Math.floor(needed / padStr.length);
+  const remainder = needed % padStr.length;
+
+  return padStr.repeat(fullPads) + padStr.slice(0, remainder) + str;
+}
+
+/**
+ * rpad(x, len, pad) - Right-pad string x to length len with pad characters
+ */
+export function rpad(x: SqlValue, len: SqlValue, pad?: SqlValue): SqlValue {
+  if (x === null || len === null) return null;
+
+  const str = String(x);
+  const targetLen = Math.floor(Number(len));
+  if (isNaN(targetLen) || targetLen < 0) return null;
+
+  if (str.length >= targetLen) return str.slice(0, targetLen);
+
+  const padStr = pad !== undefined && pad !== null ? String(pad) : ' ';
+  if (padStr.length === 0) return str;
+
+  const needed = targetLen - str.length;
+  const fullPads = Math.floor(needed / padStr.length);
+  const remainder = needed % padStr.length;
+
+  return str + padStr.repeat(fullPads) + padStr.slice(0, remainder);
+}
+
+/**
+ * repeat(x, n) - Returns string x repeated n times
+ */
+export function repeat(x: SqlValue, n: SqlValue): SqlValue {
+  if (x === null || n === null) return null;
+
+  const str = String(x);
+  const count = Math.floor(Number(n));
+  if (isNaN(count) || count < 0) return null;
+  if (count === 0) return '';
+
+  return str.repeat(count);
+}
+
+/**
+ * space(n) - Returns a string of n space characters
+ */
+export function space(n: SqlValue): SqlValue {
+  if (n === null) return null;
+
+  const count = Math.floor(Number(n));
+  if (isNaN(count) || count < 0) return null;
+
+  return ' '.repeat(count);
+}
+
 // =============================================================================
 // FUNCTION SIGNATURES FOR REGISTRY
 // =============================================================================
@@ -471,6 +634,12 @@ export const stringFunctions: Record<string, SqlFunction> = {
   unicode: { fn: unicode, minArgs: 1, maxArgs: 1 },
   like: { fn: like, minArgs: 2, maxArgs: 3 },
   glob: { fn: glob, minArgs: 2, maxArgs: 2 },
+  soundex: { fn: soundex, minArgs: 1, maxArgs: 1 },
+  reverse: { fn: reverse, minArgs: 1, maxArgs: 1 },
+  lpad: { fn: lpad, minArgs: 2, maxArgs: 3 },
+  rpad: { fn: rpad, minArgs: 2, maxArgs: 3 },
+  repeat: { fn: repeat, minArgs: 2, maxArgs: 2 },
+  space: { fn: space, minArgs: 1, maxArgs: 1 },
 };
 
 export const stringSignatures: Record<string, FunctionSignature> = {
@@ -583,5 +752,52 @@ export const stringSignatures: Record<string, FunctionSignature> = {
     params: [{ name: 'n', type: 'number' }],
     returnType: 'bytes',
     description: 'Returns a blob of n zero bytes',
+  },
+  soundex: {
+    name: 'soundex',
+    params: [{ name: 'x', type: 'string' }],
+    returnType: 'string',
+    description: 'Returns the Soundex phonetic encoding of string x',
+  },
+  reverse: {
+    name: 'reverse',
+    params: [{ name: 'x', type: 'string' }],
+    returnType: 'string',
+    description: 'Returns the string x with characters in reverse order',
+  },
+  lpad: {
+    name: 'lpad',
+    params: [
+      { name: 'x', type: 'string' },
+      { name: 'len', type: 'number' },
+      { name: 'pad', type: 'string', optional: true },
+    ],
+    returnType: 'string',
+    description: 'Left-pad string x to length len with pad characters',
+  },
+  rpad: {
+    name: 'rpad',
+    params: [
+      { name: 'x', type: 'string' },
+      { name: 'len', type: 'number' },
+      { name: 'pad', type: 'string', optional: true },
+    ],
+    returnType: 'string',
+    description: 'Right-pad string x to length len with pad characters',
+  },
+  repeat: {
+    name: 'repeat',
+    params: [
+      { name: 'x', type: 'string' },
+      { name: 'n', type: 'number' },
+    ],
+    returnType: 'string',
+    description: 'Returns string x repeated n times',
+  },
+  space: {
+    name: 'space',
+    params: [{ name: 'n', type: 'number' }],
+    returnType: 'string',
+    description: 'Returns a string of n space characters',
   },
 };
