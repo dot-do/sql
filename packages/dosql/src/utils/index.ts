@@ -184,6 +184,8 @@ export {
   isFunction,
   isNullish,
   isDefined,
+  isNull,
+  isUndefined,
 
   // Casting helpers
   asRecord,
@@ -199,6 +201,7 @@ export {
   // SQL value guards
   isSqlValue,
   isRow,
+  isQueryResult,
 
   // Utility types
   type RecordWithRequired,
@@ -206,4 +209,5 @@ export {
   type PartialRecord,
   type SqlValue as TypeGuardSqlValue,
   type Row,
+  type QueryResult as TypeGuardQueryResult,
 } from './type-guards.js';

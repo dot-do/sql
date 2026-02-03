@@ -46,6 +46,8 @@ import {
   isFunction,
   isNullish,
   isDefined,
+  isNull,
+  isUndefined,
   asRecord,
   asRecordOrThrow,
   asArray,
@@ -55,6 +57,7 @@ import {
   setProperty,
   isSqlValue,
   isRow,
+  isQueryResult,
 } from '../type-guards.js';
 
 describe('type-guards', () => {
@@ -472,6 +475,26 @@ describe('type-guards', () => {
     });
   });
 
+  describe('isNull', () => {
+    it('should check for null', () => {
+      expect(isNull(null)).toBe(true);
+      expect(isNull(undefined)).toBe(false);
+      expect(isNull(0)).toBe(false);
+      expect(isNull('')).toBe(false);
+      expect(isNull(false)).toBe(false);
+    });
+  });
+
+  describe('isUndefined', () => {
+    it('should check for undefined', () => {
+      expect(isUndefined(undefined)).toBe(true);
+      expect(isUndefined(null)).toBe(false);
+      expect(isUndefined(0)).toBe(false);
+      expect(isUndefined('')).toBe(false);
+      expect(isUndefined(false)).toBe(false);
+    });
+  });
+
   // ============================================================================
   // Casting Helpers
   // ============================================================================
@@ -572,6 +595,50 @@ describe('type-guards', () => {
     it('should return false for non-objects', () => {
       expect(isRow(null)).toBe(false);
       expect(isRow([])).toBe(false);
+    });
+  });
+
+  describe('isQueryResult', () => {
+    it('should validate query result objects', () => {
+      expect(isQueryResult({ rows: [] })).toBe(true);
+      expect(isQueryResult({ rows: [{ id: 1 }] })).toBe(true);
+      expect(isQueryResult({ rows: [], rowsAffected: 5 })).toBe(true);
+      expect(isQueryResult({ rows: [], columns: [{ name: 'id', type: 'integer' }] })).toBe(true);
+      expect(isQueryResult({
+        rows: [{ id: 1, name: 'test' }],
+        rowsAffected: 1,
+        columns: [
+          { name: 'id', type: 'integer' },
+          { name: 'name', type: 'text' }
+        ]
+      })).toBe(true);
+    });
+
+    it('should return false for missing rows property', () => {
+      expect(isQueryResult({})).toBe(false);
+      expect(isQueryResult({ rowsAffected: 5 })).toBe(false);
+    });
+
+    it('should return false for invalid rows', () => {
+      expect(isQueryResult({ rows: 'not array' })).toBe(false);
+      expect(isQueryResult({ rows: null })).toBe(false);
+    });
+
+    it('should return false for invalid rowsAffected', () => {
+      expect(isQueryResult({ rows: [], rowsAffected: 'five' })).toBe(false);
+    });
+
+    it('should return false for invalid columns', () => {
+      expect(isQueryResult({ rows: [], columns: 'not array' })).toBe(false);
+      expect(isQueryResult({ rows: [], columns: [{ name: 'id' }] })).toBe(false); // missing type
+      expect(isQueryResult({ rows: [], columns: [{ type: 'integer' }] })).toBe(false); // missing name
+      expect(isQueryResult({ rows: [], columns: ['id'] })).toBe(false); // not objects
+    });
+
+    it('should return false for non-objects', () => {
+      expect(isQueryResult(null)).toBe(false);
+      expect(isQueryResult([])).toBe(false);
+      expect(isQueryResult('result')).toBe(false);
     });
   });
 });

@@ -381,6 +381,20 @@ export function isDefined<T>(value: T | null | undefined): value is T {
   return value !== null && value !== undefined;
 }
 
+/**
+ * Type guard for null values
+ */
+export function isNull(value: unknown): value is null {
+  return value === null;
+}
+
+/**
+ * Type guard for undefined values
+ */
+export function isUndefined(value: unknown): value is undefined {
+  return value === undefined;
+}
+
 // =============================================================================
 // CASTING HELPERS (with validation)
 // =============================================================================
@@ -474,6 +488,37 @@ export function isRow(value: unknown): value is Row {
   if (!isObject(value)) return false;
   for (const val of Object.values(value)) {
     if (!isSqlValue(val)) return false;
+  }
+  return true;
+}
+
+/**
+ * Query result type
+ */
+export interface QueryResult<T = Row> {
+  rows: T[];
+  rowsAffected?: number | undefined;
+  columns?: { name: string; type: string }[] | undefined;
+}
+
+/**
+ * Type guard for QueryResult type
+ */
+export function isQueryResult<T = Row>(value: unknown): value is QueryResult<T> {
+  if (!isObject(value)) return false;
+  if (!hasArrayProperty(value, 'rows')) return false;
+  // rowsAffected is optional, but if present must be a number
+  if ('rowsAffected' in value && value.rowsAffected !== undefined) {
+    if (typeof value.rowsAffected !== 'number') return false;
+  }
+  // columns is optional, but if present must be an array
+  if ('columns' in value && value.columns !== undefined) {
+    if (!isArray(value.columns)) return false;
+    for (const col of value.columns) {
+      if (!isObject(col)) return false;
+      if (!hasStringProperty(col, 'name')) return false;
+      if (!hasStringProperty(col, 'type')) return false;
+    }
   }
   return true;
 }
