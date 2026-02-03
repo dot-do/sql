@@ -661,7 +661,7 @@ export interface R2IndexHeaderReadResult {
 /**
  * Result of a section read operation
  */
-export interface R2IndexSectionReadResult<T> {
+export interface R2IndexSectionReadResult<T extends Record<string, unknown>> {
   /** Parsed section data */
   data: T;
 

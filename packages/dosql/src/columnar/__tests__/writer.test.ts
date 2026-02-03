@@ -13,13 +13,13 @@ import { describe, it, expect } from 'vitest';
 
 import { ColumnarWriter, writeColumnar, inferSchema } from '../writer.js';
 import { serializeRowGroup, deserializeRowGroup } from '../chunk.js';
-import type { ColumnarTableSchema, FSXInterface, RowGroup, Encoding } from '../types.js';
+import type { ColumnarTableSchema, StorageInterface, RowGroup, Encoding } from '../types.js';
 
 // ============================================================================
 // TEST FIXTURES
 // ============================================================================
 
-function createInMemoryFSX(): FSXInterface & { store: Map<string, Uint8Array> } {
+function createInMemoryFSX(): StorageInterface & { store: Map<string, Uint8Array> } {
   const store = new Map<string, Uint8Array>();
   return {
     store,

@@ -680,10 +680,10 @@ describe('DeadlockDetector', () => {
 
   describe('Deadlock Callback', () => {
     it('should call onDeadlock callback', () => {
-      const callback = vi.fn();
+      const callbackArgs: unknown[] = [];
       const detector = new DeadlockDetector({
         enabled: true,
-        onDeadlock: callback,
+        onDeadlock: (info: unknown) => { callbackArgs.push(info); },
       });
 
       detector.registerTransaction('txn1');
@@ -694,12 +694,10 @@ describe('DeadlockDetector', () => {
 
       detector.checkDeadlock('txn2');
 
-      expect(callback).toHaveBeenCalledWith(
-        expect.objectContaining({
-          victimTxnId: expect.any(String),
-          cycle: expect.any(Array),
-        })
-      );
+      expect(callbackArgs.length).toBeGreaterThan(0);
+      const info = callbackArgs[0] as { victimTxnId: string; cycle: unknown[] };
+      expect(typeof info.victimTxnId).toBe('string');
+      expect(Array.isArray(info.cycle)).toBe(true);
     });
   });
 

@@ -23,6 +23,7 @@ import {
   detectStatementType,
   type ParseResult,
   type StatementType,
+  type ExplainStatement,
 } from '../parser/unified.js';
 import {
   explain,
@@ -113,7 +114,7 @@ describe('EXPLAIN Parsing', () => {
       if (result.success) {
         expect(result.statementType).toBe('EXPLAIN');
         expect(result.ast.type).toBe('explain');
-        expect((result.ast as any).statement.type).toBe('select');
+        expect((result.ast as ExplainStatement).statement.type).toBe('select');
       }
     });
 
@@ -145,7 +146,7 @@ describe('EXPLAIN Parsing', () => {
       if (result.success) {
         expect(result.statementType).toBe('EXPLAIN');
         expect(result.ast.type).toBe('explain');
-        expect((result.ast as any).queryPlan).toBe(true);
+        expect((result.ast as ExplainStatement).queryPlan).toBe(true);
       }
     });
 
@@ -164,7 +165,7 @@ describe('EXPLAIN Parsing', () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.statementType).toBe('EXPLAIN');
-        expect((result.ast as any).queryPlan).toBe(true);
+        expect((result.ast as ExplainStatement).queryPlan).toBe(true);
       }
     });
   });
@@ -176,7 +177,7 @@ describe('EXPLAIN Parsing', () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.statementType).toBe('EXPLAIN');
-        expect((result.ast as any).analyze).toBe(true);
+        expect((result.ast as ExplainStatement).analyze).toBe(true);
       }
     });
   });
@@ -188,7 +189,7 @@ describe('EXPLAIN Parsing', () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.statementType).toBe('EXPLAIN');
-        expect((result.ast as any).statement.type).toBe('insert');
+        expect((result.ast as ExplainStatement).statement.type).toBe('insert');
       }
     });
 
@@ -198,7 +199,7 @@ describe('EXPLAIN Parsing', () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.statementType).toBe('EXPLAIN');
-        expect((result.ast as any).statement.type).toBe('update');
+        expect((result.ast as ExplainStatement).statement.type).toBe('update');
       }
     });
 
@@ -208,7 +209,7 @@ describe('EXPLAIN Parsing', () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.statementType).toBe('EXPLAIN');
-        expect((result.ast as any).statement.type).toBe('delete');
+        expect((result.ast as ExplainStatement).statement.type).toBe('delete');
       }
     });
   });
@@ -553,7 +554,7 @@ describe('EXPLAIN Statement AST Types', () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      const ast = result.ast as any;
+      const ast = result.ast as ExplainStatement;
       expect(ast.type).toBe('explain');
       expect(ast.queryPlan).toBeFalsy();
       expect(ast.analyze).toBeFalsy();
@@ -566,7 +567,7 @@ describe('EXPLAIN Statement AST Types', () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      const ast = result.ast as any;
+      const ast = result.ast as ExplainStatement;
       expect(ast.type).toBe('explain');
       expect(ast.queryPlan).toBe(true);
       expect(ast.statement).toBeDefined();
@@ -578,7 +579,7 @@ describe('EXPLAIN Statement AST Types', () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      const ast = result.ast as any;
+      const ast = result.ast as ExplainStatement;
       expect(ast.type).toBe('explain');
       expect(ast.analyze).toBe(true);
       expect(ast.statement).toBeDefined();
@@ -590,7 +591,7 @@ describe('EXPLAIN Statement AST Types', () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      const ast = result.ast as any;
+      const ast = result.ast as ExplainStatement;
       const stmt = ast.statement;
 
       expect(stmt.type).toBe('select');

@@ -87,9 +87,11 @@ describe('Transaction Manager', () => {
 
       const context = await manager.begin();
 
-      expect(context).toBeDefined();
-      expect(context.txnId).toBeTruthy();
-      expect(context.state).toBe(TransactionState.ACTIVE);
+      expect(context).toMatchObject({
+        state: TransactionState.ACTIVE,
+      });
+      expect(typeof context.txnId).toBe('string');
+      expect(context.txnId.length).toBeGreaterThan(0);
       expect(manager.isActive()).toBe(true);
       expect(manager.getState()).toBe(TransactionState.ACTIVE);
     });

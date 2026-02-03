@@ -46,11 +46,10 @@ import type { RPCSessionState } from './test-utils.js';
 /**
  * WebSocket attachment data structure
  */
-interface WebSocketAttachment {
+type WebSocketAttachment = {
   sessionId?: string;
   authenticatedAt?: number;
-  [key: string]: unknown;
-}
+} & Record<string, unknown>;
 
 interface MockWebSocket {
   id: string;

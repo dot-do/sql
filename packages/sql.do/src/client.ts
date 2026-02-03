@@ -669,6 +669,29 @@ export class DoSQLClient implements SQLClient {
   }
 
   // ===========================================================================
+  // Public Properties
+  // ===========================================================================
+
+  /**
+   * Returns the configured URL for this client.
+   *
+   * Consistent with lake.do's `url` property for unified API surface.
+   *
+   * @example
+   * ```typescript
+   * const client = createSQLClient({ url: 'https://sql.example.com' });
+   * console.log(client.url); // 'https://sql.example.com'
+   * ```
+   *
+   * @public
+   * @readonly
+   * @since 0.5.0
+   */
+  get url(): string {
+    return this.config.url;
+  }
+
+  // ===========================================================================
   // Configuration Access
   // ===========================================================================
 
@@ -854,6 +877,37 @@ export class DoSQLClient implements SQLClient {
    */
   off<K extends keyof ClientEventMap>(event: K, listener: ClientEventListener<K>): this {
     this.eventListeners[event].delete(listener);
+    return this;
+  }
+
+  /**
+   * Registers a one-time event listener.
+   *
+   * The listener will be called at most once for the next occurrence of the event,
+   * then automatically removed. Returns `this` for method chaining.
+   *
+   * Consistent with lake.do's `once()` method.
+   *
+   * @param event - The event name to listen for
+   * @param listener - The callback function to invoke when the event occurs
+   * @returns The client instance (for chaining)
+   *
+   * @example
+   * ```typescript
+   * client.once('connected', (event) => {
+   *   console.log('First connection established!');
+   * });
+   * ```
+   *
+   * @public
+   * @since 0.5.0
+   */
+  once<K extends keyof ClientEventMap>(event: K, listener: ClientEventListener<K>): this {
+    const wrapper = ((data: ClientEventMap[K]) => {
+      this.off(event, wrapper as ClientEventListener<K>);
+      listener(data);
+    }) as ClientEventListener<K>;
+    this.on(event, wrapper);
     return this;
   }
 
@@ -1635,6 +1689,27 @@ export class DoSQLClient implements SQLClient {
       this.ws.close();
       this.ws = null;
     }
+  }
+
+  /**
+   * Closes the client connection.
+   *
+   * Alias for {@link close}. Consistent with lake.do's `disconnect()` method
+   * for unified API surface across both clients.
+   *
+   * @returns Resolves when the connection is fully closed
+   *
+   * @example
+   * ```typescript
+   * await client.disconnect();
+   * console.log(client.isConnected()); // false
+   * ```
+   *
+   * @public
+   * @since 0.5.0
+   */
+  async disconnect(): Promise<void> {
+    return this.close();
   }
 
   // ===========================================================================

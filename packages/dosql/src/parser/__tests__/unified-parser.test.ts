@@ -215,7 +215,8 @@ describe('Unified SQL Parser', () => {
       // Document current behavior - recursive CTEs may not parse fully
       // This is a known gap that would need enhancement
       if (!result.success) {
-        expect(result.error.message).toBeTruthy();
+        expect(typeof result.error.message).toBe('string');
+        expect(result.error.message.length).toBeGreaterThan(0);
       } else {
         expect(result.statementType).toBe('SELECT');
       }
@@ -231,7 +232,8 @@ describe('Unified SQL Parser', () => {
 
       // Document current behavior
       if (!result.success) {
-        expect(result.error.message).toBeTruthy();
+        expect(typeof result.error.message).toBe('string');
+        expect(result.error.message.length).toBeGreaterThan(0);
       } else {
         expect(result.statementType).toBe('SELECT');
       }
@@ -355,7 +357,8 @@ describe('Unified SQL Parser', () => {
 
       // Document current behavior - window functions may not parse
       if (!result.success) {
-        expect(result.error.message).toBeTruthy();
+        expect(typeof result.error.message).toBe('string');
+        expect(result.error.message.length).toBeGreaterThan(0);
       } else {
         expect(result.statementType).toBe('SELECT');
       }
@@ -373,7 +376,8 @@ describe('Unified SQL Parser', () => {
       const result = parseSQL(sql);
 
       if (!result.success) {
-        expect(result.error.message).toBeTruthy();
+        expect(typeof result.error.message).toBe('string');
+        expect(result.error.message.length).toBeGreaterThan(0);
       } else {
         expect(result.statementType).toBe('SELECT');
       }
@@ -393,7 +397,8 @@ describe('Unified SQL Parser', () => {
       const result = parseSQL(sql);
 
       if (!result.success) {
-        expect(result.error.message).toBeTruthy();
+        expect(typeof result.error.message).toBe('string');
+        expect(result.error.message.length).toBeGreaterThan(0);
       } else {
         expect(result.statementType).toBe('SELECT');
       }
@@ -412,7 +417,8 @@ describe('Unified SQL Parser', () => {
 
       // Named windows with WINDOW clause may not be supported
       if (!result.success) {
-        expect(result.error.message).toBeTruthy();
+        expect(typeof result.error.message).toBe('string');
+        expect(result.error.message.length).toBeGreaterThan(0);
       } else {
         expect(result.statementType).toBe('SELECT');
       }
@@ -864,7 +870,8 @@ describe('Unified SQL Parser', () => {
 
       // Document current behavior - complex queries may have limitations
       if (!result.success) {
-        expect(result.error.message).toBeTruthy();
+        expect(typeof result.error.message).toBe('string');
+        expect(result.error.message.length).toBeGreaterThan(0);
       } else {
         expect(result.statementType).toBe('SELECT');
       }

@@ -28,98 +28,98 @@ export type Expression =
  * Literal value expression
  */
 export interface LiteralExpression {
-  type: 'literal';
-  value: string | number | boolean | null;
+  readonly type: 'literal';
+  readonly value: string | number | boolean | null;
   /** Original string representation */
-  raw: string;
+  readonly raw: string;
 }
 
 /**
  * Column reference (possibly qualified with table name)
  */
 export interface ColumnReference {
-  type: 'column';
+  readonly type: 'column';
   /** Column name */
-  name: string;
+  readonly name: string;
   /** Table name or alias (optional) */
-  table?: string | undefined;
+  readonly table?: string | undefined;
   /** Schema name (optional, for schema.table.column syntax) */
-  schema?: string | undefined;
+  readonly schema?: string | undefined;
 }
 
 /**
  * Function call expression
  */
 export interface FunctionCall {
-  type: 'function';
-  name: string;
-  args: Expression[];
+  readonly type: 'function';
+  readonly name: string;
+  readonly args: readonly Expression[];
   /** Whether DISTINCT is used (e.g., COUNT(DISTINCT x)) */
-  distinct?: boolean | undefined;
+  readonly distinct?: boolean | undefined;
   /** Whether this function has an OVER clause (window function) */
-  hasOver?: boolean | undefined;
+  readonly hasOver?: boolean | undefined;
 }
 
 /**
  * Binary operation (e.g., a + b, x = y, a AND b)
  */
 export interface BinaryExpression {
-  type: 'binary';
-  operator: BinaryOperator;
-  left: Expression;
-  right: Expression;
+  readonly type: 'binary';
+  readonly operator: BinaryOperator;
+  readonly left: Expression;
+  readonly right: Expression;
 }
 
 /**
  * Unary operation (e.g., NOT x, -y)
  */
 export interface UnaryExpression {
-  type: 'unary';
-  operator: UnaryOperator;
-  operand: Expression;
+  readonly type: 'unary';
+  readonly operator: UnaryOperator;
+  readonly operand: Expression;
 }
 
 /**
  * Subquery as expression
  */
 export interface SubqueryExpression {
-  type: 'subquery';
-  query: string; // For now, keep as string; can be parsed recursively
+  readonly type: 'subquery';
+  readonly query: string; // For now, keep as string; can be parsed recursively
 }
 
 /**
  * CASE expression
  */
 export interface CaseExpression {
-  type: 'case';
-  operand?: Expression | undefined;
-  when: Array<{ condition: Expression; result: Expression }>;
-  else?: Expression | undefined;
+  readonly type: 'case';
+  readonly operand?: Expression | undefined;
+  readonly when: ReadonlyArray<{ readonly condition: Expression; readonly result: Expression }>;
+  readonly else?: Expression | undefined;
 }
 
 /**
  * NULL expression
  */
 export interface NullExpression {
-  type: 'null';
+  readonly type: 'null';
 }
 
 /**
  * DEFAULT expression (used in INSERT to indicate default value)
  */
 export interface DefaultExpression {
-  type: 'default';
+  readonly type: 'default';
 }
 
 /**
  * Parameter placeholder (? or :name or $n)
  */
 export interface ParameterExpression {
-  type: 'parameter';
+  readonly type: 'parameter';
   /** Parameter index (for ?) or name (for :name/$name) */
-  name: string | number;
+  readonly name: string | number;
   /** Original representation */
-  raw: string;
+  readonly raw: string;
 }
 
 /**
@@ -490,33 +490,33 @@ export type DMLStatement =
  * Successful parse result
  */
 export interface ParseSuccess<T extends DMLStatement> {
-  success: true;
-  statement: T;
+  readonly success: true;
+  readonly statement: T;
   /** Remaining unparsed input (should be empty for valid SQL) */
-  remaining: string;
+  readonly remaining: string;
 }
 
 /**
  * Failed parse result with enhanced location information
  */
 export interface ParseError {
-  success: false;
+  readonly success: false;
   /** Error message */
-  error: string;
+  readonly error: string;
   /** Character offset where error occurred (0-indexed) */
-  position: number;
+  readonly position: number;
   /** The input that caused the error */
-  input: string;
+  readonly input: string;
   /** Line number (1-indexed) */
-  line?: number;
+  readonly line?: number;
   /** Column number (1-indexed) */
-  column?: number;
+  readonly column?: number;
   /** The problematic token (if available) */
-  token?: string;
+  readonly token?: string;
   /** Expected token(s) (if available) */
-  expected?: string;
+  readonly expected?: string;
   /** Suggestion for fix (if available) */
-  suggestion?: string;
+  readonly suggestion?: string;
 }
 
 /**

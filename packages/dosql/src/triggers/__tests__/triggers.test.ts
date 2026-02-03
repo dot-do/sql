@@ -28,7 +28,6 @@ import {
   createTriggerRegistry,
 } from '../registry.js';
 import {
-  createTriggerExecutor,
   createSimpleTriggerExecutor,
 } from '../executor.js';
 import type {

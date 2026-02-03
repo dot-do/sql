@@ -42,6 +42,37 @@ class TestSink implements LogSink {
   }
 }
 
+/**
+ * Captures console output without using vi.fn() mocking.
+ * Returns an object that intercepts console method calls.
+ */
+function captureConsole(method: 'log' | 'warn' | 'error' = 'log') {
+  const captured: unknown[][] = [];
+  const original = console[method];
+  console[method] = (...args: unknown[]) => { captured.push(args); };
+  return {
+    captured,
+    restore: () => { console[method] = original; },
+  };
+}
+
+/**
+ * Creates a recording function that tracks all calls and their arguments.
+ * Replaces vi.fn() with a real implementation that implements the callback interface.
+ */
+function createCallRecorder<T extends unknown[], R = void>(
+  impl?: (...args: T) => R,
+): ((...args: T) => R) & { calls: T[]; callCount: number } {
+  const calls: T[] = [];
+  const fn = ((...args: T) => {
+    calls.push(args);
+    return impl ? impl(...args) : (undefined as R);
+  }) as ((...args: T) => R) & { calls: T[]; callCount: number };
+  Object.defineProperty(fn, 'calls', { get: () => calls });
+  Object.defineProperty(fn, 'callCount', { get: () => calls.length });
+  return fn;
+}
+
 // =============================================================================
 // Logger Creation Tests
 // =============================================================================
@@ -50,7 +81,7 @@ describe('createLogger', () => {
   it('should create a logger with default configuration', () => {
     const logger = createLogger();
 
-    expect(logger).toBeDefined();
+    expect(logger).toHaveProperty('debug');
     expect(logger.debug).toBeTypeOf('function');
     expect(logger.info).toBeTypeOf('function');
     expect(logger.warn).toBeTypeOf('function');
@@ -100,7 +131,7 @@ describe('createLogger', () => {
 
     logger.info('Test message');
 
-    expect(sink.entries[0].traceId).toBeDefined();
+    expect(typeof sink.entries[0].traceId).toBe('string');
     expect(sink.entries[0].traceId.length).toBeGreaterThan(0);
   });
 
@@ -255,7 +286,7 @@ describe('Context Handling', () => {
       logger.info('Message', { data: circular });
     }).not.toThrow();
 
-    expect(sink.entries[0].context?.data).toBeDefined();
+    expect(sink.entries[0].context).toHaveProperty('data');
   });
 });
 
@@ -271,9 +302,10 @@ describe('Error Logging', () => {
     const error = new Error('Test error');
     logger.error('An error occurred', error);
 
-    expect(sink.entries[0].error).toBeDefined();
-    expect(sink.entries[0].error?.name).toBe('Error');
-    expect(sink.entries[0].error?.message).toBe('Test error');
+    expect(sink.entries[0].error).toMatchObject({
+      name: 'Error',
+      message: 'Test error',
+    });
   });
 
   it('should include error stack trace by default', () => {
@@ -283,7 +315,7 @@ describe('Error Logging', () => {
     const error = new Error('Test error');
     logger.error('An error occurred', error);
 
-    expect(sink.entries[0].error?.stack).toBeDefined();
+    expect(typeof sink.entries[0].error?.stack).toBe('string');
   });
 
   it('should exclude stack traces when disabled', () => {
@@ -441,41 +473,47 @@ describe('withTraceId', () => {
 
 describe('ConsoleSink', () => {
   it('should write to console', () => {
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const sink = new ConsoleSink({});
+    const capture = captureConsole('log');
+    try {
+      const sink = new ConsoleSink({});
 
-    sink.write({
-      timestamp: '2024-01-01T00:00:00.000Z',
-      level: 'info',
-      message: 'Test',
-      traceId: 'trace',
-    });
+      sink.write({
+        timestamp: '2024-01-01T00:00:00.000Z',
+        level: 'info',
+        message: 'Test',
+        traceId: 'trace',
+      });
 
-    expect(consoleSpy).toHaveBeenCalled();
-    consoleSpy.mockRestore();
+      expect(capture.captured.length).toBeGreaterThan(0);
+    } finally {
+      capture.restore();
+    }
   });
 
   it('should pretty print when enabled', () => {
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const sink = new ConsoleSink({ prettyPrint: true });
+    const capture = captureConsole('log');
+    try {
+      const sink = new ConsoleSink({ prettyPrint: true });
 
-    sink.write({
-      timestamp: '2024-01-01T00:00:00.000Z',
-      level: 'info',
-      message: 'Test',
-      traceId: 'trace',
-    });
+      sink.write({
+        timestamp: '2024-01-01T00:00:00.000Z',
+        level: 'info',
+        message: 'Test',
+        traceId: 'trace',
+      });
 
-    const output = consoleSpy.mock.calls[0][0];
-    expect(output).toContain('\n'); // Pretty printed JSON contains newlines
-    consoleSpy.mockRestore();
+      const output = capture.captured[0][0] as string;
+      expect(output).toContain('\n'); // Pretty printed JSON contains newlines
+    } finally {
+      capture.restore();
+    }
   });
 });
 
 describe('JsonSink', () => {
   it('should call write function with JSON', () => {
-    const writeFn = vi.fn();
-    const sink = new JsonSink({ write: writeFn });
+    const writtenValues: string[] = [];
+    const sink = new JsonSink({ write: (val: string) => { writtenValues.push(val); } });
 
     const entry: LogEntry = {
       timestamp: '2024-01-01T00:00:00.000Z',
@@ -485,7 +523,8 @@ describe('JsonSink', () => {
     };
     sink.write(entry);
 
-    expect(writeFn).toHaveBeenCalledWith(JSON.stringify(entry));
+    expect(writtenValues).toHaveLength(1);
+    expect(writtenValues[0]).toBe(JSON.stringify(entry));
   });
 });
 
@@ -543,16 +582,16 @@ describe('MultiSink', () => {
   });
 
   it('should flush all sinks', async () => {
-    const flush1 = vi.fn();
-    const flush2 = vi.fn();
-    const sink1: LogSink = { write() {}, flush: flush1 };
-    const sink2: LogSink = { write() {}, flush: flush2 };
+    let flush1Called = false;
+    let flush2Called = false;
+    const sink1: LogSink = { write() {}, flush: () => { flush1Called = true; } };
+    const sink2: LogSink = { write() {}, flush: () => { flush2Called = true; } };
     const multi = new MultiSink([sink1, sink2]);
 
     await multi.flush();
 
-    expect(flush1).toHaveBeenCalled();
-    expect(flush2).toHaveBeenCalled();
+    expect(flush1Called).toBe(true);
+    expect(flush2Called).toBe(true);
   });
 });
 
@@ -791,16 +830,16 @@ describe('StandardContext', () => {
 
 describe('Logger Flush', () => {
   it('should flush underlying sink', async () => {
-    const flushFn = vi.fn();
+    let flushCalled = false;
     const sink: LogSink = {
       write() {},
-      flush: flushFn,
+      flush: () => { flushCalled = true; },
     };
     const logger = createLogger({ sink });
 
     await logger.flush();
 
-    expect(flushFn).toHaveBeenCalled();
+    expect(flushCalled).toBe(true);
   });
 
   it('should not throw if sink has no flush', async () => {

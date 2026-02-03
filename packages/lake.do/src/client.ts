@@ -265,10 +265,23 @@ export class DoLakeClient implements LakeClient {
    * @example
    * ```typescript
    * const client = createLakeClient({ url: 'https://lake.example.com' });
-   * console.log(client.isConnected); // false
+   * console.log(client.connected); // false
    * await client.connect();
-   * console.log(client.isConnected); // true
+   * console.log(client.connected); // true
    * ```
+   *
+   * @public
+   * @readonly
+   */
+  get connected(): boolean {
+    return this.connectionManager.isConnected;
+  }
+
+  /**
+   * Indicates whether the client is currently connected to the server.
+   *
+   * @description Alias property for backward compatibility.
+   * Prefer using `connected` property.
    *
    * @public
    * @readonly
@@ -291,6 +304,21 @@ export class DoLakeClient implements LakeClient {
    */
   get url(): string {
     return this.config.url;
+  }
+
+  /**
+   * Gets a read-only copy of the client configuration.
+   *
+   * Returns a frozen copy of the configuration to prevent modification.
+   * Consistent with sql.do's `getConfig()` method.
+   *
+   * @returns A frozen copy of the client configuration
+   *
+   * @public
+   * @since 0.2.0
+   */
+  getConfig(): Readonly<LakeClientConfig> {
+    return Object.freeze({ ...this.config });
   }
 
   // ===========================================================================
@@ -316,8 +344,9 @@ export class DoLakeClient implements LakeClient {
    *
    * @public
    */
-  on(event: LakeClientEventType, handler: LakeClientEventHandler): void {
+  on(event: LakeClientEventType, handler: LakeClientEventHandler): this {
     this.connectionManager.on(event, handler as ConnectionEventHandler);
+    return this;
   }
 
   /**
@@ -325,9 +354,11 @@ export class DoLakeClient implements LakeClient {
    *
    * @description Removes a previously registered callback function.
    * If the handler was not registered, this method does nothing.
+   * Returns `this` for method chaining (consistent with sql.do).
    *
    * @param event - The event type to remove the listener from
    * @param handler - The callback function to remove
+   * @returns The client instance (for chaining)
    *
    * @example
    * ```typescript
@@ -339,8 +370,9 @@ export class DoLakeClient implements LakeClient {
    *
    * @public
    */
-  off(event: LakeClientEventType, handler: LakeClientEventHandler): void {
+  off(event: LakeClientEventType, handler: LakeClientEventHandler): this {
     this.connectionManager.off(event, handler as ConnectionEventHandler);
+    return this;
   }
 
   /**
@@ -348,9 +380,11 @@ export class DoLakeClient implements LakeClient {
    *
    * @description Adds a callback function that will be called only once
    * when the specified event is emitted, then automatically removed.
+   * Returns `this` for method chaining.
    *
    * @param event - The event type to listen for
    * @param handler - The callback function to invoke when the event occurs
+   * @returns The client instance (for chaining)
    *
    * @example
    * ```typescript
@@ -361,8 +395,9 @@ export class DoLakeClient implements LakeClient {
    *
    * @public
    */
-  once(event: LakeClientEventType, handler: LakeClientEventHandler): void {
+  once(event: LakeClientEventType, handler: LakeClientEventHandler): this {
     this.connectionManager.once(event, handler as ConnectionEventHandler);
+    return this;
   }
 
   // ===========================================================================

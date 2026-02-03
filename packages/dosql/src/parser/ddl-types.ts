@@ -573,29 +573,29 @@ export type DDLStatement =
  * Successful parse result
  */
 export interface ParseSuccess<T extends DDLStatement> {
-  success: true;
-  statement: T;
+  readonly success: true;
+  readonly statement: T;
 }
 
 /**
  * Parse error with enhanced location information
  */
 export interface ParseError {
-  success: false;
+  readonly success: false;
   /** Error message */
-  error: string;
+  readonly error: string;
   /** Character offset where error occurred (0-indexed) */
-  position?: number | undefined;
+  readonly position?: number | undefined;
   /** Line number (1-indexed) */
-  line?: number | undefined;
+  readonly line?: number | undefined;
   /** Column number (1-indexed) */
-  column?: number | undefined;
+  readonly column?: number | undefined;
   /** The problematic token (if available) */
-  token?: string | undefined;
+  readonly token?: string | undefined;
   /** Expected token(s) (if available) */
-  expected?: string | undefined;
+  readonly expected?: string | undefined;
   /** Suggestion for fix (if available) */
-  suggestion?: string | undefined;
+  readonly suggestion?: string | undefined;
 }
 
 /**

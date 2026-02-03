@@ -358,3 +358,373 @@ export {
  * @since 0.1.0
  */
 export * from './virtual/index.js';
+
+// =============================================================================
+// ENGINE TYPES (experimental)
+// =============================================================================
+
+/**
+ * Core execution engine types for query plans, results, and operators.
+ *
+ * These types are used throughout the engine pipeline and are needed by
+ * consumers building custom operators, analyzing query plans, or working
+ * with query results at the engine level.
+ *
+ * @public
+ * @experimental
+ * @since 0.2.0
+ */
+export {
+  // Value types
+  type SqlValue,
+  type Row,
+
+  // Schema types
+  type ColumnDef,
+  type TableSchema as EngineTableSchema,
+  type IndexDef,
+  type Schema as EngineSchema,
+
+  // Expression types
+  type ComparisonOp,
+  type LogicalOp,
+  type ArithmeticOp,
+  type AggregateFunction,
+  type Expression,
+  type ColumnRef,
+  type Literal,
+  type BinaryExpr,
+  type UnaryExpr,
+  type FunctionCall,
+  type AggregateExpr,
+  type CaseExpr,
+  type SubqueryExpr,
+
+  // Predicate types
+  type PredicateNode,
+  type ComparisonPredicate,
+  type LogicalPredicate,
+  type BetweenPredicate,
+  type InPredicate,
+  type IsNullPredicate,
+  type Predicate as EnginePredicate,
+
+  // Query plan types
+  type DataSource,
+  type SortDirection,
+  type SortSpec,
+  type JoinType,
+  type BasePlanNode,
+  type ScanPlan,
+  type IndexLookupPlan,
+  type FilterPlan,
+  type ProjectPlan,
+  type JoinPlan,
+  type AggregatePlan,
+  type SortPlan,
+  type LimitPlan,
+  type DistinctPlan,
+  type UnionPlan,
+  type MergePlan,
+  type QueryPlan,
+
+  // Execution context types
+  type BTreeStorage,
+  type ColumnarStorage,
+  type ExecutionContext,
+  type ExecutionOptions as EngineExecutionOptions,
+
+  // Backpressure types
+  type BackpressureState as EngineBackpressureState,
+  type WatermarkConfig,
+  type BackpressureStats,
+  type BackpressureSupport,
+  type BackpressureController as EngineBackpressureController,
+  DEFAULT_WATERMARKS,
+
+  // Operator types
+  type Operator,
+  type BackpressureOperator,
+  type OperatorFactory,
+
+  // Query result types
+  type QueryResult as EngineQueryResult,
+  type ExecutionStats,
+
+  // SQL template
+  type SqlTemplate,
+  sql,
+
+  // Engine interface
+  type Engine,
+
+  // Helper functions
+  col,
+  lit,
+  nextPlanId,
+  resetPlanIds,
+} from './engine/types.js';
+
+// =============================================================================
+// ERROR TYPES (stable)
+// =============================================================================
+
+/**
+ * Unified error hierarchy for DoSQL.
+ *
+ * Provides structured error types for all subsystems including parser,
+ * planner, executor, storage, and binding errors. All errors extend
+ * the base DoSQLError class with error codes and categories.
+ *
+ * @public
+ * @stable
+ * @since 0.2.0
+ */
+export {
+  // Base error classes
+  DoSQLError,
+  AggregateDoSQLError,
+  GenericDoSQLError,
+  ErrorCategory,
+  registerErrorClass,
+  deserializeError,
+  type ErrorContext,
+  type SerializedError,
+  type ErrorLogEntry,
+
+  // Error codes
+  DatabaseErrorCode,
+  StatementErrorCode,
+  BindingErrorCode,
+  SyntaxErrorCode,
+  PlannerErrorCode,
+  ExecutorErrorCode,
+  ParserErrorCode,
+  StorageErrorCode,
+  getErrorCodeCategory,
+  isErrorCodeInCategory,
+  type DoSQLErrorCode,
+
+  // Database errors
+  DatabaseError,
+  ConnectionError,
+  ReadOnlyError,
+  createClosedDatabaseError,
+  createSavepointNotFoundError,
+
+  // Statement errors
+  StatementError,
+  PrepareError,
+  ExecuteError,
+  createFinalizedStatementError,
+  createTableNotFoundError,
+  createUnsupportedSqlError,
+
+  // Binding errors
+  BindingError,
+  MissingParameterError,
+  TypeCoercionError,
+  createMissingNamedParamError,
+  createMissingPositionalParamError,
+  createInvalidTypeError,
+  createCountMismatchError,
+  createNamedExpectedError,
+  createNonFiniteNumberError,
+  createMixedParametersError,
+  createArrayForNamedParamsError,
+
+  // Typed errors (Planner, Executor, Parser, Storage)
+  PlannerError,
+  ExecutorError,
+  ParserError,
+  StorageError,
+  createNoTablesToJoinError,
+  createJoinOrderFailedError,
+  createUnknownPlanTypeError,
+  createQueryTimeoutError,
+  createEmptySqlError,
+  createUnsupportedOperationError,
+  createInvalidSnapshotIdError,
+  createStorageReadError,
+  createStorageWriteError,
+  createCteNotMaterializedError,
+  createScalarSubqueryError,
+  createAggregateExpressionError,
+  createUnknownFunctionError,
+  createUnknownWindowFunctionError,
+  createUnknownSetOperationError,
+  createTransactionStateError,
+  createUnknownOperationError,
+  createInvalidStatementError,
+  createInvalidPageIdError,
+  createBucketNotFoundError,
+
+  // Syntax errors
+  SQLSyntaxError,
+  UnexpectedTokenError,
+  UnexpectedEOFError,
+  MissingKeywordError,
+  InvalidIdentifierError,
+  createErrorFromException,
+  createUnexpectedTokenError,
+  createUnexpectedEOFError,
+  createMissingKeywordError,
+  createInvalidIdentifierError,
+  createSyntaxError,
+  calculateLocation,
+  formatErrorSnippet,
+  getSuggestionForTypo,
+  levenshteinDistance,
+  COMMON_TYPOS,
+  type SourceLocation,
+} from './errors/index.js';
+
+/**
+ * Distributed transaction error types.
+ *
+ * Error codes and error class for distributed (cross-shard) transaction handling.
+ *
+ * @public
+ * @experimental
+ * @since 0.2.0
+ */
+export {
+  DistributedTransactionError,
+  DistributedTransactionErrorCode,
+} from './distributed-tx/errors.js';
+
+// =============================================================================
+// TRANSACTION TIMEOUT TYPES (experimental)
+// =============================================================================
+
+/**
+ * Transaction timeout enforcement and extended manager types.
+ *
+ * These types were previously internal but are needed by consumers
+ * implementing custom transaction handling or timeout policies.
+ *
+ * @public
+ * @experimental
+ * @since 0.2.0
+ */
+export {
+  // Timeout types from transaction types
+  type TransactionTimeoutConfig,
+  type LongRunningTransactionLog,
+  type WarningLevel,
+  DEFAULT_TIMEOUT_CONFIG,
+
+  // Extended manager from transaction manager
+  type ExtendedTransactionManager,
+  type TimeoutMethods,
+} from './transaction/index.js';
+
+/**
+ * Transaction timeout enforcement utilities.
+ *
+ * @public
+ * @experimental
+ * @since 0.2.0
+ */
+export {
+  createTimeoutEnforcer,
+  checkTransactionTimeout,
+  type TransactionTimeoutEnforcer,
+  type TimeoutEnforcerOptions,
+} from './transaction/index.js';
+
+// =============================================================================
+// OBSERVABILITY (experimental)
+// =============================================================================
+
+/**
+ * Observability module for distributed tracing, metrics, and structured logging.
+ *
+ * Provides production-grade instrumentation for DoSQL including W3C Trace Context
+ * propagation, Prometheus-format metrics, and SQL statement sanitization.
+ *
+ * @public
+ * @experimental
+ * @since 0.2.0
+ */
+export {
+  // Span and tracer types
+  type Span,
+  type SpanKind,
+  type SpanStatus,
+  type SpanEvent,
+  type SpanOptions,
+  type TraceContext,
+  type Tracer,
+  type AttributeValue,
+
+  // Metric types
+  type Counter,
+  type Histogram,
+  type HistogramValue,
+  type Gauge,
+  type MetricsRegistry,
+
+  // SQL sanitizer types
+  type SQLSanitizer,
+  type StatementType,
+
+  // Observable query types
+  type ObservableQuery,
+  type ObservableQueryResult,
+
+  // Configuration types
+  type TracingConfig,
+  type MetricsConfig,
+  type ObservabilityConfig,
+  DEFAULT_OBSERVABILITY_CONFIG,
+
+  // Tracer implementations
+  TracerImpl,
+  NoOpTracer,
+  createTracer,
+
+  // Metrics implementations
+  MetricsRegistryImpl,
+  NoOpMetricsRegistry,
+  createMetricsRegistry,
+
+  // Sanitizer implementations
+  SQLSanitizerImpl,
+  createSQLSanitizer,
+
+  // Convenience factory
+  type Observability,
+  createObservability,
+
+  // Pre-configured metrics
+  type DoSQLMetrics,
+  createDoSQLMetrics,
+
+  // Instrumentation helpers
+  instrumentQuery,
+  instrumentTransaction,
+
+  // Distributed tracing
+  createDistributedTracer,
+  DistributedTracerImpl,
+  NoOpDistributedTracer,
+  DistributedTraceStorage,
+  prepareTracedFetch,
+  startServerSpan,
+  withDistributedContext,
+  type DistributedTracer,
+  type DistributedSpan,
+  type DistributedTraceContext,
+  type DistributedTracerConfig,
+  type DistributedSpanOptions,
+  DEFAULT_DISTRIBUTED_TRACER_CONFIG,
+
+  // Unified observability
+  createUnifiedObservability,
+  type UnifiedObservability,
+  type UnifiedObservabilityConfig,
+  type UnifiedMetrics,
+  type TraceAwareLogger,
+  DEFAULT_UNIFIED_CONFIG,
+} from './observability/index.js';

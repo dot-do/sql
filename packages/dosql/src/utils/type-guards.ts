@@ -707,9 +707,7 @@ export function getTriggerOriginalTiming(trigger: Record<string, unknown>): stri
 /**
  * Interface for objects with callable methods
  */
-export interface ObjectWithMethod<K extends string, Args extends unknown[], R> {
-  [key: string]: unknown;
-}
+export type ObjectWithMethod<K extends string, Args extends unknown[], R> = Record<string, unknown>;
 
 /**
  * Check if an object has a method with the given name

@@ -13,6 +13,7 @@ import {
   type MemoryStorage,
   type MemorySchemaManager,
 } from '../index.js';
+import type { WALWriter } from '../../wal/types.js';
 
 describe('StandaloneExecutor', () => {
   let storage: MemoryStorage;
@@ -604,7 +605,7 @@ describe('StandaloneExecutor', () => {
       const execWithWal = new StandaloneExecutor({
         storage,
         schema,
-        wal: walWriter as any,
+        wal: walWriter as unknown as WALWriter,
       });
 
       await execWithWal.execute('CREATE TABLE logged (id INTEGER PRIMARY KEY)');

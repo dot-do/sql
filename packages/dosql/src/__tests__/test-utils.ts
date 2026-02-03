@@ -713,11 +713,10 @@ export interface ExtendedLockManagerConfig {
 /**
  * Row type for cross join results with indexed columns
  */
-export interface CrossJoinRow {
+export type CrossJoinRow = {
   col0?: unknown;
   col1?: unknown;
-  [key: string]: unknown;
-}
+} & Record<string, unknown>;
 
 /**
  * Extracts column pairs from cross join results
@@ -737,13 +736,12 @@ export function extractColumnPairs(
 /**
  * RPC session state type
  */
-export interface RPCSessionState {
+export type RPCSessionState = {
   clientId?: string;
   database?: string;
   authenticated?: boolean;
   lastMessageId?: number;
-  [key: string]: unknown;
-}
+} & Record<string, unknown>;
 
 /**
  * Extended hibernatable interface with RPC state

@@ -99,8 +99,6 @@ export {
 
   // Storage interface (unified abstraction)
   type StorageInterface,
-  // FSX interface (deprecated alias for StorageInterface)
-  type FSXInterface,
 
   // Constants
   MAX_BLOB_SIZE,
@@ -201,6 +199,23 @@ export {
   writeColumnar,
   inferSchema,
 } from './writer.js';
+
+// ============================================================================
+// Dictionary Encoding
+// ============================================================================
+
+export {
+  // Builder and Reader classes
+  DictionaryBuilder,
+  DictionaryReader,
+
+  // Analysis utility
+  analyzeDictionaryFit,
+
+  // Types
+  type DictionaryEncoded,
+  type DictionaryAnalysis,
+} from './dictionary.js';
 
 // ============================================================================
 // Reader

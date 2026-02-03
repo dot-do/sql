@@ -607,7 +607,7 @@ export function inferSchemaFromDDL(
     fullCodeParts.push(`export type DateString = Brand<string, 'DateString'>;`);
     fullCodeParts.push('');
     fullCodeParts.push(`/** JSON value type */`);
-    fullCodeParts.push(`export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };`);
+    fullCodeParts.push(`export type JsonValue = string | number | boolean | null | JsonValue[] | Record<string, JsonValue>;`);
     fullCodeParts.push('');
   }
 

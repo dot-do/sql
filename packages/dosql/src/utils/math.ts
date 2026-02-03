@@ -29,7 +29,7 @@ export function calculatePercentile(sortedArray: number[], percentile: number): 
   }
 
   const index = Math.ceil((percentile / 100) * sortedArray.length) - 1;
-  return sortedArray[Math.max(0, Math.min(index, sortedArray.length - 1))];
+  return sortedArray[Math.max(0, Math.min(index, sortedArray.length - 1))] ?? 0;
 }
 
 /**
@@ -103,8 +103,8 @@ export function calculateBasicStats(values: number[]): BasicStats {
   }
 
   const sum = values.reduce((acc, val) => acc + val, 0);
-  let min = values[0];
-  let max = values[0];
+  let min = values[0] ?? 0;
+  let max = values[0] ?? 0;
 
   for (let i = 1; i < values.length; i++) {
     if (values[i] < min) min = values[i];
@@ -178,8 +178,8 @@ export function calculateLatencyStatistics(durations: number[]): LatencyStatisti
   const mean = sum / sorted.length;
 
   return {
-    min: sorted[0],
-    max: sorted[sorted.length - 1],
+    min: sorted[0] ?? 0,
+    max: sorted[sorted.length - 1] ?? 0,
     mean,
     median: calculatePercentile(sorted, 50),
     p95: calculatePercentile(sorted, 95),
@@ -228,8 +228,8 @@ export function calculateLatencyHistogram(latencies: number[]): LatencyHistogram
     p50: calculatePercentile(sorted, 50),
     p90: calculatePercentile(sorted, 90),
     p99: calculatePercentile(sorted, 99),
-    min: sorted[0],
-    max: sorted[count - 1],
+    min: sorted[0] ?? 0,
+    max: sorted[count - 1] ?? 0,
     avg: latencies.reduce((a, b) => a + b, 0) / count,
     count,
   };

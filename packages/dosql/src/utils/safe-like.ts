@@ -72,7 +72,7 @@ export function safeLikeMatch(
   // Handle patterns starting with % (which can match empty string)
   for (let j = 1; j <= pLen; j++) {
     if (p[j - 1] === '%') {
-      prev[j] = prev[j - 1];
+      prev[j] = prev[j - 1] ?? false;
     }
   }
 
@@ -86,13 +86,13 @@ export function safeLikeMatch(
       if (pc === '%') {
         // % matches zero or more characters
         // Either we don't use % (prev[j]) or we use it (curr[j-1])
-        curr[j] = prev[j] || curr[j - 1];
+        curr[j] = (prev[j] ?? false) || (curr[j - 1] ?? false);
       } else if (pc === '_') {
         // _ matches exactly one character
-        curr[j] = prev[j - 1];
+        curr[j] = prev[j - 1] ?? false;
       } else {
         // Literal character - must match exactly
-        curr[j] = prev[j - 1] && s[i - 1] === pc;
+        curr[j] = (prev[j - 1] ?? false) && s[i - 1] === pc;
       }
     }
 
@@ -100,7 +100,7 @@ export function safeLikeMatch(
     [prev, curr] = [curr, prev];
   }
 
-  return prev[pLen];
+  return prev[pLen] ?? false;
 }
 
 /**
@@ -175,8 +175,9 @@ export function safeLikeMatchWithEscape(
 
   // Handle patterns starting with % (which can match empty string)
   for (let j = 1; j <= pLen; j++) {
-    if (normalizedPattern[j - 1].type === '%') {
-      prev[j] = prev[j - 1];
+    const np = normalizedPattern[j - 1];
+    if (np && np.type === '%') {
+      prev[j] = prev[j - 1] ?? false;
     }
   }
 
@@ -186,22 +187,23 @@ export function safeLikeMatchWithEscape(
 
     for (let j = 1; j <= pLen; j++) {
       const pe = normalizedPattern[j - 1];
+      if (!pe) continue;
 
       if (pe.type === '%') {
-        curr[j] = prev[j] || curr[j - 1];
+        curr[j] = (prev[j] ?? false) || (curr[j - 1] ?? false);
       } else if (pe.type === '_') {
-        curr[j] = prev[j - 1];
+        curr[j] = prev[j - 1] ?? false;
       } else {
         // Literal character
-        const pc = caseInsensitive ? pe.char!.toLowerCase() : pe.char!;
-        curr[j] = prev[j - 1] && s[si - 1] === pc;
+        const pc = caseInsensitive ? (pe.char ?? '').toLowerCase() : (pe.char ?? '');
+        curr[j] = (prev[j - 1] ?? false) && s[si - 1] === pc;
       }
     }
 
     [prev, curr] = [curr, prev];
   }
 
-  return prev[pLen];
+  return prev[pLen] ?? false;
 }
 
 /**
@@ -309,8 +311,9 @@ export function safeGlobMatch(
 
   // Handle patterns starting with * (which can match empty string)
   for (let j = 1; j <= pLen; j++) {
-    if (tokens[j - 1].type === '*') {
-      prev[j] = prev[j - 1];
+    const tok = tokens[j - 1];
+    if (tok && tok.type === '*') {
+      prev[j] = prev[j - 1] ?? false;
     }
   }
 
@@ -320,27 +323,28 @@ export function safeGlobMatch(
 
     for (let j = 1; j <= pLen; j++) {
       const token = tokens[j - 1];
+      if (!token) continue;
 
       if (token.type === '*') {
         // * matches zero or more characters
-        curr[j] = prev[j] || curr[j - 1];
+        curr[j] = (prev[j] ?? false) || (curr[j - 1] ?? false);
       } else if (token.type === '?') {
         // ? matches exactly one character
-        curr[j] = prev[j - 1];
+        curr[j] = prev[j - 1] ?? false;
       } else if (token.type === 'class') {
         // Character class
-        const charInClass = token.chars!.has(s[si - 1]);
+        const charInClass = token.chars ? token.chars.has(s[si - 1] ?? '') : false;
         const matches = token.negated ? !charInClass : charInClass;
-        curr[j] = prev[j - 1] && matches;
+        curr[j] = (prev[j - 1] ?? false) && matches;
       } else {
         // Literal character
-        const pc = caseInsensitive ? token.char!.toLowerCase() : token.char!;
-        curr[j] = prev[j - 1] && s[si - 1] === pc;
+        const pc = caseInsensitive ? (token.char ?? '').toLowerCase() : (token.char ?? '');
+        curr[j] = (prev[j - 1] ?? false) && s[si - 1] === pc;
       }
     }
 
     [prev, curr] = [curr, prev];
   }
 
-  return prev[pLen];
+  return prev[pLen] ?? false;
 }

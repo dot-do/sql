@@ -25,8 +25,8 @@ import type {
 /** Operations that can create snapshots */
 export type SnapshotOperation = 'append' | 'replace' | 'overwrite' | 'delete';
 
-/** Summary statistics for a snapshot */
-export interface SnapshotSummary {
+/** Known snapshot summary fields */
+interface SnapshotSummaryFields {
   operation: SnapshotOperation;
   'added-data-files'?: string;
   'added-records'?: string;
@@ -40,8 +40,10 @@ export interface SnapshotSummary {
   'total-delete-files'?: string;
   'total-position-deletes'?: string;
   'total-equality-deletes'?: string;
-  [key: string]: string | undefined;
 }
+
+/** Summary statistics for a snapshot (extensible via Record for custom properties) */
+export type SnapshotSummary = SnapshotSummaryFields & Record<string, string | undefined>;
 
 /**
  * Iceberg Snapshot

@@ -303,7 +303,8 @@ describe('Migration Runner', () => {
 
       expect(migration.id).toBe('20240101120000_create_users');
       expect(migration.sql).toContain('CREATE TABLE');
-      expect(migration.checksum).toBeTruthy();
+      expect(typeof migration.checksum).toBe('string');
+      expect(migration.checksum.length).toBeGreaterThan(0);
       expect(migration.createdAt).toBeInstanceOf(Date);
     });
 

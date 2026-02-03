@@ -71,7 +71,7 @@ export type ProcSchemaToType<S extends Schema> =
 /**
  * Predicate function for filtering records
  */
-export type Predicate<T> = (record: T) => boolean;
+export type Predicate<T extends Record<string, unknown>> = (record: T) => boolean;
 
 /**
  * Query options for table operations

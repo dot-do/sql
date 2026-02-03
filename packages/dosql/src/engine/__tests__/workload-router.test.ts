@@ -24,6 +24,7 @@ import {
   shouldUseBTree,
 } from '../workload-router.js';
 import type { Schema } from '../types.js';
+import type { PathExecutionStats } from '../workload-router.js';
 
 // =============================================================================
 // TEST UTILITIES
@@ -424,7 +425,7 @@ describe('WorkloadRouter', () => {
     it('should register OLTP path', () => {
       const mockPath = {
         pathType: WorkloadType.OLTP,
-        execute: async () => ({ rows: [], stats: {} as any }),
+        execute: async () => ({ rows: [], stats: {} as PathExecutionStats }),
         canExecute: () => true,
         estimateCost: () => ({ ioOps: 0, cpuCost: 0, memoryBytes: 0, estimatedTimeMs: 0 }),
       };
@@ -436,7 +437,7 @@ describe('WorkloadRouter', () => {
     it('should register OLAP path', () => {
       const mockPath = {
         pathType: WorkloadType.OLAP,
-        execute: async () => ({ rows: [], stats: {} as any }),
+        execute: async () => ({ rows: [], stats: {} as PathExecutionStats }),
         canExecute: () => true,
         estimateCost: () => ({ ioOps: 0, cpuCost: 0, memoryBytes: 0, estimatedTimeMs: 0 }),
       };
@@ -448,7 +449,7 @@ describe('WorkloadRouter', () => {
     it('should reject mismatched path types', () => {
       const mockPath = {
         pathType: WorkloadType.OLAP,
-        execute: async () => ({ rows: [], stats: {} as any }),
+        execute: async () => ({ rows: [], stats: {} as PathExecutionStats }),
         canExecute: () => true,
         estimateCost: () => ({ ioOps: 0, cpuCost: 0, memoryBytes: 0, estimatedTimeMs: 0 }),
       };
@@ -459,7 +460,7 @@ describe('WorkloadRouter', () => {
     it('should get registered paths', () => {
       const oltpPath = {
         pathType: WorkloadType.OLTP,
-        execute: async () => ({ rows: [], stats: {} as any }),
+        execute: async () => ({ rows: [], stats: {} as PathExecutionStats }),
         canExecute: () => true,
         estimateCost: () => ({ ioOps: 0, cpuCost: 0, memoryBytes: 0, estimatedTimeMs: 0 }),
       };
@@ -475,13 +476,13 @@ describe('WorkloadRouter', () => {
 
       const oltpPath = {
         pathType: WorkloadType.OLTP,
-        execute: async () => ({ rows: [], stats: {} as any }),
+        execute: async () => ({ rows: [], stats: {} as PathExecutionStats }),
         canExecute: () => true,
         estimateCost: () => ({ ioOps: 0, cpuCost: 0, memoryBytes: 0, estimatedTimeMs: 0 }),
       };
       const olapPath = {
         pathType: WorkloadType.OLAP,
-        execute: async () => ({ rows: [], stats: {} as any }),
+        execute: async () => ({ rows: [], stats: {} as PathExecutionStats }),
         canExecute: () => true,
         estimateCost: () => ({ ioOps: 0, cpuCost: 0, memoryBytes: 0, estimatedTimeMs: 0 }),
       };

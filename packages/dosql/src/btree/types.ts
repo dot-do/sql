@@ -73,30 +73,30 @@ export interface Page {
 /**
  * Create an empty internal page
  */
-export function createInternalPage(id: number): Page {
+export function createInternalPage(id: PageId): Page {
   return {
     id,
     type: PageType.INTERNAL,
     keys: [],
     values: [],
     children: [],
-    nextLeaf: -1,
-    prevLeaf: -1,
+    nextLeaf: -1 as PageId,
+    prevLeaf: -1 as PageId,
   };
 }
 
 /**
  * Create an empty leaf page
  */
-export function createLeafPage(id: number): Page {
+export function createLeafPage(id: PageId): Page {
   return {
     id,
     type: PageType.LEAF,
     keys: [],
     values: [],
     children: [],
-    nextLeaf: -1,
-    prevLeaf: -1,
+    nextLeaf: -1 as PageId,
+    prevLeaf: -1 as PageId,
   };
 }
 
@@ -125,7 +125,7 @@ export interface PageCacheConfig {
    * @param page - The evicted page object
    * @param dirty - Whether the page was dirty (had uncommitted writes)
    */
-  onEvict?: (pageId: number, page: Page, dirty: boolean) => void | Promise<void>;
+  onEvict?: (pageId: PageId, page: Page, dirty: boolean) => void | Promise<void>;
 }
 
 /**
@@ -217,7 +217,7 @@ export const DEFAULT_BTREE_CONFIG: Readonly<BTreeConfig> = {
  */
 export interface BTreeMetadata {
   /** Root page ID */
-  rootPageId: number;
+  rootPageId: PageId;
 
   /** Current height of the tree */
   height: number;
@@ -226,7 +226,7 @@ export interface BTreeMetadata {
   entryCount: number;
 
   /** Next available page ID */
-  nextPageId: number;
+  nextPageId: PageId;
 
   /** Configuration snapshot */
   config: BTreeConfig;

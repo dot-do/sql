@@ -118,30 +118,30 @@ export type Row = Record<string, SqlValue>;
  * Column definition in a schema
  */
 export interface ColumnDef {
-  name: string;
-  type: 'string' | 'number' | 'bigint' | 'boolean' | 'date' | 'bytes';
-  nullable: boolean;
-  primaryKey?: boolean;
+  readonly name: string;
+  readonly type: 'string' | 'number' | 'bigint' | 'boolean' | 'date' | 'bytes';
+  readonly nullable: boolean;
+  readonly primaryKey?: boolean;
 }
 
 /**
  * Table schema definition
  */
 export interface TableSchema {
-  name: string;
-  columns: ColumnDef[];
-  primaryKey?: string[] | undefined;
-  indexes?: IndexDef[] | undefined;
-  storageConfig?: import('./storage-config.js').TableStorageConfig | undefined;
+  readonly name: string;
+  readonly columns: readonly ColumnDef[];
+  readonly primaryKey?: readonly string[] | undefined;
+  readonly indexes?: readonly IndexDef[] | undefined;
+  readonly storageConfig?: import('./storage-config.js').TableStorageConfig | undefined;
 }
 
 /**
  * Index definition
  */
 export interface IndexDef {
-  name: string;
-  columns: string[];
-  unique: boolean;
+  readonly name: string;
+  readonly columns: readonly string[];
+  readonly unique: boolean;
 }
 
 /**
@@ -754,13 +754,13 @@ export type OperatorFactory = (plan: QueryPlan, ctx: ExecutionContext) => Operat
  */
 export interface QueryResult<T = Row> {
   /** Rows returned by the query */
-  rows: T[];
+  readonly rows: readonly T[];
   /** Number of rows affected (for INSERT/UPDATE/DELETE) */
-  rowsAffected?: number | undefined;
+  readonly rowsAffected?: number | undefined;
   /** Column metadata */
-  columns?: { name: string; type: string }[] | undefined;
+  readonly columns?: ReadonlyArray<{ readonly name: string; readonly type: string }> | undefined;
   /** Execution statistics */
-  stats?: ExecutionStats | undefined;
+  readonly stats?: ExecutionStats | undefined;
 }
 
 /**
@@ -768,19 +768,19 @@ export interface QueryResult<T = Row> {
  */
 export interface ExecutionStats {
   /** Time to plan the query (ms) */
-  planningTime: number;
+  readonly planningTime: number;
   /** Time to execute the query (ms) */
-  executionTime: number;
+  readonly executionTime: number;
   /** Rows scanned */
-  rowsScanned: number;
+  readonly rowsScanned: number;
   /** Rows returned */
-  rowsReturned: number;
+  readonly rowsReturned: number;
   /** Bytes read */
-  bytesRead?: number;
+  readonly bytesRead?: number;
   /** Cache hits */
-  cacheHits?: number;
+  readonly cacheHits?: number;
   /** Cache misses */
-  cacheMisses?: number;
+  readonly cacheMisses?: number;
 }
 
 // =============================================================================
@@ -791,8 +791,8 @@ export interface ExecutionStats {
  * Tagged template result for parameterized queries
  */
 export interface SqlTemplate {
-  sql: string;
-  parameters: SqlValue[];
+  readonly sql: string;
+  readonly parameters: readonly SqlValue[];
 }
 
 /**
@@ -929,22 +929,3 @@ export function lit(value: SqlValue): Literal {
   return { type: 'literal', value, dataType };
 }
 
-/**
- * Generate unique plan node IDs using the default (shared) context.
- * For concurrent planning, use PlanningContext directly.
- *
- * @deprecated For new code, use PlanningContext.nextId() with an isolated context
- */
-export function nextPlanId(): number {
-  return getDefaultPlanningContext().nextId();
-}
-
-/**
- * Reset plan node ID counter (for testing).
- * This resets the default shared context.
- *
- * @deprecated For new code, use isolated PlanningContext instances
- */
-export function resetPlanIds(): void {
-  resetDefaultPlanningContext();
-}

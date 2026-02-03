@@ -55,7 +55,7 @@ export interface ParseError {
 /**
  * Parse result with errors
  */
-export interface ParseResult<T> {
+export interface ParseResult<T extends Record<string, unknown>> {
   value: T | null;
   errors: ParseError[];
   warnings: ParseError[];

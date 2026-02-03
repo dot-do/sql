@@ -17,7 +17,7 @@ import {
   type ColumnDefinition,
   type ColumnDataType,
   type Encoding,
-  type FSXInterface,
+  type StorageInterface,
   MAX_ROWS_PER_ROW_GROUP,
   TARGET_ROW_GROUP_SIZE,
 } from './types.js';
@@ -134,7 +134,7 @@ export class ColumnarWriter {
   private readonly schema: ColumnarTableSchema;
   private readonly config: Required<Omit<WriterConfig, 'forceEncoding' | 'onFlush' | 'storageConfig'>> &
     Pick<WriterConfig, 'forceEncoding' | 'onFlush'>;
-  private readonly fsx?: FSXInterface;
+  private readonly fsx?: StorageInterface;
 
   private buffers: Map<string, ColumnBuffer> = new Map();
   private bufferedRowCount: number = 0;
@@ -145,7 +145,7 @@ export class ColumnarWriter {
   constructor(
     schema: ColumnarTableSchema,
     config?: WriterConfig,
-    fsx?: FSXInterface
+    fsx?: StorageInterface
   ) {
     this.schema = schema;
 
@@ -625,7 +625,7 @@ export class ColumnarWriter {
 export async function writeColumnar(
   schema: ColumnarTableSchema,
   rows: Record<string, unknown>[],
-  fsx?: FSXInterface
+  fsx?: StorageInterface
 ): Promise<{ rowGroups: RowGroup[]; serialized: Uint8Array[] }> {
   const serializedGroups: Uint8Array[] = [];
 

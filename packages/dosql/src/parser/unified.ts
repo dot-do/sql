@@ -112,7 +112,7 @@ export type UnifiedAST =
   | (DDLStatement & { location?: SourceLocation })
   | (DMLStatement & { location?: SourceLocation })
   | (ParsedSelect & { location?: SourceLocation })
-  | { type: string; [key: string]: unknown; location?: SourceLocation };
+  | ({ type: string; location?: SourceLocation } & Record<string, unknown>);
 
 /**
  * Successful parse result

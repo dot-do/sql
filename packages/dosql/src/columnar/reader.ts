@@ -16,7 +16,7 @@ import {
   type Encoding,
   type Predicate,
   type ReadRequest,
-  type FSXInterface,
+  type StorageInterface,
   isNumericType,
 } from './types.js';
 import { assertNever } from '../utils/assert-never.js';
@@ -99,11 +99,11 @@ export interface ScanResult {
 // ============================================================================
 
 export class ColumnarReader {
-  private readonly fsx: FSXInterface;
+  private readonly fsx: StorageInterface;
   private readonly config: Required<ReaderConfig>;
   private metadataCache: Map<string, RowGroupMetadata> = new Map();
 
-  constructor(fsx: FSXInterface, config?: ReaderConfig) {
+  constructor(fsx: StorageInterface, config?: ReaderConfig) {
     this.fsx = fsx;
     this.config = { ...DEFAULT_CONFIG, ...config };
   }

@@ -218,7 +218,7 @@ describe('ShardingConfigManager', () => {
     it('should detect missing shard key for sharded table', () => {
       const config = createTestVersionedVSchema();
       // Manually break the config
-      (config.tables['users'] as any).shardKey = '';
+      (config.tables['users'] as unknown as { shardKey: string }).shardKey = '';
       const manager = createConfigManager(createTestVersionedVSchema());
 
       const result = manager.validate(config);
@@ -235,7 +235,7 @@ describe('ShardingConfigManager', () => {
     it('should detect missing vindex for sharded table', () => {
       const config = createTestVersionedVSchema();
       // Manually break the config
-      delete (config.tables['users'] as any).vindex;
+      delete (config.tables['users'] as unknown as { vindex?: unknown }).vindex;
       const manager = createConfigManager(createTestVersionedVSchema());
 
       const result = manager.validate(config);
@@ -254,7 +254,7 @@ describe('ShardingConfigManager', () => {
         {
           users: shardedTable('tenant_id', {
             type: 'hash',
-            algorithm: 'invalid' as any,
+            algorithm: 'invalid' as unknown as 'fnv1a' | 'xxhash',
           }),
         },
         [shard(createShardId('shard-1'), 'user-do-ns')]

@@ -70,8 +70,8 @@ import {
 // =============================================================================
 
 /**
- * Adapter to make FSXBackend work with FSXInterface (columnar writer)
- * FSXBackend uses read/write, FSXInterface uses get/put
+ * Adapter to make FSXBackend work with StorageInterface (columnar writer)
+ * FSXBackend uses read/write, StorageInterface uses get/put
  */
 class FSXAdapter {
   constructor(private backend: FSXBackend) {}
@@ -518,11 +518,11 @@ describe('RowToColumnarConverter', () => {
 
   beforeEach(() => {
     fsx = createMemoryBackend();
-    // Create adapter that supports both FSXBackend and FSXInterface
+    // Create adapter that supports both FSXBackend and StorageInterface
     fsxAdapter = new FSXAdapter(fsx);
     schema = createTestSchema();
     config = createTestConfig();
-    // Pass the adapter which supports FSXInterface (get/put)
+    // Pass the adapter which supports StorageInterface (get/put)
     converter = createConverter<string, Record<string, unknown>>(schema, fsxAdapter as unknown as FSXBackend, config);
   });
 
@@ -1532,7 +1532,7 @@ describe('Compaction Integration', () => {
       delete: async () => {},
       list: async () => [],
       exists: async () => false,
-      // Also add FSXInterface methods for converter compatibility
+      // Also add StorageInterface methods for converter compatibility
       get: async () => null,
       put: async () => { throw new Error('Write failed'); },
     };

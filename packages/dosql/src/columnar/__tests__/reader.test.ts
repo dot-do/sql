@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { ColumnarReader, readColumnarChunk, getColumnStats, mightMatchPredicates } from '../reader.js';
 import { ColumnarWriter } from '../writer.js';
 import { serializeRowGroup, deserializeRowGroup, canSkipChunk, canSkipRowGroup } from '../chunk.js';
-import type { ColumnarTableSchema, FSXInterface, Predicate, RowGroupMetadata, ColumnStats } from '../types.js';
+import type { ColumnarTableSchema, StorageInterface, Predicate, RowGroupMetadata, ColumnStats } from '../types.js';
 
 // ============================================================================
 // TEST FIXTURES
@@ -24,7 +24,7 @@ import type { ColumnarTableSchema, FSXInterface, Predicate, RowGroupMetadata, Co
 /**
  * In-memory FSX implementation for testing
  */
-function createInMemoryFSX(): FSXInterface & { store: Map<string, Uint8Array> } {
+function createInMemoryFSX(): StorageInterface & { store: Map<string, Uint8Array> } {
   const store = new Map<string, Uint8Array>();
   return {
     store,

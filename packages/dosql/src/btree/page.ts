@@ -35,6 +35,8 @@
  *   Variable-length value data packed contiguously
  */
 
+import { createPageId } from '@dotdo/sql-types';
+import type { PageId } from '@dotdo/sql-types';
 import type { Page } from './types.js';
 import { PageType, createInternalPage, createLeafPage } from './types.js';
 
@@ -188,11 +190,11 @@ export function deserializePage(bytes: Uint8Array): Page {
     throw new Error(`Unsupported page version: ${version}`);
   }
 
-  const id = view.getUint32(8, false);
+  const id = createPageId(view.getUint32(8, false));
   const type = view.getUint8(12) as PageType;
   const keyCount = view.getUint32(16, false);
-  const nextLeaf = view.getInt32(20, false);
-  const prevLeaf = view.getInt32(24, false);
+  const nextLeaf = view.getInt32(20, false) as PageId;
+  const prevLeaf = view.getInt32(24, false) as PageId;
 
   // Create the appropriate page type
   const page: Page =

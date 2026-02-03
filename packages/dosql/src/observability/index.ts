@@ -546,6 +546,18 @@ export {
 } from './unified.js';
 
 // =============================================================================
+// CORRELATION ID PROPAGATION
+// =============================================================================
+
+export {
+  getCurrentCorrelationId,
+  generateCorrelationId,
+  enrichCDCEventWithCorrelation,
+  enrichCDCBatchWithCorrelation,
+  extractCorrelationIdFromHeaders,
+} from './correlation.js';
+
+// =============================================================================
 // EXPORTERS
 // =============================================================================
 

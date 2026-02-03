@@ -90,9 +90,9 @@ export class DefaultWALEncoder implements WALEncoder {
     const json = this.textDecoder.decode(data);
     const obj = JSON.parse(json);
     return {
-      lsn: BigInt(obj.lsn),
+      lsn: createLSN(BigInt(obj.lsn)),
       timestamp: obj.timestamp,
-      txnId: obj.txnId,
+      txnId: createTransactionId(obj.txnId as string),
       op: obj.op,
       table: obj.table,
       key: obj.key ? this.decodeBytes(obj.key) : undefined,
@@ -138,12 +138,12 @@ export class DefaultWALEncoder implements WALEncoder {
     const obj = JSON.parse(json);
     return {
       id: obj.id,
-      startLSN: BigInt(obj.startLSN),
-      endLSN: BigInt(obj.endLSN),
+      startLSN: createLSN(BigInt(obj.startLSN)),
+      endLSN: createLSN(BigInt(obj.endLSN)),
       entries: obj.entries.map((e: SerializedWALEntry) => ({
-        lsn: BigInt(e.lsn),
+        lsn: createLSN(BigInt(e.lsn)),
         timestamp: e.timestamp,
-        txnId: e.txnId,
+        txnId: createTransactionId(e.txnId),
         op: e.op,
         table: e.table,
         key: e.key ? this.decodeBytes(e.key) : undefined,
@@ -395,7 +395,7 @@ export function createWALWriter(
       // Assign monotonically increasing LSN and HLC timestamp
       const entry: WALEntry = {
         ...entryWithoutLSN,
-        lsn: currentLSN++,
+        lsn: createLSN(currentLSN++),
         hlc: hlcClock.now(),
       };
 
@@ -436,8 +436,8 @@ export function createWALWriter(
       return segment;
     },
 
-    getCurrentLSN(): bigint {
-      return currentLSN;
+    getCurrentLSN() {
+      return createLSN(currentLSN);
     },
 
     getPendingCount(): number {
@@ -561,7 +561,7 @@ export class WALTransaction {
     // Write BEGIN
     const beginResult = await this.writer.append({
       timestamp,
-      txnId: this.txnId,
+      txnId: createTransactionId(this.txnId),
       op: 'BEGIN',
       table: '',
     });
@@ -572,7 +572,7 @@ export class WALTransaction {
       const result = await this.writer.append({
         ...entry,
         timestamp,
-        txnId: this.txnId,
+        txnId: createTransactionId(this.txnId),
       });
       lsns.push(result.lsn);
     }
@@ -581,7 +581,7 @@ export class WALTransaction {
     const commitResult = await this.writer.append(
       {
         timestamp,
-        txnId: this.txnId,
+        txnId: createTransactionId(this.txnId),
         op: 'COMMIT',
         table: '',
       },
@@ -602,7 +602,7 @@ export class WALTransaction {
       await this.writer.append(
         {
           timestamp: Date.now(),
-          txnId: this.txnId,
+          txnId: createTransactionId(this.txnId),
           op: 'ROLLBACK',
           table: '',
         },

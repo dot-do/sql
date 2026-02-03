@@ -20,7 +20,7 @@ import {
   type Predicate,
   type ColumnarTableSchema,
   type ColumnDefinition,
-  type FSXInterface,
+  type StorageInterface,
   MAX_BLOB_SIZE,
   TARGET_ROW_GROUP_SIZE,
   MAX_ROWS_PER_ROW_GROUP,
@@ -109,7 +109,7 @@ interface ExtendedColumnarReader extends ColumnarReader {
 /**
  * In-memory FSX implementation for testing
  */
-function createInMemoryFSX(): FSXInterface & { store: Map<string, Uint8Array> } {
+function createInMemoryFSX(): StorageInterface & { store: Map<string, Uint8Array> } {
   const store = new Map<string, Uint8Array>();
   return {
     store,

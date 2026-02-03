@@ -579,7 +579,7 @@ export class LibSQLAdapter implements BenchmarkAdapter {
         }
         case 'update': {
           // Expect data to contain both update values and primary key info
-          const { id, ...updates } = op.data as { id: unknown; [key: string]: unknown };
+          const { id, ...updates } = op.data as { id: unknown } & Record<string, unknown>;
           const columns = Object.keys(updates);
           const setClauses = columns.map((col, i) => `${this.escapeIdentifier(col)} = ?${i + 1}`).join(', ');
           statements.push({

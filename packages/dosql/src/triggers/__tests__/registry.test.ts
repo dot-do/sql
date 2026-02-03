@@ -17,6 +17,8 @@ import type {
   TriggerDefinition,
   TriggerConfig,
   TriggerContext,
+  TriggerEvent,
+  TriggerHandler,
   ParsedSQLTrigger,
 } from '../types.js';
 import { TriggerError, TriggerErrorCode } from '../types.js';
@@ -224,7 +226,7 @@ describe('Trigger Registration', () => {
         registry.register({
           name: 'test',
           table: 'users',
-          timing: 'during' as any,
+          timing: 'during' as unknown as TriggerDefinition['timing'],
           events: ['insert'],
           handler: () => {},
         });
@@ -249,7 +251,7 @@ describe('Trigger Registration', () => {
           name: 'test',
           table: 'users',
           timing: 'before',
-          events: ['create' as any],
+          events: ['create' as unknown as TriggerEvent],
           handler: () => {},
         });
       }).toThrow(TriggerError);
@@ -262,7 +264,7 @@ describe('Trigger Registration', () => {
           table: 'users',
           timing: 'before',
           events: ['insert'],
-          handler: null as any,
+          handler: null as unknown as TriggerHandler,
         });
       }).toThrow(TriggerError);
     });
@@ -271,18 +273,18 @@ describe('Trigger Registration', () => {
   describe('SQL Triggers', () => {
     it('should register a SQL trigger', () => {
       const sqlTrigger = createSQLTrigger('sql_before_insert');
-      const trigger = registry.register(sqlTrigger as any);
+      const trigger = registry.register(sqlTrigger);
 
       expect(trigger.name).toBe('sql_before_insert');
       expect(trigger.table).toBe('users');
-      expect((trigger as any).body).toBe('SELECT 1');
+      expect(trigger.body).toBe('SELECT 1');
     });
 
     it('should register SQL trigger with WHEN clause', () => {
       const sqlTrigger = createSQLTrigger('sql_conditional', {
         whenClause: 'NEW.status = "active"',
       });
-      const trigger = registry.register(sqlTrigger as any);
+      const trigger = registry.register(sqlTrigger);
 
       expect(trigger.condition).toBe('NEW.status = "active"');
     });
@@ -294,9 +296,9 @@ describe('Trigger Registration', () => {
         events: ['UPDATE'],
         columns: ['email', 'status'],
       });
-      const trigger = registry.register(sqlTrigger as any);
+      const trigger = registry.register(sqlTrigger);
 
-      expect((trigger as any).columns).toEqual(['email', 'status']);
+      expect(trigger.columns).toEqual(['email', 'status']);
     });
   });
 });

@@ -176,7 +176,7 @@ export interface SQLSanitizer {
 /**
  * Query execution result with observability data
  */
-export interface ObservableQueryResult<T> {
+export interface ObservableQueryResult<T extends Record<string, unknown>> {
   result: T;
   span: Span;
 }

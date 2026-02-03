@@ -110,6 +110,7 @@ export {
   RetentionError,
   RetentionErrorCode,
   type WALRetentionManager,
+  type RetentionConfig,
   type RetentionPolicy,
   type ActiveReader,
   type RetentionCheckResult,

@@ -43,23 +43,23 @@ export type WALOperation =
  */
 export interface WALEntry {
   /** Log Sequence Number - monotonically increasing identifier (branded type) */
-  lsn: LSN;
+  readonly lsn: LSN;
   /** Timestamp when the entry was created (Unix ms) */
-  timestamp: number;
+  readonly timestamp: number;
   /** Transaction ID for grouping related operations (branded type) */
-  txnId: TransactionId;
+  readonly txnId: TransactionId;
   /** The operation type */
-  op: WALOperation;
+  readonly op: WALOperation;
   /** Target table name (empty for transaction control ops) */
-  table: string;
+  readonly table: string;
   /** Primary key for UPDATE/DELETE operations */
-  key?: Uint8Array | undefined;
+  readonly key?: Uint8Array | undefined;
   /** Previous value for UPDATE/DELETE operations (enables rollback) */
-  before?: Uint8Array | undefined;
+  readonly before?: Uint8Array | undefined;
   /** New value for INSERT/UPDATE operations */
-  after?: Uint8Array | undefined;
+  readonly after?: Uint8Array | undefined;
   /** HLC timestamp for causal ordering in CDC (optional for backward compatibility) */
-  hlc?: HLCTimestamp | undefined;
+  readonly hlc?: HLCTimestamp | undefined;
 }
 
 /**
@@ -68,19 +68,19 @@ export interface WALEntry {
  */
 export interface WALSegment {
   /** Unique segment identifier (typically based on startLSN) */
-  id: string;
+  readonly id: string;
   /** First LSN in this segment (branded type) */
-  startLSN: LSN;
+  readonly startLSN: LSN;
   /** Last LSN in this segment (branded type) */
-  endLSN: LSN;
+  readonly endLSN: LSN;
   /** Entries contained in this segment */
-  entries: WALEntry[];
+  readonly entries: readonly WALEntry[];
   /** CRC32 checksum for integrity verification */
-  checksum: number;
+  readonly checksum: number;
   /** Segment creation timestamp */
-  createdAt: number;
+  readonly createdAt: number;
   /** Whether this segment has been archived/compacted */
-  archived?: boolean | undefined;
+  readonly archived?: boolean | undefined;
 }
 
 // =============================================================================
@@ -132,15 +132,15 @@ export const DEFAULT_WAL_CONFIG: Readonly<WALConfig> = {
  */
 export interface Checkpoint {
   /** Last LSN that has been fully applied/checkpointed (branded type) */
-  lsn: LSN;
+  readonly lsn: LSN;
   /** Timestamp of the checkpoint */
-  timestamp: number;
+  readonly timestamp: number;
   /** Segment ID containing the checkpoint LSN */
-  segmentId: string;
+  readonly segmentId: string;
   /** Transaction IDs that were in-progress at checkpoint time (branded type) */
-  activeTransactions: TransactionId[];
+  readonly activeTransactions: readonly TransactionId[];
   /** Schema version at checkpoint time */
-  schemaVersion?: number | undefined;
+  readonly schemaVersion?: number | undefined;
 }
 
 /**
@@ -180,11 +180,11 @@ export interface AppendOptions {
  */
 export interface AppendResult {
   /** Assigned LSN for the entry (branded type) */
-  lsn: LSN;
+  readonly lsn: LSN;
   /** Whether segment was flushed as part of this append */
-  flushed: boolean;
+  readonly flushed: boolean;
   /** Segment ID if flushed */
-  segmentId?: string | undefined;
+  readonly segmentId?: string | undefined;
 }
 
 /**

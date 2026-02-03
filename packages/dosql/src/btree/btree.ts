@@ -22,6 +22,8 @@ import {
   DatabaseError,
   DatabaseErrorCode,
 } from '../errors/index.js';
+import { createPageId } from '@dotdo/sql-types';
+import type { PageId } from '@dotdo/sql-types';
 import {
   PageType,
   DEFAULT_BTREE_CONFIG,
@@ -61,10 +63,10 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   private readonly keyCodec: KeyCodec<K>;
   private readonly valueCodec: ValueCodec<V>;
   private readonly config: BTreeConfig;
-  private readonly userOnEvict: ((pageId: number, page: Page, dirty: boolean) => void | Promise<void>) | undefined;
+  private readonly userOnEvict: ((pageId: PageId, page: Page, dirty: boolean) => void | Promise<void>) | undefined;
 
   private metadata: BTreeMetadata | null = null;
-  private readonly pageCache: LRUCache<number, Page>;
+  private readonly pageCache: LRUCache<PageId, Page>;
 
   constructor(
     storage: AnyStorageBackend,
@@ -83,10 +85,10 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     this.userOnEvict = cacheConfig.onEvict;
 
     // Initialize LRU page cache
-    this.pageCache = new LRUCache<number, Page>({
+    this.pageCache = new LRUCache<PageId, Page>({
       maxSize: cacheConfig.maxBytes ?? cacheConfig.maxPages,
       ...(cacheConfig.maxBytes ? { sizeCalculator: (page: Page) => calculatePageSize(page) } : {}),
-      onEvict: async (pageId, page, dirty) => {
+      onEvict: async (pageId: PageId, page: Page, dirty: boolean) => {
         // Write back dirty pages before eviction
         if (dirty) {
           const data = serializePage(page);
@@ -116,17 +118,23 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
 
     if (data) {
       const json = new TextDecoder().decode(data);
-      this.metadata = JSON.parse(json);
+      const parsed = JSON.parse(json);
+      // Re-brand page IDs after deserialization
+      this.metadata = {
+        ...parsed,
+        rootPageId: createPageId(parsed.rootPageId),
+        nextPageId: createPageId(parsed.nextPageId),
+      };
     } else {
       // Create a new empty tree
-      const rootPage = createLeafPage(0);
+      const rootPage = createLeafPage(createPageId(0));
       await this.writePage(rootPage);
 
       this.metadata = {
-        rootPageId: 0,
+        rootPageId: createPageId(0),
         height: 1,
         entryCount: 0,
-        nextPageId: 1,
+        nextPageId: createPageId(1),
         config: this.config,
       };
       await this.saveMetadata();
@@ -146,14 +154,14 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   /**
    * Get the storage key for a page
    */
-  private pageKey(pageId: number): string {
+  private pageKey(pageId: PageId): string {
     return `${this.config.pagePrefix}page_${pageId.toString(16).padStart(8, '0')}`;
   }
 
   /**
    * Read a page from storage or cache
    */
-  private async readPage(pageId: number): Promise<Page> {
+  private async readPage(pageId: PageId): Promise<Page> {
     // Check cache first (get() tracks hits internally)
     let page = this.pageCache.get(pageId);
     if (page) return page;
@@ -196,7 +204,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   /**
    * Delete a page from storage and cache (for orphaned pages after merges)
    */
-  private async deletePage(pageId: number): Promise<void> {
+  private async deletePage(pageId: PageId): Promise<void> {
     // Remove from cache first (don't write back since we're deleting)
     this.pageCache.delete(pageId);
     // Delete from persistent storage
@@ -222,14 +230,16 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   /**
    * Allocate a new page ID
    */
-  private allocPageId(): number {
+  private allocPageId(): PageId {
     if (!this.metadata) {
       throw new DatabaseError(
         DatabaseErrorCode.INTERNAL,
         'B-tree not initialized'
       );
     }
-    return this.metadata.nextPageId++;
+    const id = this.metadata.nextPageId;
+    this.metadata.nextPageId = createPageId((this.metadata.nextPageId as number) + 1);
+    return id;
   }
 
   /**
@@ -458,7 +468,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     path: Page[],
     parentIndex: number,
     key: Uint8Array,
-    rightChildId: number
+    rightChildId: PageId
   ): Promise<void> {
     if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'B-tree not initialized');
 
@@ -505,7 +515,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   private async splitInternal(
     node: Page,
     key: Uint8Array,
-    rightChildId: number,
+    rightChildId: PageId,
     insertIndex: number,
     path: Page[],
     nodeIndex: number
@@ -662,7 +672,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   /**
    * Find the index of a child page within a parent's children array
    */
-  private findChildIndex(parent: Page, childId: number): number {
+  private findChildIndex(parent: Page, childId: PageId): number {
     for (let i = 0; i < parent.children.length; i++) {
       if (parent.children[i] === childId) {
         return i;
@@ -897,14 +907,14 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     this.pageCache.clear();
 
     // Create new root
-    const rootPage = createLeafPage(0);
+    const rootPage = createLeafPage(createPageId(0));
     await this.writePage(rootPage);
 
     this.metadata = {
-      rootPageId: 0,
+      rootPageId: createPageId(0),
       height: 1,
       entryCount: 0,
-      nextPageId: 1,
+      nextPageId: createPageId(1),
       config: this.config,
     };
     await this.saveMetadata();
@@ -916,8 +926,8 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   async stats(): Promise<{
     height: number;
     entryCount: number;
-    pageCount: number;
-    rootPageId: number;
+    pageCount: PageId;
+    rootPageId: PageId;
   }> {
     if (!this.metadata) await this.loadMetadata();
     if (!this.metadata) throw new DatabaseError(DatabaseErrorCode.INTERNAL, 'Failed to load B-tree metadata');
@@ -972,8 +982,8 @@ export interface BTreeExtended<K, V> extends BTree<K, V> {
   stats(): Promise<{
     height: number;
     entryCount: number;
-    pageCount: number;
-    rootPageId: number;
+    pageCount: PageId;
+    rootPageId: PageId;
   }>;
 
   /** Get cache statistics for monitoring */

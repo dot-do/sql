@@ -371,84 +371,216 @@ export class PrometheusReporter implements MetricsReporter {
 // =============================================================================
 
 /**
- * Extended WAL Retention Manager interface
- */
-export interface ExtendedWALRetentionManager extends WALRetentionManager {
-  // Extended methods for testing and advanced usage
-  getExpiredEntries(): Promise<ExpiredEntry[]>;
-  getStorageStats(): Promise<StorageStats>;
-  getEntryStats(): Promise<EntryStats>;
-  getSegmentEntryStats(): Promise<SegmentEntryStats[]>;
-  getCheckpointHistory(): Promise<CheckpointInfo[]>;
-  onCheckpointCreated(checkpoint: CheckpointInfo): Promise<void>;
-  calculateFragmentation(): Promise<FragmentationInfo>;
-  checkCompactionNeeded(): Promise<boolean>;
-  mergeSegments(segmentIds: string[]): Promise<MergeResult>;
-  compactSegment(segmentId: string): Promise<CompactResult>;
-  startBackgroundCleanup(): void;
-  stopBackgroundCleanup(): void;
-  isRunning(): boolean;
-  getNextCleanupTime(): Date | null;
-  setThrottleConfig(config: ThrottleConfig): void;
-  getThrottleConfig(): ThrottleConfig;
-  isInLowActivityWindow(): boolean;
-  getMetrics(): Promise<RetentionMetrics>;
-  getCleanupHistory(): Promise<CleanupRecord[]>;
-  healthCheck(): Promise<HealthCheckResult>;
-  evaluateDynamicPolicy(): Promise<DynamicPolicyResult>;
-  getReplicationStatus(): Promise<ReplicationStatus>;
-  getRegionReplicationStatus(): Promise<RegionReplicationStatus>;
-  acquireCleanupLock(): Promise<boolean>;
-  isCleanupInProgress(): boolean;
-  registerActiveWriter(writer: WALWriter): void;
-  parseSegmentLSN(segmentId: string): bigint;
-  onWarning?: ((warning: RetentionWarning) => void) | undefined;
-  // New methods for WAL retention features
-  truncateWAL(beforeLSN: bigint): Promise<TruncateResult>;
-  compactWAL(): Promise<CompactWALResult>;
-  forceCleanup(options?: ForceCleanupOptions): Promise<ForceCleanupResult>;
-  getWALStats(): Promise<WALStats>;
-  getCleanupLatencyHistogram(): Promise<CleanupLatencyHistogram>;
-  getGrowthStats(): Promise<GrowthStats>;
-  registerCheckpointListener(checkpointMgr: CheckpointManagerForRetention): void;
-  onSizeWarning?: ((current: number, max: number) => void) | undefined;
-  // Per-table retention
-  getTableRetentionPolicy(tableName: string): TableRetentionPolicy | undefined;
-  // Cleanup windows
-  isInCleanupWindow(): boolean;
-  // Impact analysis
-  analyzeCleanupImpact(): Promise<CleanupImpact>;
-  // Metrics collection
-  startMetricsCollection(): void;
-  stopMetricsCollection(): void;
-}
-
-/**
- * Create a WAL retention manager
+ * Extended WAL Retention Manager with advanced operations.
  *
- * @param backend - Storage backend
- * @param reader - WAL reader
- * @param slotManager - Replication slot manager (or null)
- * @param policy - Retention policy configuration
- * @param config - WAL configuration
- * @returns Extended WAL retention manager
+ * This extends the core {@link WALRetentionManager} with additional
+ * capabilities for compaction, metrics, health checks, and manual
+ * WAL manipulation. The extended interface is returned by
+ * `createWALRetentionManager()`.
+ *
+ * **Commonly used methods:**
+ * - {@link getStorageStats} - Check current WAL size
+ * - {@link getMetrics} - Get retention metrics for monitoring
+ * - {@link healthCheck} - Assess retention system health
+ * - {@link truncateWAL} - Manually truncate WAL before a specific LSN
+ * - {@link compactWAL} - Remove dead entries from rolled-back transactions
+ *
+ * **Background cleanup:**
+ * - {@link startBackgroundCleanup} / {@link stopBackgroundCleanup}
  *
  * @example
  * ```typescript
- * const retentionManager = createWALRetentionManager(
- *   backend,
- *   reader,
- *   slotManager,
- *   { retentionHours: 24, maxTotalBytes: 500 * 1024 * 1024 }
- * );
+ * const manager = createWALRetentionManager(backend, reader, slots, {
+ *   preset: 'balanced',
+ * });
+ *
+ * // Check system health
+ * const health = await manager.healthCheck();
+ * if (health.status === 'critical') {
+ *   await manager.forceCleanup();
+ * }
+ *
+ * // Monitor storage usage
+ * const stats = await manager.getStorageStats();
+ * console.log(`WAL size: ${stats.totalBytes} bytes`);
+ * ```
+ */
+export interface ExtendedWALRetentionManager extends WALRetentionManager {
+  // ---- Storage & statistics ----
+
+  /** Get current WAL storage statistics (total bytes, segment count). */
+  getStorageStats(): Promise<StorageStats>;
+  /** Get total entry count across all segments. */
+  getEntryStats(): Promise<EntryStats>;
+  /** Get per-segment entry counts and sizes. */
+  getSegmentEntryStats(): Promise<SegmentEntryStats[]>;
+  /** Get comprehensive WAL statistics including fragmentation and transaction state. */
+  getWALStats(): Promise<WALStats>;
+  /** Get entries that have exceeded the retention period. */
+  getExpiredEntries(): Promise<ExpiredEntry[]>;
+
+  // ---- Metrics & health ----
+
+  /** Get retention metrics (segment count, bytes, cleanup history). */
+  getMetrics(): Promise<RetentionMetrics>;
+  /** Get cleanup operation latency percentiles (p50, p90, p99). */
+  getCleanupLatencyHistogram(): Promise<CleanupLatencyHistogram>;
+  /** Get WAL growth rate and estimated time to size limit. */
+  getGrowthStats(): Promise<GrowthStats>;
+  /** Get cleanup history records. */
+  getCleanupHistory(): Promise<CleanupRecord[]>;
+  /** Assess retention system health (healthy/warning/critical). */
+  healthCheck(): Promise<HealthCheckResult>;
+  /** Evaluate whether dynamic policy adjustments should be applied. */
+  evaluateDynamicPolicy(): Promise<DynamicPolicyResult>;
+
+  // ---- Replication ----
+
+  /** Get current replication lag status. */
+  getReplicationStatus(): Promise<ReplicationStatus>;
+  /** Get per-region replication status for multi-region setups. */
+  getRegionReplicationStatus(): Promise<RegionReplicationStatus>;
+
+  // ---- Compaction ----
+
+  /** Calculate current fragmentation ratio from rolled-back transactions. */
+  calculateFragmentation(): Promise<FragmentationInfo>;
+  /** Check if compaction is needed based on the compaction threshold. */
+  checkCompactionNeeded(): Promise<boolean>;
+  /** Merge multiple segments into a single segment. */
+  mergeSegments(segmentIds: string[]): Promise<MergeResult>;
+  /** Compact a single segment by removing rolled-back entries. */
+  compactSegment(segmentId: string): Promise<CompactResult>;
+  /** Compact all WAL segments, removing rolled-back transaction entries. */
+  compactWAL(): Promise<CompactWALResult>;
+
+  // ---- Manual WAL manipulation ----
+
+  /** Truncate all WAL segments before the given LSN. */
+  truncateWAL(beforeLSN: bigint): Promise<TruncateResult>;
+  /** Force cleanup ignoring safety checks (min count, slots, readers). */
+  forceCleanup(options?: ForceCleanupOptions): Promise<ForceCleanupResult>;
+  /** Analyze the impact of a cleanup before executing it. */
+  analyzeCleanupImpact(): Promise<CleanupImpact>;
+
+  // ---- Checkpoint integration ----
+
+  /** Get checkpoint history maintained by this manager. */
+  getCheckpointHistory(): Promise<CheckpointInfo[]>;
+  /** Notify the manager of a new checkpoint (triggers cleanup if configured). */
+  onCheckpointCreated(checkpoint: CheckpointInfo): Promise<void>;
+  /** Register a checkpoint manager to auto-trigger cleanup after checkpoints. */
+  registerCheckpointListener(checkpointMgr: CheckpointManagerForRetention): void;
+
+  // ---- Background cleanup ----
+
+  /** Start the background cleanup scheduler. */
+  startBackgroundCleanup(): void;
+  /** Stop the background cleanup scheduler. */
+  stopBackgroundCleanup(): void;
+  /** Whether the background cleanup scheduler is running. */
+  isRunning(): boolean;
+  /** Get the next scheduled cleanup time (cron-based). */
+  getNextCleanupTime(): Date | null;
+  /** Whether cleanup is currently in progress. */
+  isCleanupInProgress(): boolean;
+  /** Acquire a distributed cleanup lock (returns false if already locked). */
+  acquireCleanupLock(): Promise<boolean>;
+
+  // ---- Throttle ----
+
+  /** Set throttle configuration for cleanup batch processing. */
+  setThrottleConfig(config: ThrottleConfig): void;
+  /** Get current throttle configuration. */
+  getThrottleConfig(): ThrottleConfig;
+  /** Whether current time is within the configured low-activity window. */
+  isInLowActivityWindow(): boolean;
+
+  // ---- Metrics collection ----
+
+  /** Start periodic metrics emission via `onMetricsUpdate`. */
+  startMetricsCollection(): void;
+  /** Stop periodic metrics emission. */
+  stopMetricsCollection(): void;
+
+  // ---- Per-table retention ----
+
+  /** Get the retention policy for a specific table. */
+  getTableRetentionPolicy(tableName: string): TableRetentionPolicy | undefined;
+
+  // ---- Cleanup windows ----
+
+  /** Whether current time falls within a configured cleanup window. */
+  isInCleanupWindow(): boolean;
+
+  // ---- Writer coordination ----
+
+  /** Register an active writer for coordination during cleanup. */
+  registerActiveWriter(writer: WALWriter): void;
+
+  // ---- Utilities ----
+
+  /** Parse a segment ID to extract its start LSN. */
+  parseSegmentLSN(segmentId: string): bigint;
+  /** @deprecated Use `onWarning` on the policy instead. */
+  onWarning?: ((warning: RetentionWarning) => void) | undefined;
+  /** @deprecated Use `onWarning` on the policy instead. */
+  onSizeWarning?: ((current: number, max: number) => void) | undefined;
+}
+
+/**
+ * Create a WAL retention manager.
+ *
+ * This is the main entry point for WAL retention management. Pass a simple
+ * configuration object (see {@link RetentionConfig}) or use a preset for
+ * common scenarios.
+ *
+ * @param backend - Storage backend (DO storage, R2, or tiered)
+ * @param reader - WAL reader for listing and reading segments
+ * @param slotManager - Replication slot manager, or null if not using CDC
+ * @param policy - Retention configuration. Accepts any subset of {@link RetentionPolicy}.
+ *                 See {@link RetentionConfig} for the most commonly used fields.
+ * @param config - Optional WAL configuration overrides (segment prefix, paths, etc.)
+ * @returns An {@link ExtendedWALRetentionManager} with full retention capabilities
+ *
+ * @example Minimal setup (uses sensible defaults: 24h retention, 2 min segments)
+ * ```typescript
+ * const manager = createWALRetentionManager(backend, reader, slotManager);
+ * ```
+ *
+ * @example Common configuration
+ * ```typescript
+ * const manager = createWALRetentionManager(backend, reader, slotManager, {
+ *   retentionHours: 12,
+ *   maxTotalBytes: 256 * 1024 * 1024,  // 256MB
+ *   minSegmentCount: 3,
+ * });
+ * ```
+ *
+ * @example Using a preset with overrides
+ * ```typescript
+ * const manager = createWALRetentionManager(backend, reader, slotManager, {
+ *   preset: 'balanced',
+ *   maxTotalBytes: 1024 * 1024 * 1024,  // Override to 1GB
+ * });
+ * ```
+ *
+ * @example Full lifecycle
+ * ```typescript
+ * const manager = createWALRetentionManager(backend, reader, slotManager, {
+ *   retentionHours: 24,
+ *   maxTotalBytes: 500 * 1024 * 1024,
+ *   warningThreshold: 0.8,
+ *   onWarning: (w) => console.warn(w.message),
+ * });
  *
  * // Check what can be deleted
- * const result = await retentionManager.checkRetention();
- * console.log('Eligible for deletion:', result.eligibleForDeletion);
+ * const check = await manager.checkRetention();
+ * console.log('Eligible:', check.eligibleForDeletion.length, 'segments');
  *
- * // Perform cleanup
- * const cleanupResult = await retentionManager.cleanup();
- * console.log('Deleted:', cleanupResult.deleted.length, 'segments');
+ * // Perform cleanup (or pass true for dry run)
+ * const result = await manager.cleanup();
+ * console.log('Freed:', result.bytesFreed, 'bytes');
  * ```
  */
 export function createWALRetentionManager(

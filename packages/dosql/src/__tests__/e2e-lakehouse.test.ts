@@ -875,7 +875,7 @@ async function createDoLakeClient(options: { lakehouseId: string }): Promise<DoL
         const tableName = groupByMatch[3];
 
         const db = databases.get(dbName);
-        const duplicates: Array<{ [key: string]: unknown }> = [];
+        const duplicates: Array<Record<string, unknown>> = [];
 
         if (db) {
           const tableData = db.tables.get(tableName);

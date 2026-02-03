@@ -276,7 +276,8 @@ describe('Transaction Timeout Handling', () => {
   });
 
   it('should emit warning callback before timeout', async () => {
-    const onWarning = vi.fn();
+    const warningCalls: Array<[unknown, unknown]> = [];
+    const onWarning = (...args: unknown[]) => { warningCalls.push([args[0], args[1]]); };
     const warningManager = createTransactionManager({
       walWriter,
       timeoutConfig: {
@@ -293,17 +294,18 @@ describe('Transaction Timeout Handling', () => {
     // Wait for grace period to start (200 - 50 = 150ms)
     await delay(170);
 
-    expect(onWarning).toHaveBeenCalled();
-    const [txnId, remainingMs] = onWarning.mock.calls[0];
+    expect(warningCalls.length).toBeGreaterThan(0);
+    const [txnId, remainingMs] = warningCalls[0];
     expect(txnId).toBeDefined();
     // Allow some timing slack (grace period is 50ms, but allow up to 60ms)
-    expect(remainingMs).toBeLessThanOrEqual(60);
+    expect(remainingMs as number).toBeLessThanOrEqual(60);
 
     await warningManager.rollback();
   });
 
   it('should emit timeout callback when transaction times out', async () => {
-    const onTimeout = vi.fn();
+    let timeoutCalled = false;
+    const onTimeout = () => { timeoutCalled = true; };
     const timeoutManager = createTransactionManager({
       walWriter,
       timeoutConfig: {
@@ -320,7 +322,7 @@ describe('Transaction Timeout Handling', () => {
     // Wait for timeout
     await delay(150);
 
-    expect(onTimeout).toHaveBeenCalled();
+    expect(timeoutCalled).toBe(true);
   });
 
   it('should track I/O timeout separately from transaction timeout', async () => {
@@ -593,7 +595,8 @@ describe('Deadlock Detection and Resolution', () => {
   });
 
   it('should invoke onDeadlock callback when deadlock detected', async () => {
-    const onDeadlock = vi.fn();
+    const deadlockCalls: unknown[] = [];
+    const onDeadlock = (info: unknown) => { deadlockCalls.push(info); };
     lockManager = createLockManager({
       defaultTimeout: 5000,
       detectDeadlocks: true,
@@ -638,8 +641,8 @@ describe('Deadlock Detection and Resolution', () => {
       // Expected
     }
 
-    expect(onDeadlock).toHaveBeenCalled();
-    const [info] = onDeadlock.mock.calls[0];
+    expect(deadlockCalls.length).toBeGreaterThan(0);
+    const info = deadlockCalls[0] as { cycle: unknown; victimTxnId: unknown };
     expect(info.cycle).toBeDefined();
     expect(info.victimTxnId).toBeDefined();
 

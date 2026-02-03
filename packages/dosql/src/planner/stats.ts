@@ -9,6 +9,8 @@
  */
 
 import type { SqlValue } from '../engine/types.js';
+import type { CostModelConfig } from './types.js';
+import { DEFAULT_COST_MODEL } from './types.js';
 
 // =============================================================================
 // TABLE STATISTICS

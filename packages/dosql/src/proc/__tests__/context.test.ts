@@ -22,6 +22,7 @@ import {
   type StorageAdapter,
   type SqlExecutor,
   type TransactionManager,
+  type DatabaseContextOptions,
 } from '../context.js';
 import type { DatabaseSchema, TableAccessor } from '../types.js';
 
@@ -750,7 +751,7 @@ describe('createDatabaseContext', () => {
       adapters: {
         users: userAdapter,
         orders: orderAdapter,
-      } as any,
+      } as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });
@@ -776,7 +777,7 @@ describe('createDatabaseContext', () => {
       adapters: {
         users: userAdapter,
         orders: orderAdapter,
-      } as any,
+      } as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });
@@ -799,7 +800,7 @@ describe('createDatabaseContext', () => {
       adapters: {
         users: userAdapter,
         orders: orderAdapter,
-      } as any,
+      } as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });
@@ -820,7 +821,7 @@ describe('createDatabaseContext', () => {
       adapters: {
         users: userAdapter,
         orders: orderAdapter,
-      } as any,
+      } as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });

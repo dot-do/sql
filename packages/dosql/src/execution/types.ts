@@ -85,12 +85,12 @@ export interface SchemaManager extends SchemaProvider {
  * WAL entry for logging changes
  */
 export interface WALEntry {
-  timestamp: number;
-  txnId: string;
-  op: 'INSERT' | 'UPDATE' | 'DELETE';
-  table: string;
-  before?: Uint8Array;
-  after?: Uint8Array;
+  readonly timestamp: number;
+  readonly txnId: string;
+  readonly op: 'INSERT' | 'UPDATE' | 'DELETE';
+  readonly table: string;
+  readonly before?: Uint8Array;
+  readonly after?: Uint8Array;
 }
 
 /**
@@ -109,9 +109,9 @@ export interface WALWriter {
  */
 export interface QueryResult {
   /** Rows returned (for SELECT) or affected rows info (for INSERT/UPDATE/DELETE with RETURNING) */
-  rows: Record<string, unknown>[];
+  readonly rows: ReadonlyArray<Record<string, unknown>>;
   /** Number of rows affected by the operation */
-  rowsAffected: number;
+  readonly rowsAffected: number;
 }
 
 // =============================================================================

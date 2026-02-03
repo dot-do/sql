@@ -27,12 +27,10 @@ type MiddlewareHandler = (c: HonoContext, next: () => Promise<void>) => Promise<
 /**
  * Verified user info returned from token verification
  */
-export interface AuthUser {
+export type AuthUser = {
   /** User ID from the auth provider */
   userId: string
-  /** Additional claims from the token */
-  [key: string]: unknown
-}
+} & Record<string, unknown>
 
 /**
  * Auth middleware configuration
@@ -124,7 +122,7 @@ function createOAuthDoVerifier(oauthDoUrl: string): (token: string) => Promise<A
         return null
       }
 
-      const data = await response.json() as { valid?: boolean; userId?: string; [key: string]: unknown }
+      const data = await response.json() as { valid?: boolean; userId?: string } & Record<string, unknown>
 
       if (!data.valid || !data.userId) {
         return null

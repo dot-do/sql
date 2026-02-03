@@ -582,7 +582,7 @@ export type ValidatedProc<
 /**
  * Validation function type.
  */
-export type Validator<T> = (value: unknown) => value is T;
+export type Validator<T extends Record<string, unknown> | string | number | boolean> = (value: unknown) => value is T;
 
 /**
  * Create a validated procedure wrapper.

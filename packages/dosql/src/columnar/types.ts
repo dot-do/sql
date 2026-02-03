@@ -256,15 +256,6 @@ import type { StorageInterface } from '../storage/interface.js';
 // Re-export StorageInterface as the preferred type for columnar storage
 export type { StorageInterface };
 
-/**
- * FSXInterface is an alias for StorageInterface for backward compatibility.
- *
- * The columnar engine now uses the unified StorageInterface from the storage
- * module, which provides a common abstraction shared with the B-tree engine.
- *
- * @deprecated Use StorageInterface directly
- */
-export type FSXInterface = StorageInterface;
 
 // ============================================================================
 // Query Types

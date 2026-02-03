@@ -262,7 +262,7 @@ export interface LegacyFSXBackend {
 }
 
 /**
- * Legacy FSXInterface (for backward compatibility with Columnar).
+ * Legacy Columnar storage interface (for backward compatibility).
  *
  * @deprecated Use StorageInterface instead
  */
@@ -324,9 +324,9 @@ export function adaptToFSXBackend(storage: StorageInterface): LegacyFSXBackend {
 }
 
 /**
- * Adapt a legacy Columnar FSXInterface to the new StorageInterface.
+ * Adapt a legacy Columnar storage interface to the new StorageInterface.
  *
- * @param fsx - Legacy FSXInterface instance
+ * @param fsx - Legacy columnar storage instance
  * @returns StorageInterface wrapper
  */
 export function adaptColumnarInterface(
@@ -337,7 +337,7 @@ export function adaptColumnarInterface(
     put: (key, data) => fsx.put(key, data),
     delete: (key) => fsx.delete(key),
     list: (prefix) => fsx.list(prefix),
-    // Columnar FSXInterface doesn't have exists, so we implement it
+    // LegacyColumnarInterface doesn't have exists, so we implement it
     exists: async (key) => (await fsx.get(key)) !== null,
   };
 }

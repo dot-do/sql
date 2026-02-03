@@ -11,7 +11,7 @@ import { DoSQLDatabase, type Env } from './database.js';
 export { DoSQLDatabase };
 
 // Export TestBranchDO for branch testing
-export { TestBranchDO } from '../branch/branch.test.js';
+export { TestBranchDO } from '../branch/__tests__/branch.test.js';
 
 // Export BenchmarkTestDO for benchmark adapter testing
 export { BenchmarkTestDO } from '../benchmarks/adapters/__tests__/do-sqlite.test.js';
@@ -25,8 +25,7 @@ export { PerformanceRegressionDO } from '../__tests__/performance.test.js';
 // Export ProductionBenchmarkDO for production benchmarks TDD RED phase tests
 export { ProductionBenchmarkDO } from '../__tests__/production-benchmarks.test.js';
 
-// Export BenchmarkValidationDO for performance benchmark validation tests
-export { BenchmarkValidationDO } from '../__tests__/benchmark-validation.test.js';
+// BenchmarkValidationDO removed - test file does not exist
 
 // =============================================================================
 // Worker Fetch Handler

@@ -81,9 +81,10 @@ describe('Structured Logger - Error Events Include Structured Fields', () => {
     });
 
     expect(logs).toHaveLength(1);
-    expect(logs[0].context).toBeDefined();
-    expect(logs[0].context?.txnId).toBe(txId);
-    expect(logs[0].context?.operation).toBe(operation);
+    expect(logs[0].context).toMatchObject({
+      txnId: txId,
+      operation: operation,
+    });
   });
 
   it('should include error details with name, code, message, and stack', () => {
@@ -97,11 +98,12 @@ describe('Structured Logger - Error Events Include Structured Fields', () => {
     logger.error('Operation failed', error, { operation: 'rollback' });
 
     expect(logs).toHaveLength(1);
-    expect(logs[0].error).toBeDefined();
-    expect(logs[0].error?.name).toBe('TransactionError');
-    expect(logs[0].error?.code).toBe('ROLLBACK_FAILED');
-    expect(logs[0].error?.message).toBe('Something failed');
-    expect(logs[0].error?.stack).toBeDefined();
+    expect(logs[0].error).toMatchObject({
+      name: 'TransactionError',
+      code: 'ROLLBACK_FAILED',
+      message: 'Something failed',
+    });
+    expect(typeof logs[0].error?.stack).toBe('string');
   });
 
   it('should include trace ID in all log entries', () => {
@@ -409,7 +411,8 @@ describe('Structured Logger - JSON Serialization', () => {
 
     // Should be JSON-serializable
     const json = JSON.stringify(logs[0]);
-    expect(json).toBeDefined();
+    expect(typeof json).toBe('string');
+    expect(() => JSON.parse(json)).not.toThrow();
   });
 });
 
@@ -611,8 +614,9 @@ describe('Structured Logger - Transaction Manager Integration', () => {
 
     // Verify JSON-serializable
     const json = JSON.stringify(logs[0]);
-    expect(json).toBeDefined();
-    expect(JSON.parse(json).context.txnId).toBe(txnId);
+    expect(typeof json).toBe('string');
+    const parsed = JSON.parse(json);
+    expect(parsed.context.txnId).toBe(txnId);
   });
 
   it('should log WAL write failures with proper context', () => {

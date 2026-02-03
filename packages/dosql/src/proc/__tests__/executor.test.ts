@@ -26,6 +26,7 @@ import {
   createInMemorySqlExecutor,
   createInMemoryTransactionManager,
   createDatabaseContext,
+  type DatabaseContextOptions,
 } from '../context.js';
 import {
   createInMemoryCatalogStorage,
@@ -76,7 +77,7 @@ describe('Procedure Executor Creation', () => {
 
     const tableMap = new Map(Object.entries(adapters));
     const db = createDatabaseContext<TestDB>({
-      adapters: adapters as any,
+      adapters: adapters as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });
@@ -101,7 +102,7 @@ describe('Procedure Executor Creation', () => {
 
     const tableMap = new Map(Object.entries(adapters));
     const db = createDatabaseContext<TestDB>({
-      adapters: adapters as any,
+      adapters: adapters as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });
@@ -127,7 +128,7 @@ describe('Procedure Executor Creation', () => {
 
     const tableMap = new Map(Object.entries(adapters));
     const db = createDatabaseContext<TestDB>({
-      adapters: adapters as any,
+      adapters: adapters as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });
@@ -577,7 +578,7 @@ describe('Error Handling', () => {
 
       const tableMap = new Map(Object.entries(adapters));
       const db = createDatabaseContext<TestDB>({
-        adapters: adapters as any,
+        adapters: adapters as unknown as DatabaseContextOptions<TestDB>['adapters'],
         sqlExecutor: createInMemorySqlExecutor(tableMap),
         transactionManager: createInMemoryTransactionManager(),
       });
@@ -604,7 +605,7 @@ describe('Error Handling', () => {
 
       const tableMap = new Map(Object.entries(adapters));
       const db = createDatabaseContext<TestDB>({
-        adapters: adapters as any,
+        adapters: adapters as unknown as DatabaseContextOptions<TestDB>['adapters'],
         sqlExecutor: createInMemorySqlExecutor(tableMap),
         transactionManager: createInMemoryTransactionManager(),
       });
@@ -664,7 +665,7 @@ describe('Execution Options', () => {
 
     const tableMap = new Map(Object.entries(adapters));
     const db = createDatabaseContext<TestDB>({
-      adapters: adapters as any,
+      adapters: adapters as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });
@@ -697,7 +698,7 @@ describe('Execution Options', () => {
 
     const tableMap = new Map(Object.entries(adapters));
     const db = createDatabaseContext<TestDB>({
-      adapters: adapters as any,
+      adapters: adapters as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });
@@ -729,7 +730,7 @@ describe('Procedure run() method', () => {
 
     const tableMap = new Map(Object.entries(adapters));
     const db = createDatabaseContext<TestDB>({
-      adapters: adapters as any,
+      adapters: adapters as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });
@@ -766,7 +767,7 @@ describe('Procedure run() method', () => {
 
     const tableMap = new Map(Object.entries(adapters));
     const db = createDatabaseContext<TestDB>({
-      adapters: adapters as any,
+      adapters: adapters as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });
@@ -818,7 +819,7 @@ describe('Integration with Registry', () => {
 
     const tableMap = new Map(Object.entries(adapters));
     const db = createDatabaseContext<TestDB>({
-      adapters: adapters as any,
+      adapters: adapters as unknown as DatabaseContextOptions<TestDB>['adapters'],
       sqlExecutor: createInMemorySqlExecutor(tableMap),
       transactionManager: createInMemoryTransactionManager(),
     });

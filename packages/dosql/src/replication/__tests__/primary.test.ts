@@ -316,7 +316,7 @@ describe('Primary DO - Replica Registration', () => {
       const replicaId = createReplicaId('us-west', 'replica-1');
 
       const info = createReplicaInfo(replicaId);
-      (info as any).metadata = { datacenter: 'dc1', rack: 'r2' };
+      info.metadata = { datacenter: 'dc1', rack: 'r2' };
 
       await primary.registerReplica(info);
 
