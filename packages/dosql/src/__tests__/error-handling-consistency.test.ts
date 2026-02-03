@@ -21,6 +21,7 @@ import { coerceValue } from '../statement/binding.js';
 import { FSXError, FSXErrorCode } from '../fsx/types.js';
 import { R2Error, R2ErrorCode } from '../fsx/r2-errors.js';
 import { TransactionError, TransactionErrorCode } from '../transaction/types.js';
+import { captureError, assertErrorCode } from './test-utils.js';
 
 // Import from the new unified errors module
 import {
@@ -99,12 +100,10 @@ describe('Error Pattern Consistency: Throw vs Return', () => {
       const db = createDatabase();
       db.close();
 
-      let caughtError: DatabaseError | undefined;
-      try {
-        db.prepare('SELECT 1');
-      } catch (e) {
-        caughtError = e as DatabaseError;
-      }
+      const caughtError = captureError(
+        () => db.prepare('SELECT 1'),
+        DatabaseError
+      );
 
       expect(caughtError).toBeInstanceOf(DatabaseError);
       expect(caughtError!.code).toBe(DatabaseErrorCode.CLOSED);
@@ -114,12 +113,10 @@ describe('Error Pattern Consistency: Throw vs Return', () => {
       const db = createDatabase();
       db.close();
 
-      let caughtError: Error | undefined;
-      try {
-        db.prepare('SELECT 1');
-      } catch (e) {
-        caughtError = e as Error;
-      }
+      const caughtError = captureError(
+        () => db.prepare('SELECT 1'),
+        DoSQLError
+      );
 
       expect(caughtError).toBeInstanceOf(DoSQLError);
     });
@@ -145,12 +142,10 @@ describe('Error Code Standardization', () => {
       const db = createDatabase();
       db.close();
 
-      let caughtError: DatabaseError | undefined;
-      try {
-        db.prepare('SELECT 1');
-      } catch (e) {
-        caughtError = e as DatabaseError;
-      }
+      const caughtError = captureError(
+        () => db.prepare('SELECT 1'),
+        DatabaseError
+      );
 
       expect(caughtError).toBeInstanceOf(DatabaseError);
       // Expected format: DB_CLOSED, DB_READ_ONLY, etc.
@@ -195,15 +190,13 @@ describe('Error Code Standardization', () => {
     });
 
     it('should include error code when coerceValue fails', () => {
-      let error: Error | undefined;
-      try {
-        coerceValue(Symbol('test'));
-      } catch (e) {
-        error = e as Error;
-      }
+      const error = captureError(
+        () => coerceValue(Symbol('test')),
+        BindingError
+      );
 
       expect(error).toBeInstanceOf(BindingError);
-      expect((error as BindingError).code).toBe('BIND_INVALID_TYPE');
+      expect(error?.code).toBe('BIND_INVALID_TYPE');
     });
 
     it('has all expected error codes', () => {
@@ -375,12 +368,10 @@ describe('Error Context and Recovery', () => {
     const db = createDatabase();
     db.close();
 
-    let error: DatabaseError | undefined;
-    try {
-      db.prepare('SELECT 1');
-    } catch (e) {
-      error = e as DatabaseError;
-    }
+    const error = captureError(
+      () => db.prepare('SELECT 1'),
+      DatabaseError
+    );
 
     expect(error!.recoveryHint).toBeDefined();
     expect(error!.recoveryHint).toContain('createDatabase');

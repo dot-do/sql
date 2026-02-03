@@ -37,6 +37,7 @@ import {
   CDCError,
   CDCErrorCode,
 } from './types.js';
+import { decodeOrDefault, createJsonDecoder } from '../utils/type-guards.js';
 
 // =============================================================================
 // HLC CDC Event Types
@@ -216,7 +217,8 @@ export function createCDCSubscription(
       filter?: CDCFilter,
       decoder?: (data: Uint8Array) => T
     ): AsyncIterableIterator<CDCEvent<T>> {
-      const decodeValue = decoder ?? ((data: Uint8Array) => data as unknown as T);
+      // Create decoder with type-safe fallback using type guard utility
+      const decodeValue = (data: Uint8Array): T => decodeOrDefault(data, decoder) as T;
 
       // Extend filter to include transaction control for boundary events
       const extendedFilter: CDCFilter = {
@@ -335,14 +337,14 @@ export function createCDCSubscription(
           try {
             event.data = JSON.parse(new TextDecoder().decode(entry.after)) as T;
           } catch {
-            event.data = entry.after as unknown as T;
+            event.data = decodeOrDefault(entry.after, decoder) as T;
           }
         }
         if (entry.before) {
           try {
             event.oldData = JSON.parse(new TextDecoder().decode(entry.before)) as T;
           } catch {
-            event.oldData = entry.before as unknown as T;
+            event.oldData = decodeOrDefault(entry.before, decoder) as T;
           }
         }
 

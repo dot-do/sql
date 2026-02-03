@@ -102,9 +102,17 @@ describe('DoSQL Worker - Smoke Tests', () => {
     });
   });
 
-  // Skip this test due to known vitest-pool-workers isolated storage issue
-  // Full CRUD testing should be done via wrangler dev or actual deployment
-  describe.skip('Full CRUD Workflow (requires wrangler dev)', () => {
+  /**
+   * Full CRUD workflow tests are skipped due to known vitest-pool-workers
+   * isolated storage issue. Each test runs in isolation and cannot see
+   * state from previous operations on the same Durable Object.
+   *
+   * SKIP REASON: vitest-pool-workers isolated storage limitation
+   * See: https://developers.cloudflare.com/workers/testing/vitest-integration/known-issues/#isolated-storage
+   *
+   * RUN MANUALLY: wrangler dev, then use curl/httpie for multi-step tests
+   */
+  describe.skip('Full CRUD Workflow (vitest-pool-workers isolated storage)', () => {
     it('should perform complete CRUD operations', async () => {
       // This test is skipped due to vitest-pool-workers limitation
       // Run manually with: wrangler dev, then use curl/httpie

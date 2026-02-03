@@ -6,6 +6,14 @@
  * DO storage (hot/recent data) and R2 (cold/archival storage).
  */
 
+import {
+  DoSQLError,
+  ErrorCategory,
+  registerErrorClass,
+  type ErrorContext,
+  type SerializedError,
+} from '../errors/base.js';
+
 // =============================================================================
 // Core FSX Backend Interface
 // =============================================================================
@@ -190,19 +198,65 @@ export enum FSXErrorCode {
 }
 
 /**
- * Custom error class for FSX operations
+ * Error class for FSX (File System Abstraction) operations
+ *
+ * Extends DoSQLError for unified error handling across the DoSQL ecosystem.
  */
-export class FSXError extends Error {
+export class FSXError extends DoSQLError {
+  readonly code: FSXErrorCode;
+  readonly category: ErrorCategory;
+  readonly path?: string;
+
   constructor(
-    public readonly code: FSXErrorCode,
+    code: FSXErrorCode,
     message: string,
-    public readonly path?: string,
-    public readonly cause?: Error
+    path?: string,
+    cause?: Error
   ) {
-    super(message);
+    super(message, cause ? { cause } : undefined);
     this.name = 'FSXError';
+    this.code = code;
+    this.path = path;
+    this.category = this.determineCategory();
+
+    if (this.path) {
+      this.context = { metadata: { path: this.path } };
+    }
+  }
+
+  private determineCategory(): ErrorCategory {
+    switch (this.code) {
+      case FSXErrorCode.NOT_FOUND:
+        return ErrorCategory.RESOURCE;
+      case FSXErrorCode.CHUNK_CORRUPTED:
+        return ErrorCategory.INTERNAL;
+      case FSXErrorCode.SIZE_EXCEEDED:
+      case FSXErrorCode.INVALID_RANGE:
+        return ErrorCategory.VALIDATION;
+      default:
+        return ErrorCategory.EXECUTION;
+    }
+  }
+
+  override isRetryable(): boolean {
+    return [
+      FSXErrorCode.WRITE_FAILED,
+      FSXErrorCode.READ_FAILED,
+      FSXErrorCode.DELETE_FAILED,
+      FSXErrorCode.MIGRATION_FAILED,
+    ].includes(this.code);
+  }
+
+  static fromJSON(json: SerializedError): FSXError {
+    return new FSXError(
+      json.code as FSXErrorCode,
+      json.message,
+      json.context?.metadata?.path as string | undefined
+    );
   }
 }
+
+registerErrorClass('FSXError', FSXError);
 
 // =============================================================================
 // Utility Types

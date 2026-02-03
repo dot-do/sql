@@ -7,12 +7,17 @@
  * - Throttling of WAL capture rate based on downstream signals
  * - Adaptive rate limiting based on buffer utilization
  * - Integration with the CDC capture layer
+ * - Watermark-based backpressure (high/low thresholds)
+ * - Exactly-once delivery with sequence numbers and LSN deduplication
+ * - Consumer acknowledgment tracking with checkpoint persistence
  *
  * @packageDocumentation
  */
 
 import type { BackpressureSignal } from './types.js';
+import type { LSN } from '../wal/types.js';
 import { assertNever } from '../utils/assert-never.js';
+import { createLSN, compareLSN } from '../engine/types.js';
 
 // =============================================================================
 // Configuration Types
@@ -649,4 +654,611 @@ export function nackToBackpressureSignal(
         reason: `NACK received: ${reason}`,
       };
   }
+}
+
+// =============================================================================
+// Watermark-Based Backpressure
+// =============================================================================
+
+/**
+ * Configuration for watermark-based backpressure
+ */
+export interface WatermarkConfig {
+  /** High watermark - pause capture when buffer reaches this level (default: 0.9) */
+  highWatermark: number;
+  /** Low watermark - resume capture when buffer drops to this level (default: 0.5) */
+  lowWatermark: number;
+  /** Maximum buffer size in events (default: 10000) */
+  maxBufferSize: number;
+  /** Minimum buffer size before any backpressure (default: 100) */
+  minBufferSize: number;
+}
+
+/**
+ * Default watermark configuration
+ */
+export const DEFAULT_WATERMARK_CONFIG: Readonly<WatermarkConfig> = {
+  highWatermark: 0.9,
+  lowWatermark: 0.5,
+  maxBufferSize: 10000,
+  minBufferSize: 100,
+};
+
+/**
+ * Watermark state
+ */
+export type WatermarkState = 'flowing' | 'paused';
+
+/**
+ * Watermark-based backpressure controller for CDC streams
+ */
+export class WatermarkController {
+  private readonly config: WatermarkConfig;
+  private state: WatermarkState = 'flowing';
+  private currentBufferSize = 0;
+  private stateChangeCallbacks: Set<(state: WatermarkState, bufferUtilization: number) => void> = new Set();
+  private totalPauses = 0;
+  private totalResumes = 0;
+  private lastStateChangeAt = Date.now();
+  private totalPausedTimeMs = 0;
+
+  constructor(config: Partial<WatermarkConfig> = {}) {
+    this.config = { ...DEFAULT_WATERMARK_CONFIG, ...config };
+    if (this.config.lowWatermark >= this.config.highWatermark) {
+      throw new Error('Low watermark must be less than high watermark');
+    }
+  }
+
+  getBufferUtilization(): number {
+    return this.currentBufferSize / this.config.maxBufferSize;
+  }
+
+  getState(): WatermarkState {
+    return this.state;
+  }
+
+  shouldCapture(): boolean {
+    return this.state === 'flowing';
+  }
+
+  addEvents(count: number): boolean {
+    this.currentBufferSize += count;
+    if (this.state === 'flowing' && this.getBufferUtilization() >= this.config.highWatermark) {
+      this.transitionTo('paused');
+    }
+    return this.state === 'flowing';
+  }
+
+  removeEvents(count: number): boolean {
+    this.currentBufferSize = Math.max(0, this.currentBufferSize - count);
+    if (this.state === 'paused' && this.getBufferUtilization() <= this.config.lowWatermark) {
+      this.transitionTo('flowing');
+      return true;
+    }
+    return false;
+  }
+
+  setBufferSize(size: number): void {
+    const wasFlowing = this.state === 'flowing';
+    this.currentBufferSize = Math.min(size, this.config.maxBufferSize);
+    const utilization = this.getBufferUtilization();
+    if (wasFlowing && utilization >= this.config.highWatermark) {
+      this.transitionTo('paused');
+    } else if (!wasFlowing && utilization <= this.config.lowWatermark) {
+      this.transitionTo('flowing');
+    }
+  }
+
+  onStateChange(callback: (state: WatermarkState, bufferUtilization: number) => void): () => void {
+    this.stateChangeCallbacks.add(callback);
+    return () => this.stateChangeCallbacks.delete(callback);
+  }
+
+  getMetrics(): {
+    state: WatermarkState;
+    bufferSize: number;
+    bufferUtilization: number;
+    totalPauses: number;
+    totalResumes: number;
+    totalPausedTimeMs: number;
+    config: WatermarkConfig;
+  } {
+    const now = Date.now();
+    let pausedTime = this.totalPausedTimeMs;
+    if (this.state === 'paused') {
+      pausedTime += now - this.lastStateChangeAt;
+    }
+    return {
+      state: this.state,
+      bufferSize: this.currentBufferSize,
+      bufferUtilization: this.getBufferUtilization(),
+      totalPauses: this.totalPauses,
+      totalResumes: this.totalResumes,
+      totalPausedTimeMs: pausedTime,
+      config: { ...this.config },
+    };
+  }
+
+  reset(): void {
+    if (this.state === 'paused') {
+      this.totalPausedTimeMs += Date.now() - this.lastStateChangeAt;
+    }
+    this.state = 'flowing';
+    this.currentBufferSize = 0;
+    this.lastStateChangeAt = Date.now();
+  }
+
+  private transitionTo(newState: WatermarkState): void {
+    if (this.state === newState) return;
+    const now = Date.now();
+    if (this.state === 'paused') {
+      this.totalPausedTimeMs += now - this.lastStateChangeAt;
+    }
+    this.state = newState;
+    this.lastStateChangeAt = now;
+    if (newState === 'paused') {
+      this.totalPauses++;
+    } else {
+      this.totalResumes++;
+    }
+    const utilization = this.getBufferUtilization();
+    for (const callback of this.stateChangeCallbacks) {
+      try {
+        callback(newState, utilization);
+      } catch (error) {
+        console.error('Error in watermark state change callback:', error);
+      }
+    }
+  }
+}
+
+export function createWatermarkController(config: Partial<WatermarkConfig> = {}): WatermarkController {
+  return new WatermarkController(config);
+}
+
+// =============================================================================
+// Exactly-Once Delivery
+// =============================================================================
+
+export interface ExactlyOnceConfig {
+  maxTrackedLSNs: number;
+  lsnTTLMs: number;
+  validateSequence: boolean;
+  maxSequenceGap: number;
+}
+
+export const DEFAULT_EXACTLY_ONCE_CONFIG: Readonly<ExactlyOnceConfig> = {
+  maxTrackedLSNs: 100000,
+  lsnTTLMs: 3600000,
+  validateSequence: true,
+  maxSequenceGap: 1000,
+};
+
+interface TrackedLSN {
+  lsn: LSN;
+  timestamp: number;
+  sequenceNumber: number;
+}
+
+export interface DeliveryResult {
+  delivered: boolean;
+  duplicate: boolean;
+  sequenceNumber?: number;
+  rejectionReason?: string;
+}
+
+export class ExactlyOnceController {
+  private readonly config: ExactlyOnceConfig;
+  private trackedLSNs: Map<string, TrackedLSN> = new Map();
+  private highestLSN: LSN = createLSN(0n);
+  private nextSequenceNumber = 1;
+  private lastDeliveredSequence = 0;
+  private pendingDeliveries: Map<string, { sequenceNumber: number; timestamp: number }> = new Map();
+  private totalDelivered = 0;
+  private totalDeduplicated = 0;
+  private totalOutOfOrder = 0;
+
+  constructor(config: Partial<ExactlyOnceConfig> = {}) {
+    this.config = { ...DEFAULT_EXACTLY_ONCE_CONFIG, ...config };
+  }
+
+  checkAndTrack(lsn: LSN): DeliveryResult {
+    const lsnKey = String(lsn);
+    if (this.trackedLSNs.has(lsnKey)) {
+      this.totalDeduplicated++;
+      return { delivered: false, duplicate: true, rejectionReason: 'Duplicate LSN' };
+    }
+    if (this.pendingDeliveries.has(lsnKey)) {
+      this.totalDeduplicated++;
+      return { delivered: false, duplicate: true, rejectionReason: 'Delivery already pending' };
+    }
+    if (compareLSN(lsn, this.highestLSN) < 0) {
+      this.totalOutOfOrder++;
+    }
+    const sequenceNumber = this.nextSequenceNumber++;
+    if (this.config.validateSequence) {
+      const gap = sequenceNumber - this.lastDeliveredSequence - 1;
+      if (gap > this.config.maxSequenceGap) {
+        return { delivered: false, duplicate: false, rejectionReason: `Sequence gap too large: ${gap}` };
+      }
+    }
+    const now = Date.now();
+    this.trackedLSNs.set(lsnKey, { lsn, timestamp: now, sequenceNumber });
+    this.pendingDeliveries.set(lsnKey, { sequenceNumber, timestamp: now });
+    if (compareLSN(lsn, this.highestLSN) > 0) {
+      this.highestLSN = lsn;
+    }
+    this.lastDeliveredSequence = sequenceNumber;
+    this.totalDelivered++;
+    this.cleanupIfNeeded();
+    return { delivered: true, duplicate: false, sequenceNumber };
+  }
+
+  isDuplicate(lsn: LSN): boolean {
+    const lsnKey = String(lsn);
+    return this.trackedLSNs.has(lsnKey) || this.pendingDeliveries.has(lsnKey);
+  }
+
+  acknowledge(lsn: LSN): void {
+    this.pendingDeliveries.delete(String(lsn));
+  }
+
+  acknowledgeUpTo(upToLSN: LSN): number {
+    let acknowledged = 0;
+    for (const [lsnKey] of this.pendingDeliveries) {
+      const lsn = createLSN(BigInt(lsnKey));
+      if (compareLSN(lsn, upToLSN) <= 0) {
+        this.pendingDeliveries.delete(lsnKey);
+        acknowledged++;
+      }
+    }
+    return acknowledged;
+  }
+
+  getHighestAcknowledgedLSN(): LSN {
+    let highest = createLSN(0n);
+    for (const [lsnKey] of this.trackedLSNs) {
+      const lsn = createLSN(BigInt(lsnKey));
+      if (!this.pendingDeliveries.has(lsnKey) && compareLSN(lsn, highest) > 0) {
+        highest = lsn;
+      }
+    }
+    return highest;
+  }
+
+  getPendingCount(): number {
+    return this.pendingDeliveries.size;
+  }
+
+  getMetrics(): {
+    totalDelivered: number;
+    totalDeduplicated: number;
+    totalOutOfOrder: number;
+    pendingCount: number;
+    trackedLSNCount: number;
+    highestLSN: LSN;
+    nextSequenceNumber: number;
+  } {
+    return {
+      totalDelivered: this.totalDelivered,
+      totalDeduplicated: this.totalDeduplicated,
+      totalOutOfOrder: this.totalOutOfOrder,
+      pendingCount: this.pendingDeliveries.size,
+      trackedLSNCount: this.trackedLSNs.size,
+      highestLSN: this.highestLSN,
+      nextSequenceNumber: this.nextSequenceNumber,
+    };
+  }
+
+  reset(fromLSN?: LSN, fromSequence?: number): void {
+    this.trackedLSNs.clear();
+    this.pendingDeliveries.clear();
+    this.highestLSN = fromLSN ?? createLSN(0n);
+    this.nextSequenceNumber = fromSequence ?? 1;
+    this.lastDeliveredSequence = (fromSequence ?? 1) - 1;
+  }
+
+  exportState(): { highestLSN: string; nextSequenceNumber: number; pendingLSNs: string[] } {
+    return {
+      highestLSN: String(this.highestLSN),
+      nextSequenceNumber: this.nextSequenceNumber,
+      pendingLSNs: Array.from(this.pendingDeliveries.keys()),
+    };
+  }
+
+  importState(state: { highestLSN: string; nextSequenceNumber: number; pendingLSNs: string[] }): void {
+    this.highestLSN = createLSN(BigInt(state.highestLSN));
+    this.nextSequenceNumber = state.nextSequenceNumber;
+    this.lastDeliveredSequence = state.nextSequenceNumber - 1;
+    const now = Date.now();
+    for (const lsnKey of state.pendingLSNs) {
+      this.pendingDeliveries.set(lsnKey, { sequenceNumber: 0, timestamp: now });
+    }
+  }
+
+  private cleanupIfNeeded(): void {
+    if (this.trackedLSNs.size <= this.config.maxTrackedLSNs) return;
+    const now = Date.now();
+    const expiredCutoff = now - this.config.lsnTTLMs;
+    for (const [lsnKey, tracked] of this.trackedLSNs) {
+      if (tracked.timestamp < expiredCutoff && !this.pendingDeliveries.has(lsnKey)) {
+        this.trackedLSNs.delete(lsnKey);
+      }
+    }
+    if (this.trackedLSNs.size > this.config.maxTrackedLSNs) {
+      const sorted = Array.from(this.trackedLSNs.entries())
+        .filter(([key]) => !this.pendingDeliveries.has(key))
+        .sort((a, b) => a[1].timestamp - b[1].timestamp);
+      const toRemove = sorted.slice(0, sorted.length - this.config.maxTrackedLSNs);
+      for (const [key] of toRemove) {
+        this.trackedLSNs.delete(key);
+      }
+    }
+  }
+}
+
+export function createExactlyOnceController(config: Partial<ExactlyOnceConfig> = {}): ExactlyOnceController {
+  return new ExactlyOnceController(config);
+}
+
+// =============================================================================
+// Consumer Checkpoint Manager
+// =============================================================================
+
+export interface ConsumerCheckpoint {
+  consumerId: string;
+  acknowledgedLSN: LSN;
+  acknowledgedSequence: number;
+  checkpointedAt: number;
+  pendingLSNs: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CheckpointStorage {
+  save(checkpoint: ConsumerCheckpoint): Promise<void>;
+  load(consumerId: string): Promise<ConsumerCheckpoint | null>;
+  delete(consumerId: string): Promise<void>;
+  list(): Promise<string[]>;
+}
+
+export class InMemoryCheckpointStorage implements CheckpointStorage {
+  private checkpoints: Map<string, ConsumerCheckpoint> = new Map();
+
+  async save(checkpoint: ConsumerCheckpoint): Promise<void> {
+    this.checkpoints.set(checkpoint.consumerId, { ...checkpoint });
+  }
+
+  async load(consumerId: string): Promise<ConsumerCheckpoint | null> {
+    const checkpoint = this.checkpoints.get(consumerId);
+    return checkpoint ? { ...checkpoint } : null;
+  }
+
+  async delete(consumerId: string): Promise<void> {
+    this.checkpoints.delete(consumerId);
+  }
+
+  async list(): Promise<string[]> {
+    return Array.from(this.checkpoints.keys());
+  }
+}
+
+export class ConsumerCheckpointManager {
+  private readonly storage: CheckpointStorage;
+  private readonly checkpointInterval: number;
+  private lastCheckpointAt: Map<string, number> = new Map();
+
+  constructor(storage: CheckpointStorage, checkpointIntervalMs = 5000) {
+    this.storage = storage;
+    this.checkpointInterval = checkpointIntervalMs;
+  }
+
+  async checkpoint(
+    consumerId: string,
+    acknowledgedLSN: LSN,
+    acknowledgedSequence: number,
+    pendingLSNs: string[] = [],
+    metadata?: Record<string, unknown>
+  ): Promise<void> {
+    const checkpoint: ConsumerCheckpoint = {
+      consumerId,
+      acknowledgedLSN,
+      acknowledgedSequence,
+      checkpointedAt: Date.now(),
+      pendingLSNs,
+      metadata,
+    };
+    await this.storage.save(checkpoint);
+    this.lastCheckpointAt.set(consumerId, checkpoint.checkpointedAt);
+  }
+
+  shouldCheckpoint(consumerId: string): boolean {
+    const lastCheckpoint = this.lastCheckpointAt.get(consumerId);
+    if (!lastCheckpoint) return true;
+    return Date.now() - lastCheckpoint >= this.checkpointInterval;
+  }
+
+  async recover(consumerId: string): Promise<ConsumerCheckpoint | null> {
+    return this.storage.load(consumerId);
+  }
+
+  async deleteCheckpoint(consumerId: string): Promise<void> {
+    await this.storage.delete(consumerId);
+    this.lastCheckpointAt.delete(consumerId);
+  }
+
+  async listConsumers(): Promise<string[]> {
+    return this.storage.list();
+  }
+}
+
+export function createCheckpointManager(
+  storage: CheckpointStorage,
+  checkpointIntervalMs?: number
+): ConsumerCheckpointManager {
+  return new ConsumerCheckpointManager(storage, checkpointIntervalMs);
+}
+
+// =============================================================================
+// Integrated Backpressure Stream Controller
+// =============================================================================
+
+export interface BackpressureStreamConfig {
+  backpressure: Partial<BackpressureConfig>;
+  watermark: Partial<WatermarkConfig>;
+  exactlyOnce: Partial<ExactlyOnceConfig>;
+  checkpointIntervalMs: number;
+  consumerId: string;
+}
+
+export const DEFAULT_STREAM_CONFIG: Readonly<BackpressureStreamConfig> = {
+  backpressure: {},
+  watermark: {},
+  exactlyOnce: {},
+  checkpointIntervalMs: 5000,
+  consumerId: '',
+};
+
+export class BackpressureStreamController {
+  private readonly config: BackpressureStreamConfig;
+  private readonly backpressure: BackpressureController;
+  private readonly watermark: WatermarkController;
+  private readonly exactlyOnce: ExactlyOnceController;
+  private readonly checkpointManager: ConsumerCheckpointManager;
+  private resumePromise: Promise<void> | null = null;
+  private resumeResolve: (() => void) | null = null;
+
+  constructor(config: Partial<BackpressureStreamConfig>, checkpointStorage: CheckpointStorage) {
+    this.config = { ...DEFAULT_STREAM_CONFIG, ...config };
+    this.backpressure = new BackpressureController(this.config.backpressure);
+    this.watermark = new WatermarkController(this.config.watermark);
+    this.exactlyOnce = new ExactlyOnceController(this.config.exactlyOnce);
+    this.checkpointManager = new ConsumerCheckpointManager(
+      checkpointStorage,
+      this.config.checkpointIntervalMs
+    );
+    this.watermark.onStateChange((state, _utilization) => {
+      if (state === 'paused') {
+        this.backpressure.handleSignal({
+          type: 'pause',
+          bufferUtilization: this.watermark.getBufferUtilization(),
+          reason: 'High watermark reached',
+        });
+      } else {
+        this.backpressure.handleSignal({
+          type: 'resume',
+          bufferUtilization: this.watermark.getBufferUtilization(),
+          reason: 'Low watermark reached',
+        });
+        this.notifyResume();
+      }
+    });
+  }
+
+  shouldCapture(): boolean {
+    return this.watermark.shouldCapture() && this.backpressure.shouldProceed();
+  }
+
+  async waitForResume(): Promise<void> {
+    if (this.shouldCapture()) return;
+    if (!this.resumePromise) {
+      this.resumePromise = new Promise<void>((resolve) => {
+        this.resumeResolve = resolve;
+      });
+    }
+    await this.resumePromise;
+  }
+
+  deliver(lsn: LSN): DeliveryResult {
+    const result = this.exactlyOnce.checkAndTrack(lsn);
+    if (result.delivered) {
+      this.watermark.addEvents(1);
+    }
+    return result;
+  }
+
+  isDuplicate(lsn: LSN): boolean {
+    return this.exactlyOnce.isDuplicate(lsn);
+  }
+
+  acknowledge(lsn: LSN): void {
+    this.exactlyOnce.acknowledge(lsn);
+    this.watermark.removeEvents(1);
+  }
+
+  acknowledgeUpTo(upToLSN: LSN): number {
+    const count = this.exactlyOnce.acknowledgeUpTo(upToLSN);
+    this.watermark.removeEvents(count);
+    return count;
+  }
+
+  handleBackpressure(signal: BackpressureSignal): void {
+    this.backpressure.handleSignal(signal);
+  }
+
+  async maybeCheckpoint(): Promise<boolean> {
+    if (!this.config.consumerId) return false;
+    if (!this.checkpointManager.shouldCheckpoint(this.config.consumerId)) return false;
+    await this.checkpoint();
+    return true;
+  }
+
+  async checkpoint(): Promise<void> {
+    if (!this.config.consumerId) return;
+    const state = this.exactlyOnce.exportState();
+    await this.checkpointManager.checkpoint(
+      this.config.consumerId,
+      this.exactlyOnce.getHighestAcknowledgedLSN(),
+      state.nextSequenceNumber - 1,
+      state.pendingLSNs
+    );
+  }
+
+  async recover(): Promise<ConsumerCheckpoint | null> {
+    if (!this.config.consumerId) return null;
+    const checkpoint = await this.checkpointManager.recover(this.config.consumerId);
+    if (checkpoint) {
+      this.exactlyOnce.importState({
+        highestLSN: String(checkpoint.acknowledgedLSN),
+        nextSequenceNumber: checkpoint.acknowledgedSequence + 1,
+        pendingLSNs: checkpoint.pendingLSNs,
+      });
+    }
+    return checkpoint;
+  }
+
+  getMetrics(): {
+    backpressure: BackpressureMetrics;
+    watermark: ReturnType<WatermarkController['getMetrics']>;
+    exactlyOnce: ReturnType<ExactlyOnceController['getMetrics']>;
+    shouldCapture: boolean;
+  } {
+    return {
+      backpressure: this.backpressure.getMetrics(),
+      watermark: this.watermark.getMetrics(),
+      exactlyOnce: this.exactlyOnce.getMetrics(),
+      shouldCapture: this.shouldCapture(),
+    };
+  }
+
+  reset(): void {
+    this.backpressure.reset();
+    this.watermark.reset();
+    this.exactlyOnce.reset();
+    this.notifyResume();
+  }
+
+  private notifyResume(): void {
+    if (this.resumeResolve) {
+      this.resumeResolve();
+      this.resumePromise = null;
+      this.resumeResolve = null;
+    }
+  }
+}
+
+export function createBackpressureStreamController(
+  config: Partial<BackpressureStreamConfig>,
+  checkpointStorage: CheckpointStorage
+): BackpressureStreamController {
+  return new BackpressureStreamController(config, checkpointStorage);
 }

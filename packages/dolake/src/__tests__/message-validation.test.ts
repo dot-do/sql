@@ -626,9 +626,13 @@ describe('Extra Unknown Fields', () => {
    * These tests document the behavior with unknown fields.
    * Decision point: Should unknown fields be allowed (forward compatibility)
    * or rejected (strict validation)?
+   *
+   * TODO(sql-design-1): Decide on unknown field handling strategy
+   * - Option A: Allow extra fields (forward compatibility)
+   * - Option B: Reject extra fields (strict validation via Zod .strict())
    */
 
-  it.skip('should handle extra unknown fields gracefully', async () => {
+  it.skip('should handle extra unknown fields gracefully - TODO(sql-design-1)', async () => {
     const id = env.DOLAKE.idFromName('test-extra-fields-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -653,7 +657,7 @@ describe('Extra Unknown Fields', () => {
     }
   });
 
-  it.skip('should strip unknown fields before processing', async () => {
+  it.skip('should strip unknown fields before processing - TODO(sql-design-1)', async () => {
     const id = env.DOLAKE.idFromName('test-strip-fields-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -1048,8 +1052,12 @@ describe('ConnectMessage Validation', () => {
    * not a schema validation concern. Zod validates that protocolVersion is a
    * non-negative integer, but checking for "supported" versions should happen
    * in application logic after schema validation.
+   *
+   * TODO(sql-design-2): Implement protocol version negotiation
+   * - Current: Schema only validates non-negative integer
+   * - Needed: Application-level check for supported protocol versions
    */
-  it.skip('should reject unsupported protocol version', async () => {
+  it.skip('should reject unsupported protocol version - TODO(sql-design-2)', async () => {
     const id = env.DOLAKE.idFromName('test-unsupported-proto-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -1398,7 +1406,18 @@ describe('Unknown Message Type', () => {
 // =============================================================================
 
 describe('Security Validation', () => {
-  it.skip('should sanitize or reject XSS-like content in strings', async () => {
+  /**
+   * Security validation tests document edge cases around malicious input.
+   * The current implementation relies on:
+   * - JSON.parse (safe against prototype pollution by default)
+   * - Zod schema validation (type checking)
+   * - WebSocket message size limits (transport layer)
+   *
+   * TODO(sql-security-1): Review if additional sanitization is needed
+   * For CDC data, XSS prevention should happen at the rendering layer,
+   * not at the data layer. The database should store data as-is.
+   */
+  it.skip('should sanitize or reject XSS-like content in strings - TODO(sql-security-1)', async () => {
     const id = env.DOLAKE.idFromName('test-xss-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -1429,7 +1448,7 @@ describe('Security Validation', () => {
     }
   });
 
-  it.skip('should handle prototype pollution attempts', async () => {
+  it.skip('should handle prototype pollution attempts - TODO(sql-security-1)', async () => {
     const id = env.DOLAKE.idFromName('test-proto-pollution-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);
@@ -1458,8 +1477,12 @@ describe('Security Validation', () => {
    * Size limits should be enforced at the transport layer (WebSocket max message size)
    * or in application-level validation. This test documents that schema validation
    * alone does not reject very long strings - it's valid from a type perspective.
+   *
+   * TODO(sql-security-2): Implement message size limits
+   * - WebSocket max message size should be configured
+   * - Individual field size limits could be added to Zod schemas via .max()
    */
-  it.skip('should reject extremely long strings', async () => {
+  it.skip('should reject extremely long strings - TODO(sql-security-2)', async () => {
     const id = env.DOLAKE.idFromName('test-long-string-' + Date.now());
     const stub = env.DOLAKE.get(id);
     const { client } = await connectWebSocket(stub);

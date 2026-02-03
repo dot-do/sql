@@ -556,8 +556,8 @@ export function createEmbeddedReplica(
       const offlineEntry: OfflineWALEntry = {
         entry: {
           timestamp: Date.now(),
-          txnId: `offline_${localLSN}`,
-          op: 'STATEMENT',
+          txnId: createTransactionId(`offline_${localLSN}`),
+          op: 'INSERT' as const, // Use INSERT as generic operation type for offline writes
           table: '',
           after: new TextEncoder().encode(JSON.stringify({ sql, params })),
         },
@@ -582,8 +582,8 @@ export function createEmbeddedReplica(
       // Write directly to WAL for immediate sync
       await walWriter.append({
         timestamp: Date.now(),
-        txnId: `direct_${Date.now()}`,
-        op: 'STATEMENT',
+        txnId: createTransactionId(`direct_${Date.now()}`),
+        op: 'INSERT' as const, // Use INSERT as generic operation type for direct writes
         table: '',
         after: new TextEncoder().encode(JSON.stringify({ sql, params })),
       });

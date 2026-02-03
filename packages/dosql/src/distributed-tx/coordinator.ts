@@ -385,6 +385,12 @@ export function createDistributedTransactionCoordinator(
       // Send PREPARE to all participants in parallel
       const preparePromises: Promise<void>[] = [];
 
+      // Capture txnId, prepareVotes, and lockedRows before async iteration
+      // These are guaranteed to exist after the null check above
+      const txnId = currentContext.txnId;
+      const prepareVotes = currentContext.prepareVotes;
+      const lockedRows = currentContext.lockedRows;
+
       for (const participant of currentContext.participants) {
         const shardOps = currentContext.operations.filter(
           (op) => op.shard === participant
@@ -396,7 +402,7 @@ export function createDistributedTransactionCoordinator(
             try {
               // Create prepare timeout
               const preparePromise = withRetry(
-                () => rpc.prepare(shardId, currentContext!.txnId, shardOps),
+                () => rpc.prepare(shardId, txnId, shardOps),
                 shardId,
                 'prepare'
               );
@@ -409,7 +415,7 @@ export function createDistributedTransactionCoordinator(
 
               const result = await Promise.race([preparePromise, timeoutPromise]);
 
-              currentContext!.prepareVotes.set(shardId, result.vote);
+              prepareVotes.set(shardId, result.vote);
 
               // Track participant state
               const state = participantStates.get(shardId);
@@ -420,7 +426,7 @@ export function createDistributedTransactionCoordinator(
 
               // Log participant's vote
               await txnLog.write({
-                txnId: currentContext!.txnId,
+                txnId,
                 type: 'PREPARE_ACK',
                 participants: [shardId],
                 timestamp: Date.now(),
@@ -430,14 +436,14 @@ export function createDistributedTransactionCoordinator(
 
               // Track locked rows
               if (result.vote === 'YES') {
-                currentContext!.lockedRows.set(shardId, new Set(shardOps.flatMap((op) => op.affectedKeys || [])));
+                lockedRows.set(shardId, new Set(shardOps.flatMap((op) => op.affectedKeys || [])));
               }
             } catch (error) {
               // Treat failures as TIMEOUT votes
-              currentContext!.prepareVotes.set(shardId, 'TIMEOUT');
+              prepareVotes.set(shardId, 'TIMEOUT');
 
               await txnLog.write({
-                txnId: currentContext!.txnId,
+                txnId,
                 type: 'PREPARE_ACK',
                 participants: [shardId],
                 timestamp: Date.now(),
@@ -514,20 +520,24 @@ export function createDistributedTransactionCoordinator(
       // Send COMMIT to all participants
       const commitPromises: Promise<void>[] = [];
 
+      // Capture txnId and lockedRows before async iteration
+      const commitTxnId = currentContext.txnId;
+      const commitLockedRows = currentContext.lockedRows;
+
       for (const participant of currentContext.participants) {
         commitPromises.push(
           (async () => {
             const shardId = participant as string;
             try {
               await withRetry(
-                () => rpc.commit(shardId, currentContext!.txnId),
+                () => rpc.commit(shardId, commitTxnId),
                 shardId,
                 'commit'
               );
 
               // Log commit acknowledgment
               await txnLog.write({
-                txnId: currentContext!.txnId,
+                txnId: commitTxnId,
                 type: 'COMMIT_ACK',
                 participants: [shardId],
                 timestamp: Date.now(),
@@ -535,7 +545,7 @@ export function createDistributedTransactionCoordinator(
               });
 
               // Release locks
-              currentContext!.lockedRows.delete(shardId);
+              commitLockedRows.delete(shardId);
             } catch (error) {
               // For commit phase, we must keep retrying indefinitely
               // The decision is already logged, participant must eventually commit
@@ -604,19 +614,23 @@ export function createDistributedTransactionCoordinator(
       // Send ABORT to all participants
       const abortPromises: Promise<void>[] = [];
 
+      // Capture txnId and lockedRows before async iteration
+      const abortTxnId = currentContext.txnId;
+      const abortLockedRows = currentContext.lockedRows;
+
       for (const participant of currentContext.participants) {
         abortPromises.push(
           (async () => {
             const shardId = participant as string;
             try {
               await withRetry(
-                () => rpc.abort(shardId, currentContext!.txnId),
+                () => rpc.abort(shardId, abortTxnId),
                 shardId,
                 'abort'
               );
 
               // Release locks
-              currentContext!.lockedRows.delete(shardId);
+              abortLockedRows.delete(shardId);
             } catch (error) {
               // Best effort for abort
               logger.error('Failed to abort on shard', error instanceof Error ? error : new Error(String(error)), { shardId });

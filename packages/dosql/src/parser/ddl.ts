@@ -8,14 +8,19 @@
  * - ALTER TABLE ADD COLUMN / DROP COLUMN / RENAME
  * - DROP TABLE / DROP INDEX / DROP VIEW
  * - CREATE VIEW AS SELECT
+ *
+ * Uses the shared tokenizer from parser/shared/tokenizer.ts for lexical analysis.
  */
 
 import {
   calculateLocation,
   getSuggestionForTypo,
-  formatErrorSnippet,
-  type SourceLocation,
 } from './shared/errors.js';
+
+import {
+  Tokenizer as SharedTokenizer,
+  type Token as SharedToken,
+} from './shared/tokenizer.js';
 
 import type {
   DDLStatement,
@@ -40,7 +45,6 @@ import type {
   IndexColumn,
   AlterTableOperation,
   ParseResult,
-  ParseError,
 } from './ddl-types.js';
 
 import { parseWithStorageClause, type TableStorageConfig } from '../engine/storage-config.js';
@@ -48,11 +52,11 @@ import { SQLSyntaxError } from '../errors/index.js';
 import { SyntaxErrorCode } from '../errors/codes.js';
 
 // =============================================================================
-// TOKENIZER
+// TOKEN ADAPTER - Bridge between shared tokenizer and DDL parser
 // =============================================================================
 
 /**
- * Token types for the DDL lexer
+ * Internal token type used by DDL parser (uppercase for backwards compatibility)
  */
 type TokenType =
   | 'KEYWORD'
@@ -68,265 +72,57 @@ interface Token {
   type: TokenType;
   value: string;
   position: number;
+  /** Original string value (with quotes for strings) */
+  raw?: string;
 }
 
 /**
- * SQL keywords for DDL parsing
+ * Map shared tokenizer types to DDL internal types
  */
-const KEYWORDS = new Set([
-  // DDL keywords
-  'CREATE',
-  'TABLE',
-  'INDEX',
-  'VIEW',
-  'TRIGGER',
-  'DROP',
-  'ALTER',
-  'ADD',
-  'COLUMN',
-  'RENAME',
-  'TO',
-  'IF',
-  'NOT',
-  'EXISTS',
-  'TEMPORARY',
-  'TEMP',
-  'UNIQUE',
-  'PRIMARY',
-  'KEY',
-  'FOREIGN',
-  'REFERENCES',
-  'ON',
-  'DELETE',
-  'UPDATE',
-  'INSERT',
-  'CASCADE',
-  'RESTRICT',
-  'SET',
-  'NULL',
-  'DEFAULT',
-  'CHECK',
-  'CONSTRAINT',
-  'AUTOINCREMENT',
-  'ASC',
-  'DESC',
-  'COLLATE',
-  'WITH',
-  'WITHOUT',
-  'ROWID',
-  'STRICT',
-  'STORAGE',
-  'AS',
-  'SELECT',
-  'FROM',
-  'WHERE',
-  'AND',
-  'OR',
-  'IN',
-  'LIKE',
-  'BETWEEN',
-  'MATCH',
-  'SIMPLE',
-  'PARTIAL',
-  'FULL',
-  'DEFERRABLE',
-  'INITIALLY',
-  'DEFERRED',
-  'IMMEDIATE',
-  'GENERATED',
-  'ALWAYS',
-  'STORED',
-  'VIRTUAL',
-  'NO',
-  'ACTION',
-  'REPLACE',
-  'ABORT',
-  'FAIL',
-  'IGNORE',
-  'ROLLBACK',
-  // Trigger keywords
-  'BEFORE',
-  'AFTER',
-  'INSTEAD',
-  'OF',
-  'FOR',
-  'EACH',
-  'ROW',
-  'WHEN',
-  'BEGIN',
-  'END',
-  'NEW',
-  'OLD',
-  'RAISE',
-  // Data types
-  'INTEGER',
-  'INT',
-  'SMALLINT',
-  'MEDIUMINT',
-  'BIGINT',
-  'TINYINT',
-  'REAL',
-  'DOUBLE',
-  'PRECISION',
-  'FLOAT',
-  'NUMERIC',
-  'DECIMAL',
-  'TEXT',
-  'VARCHAR',
-  'CHAR',
-  'NCHAR',
-  'NVARCHAR',
-  'CLOB',
-  'BLOB',
-  'NONE',
-  'DATE',
-  'DATETIME',
-  'TIMESTAMP',
-  'TIME',
-  'BOOLEAN',
-  'BOOL',
-  'JSON',
-  'JSONB',
-  'UUID',
-]);
+function mapTokenType(sharedType: string): TokenType {
+  switch (sharedType) {
+    case 'keyword': return 'KEYWORD';
+    case 'identifier': return 'IDENTIFIER';
+    case 'string': return 'STRING';
+    case 'number': return 'NUMBER';
+    case 'operator': return 'OPERATOR';
+    case 'punctuation': return 'PUNCTUATION';
+    case 'whitespace': return 'WHITESPACE';
+    case 'eof': return 'EOF';
+    case 'comment': return 'WHITESPACE'; // Treat comments as whitespace (filtered out)
+    case 'parameter': return 'IDENTIFIER'; // DDL doesn't use parameters
+    default: return 'IDENTIFIER';
+  }
+}
 
 /**
- * Tokenize a DDL statement
+ * Convert shared tokens to DDL internal format
+ */
+function adaptToken(t: SharedToken, sql: string): Token {
+  // For keywords, use the original case from the SQL source
+  // For strings, store the raw value with quotes for reconstruction
+  const value = t.type === 'keyword'
+    ? sql.substring(t.location.offset, t.location.offset + t.value.length)
+    : t.value;
+
+  return {
+    type: mapTokenType(t.type),
+    value,
+    position: t.location.offset,
+    // Store the raw SQL substring for string tokens (to preserve quotes)
+    raw: t.type === 'string'
+      ? sql.substring(t.location.offset, t.location.offset + t.value.length + 2) // +2 for quotes
+      : undefined,
+  };
+}
+
+/**
+ * Tokenize a DDL statement using the shared tokenizer
  */
 function tokenize(sql: string): Token[] {
-  const tokens: Token[] = [];
-  let pos = 0;
-
-  while (pos < sql.length) {
-    const char = sql[pos]!;
-
-    // Whitespace
-    if (/\s/.test(char)) {
-      const start = pos;
-      while (pos < sql.length && /\s/.test(sql[pos]!)) {
-        pos++;
-      }
-      tokens.push({ type: 'WHITESPACE', value: sql.slice(start, pos), position: start });
-      continue;
-    }
-
-    // Single-line comment
-    if (char === '-' && sql[pos + 1] === '-') {
-      while (pos < sql.length && sql[pos] !== '\n') {
-        pos++;
-      }
-      continue;
-    }
-
-    // Multi-line comment
-    if (char === '/' && sql[pos + 1] === '*') {
-      pos += 2;
-      while (pos < sql.length - 1 && !(sql[pos] === '*' && sql[pos + 1] === '/')) {
-        pos++;
-      }
-      pos += 2;
-      continue;
-    }
-
-    // String literal (single quotes)
-    if (char === "'") {
-      const start = pos;
-      pos++;
-      while (pos < sql.length) {
-        if (sql[pos] === "'" && sql[pos + 1] === "'") {
-          pos += 2; // Escaped quote
-        } else if (sql[pos] === "'") {
-          pos++;
-          break;
-        } else {
-          pos++;
-        }
-      }
-      tokens.push({ type: 'STRING', value: sql.slice(start, pos), position: start });
-      continue;
-    }
-
-    // Quoted identifier (double quotes or backticks)
-    if (char === '"' || char === '`') {
-      const quote = char;
-      const start = pos;
-      pos++;
-      while (pos < sql.length && sql[pos] !== quote) {
-        pos++;
-      }
-      pos++;
-      tokens.push({ type: 'IDENTIFIER', value: sql.slice(start, pos), position: start });
-      continue;
-    }
-
-    // Square bracket quoted identifier (SQL Server style)
-    if (char === '[') {
-      const start = pos;
-      pos++;
-      while (pos < sql.length && sql[pos] !== ']') {
-        pos++;
-      }
-      pos++;
-      tokens.push({ type: 'IDENTIFIER', value: sql.slice(start, pos), position: start });
-      continue;
-    }
-
-    // Number
-    if (/[0-9]/.test(char) || (char === '.' && /[0-9]/.test(sql[pos + 1] || ''))) {
-      const start = pos;
-      while (pos < sql.length && /[0-9.]/.test(sql[pos])) {
-        pos++;
-      }
-      // Handle scientific notation
-      if ((sql[pos] === 'e' || sql[pos] === 'E') && /[0-9+-]/.test(sql[pos + 1] || '')) {
-        pos++;
-        if (sql[pos] === '+' || sql[pos] === '-') pos++;
-        while (pos < sql.length && /[0-9]/.test(sql[pos])) {
-          pos++;
-        }
-      }
-      tokens.push({ type: 'NUMBER', value: sql.slice(start, pos), position: start });
-      continue;
-    }
-
-    // Identifier or keyword
-    if (/[a-zA-Z_]/.test(char)) {
-      const start = pos;
-      while (pos < sql.length && /[a-zA-Z0-9_]/.test(sql[pos])) {
-        pos++;
-      }
-      const value = sql.slice(start, pos);
-      const upperValue = value.toUpperCase();
-      const type: TokenType = KEYWORDS.has(upperValue) ? 'KEYWORD' : 'IDENTIFIER';
-      tokens.push({ type, value, position: start });
-      continue;
-    }
-
-    // Punctuation and operators
-    if ('(),;.'.includes(char)) {
-      tokens.push({ type: 'PUNCTUATION', value: char, position: pos });
-      pos++;
-      continue;
-    }
-
-    // Operators
-    if ('+-*/<>=!'.includes(char)) {
-      const start = pos;
-      pos++;
-      // Check for two-character operators
-      if (pos < sql.length && '=<>'.includes(sql[pos])) {
-        pos++;
-      }
-      tokens.push({ type: 'OPERATOR', value: sql.slice(start, pos), position: start });
-      continue;
-    }
-
-    // Unknown character - skip it
-    pos++;
-  }
-
-  tokens.push({ type: 'EOF', value: '', position: pos });
-  return tokens;
+  const tokenizer = new SharedTokenizer(sql);
+  const sharedTokens = tokenizer.tokenize(false, false); // Exclude whitespace and comments
+  return sharedTokens.map(adaptToken);
 }
 
 // =============================================================================
@@ -671,7 +467,8 @@ class Parser {
         let isExpression = false;
 
         if (token.type === 'STRING') {
-          value = token.value.slice(1, -1).replace(/''/g, "'");
+          // Shared tokenizer already strips quotes and handles escape sequences
+          value = token.value;
           this.advance();
         } else if (token.type === 'NUMBER') {
           value = parseFloat(token.value);

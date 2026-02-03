@@ -64,7 +64,7 @@ export function parseMigrationFolderName(name: string): {
 } | null {
   // New format: YYYYMMDDHHMMSS_name
   const newFormatMatch = name.match(/^(\d{14})_(.+)$/);
-  if (newFormatMatch) {
+  if (newFormatMatch && newFormatMatch[1] && newFormatMatch[2]) {
     return {
       timestamp: newFormatMatch[1],
       migrationName: newFormatMatch[2],
@@ -74,7 +74,7 @@ export function parseMigrationFolderName(name: string): {
 
   // Legacy format: 0000_name (sequential index)
   const legacyMatch = name.match(/^(\d{4})_(.+)$/);
-  if (legacyMatch) {
+  if (legacyMatch && legacyMatch[1] && legacyMatch[2]) {
     return {
       timestamp: legacyMatch[1].padStart(14, '0'),
       migrationName: legacyMatch[2],
@@ -439,10 +439,11 @@ export function createInMemoryFs(
 ): MigrationFileSystem {
   return {
     async readFile(path: string): Promise<string> {
-      if (!(path in files)) {
+      const content = files[path];
+      if (content === undefined) {
         throw new Error(`File not found: ${path}`);
       }
-      return files[path];
+      return content;
     },
 
     async exists(path: string): Promise<boolean> {

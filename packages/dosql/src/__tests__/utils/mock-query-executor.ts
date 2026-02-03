@@ -561,3 +561,20 @@ export class MockQueryExecutor implements QueryExecutor {
     this.#tables.set(name.toLowerCase(), { columns, columnTypes, rows });
   }
 }
+
+// =============================================================================
+// Fake Query Executor Alias (NO MOCKS Philosophy)
+// =============================================================================
+
+/**
+ * FakeQueryExecutor - Preferred name following the NO MOCKS philosophy
+ *
+ * This is an alias for MockQueryExecutor. Despite the "Mock" name, this is
+ * actually a "Fake" - a test double with real behavior (actual SQL tokenization,
+ * real in-memory storage). This follows the project's NO MOCKS philosophy:
+ * - Use real implementations, not mocks
+ * - Use Fakes (test doubles with real behavior) if needed
+ *
+ * New code should prefer using FakeQueryExecutor.
+ */
+export const FakeQueryExecutor = MockQueryExecutor;

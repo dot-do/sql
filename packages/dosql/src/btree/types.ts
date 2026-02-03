@@ -9,9 +9,17 @@
  */
 
 import type { StorageInterface } from '../storage/interface.js';
+import type { StorageProvider } from '../storage/provider.js';
+import type { PageStorage } from '../storage/page-storage.js';
 
-// Re-export StorageInterface as the preferred storage type
-export type { StorageInterface };
+// Re-export storage interfaces - prefer StorageProvider for new code
+export type { StorageInterface, StorageProvider, PageStorage };
+
+/**
+ * Union type of all supported storage backends for B-tree.
+ * The B-tree can work with any of these storage interfaces.
+ */
+export type BTreeStorageBackend = StorageInterface | PageStorage;
 
 /**
  * Page types in the B-tree

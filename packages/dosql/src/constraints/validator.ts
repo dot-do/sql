@@ -32,6 +32,12 @@ import {
   createTableConstraints,
 } from './types.js';
 import { sqlLikeMatch } from '../utils/like.js';
+import {
+  DoSQLError,
+  ErrorCategory,
+  registerErrorClass,
+  type SerializedError,
+} from '../errors/base.js';
 
 // =============================================================================
 // VALIDATION ERROR
@@ -39,16 +45,48 @@ import { sqlLikeMatch } from '../utils/like.js';
 
 /**
  * Error thrown when a constraint is violated
+ *
+ * Extends DoSQLError for unified error handling across the DoSQL ecosystem.
  */
-export class ConstraintError extends Error {
+export class ConstraintError extends DoSQLError {
+  readonly code = 'CONSTRAINT_VIOLATION';
+  readonly category = ErrorCategory.VALIDATION;
+  readonly violation: ConstraintViolation;
+
   constructor(
     message: string,
-    public readonly violation: ConstraintViolation
+    violation: ConstraintViolation
   ) {
     super(message);
     this.name = 'ConstraintError';
+    this.violation = violation;
+    this.context = {
+      table: violation.table,
+      column: violation.column,
+      metadata: {
+        constraintName: violation.constraintName,
+        violationCode: violation.code,
+      },
+    };
+  }
+
+  override isRetryable(): boolean {
+    return false;
+  }
+
+  static fromJSON(json: SerializedError): ConstraintError {
+    const violation: ConstraintViolation = {
+      code: json.context?.metadata?.violationCode as ConstraintViolationCode,
+      constraintName: json.context?.metadata?.constraintName as string,
+      table: json.context?.table as string,
+      column: json.context?.column,
+      message: json.message,
+    };
+    return new ConstraintError(json.message, violation);
   }
 }
+
+registerErrorClass('ConstraintError', ConstraintError);
 
 // =============================================================================
 // CONSTRAINT VALIDATOR

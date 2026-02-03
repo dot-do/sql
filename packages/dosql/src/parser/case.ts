@@ -10,6 +10,7 @@
  */
 
 import { likeMatch } from '../utils/like.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // AST TYPES
@@ -1199,8 +1200,24 @@ function evaluateExpr(expr: ParsedExpr, row: Row): SqlValue {
       return false; // Subquery - would need context
     }
 
-    default:
+    case 'aggregate':
+      // Aggregates should be evaluated at a higher level
       return null;
+
+    case 'subquery':
+      // Subqueries need execution context
+      return null;
+
+    case 'exists':
+      // EXISTS needs execution context
+      return null;
+
+    case 'star':
+      // Star should be expanded before evaluation
+      return null;
+
+    default:
+      return assertNever(expr, `Unknown expression type in evaluateExpr`);
   }
 }
 

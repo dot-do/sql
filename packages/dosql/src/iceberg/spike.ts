@@ -410,12 +410,15 @@ export class DoSQLIceberg {
       throw new Error('Iceberg server not configured');
     }
 
+    // Capture serverConfig after null check for use in closures
+    const serverConfig = this.serverConfig;
+
     return {
       // Configuration endpoint
       'GET /v1/config': () => ({
         overrides: {},
         defaults: {
-          'warehouse-location': this.serverConfig!.warehouseLocation,
+          'warehouse-location': serverConfig.warehouseLocation,
         },
       }),
 

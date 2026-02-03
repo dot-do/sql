@@ -1297,7 +1297,9 @@ describe('R2StorageBackend Error Handling', () => {
       expect(exists).toBe(true);
     });
 
-    it.skip('should report degraded mode in health check', async () => {
+    // TODO(sql-r2-health): Implement getHealthStatus() method on R2Backend
+    // This would allow monitoring the health of R2 connectivity and circuit breaker state
+    it.skip('should report degraded mode in health check - TODO(sql-r2-health)', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'circuit_breaker' });
       const backend = createR2Backend(bucket);
 
@@ -1341,7 +1343,9 @@ describe('R2StorageBackend Error Handling', () => {
       expect(result).not.toBeNull();
     });
 
-    it.skip('should emit events when entering/exiting degraded mode', async () => {
+    // TODO(sql-r2-events): Implement onDegradedMode() event emitter on R2Backend
+    // This would allow observability into R2 circuit breaker state changes
+    it.skip('should emit events when entering/exiting degraded mode - TODO(sql-r2-events)', async () => {
       const bucket = createFailingR2Bucket({ failureMode: 'circuit_breaker' });
       const backend = createR2Backend(bucket);
 

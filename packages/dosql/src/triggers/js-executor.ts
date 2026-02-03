@@ -31,6 +31,7 @@ import {
   createOutboundRpcHandler,
   type SandboxDatabaseContext,
 } from '../utils/sandbox.js';
+import { isSandboxDatabaseContext } from '../utils/type-guards.js';
 
 // =============================================================================
 // Executor Options
@@ -178,7 +179,11 @@ export async function executeSandboxed<T extends Record<string, unknown>>(
   `;
 
   // Use shared outbound RPC handler
-  const outboundRpc = createOutboundRpcHandler(db as unknown as SandboxDatabaseContext);
+  // Verify db has the expected structure before casting
+  if (!isSandboxDatabaseContext(db)) {
+    throw new TypeError('DatabaseContext must have a tables property with table accessors');
+  }
+  const outboundRpc = createOutboundRpcHandler(db as SandboxDatabaseContext);
 
   const evalOptions: EvaluateOptions = {
     module: moduleCode,

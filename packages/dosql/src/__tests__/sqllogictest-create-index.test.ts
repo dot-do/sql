@@ -24,6 +24,15 @@ import {
   createInMemoryStorage,
   type InMemoryStorage,
 } from '../statement/statement.js';
+import {
+  hasIndex,
+  findIndex,
+  getIndexNamesFromPragma,
+  getProperty,
+  mapResults,
+  captureError,
+  isObject,
+} from './test-utils.js';
 
 // =============================================================================
 // TEST SETUP
@@ -69,7 +78,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
       // Verify index exists via pragma
       const indexes = db.pragma('index_list', 't1');
       expect(Array.isArray(indexes)).toBe(true);
-      expect((indexes as { name: string }[]).some(idx => idx.name === 't1i1')).toBe(true);
+      expect(hasIndex(indexes, 't1i1')).toBe(true);
     });
 
     /**
@@ -88,7 +97,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
       // Verify index exists
       const indexes = db.pragma('index_list', 't1');
       expect(Array.isArray(indexes)).toBe(true);
-      expect((indexes as { name: string }[]).some(idx => idx.name === 't1i2')).toBe(true);
+      expect(hasIndex(indexes, 't1i2')).toBe(true);
     });
 
     /**
@@ -104,7 +113,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
 
       const indexes = db.pragma('index_list', 't1');
       expect(Array.isArray(indexes)).toBe(true);
-      expect((indexes as { name: string }[]).some(idx => idx.name === 't1i_abc')).toBe(true);
+      expect(hasIndex(indexes, 't1i_abc')).toBe(true);
     });
   });
 
@@ -138,7 +147,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
 
       const indexes = db.pragma('index_list', 't1');
       expect(Array.isArray(indexes)).toBe(true);
-      expect((indexes as { name: string }[]).some(idx => idx.name === 't1i3')).toBe(true);
+      expect(hasIndex(indexes, 't1i3')).toBe(true);
     });
 
     /**
@@ -154,7 +163,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
 
       const indexes = db.pragma('index_list', 't1');
       expect(Array.isArray(indexes)).toBe(true);
-      expect((indexes as { name: string }[]).some(idx => idx.name === 't1i_desc')).toBe(true);
+      expect(hasIndex(indexes, 't1i_desc')).toBe(true);
     });
 
     /**
@@ -170,7 +179,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
 
       const indexes = db.pragma('index_list', 't1');
       expect(Array.isArray(indexes)).toBe(true);
-      expect((indexes as { name: string }[]).some(idx => idx.name === 't1i_asc')).toBe(true);
+      expect(hasIndex(indexes, 't1i_asc')).toBe(true);
     });
   });
 
@@ -204,7 +213,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
 
       const indexes = db.pragma('index_list', 't1');
       expect(Array.isArray(indexes)).toBe(true);
-      const idx = (indexes as { name: string; unique: number }[]).find(i => i.name === 't1i4');
+      const idx = findIndex(indexes, 't1i4');
       expect(idx).toBeDefined();
       expect(idx?.unique).toBe(1);
     });
@@ -243,7 +252,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
 
       const indexes = db.pragma('index_list', 't1');
       expect(Array.isArray(indexes)).toBe(true);
-      const idx = (indexes as { name: string; unique: number }[]).find(i => i.name === 't1i_unique_ab');
+      const idx = findIndex(indexes, 't1i_unique_ab');
       expect(idx).toBeDefined();
       expect(idx?.unique).toBe(1);
     });
@@ -278,7 +287,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
 
       // Verify it exists
       let indexes = db.pragma('index_list', 't1');
-      expect((indexes as { name: string }[]).some(idx => idx.name === 't1i1')).toBe(true);
+      expect(hasIndex(indexes, 't1i1')).toBe(true);
 
       // Drop the index
       expect(() => {
@@ -287,7 +296,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
 
       // Verify it no longer exists
       indexes = db.pragma('index_list', 't1');
-      expect((indexes as { name: string }[]).some(idx => idx.name === 't1i1')).toBe(false);
+      expect(hasIndex(indexes, 't1i1')).toBe(false);
     });
 
     /**
@@ -300,14 +309,12 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
     it('should throw proper error when dropping non-existent index', () => {
       // The engine should support DROP INDEX syntax first, then validate
       // Currently throws "Unsupported SQL" instead of "no such index"
-      let error: Error | null = null;
-      try {
-        db.exec('DROP INDEX nonexistent_index');
-      } catch (e) {
-        error = e as Error;
-      }
+      const error = captureError(
+        () => db.exec('DROP INDEX nonexistent_index'),
+        Error
+      );
 
-      expect(error).not.toBeNull();
+      expect(error).not.toBeUndefined();
       // Should be a proper "no such index" error, not "Unsupported SQL"
       expect(error?.message).toMatch(/no such index|does not exist/i);
       expect(error?.message).not.toMatch(/unsupported/i);
@@ -405,7 +412,8 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
       const result = db.prepare('SELECT id, a, b FROM t1 WHERE a = 500').all();
 
       expect(result.length).toBe(1);
-      expect((result[0] as { id: number; a: number; b: string }).a).toBe(500);
+      const row = result[0];
+      expect(getProperty<number>(row, 'a')).toBe(500);
     });
 
     /**
@@ -420,7 +428,8 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
       const result = db.prepare('SELECT id, a FROM t1 WHERE a > 900').all();
 
       expect(result.length).toBe(10); // 910, 920, ... 1000
-      expect((result as { id: number; a: number }[]).every(r => r.a > 900)).toBe(true);
+      const typedResults = mapResults<{ id: number; a: number }>(result, ['id', 'a']);
+      expect(typedResults.every(r => r.a > 900)).toBe(true);
     });
 
     /**
@@ -435,7 +444,7 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
       const result = db.prepare("SELECT id FROM t1 WHERE a = 500 AND b = 'value50'").all();
 
       expect(result.length).toBe(1);
-      expect((result[0] as { id: number }).id).toBe(50);
+      expect(getProperty<number>(result[0], 'id')).toBe(50);
     });
   });
 
@@ -469,9 +478,8 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
       const indexes = db.pragma('index_list', 't1');
 
       expect(Array.isArray(indexes)).toBe(true);
-      expect((indexes as { name: string }[]).length).toBe(3);
-
-      const indexNames = (indexes as { name: string }[]).map(i => i.name);
+      const indexNames = getIndexNamesFromPragma(indexes);
+      expect(indexNames.length).toBe(3);
       expect(indexNames).toContain('t1i1');
       expect(indexNames).toContain('t1i2');
       expect(indexNames).toContain('t1i3');
@@ -516,14 +524,12 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Actual: Throws "Unsupported SQL" error instead of proper validation error
      */
     it('should error with proper message when creating index on non-existent table', () => {
-      let error: Error | null = null;
-      try {
-        db.exec('CREATE INDEX idx ON nonexistent_table(a)');
-      } catch (e) {
-        error = e as Error;
-      }
+      const error = captureError(
+        () => db.exec('CREATE INDEX idx ON nonexistent_table(a)'),
+        Error
+      );
 
-      expect(error).not.toBeNull();
+      expect(error).not.toBeUndefined();
       // Should be a proper "no such table" error, not "Unsupported SQL"
       expect(error?.message).toMatch(/no such table|table.*not found|does not exist/i);
       expect(error?.message).not.toMatch(/unsupported/i);
@@ -536,14 +542,12 @@ describe('SQLLogicTest CREATE INDEX Compatibility', () => {
      * Actual: Throws "Unsupported SQL" error instead of proper validation error
      */
     it('should error with proper message when creating index on non-existent column', () => {
-      let error: Error | null = null;
-      try {
-        db.exec('CREATE INDEX idx ON t1(nonexistent_column)');
-      } catch (e) {
-        error = e as Error;
-      }
+      const error = captureError(
+        () => db.exec('CREATE INDEX idx ON t1(nonexistent_column)'),
+        Error
+      );
 
-      expect(error).not.toBeNull();
+      expect(error).not.toBeUndefined();
       // Should be a proper "no such column" error, not "Unsupported SQL"
       expect(error?.message).toMatch(/no such column|column.*not found|does not exist/i);
       expect(error?.message).not.toMatch(/unsupported/i);
@@ -608,7 +612,13 @@ describe('InMemoryEngine CREATE INDEX Direct Tests', () => {
     // Check if storage has index information
     // Note: This depends on how indexes are stored in InMemoryStorage
     expect(storage).toHaveProperty('indexes');
-    expect((storage as unknown as { indexes: Map<string, unknown> }).indexes.has('t1i1')).toBe(true);
+    // Use type guard to safely check index existence
+    if (isObject(storage) && 'indexes' in storage) {
+      const indexes = storage.indexes;
+      if (indexes instanceof Map) {
+        expect(indexes.has('t1i1')).toBe(true);
+      }
+    }
   });
 
   /**

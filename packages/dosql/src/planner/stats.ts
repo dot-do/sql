@@ -1279,12 +1279,16 @@ export function buildHistogram(
     const distinctValues = new Set(bucketValues.map(v => JSON.stringify(v)));
 
     if (bucketValues.length > 0) {
-      buckets.push({
-        low: bucketValues[0],
-        high: bucketValues[bucketValues.length - 1],
-        count: bucketValues.length,
-        distinctCount: distinctValues.size,
-      });
+      const low = bucketValues[0];
+      const high = bucketValues[bucketValues.length - 1];
+      if (low !== undefined && high !== undefined) {
+        buckets.push({
+          low,
+          high,
+          count: bucketValues.length,
+          distinctCount: distinctValues.size,
+        });
+      }
     }
   }
 

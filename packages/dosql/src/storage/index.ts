@@ -95,3 +95,74 @@ export {
   type SynchronousMode,
   type CheckpointMode,
 } from './file-backend.js';
+
+// =============================================================================
+// Unified Page Storage Interface
+// =============================================================================
+
+export {
+  // Core types
+  type PageId,
+  type StorageKey,
+  type PageStorage,
+  type PageStorageWithBatch,
+  type BatchPageWrite,
+  type AnyStorageBackend,
+
+  // Configuration
+  type PageStorageConfig,
+  StorageBackendType,
+  DEFAULT_PAGE_STORAGE_CONFIG,
+
+  // Type guards
+  hasBatchPageOperations,
+  isStorageProvider,
+  isStorageInterface,
+  isFSXBackend,
+
+  // Factory functions
+  createPageStorage,
+  pageStorageToStorageInterface,
+  pageStorageToFSXBackend,
+
+  // Utility functions
+  pageIdToKey,
+  keyToPageId,
+  normalizeStorageBackend,
+} from './page-storage.js';
+
+// =============================================================================
+// Unified StorageProvider Interface (Recommended)
+// =============================================================================
+
+export {
+  // Core provider types
+  type StorageProvider,
+  type StorageProviderWithMeta,
+  type StorageProviderWithBatch,
+  type StorageProviderWithTiers,
+  type TieredStorageOptions,
+  type TieredMetadata,
+  StorageTier,
+
+  // Type guards
+  hasMetadataSupport,
+  hasBatchSupport,
+  hasTieredSupport,
+
+  // Base class for implementations
+  StorageProviderBase,
+
+  // Legacy interface types (for adapters)
+  type LegacyStorageInterface,
+
+  // Adapters
+  adaptStorageInterface,
+  adaptToStorageInterface,
+  normalizeStorage,
+
+  // In-memory implementation
+  MemoryProvider,
+  createMemoryProvider,
+  type MemoryProviderOptions,
+} from './provider.js';

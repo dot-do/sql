@@ -23,6 +23,7 @@ import {
   createOutboundRpcHandler,
   type SandboxDatabaseContext,
 } from '../utils/sandbox.js';
+import { isSandboxDatabaseContext } from '../utils/type-guards.js';
 
 // =============================================================================
 // EXECUTOR TYPES
@@ -130,7 +131,11 @@ export function createProcedureExecutor<DB extends DatabaseSchema>(
   const tableNames = Object.keys(db.tables);
 
   // Create the shared outbound RPC handler for database operations
-  const outboundRpc = createOutboundRpcHandler(db as unknown as SandboxDatabaseContext);
+  // Verify db has the expected structure before casting
+  if (!isSandboxDatabaseContext(db)) {
+    throw new TypeError('DatabaseContext must have a tables property with table accessors');
+  }
+  const outboundRpc = createOutboundRpcHandler(db as SandboxDatabaseContext);
 
   /**
    * Execute procedure code

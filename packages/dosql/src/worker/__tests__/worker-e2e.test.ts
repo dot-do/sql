@@ -169,9 +169,10 @@ describe('Worker Entry Point E2E Tests', () => {
       expect(result.body.success).toBe(true);
     });
 
-    // Note: Quoted table names with special characters may not be supported
-    // by the simple parser - skip this test
-    it.skip('should execute CREATE TABLE with quoted table name', async () => {
+    // TODO(sql-quoted-identifiers): DDL parser supports quoted identifiers but
+    // the full execution pipeline (unified parser -> planner -> executor) may not.
+    // The DDL parser handles "my-special_table" but another component rejects it.
+    it.skip('should execute CREATE TABLE with quoted table name - TODO(sql-quoted-identifiers)', async () => {
       const dbName = uniqueDbName('exec-quoted');
       const result = await execute(dbName, 'CREATE TABLE "my-special_table" (id INTEGER, PRIMARY KEY (id))');
       expect(result.status).toBe(200);

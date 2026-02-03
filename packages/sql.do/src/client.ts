@@ -26,10 +26,70 @@ import type {
   ClientErrorEvent,
   IdempotencyCacheStats,
   TransactionContext as TransactionContextInterface,
+  PoolConfig,
+  PoolStats,
+  PoolHealth,
+  ConnectionInfo,
 } from './types.js';
 import { createTransactionId, createLSN, createStatementHash, DEFAULT_IDEMPOTENCY_CONFIG, DEFAULT_RETRY_CONFIG } from './types.js';
-import { SQLError, MessageParseError, ConnectionError, TimeoutError, type TimeoutOperationType } from './errors.js';
+import { SQLError, MessageParseError, ConnectionError, TimeoutError, ConfigurationError, type TimeoutOperationType } from './errors.js';
 import { clientLogger } from './logger.js';
+import { ConnectionPool, type ConnectionPoolConfig, type PooledConnection } from './connection-pool.js';
+
+// =============================================================================
+// Configuration Validation
+// =============================================================================
+
+/**
+ * Validates the client configuration and throws ConfigurationError for invalid values.
+ * @internal
+ */
+function validateConfig(config: SQLClientConfig): void {
+  // URL is required
+  if (!config.url) {
+    throw new ConfigurationError('URL is required', 'url');
+  }
+
+  // Validate URL format
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(config.url);
+  } catch {
+    throw new ConfigurationError('Invalid URL format', 'url');
+  }
+
+  // Validate URL protocol (only ws, wss, http, https allowed)
+  const validProtocols = ['ws:', 'wss:', 'http:', 'https:'];
+  if (!validProtocols.includes(parsedUrl.protocol)) {
+    throw new ConfigurationError(`Unsupported protocol: ${parsedUrl.protocol}. Use ws://, wss://, http://, or https://`, 'url');
+  }
+
+  // Validate timeout is positive
+  if (config.timeout !== undefined) {
+    if (config.timeout <= 0) {
+      throw new ConfigurationError('Timeout must be a positive number', 'timeout');
+    }
+  }
+
+  // Validate retry config
+  if (config.retry) {
+    if (config.retry.maxRetries !== undefined && config.retry.maxRetries < 0) {
+      throw new ConfigurationError('maxRetries must be non-negative', 'retry.maxRetries');
+    }
+    if (config.retry.baseDelayMs !== undefined && config.retry.baseDelayMs < 0) {
+      throw new ConfigurationError('baseDelayMs must be non-negative', 'retry.baseDelayMs');
+    }
+    if (config.retry.maxDelayMs !== undefined && config.retry.maxDelayMs < 0) {
+      throw new ConfigurationError('maxDelayMs must be non-negative', 'retry.maxDelayMs');
+    }
+    // Validate relationship between baseDelayMs and maxDelayMs
+    const baseDelay = config.retry.baseDelayMs ?? 100;
+    const maxDelay = config.retry.maxDelayMs ?? 5000;
+    if (baseDelay > maxDelay) {
+      throw new ConfigurationError('baseDelayMs cannot exceed maxDelayMs', 'retry');
+    }
+  }
+}
 
 // =============================================================================
 // Idempotency Key Generation
@@ -423,6 +483,31 @@ export interface SQLClientConfig {
    * include idempotency keys to prevent duplicate operations on retry.
    */
   idempotency?: IdempotencyConfig;
+
+  /**
+   * Configuration for connection pooling.
+   *
+   * When provided, enables connection pooling with the specified settings.
+   * This allows connection reuse, health checking, and better resource management.
+   *
+   * @example
+   * ```typescript
+   * const client = createSQLClient({
+   *   url: 'https://sql.example.com',
+   *   pool: {
+   *     maxSize: 10,
+   *     minIdle: 2,
+   *     warmUp: true,
+   *   },
+   * });
+   * ```
+   */
+  pool?: PoolConfig & {
+    /** Whether to warm up the pool on initialization (default: false) */
+    warmUp?: boolean;
+    /** Number of connections to create during warm-up (default: minIdle) */
+    warmUpSize?: number;
+  };
 }
 
 // RetryConfig is imported from @dotdo/sql-types via ./types.js
@@ -502,9 +587,10 @@ type EventListenerStore = {
  */
 export class DoSQLClient implements SQLClient {
   /** @internal */
-  private readonly config: Required<Omit<SQLClientConfig, 'token' | 'database'>> & {
+  private readonly config: Required<Omit<SQLClientConfig, 'token' | 'database' | 'pool'>> & {
     token?: string;
     database?: string;
+    pool?: PoolConfig & { warmUp?: boolean; warmUpSize?: number };
   };
   /** @internal */
   private requestId = 0;
@@ -526,6 +612,12 @@ export class DoSQLClient implements SQLClient {
   private connecting: boolean = false;
   /** @internal Promise that resolves when connection is established (for concurrent connect() calls) */
   private connectPromise: Promise<void> | null = null;
+  /** @internal Connection pool for connection management */
+  private connectionPool: ConnectionPool | null = null;
+  /** @internal Currently borrowed connection from pool */
+  private pooledConnection: PooledConnection | null = null;
+  /** @internal Active transaction ID for connection affinity */
+  private activeTransactionId: TransactionId | null = null;
 
   /**
    * Creates a new DoSQLClient instance.
@@ -543,6 +635,9 @@ export class DoSQLClient implements SQLClient {
    * ```
    */
   constructor(config: SQLClientConfig) {
+    // Validate configuration before storing
+    validateConfig(config);
+
     this.config = {
       ...config,
       timeout: config.timeout ?? 30000,
@@ -562,6 +657,46 @@ export class DoSQLClient implements SQLClient {
         this.idempotencyKeyCache.cleanup();
       }, cleanupIntervalMs);
     }
+
+    // Initialize connection pool if configured
+    if (config.pool) {
+      const poolConfig: ConnectionPoolConfig = {
+        url: config.url,
+        ...config.pool,
+      };
+      this.connectionPool = new ConnectionPool(poolConfig);
+    }
+  }
+
+  // ===========================================================================
+  // Configuration Access
+  // ===========================================================================
+
+  /**
+   * Gets a read-only copy of the client configuration.
+   *
+   * Returns a frozen copy of the configuration to prevent modification.
+   * Useful for debugging, logging, or inspecting the current settings.
+   *
+   * @returns A frozen copy of the client configuration
+   *
+   * @example
+   * ```typescript
+   * const client = createSQLClient({ url: 'wss://sql.example.com', timeout: 30000 });
+   * const config = client.getConfig();
+   * console.log(config.url); // 'wss://sql.example.com'
+   * console.log(config.timeout); // 30000
+   *
+   * // Configuration is immutable
+   * config.url = 'other'; // Throws in strict mode
+   * ```
+   *
+   * @public
+   * @since 0.4.0
+   */
+  getConfig(): Readonly<SQLClientConfig> {
+    // Return a frozen shallow copy to prevent modification
+    return Object.freeze({ ...this.config });
   }
 
   // ===========================================================================
@@ -1489,10 +1624,110 @@ export class DoSQLClient implements SQLClient {
       this.cleanupTimer = null;
     }
 
+    // Shutdown connection pool if configured
+    if (this.connectionPool) {
+      await this.connectionPool.shutdown();
+      this.connectionPool = null;
+      this.pooledConnection = null;
+    }
+
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
+  }
+
+  // ===========================================================================
+  // Connection Pool Methods
+  // ===========================================================================
+
+  /**
+   * Checks if the client has a connection pool configured.
+   *
+   * @returns `true` if pool is configured, `false` otherwise
+   *
+   * @example
+   * ```typescript
+   * const client = createSQLClient({
+   *   url: 'https://sql.example.com',
+   *   pool: { maxSize: 10 },
+   * });
+   *
+   * if (client.hasPool()) {
+   *   console.log('Pool stats:', client.getPoolStats());
+   * }
+   * ```
+   *
+   * @public
+   * @since 0.4.0
+   */
+  hasPool(): boolean {
+    return this.connectionPool !== null;
+  }
+
+  /**
+   * Gets current pool statistics.
+   *
+   * @returns Pool statistics or null if pool is not configured
+   *
+   * @example
+   * ```typescript
+   * const stats = client.getPoolStats();
+   * if (stats) {
+   *   console.log(`Active: ${stats.activeConnections}/${stats.maxSize}`);
+   *   console.log(`Reuse ratio: ${(stats.connectionReuseRatio * 100).toFixed(1)}%`);
+   * }
+   * ```
+   *
+   * @public
+   * @since 0.4.0
+   */
+  getPoolStats(): PoolStats | null {
+    return this.connectionPool?.getStats() ?? null;
+  }
+
+  /**
+   * Gets pool health status.
+   *
+   * @returns Pool health or null if pool is not configured
+   *
+   * @example
+   * ```typescript
+   * const health = client.getPoolHealth();
+   * if (health && !health.healthy) {
+   *   console.warn(`Unhealthy connections: ${health.unhealthyConnections}`);
+   * }
+   * ```
+   *
+   * @public
+   * @since 0.4.0
+   */
+  getPoolHealth(): PoolHealth | null {
+    return this.connectionPool?.getHealth() ?? null;
+  }
+
+  /**
+   * Gets information about all pooled connections.
+   *
+   * @returns Array of connection info or null if pool is not configured
+   *
+   * @public
+   * @since 0.4.0
+   */
+  getPoolConnectionInfo(): ConnectionInfo[] | null {
+    return this.connectionPool?.getConnectionInfo() ?? null;
+  }
+
+  /**
+   * Gets the connection tags configured for the pool.
+   *
+   * @returns Array of tags or empty array if pool not configured
+   *
+   * @public
+   * @since 0.4.0
+   */
+  getPoolConnectionTags(): string[] {
+    return this.connectionPool?.getConnectionTags() ?? [];
   }
 
   // ===========================================================================
@@ -1580,6 +1815,181 @@ export class DoSQLClient implements SQLClient {
    */
   async batch(statements: Array<{ sql: string; params?: SQLValue[] }>): Promise<QueryResult[]> {
     return this.rpc<QueryResult[]>('batch', { statements });
+  }
+
+  // ===========================================================================
+  // Query Convenience Methods
+  // ===========================================================================
+
+  /**
+   * Executes raw SQL directly without any semantic validation.
+   *
+   * This is an alias for {@link exec} that makes it clearer that raw SQL is being executed.
+   * Use this when you need to execute SQL that doesn't fit the query/exec semantic split.
+   *
+   * @param sql - The SQL statement to execute
+   * @param params - Optional array of parameter values
+   * @returns Promise resolving to the query result
+   * @throws {SQLError} When statement execution fails
+   *
+   * @example
+   * ```typescript
+   * // Execute DDL
+   * await client.executeRaw('CREATE TABLE IF NOT EXISTS users (id INT PRIMARY KEY)');
+   *
+   * // Execute any SQL
+   * const result = await client.executeRaw('INSERT INTO users VALUES (?)', [1]);
+   * ```
+   *
+   * @public
+   * @since 0.4.0
+   */
+  async executeRaw(sql: string, params?: SQLValue[]): Promise<QueryResult> {
+    return this.exec(sql, params);
+  }
+
+  /**
+   * Executes a DDL (Data Definition Language) statement.
+   *
+   * Use this for schema modification statements like CREATE, ALTER, DROP.
+   * Returns a success indicator rather than rows.
+   *
+   * @param sql - The DDL statement to execute
+   * @returns Promise resolving to a success indicator
+   * @throws {SQLError} When statement execution fails
+   *
+   * @example
+   * ```typescript
+   * const result = await client.run('CREATE TABLE users (id INT PRIMARY KEY, name TEXT)');
+   * console.log(result.success); // true
+   *
+   * await client.run('ALTER TABLE users ADD COLUMN email TEXT');
+   * await client.run('DROP TABLE IF EXISTS temp');
+   * ```
+   *
+   * @public
+   * @since 0.4.0
+   */
+  async run(sql: string): Promise<{ success: boolean }> {
+    await this.exec(sql);
+    return { success: true };
+  }
+
+  /**
+   * Executes a query and returns exactly one row.
+   *
+   * This is a convenience method for queries that should return a single row.
+   * Throws an error if the query returns zero or more than one row.
+   *
+   * @typeParam T - The expected shape of the result row
+   * @param sql - The SQL SELECT query to execute
+   * @param params - Optional array of parameter values
+   * @returns Promise resolving to the single row
+   * @throws {SQLError} When query execution fails
+   * @throws {SQLError} When query returns zero rows (code: NO_ROWS)
+   * @throws {SQLError} When query returns multiple rows (code: MULTIPLE_ROWS)
+   *
+   * @example
+   * ```typescript
+   * interface User {
+   *   id: number;
+   *   name: string;
+   * }
+   *
+   * // Get a single user by ID
+   * const user = await client.queryOne<User>('SELECT * FROM users WHERE id = ?', [1]);
+   * console.log(user.name);
+   *
+   * // Throws if user not found
+   * try {
+   *   await client.queryOne('SELECT * FROM users WHERE id = ?', [999]);
+   * } catch (error) {
+   *   console.log(error.code); // 'NO_ROWS'
+   * }
+   * ```
+   *
+   * @public
+   * @since 0.4.0
+   */
+  async queryOne<T = Record<string, SQLValue>>(sql: string, params?: SQLValue[]): Promise<T> {
+    const result = await this.query<T>(sql, params);
+    if (result.rows.length === 0) {
+      throw SQLError.create('NO_ROWS', 'Query returned no rows');
+    }
+    if (result.rows.length > 1) {
+      throw SQLError.create('MULTIPLE_ROWS', 'Query returned multiple rows', { count: result.rows.length });
+    }
+    return result.rows[0];
+  }
+
+  /**
+   * Executes a query and returns a single scalar value.
+   *
+   * This is a convenience method for queries that return a single value,
+   * such as COUNT(*), MAX(), etc.
+   *
+   * @typeParam T - The expected type of the scalar value
+   * @param sql - The SQL query returning a single value
+   * @param params - Optional array of parameter values
+   * @returns Promise resolving to the scalar value
+   * @throws {SQLError} When query execution fails
+   * @throws {SQLError} When query returns zero rows
+   *
+   * @example
+   * ```typescript
+   * // Get count
+   * const count = await client.queryValue<number>('SELECT COUNT(*) FROM users');
+   * console.log(`Total users: ${count}`);
+   *
+   * // Get max value
+   * const maxId = await client.queryValue<number>('SELECT MAX(id) FROM users');
+   * ```
+   *
+   * @public
+   * @since 0.4.0
+   */
+  async queryValue<T = SQLValue>(sql: string, params?: SQLValue[]): Promise<T> {
+    const result = await this.query(sql, params);
+    if (result.rows.length === 0) {
+      throw SQLError.create('NO_ROWS', 'Query returned no rows');
+    }
+    const row = result.rows[0];
+    const values = Object.values(row);
+    if (values.length === 0) {
+      throw SQLError.create('NO_COLUMNS', 'Query returned no columns');
+    }
+    return values[0] as T;
+  }
+
+  /**
+   * Checks if any rows match the given query.
+   *
+   * This is a convenience method for existence checks that returns a boolean
+   * instead of rows.
+   *
+   * @param sql - The SQL SELECT query to check
+   * @param params - Optional array of parameter values
+   * @returns Promise resolving to true if at least one row exists, false otherwise
+   * @throws {SQLError} When query execution fails
+   *
+   * @example
+   * ```typescript
+   * // Check if user exists
+   * const userExists = await client.exists('SELECT 1 FROM users WHERE id = ?', [userId]);
+   * if (!userExists) {
+   *   throw new Error('User not found');
+   * }
+   *
+   * // Check for any active orders
+   * const hasActiveOrders = await client.exists('SELECT 1 FROM orders WHERE status = ?', ['active']);
+   * ```
+   *
+   * @public
+   * @since 0.4.0
+   */
+  async exists(sql: string, params?: SQLValue[]): Promise<boolean> {
+    const result = await this.query(sql, params);
+    return result.rows.length > 0;
   }
 }
 

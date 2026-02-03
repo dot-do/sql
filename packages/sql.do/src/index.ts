@@ -76,6 +76,21 @@ export type { ErrorEvent } from './types.js';
 export type { IdempotencyCacheStats } from './types.js';
 
 /**
+ * Connection pool types for enterprise-grade connection management.
+ * @public
+ * @stability experimental
+ * @since 0.4.0
+ */
+export type {
+  PoolConfig,
+  PoolStats,
+  PoolHealth,
+  ConnectionInfo,
+  PoolEventMap,
+} from './types.js';
+export { ConnectionPool, type ConnectionPoolConfig, type ConnectionPoolEventMap, type PooledConnection } from './connection-pool.js';
+
+/**
  * Idempotency utilities for mutation safety.
  * @public
  * @stability experimental

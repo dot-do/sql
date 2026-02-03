@@ -36,7 +36,11 @@ export const SQL_KEYWORDS = new Set([
   'autoincrement', 'collate', 'without', 'rowid', 'strict', 'generated',
   'always', 'stored', 'virtual', 'no', 'action', 'abort', 'fail', 'ignore',
   'rollback', 'match', 'simple', 'partial', 'deferrable', 'initially',
-  'deferred', 'immediate',
+  'deferred', 'immediate', 'storage',
+
+  // Triggers
+  'trigger', 'before', 'after', 'instead', 'of', 'for', 'each', 'begin',
+  'new', 'old', 'raise',
 
   // Data types
   'integer', 'int', 'smallint', 'mediumint', 'bigint', 'tinyint',
@@ -402,6 +406,9 @@ export class Tokenizer {
 
   /**
    * Read identifier or keyword
+   *
+   * Keywords are normalized to lowercase for consistent comparison,
+   * but identifiers preserve their original case.
    */
   private readIdentifier(loc: SourceLocation): Token {
     let value = '';
@@ -413,7 +420,9 @@ export class Tokenizer {
     const lower = value.toLowerCase();
     const type: TokenType = SQL_KEYWORDS.has(lower) ? 'keyword' : 'identifier';
 
-    return { type, value: type === 'keyword' ? lower : value, location: loc };
+    // Preserve original case for both keywords and identifiers
+    // This allows reconstructing SQL with original formatting
+    return { type, value, location: loc };
   }
 }
 

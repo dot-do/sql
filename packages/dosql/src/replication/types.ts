@@ -11,6 +11,12 @@
  */
 
 import type { WALEntry, WALSegment } from '../wal/types.js';
+import {
+  DoSQLError,
+  ErrorCategory,
+  registerErrorClass,
+  type SerializedError,
+} from '../errors/base.js';
 
 // =============================================================================
 // REPLICA IDENTITY
@@ -854,20 +860,88 @@ export enum ReplicationErrorCode {
 }
 
 /**
- * Replication error class
+ * Error class for replication operations
+ *
+ * Extends DoSQLError for unified error handling across the DoSQL ecosystem.
  */
-export class ReplicationError extends Error {
+export class ReplicationError extends DoSQLError {
+  readonly code: ReplicationErrorCode;
+  readonly category: ErrorCategory;
+  readonly replicaId?: ReplicaId;
+  readonly lsn?: bigint;
+
   constructor(
-    public readonly code: ReplicationErrorCode,
+    code: ReplicationErrorCode,
     message: string,
-    public readonly replicaId?: ReplicaId,
-    public readonly lsn?: bigint,
-    public readonly cause?: Error
+    replicaId?: ReplicaId,
+    lsn?: bigint,
+    cause?: Error
   ) {
-    super(message);
+    super(message, cause ? { cause } : undefined);
     this.name = 'ReplicationError';
+    this.code = code;
+    this.replicaId = replicaId;
+    this.lsn = lsn;
+    this.category = this.determineCategory();
+
+    if (this.replicaId || this.lsn !== undefined) {
+      this.context = {
+        metadata: {
+          ...(this.replicaId && { replicaId: serializeReplicaId(this.replicaId) }),
+          ...(this.lsn !== undefined && { lsn: String(this.lsn) }),
+        },
+      };
+    }
+  }
+
+  private determineCategory(): ErrorCategory {
+    switch (this.code) {
+      case ReplicationErrorCode.NOT_PRIMARY:
+      case ReplicationErrorCode.NOT_REPLICA:
+      case ReplicationErrorCode.REPLICA_NOT_FOUND:
+        return ErrorCategory.VALIDATION;
+      case ReplicationErrorCode.CONFLICT_DETECTED:
+      case ReplicationErrorCode.SPLIT_BRAIN_DETECTED:
+        return ErrorCategory.CONFLICT;
+      case ReplicationErrorCode.CONNECTION_FAILED:
+      case ReplicationErrorCode.STREAMING_ERROR:
+        return ErrorCategory.CONNECTION;
+      case ReplicationErrorCode.SYNC_FAILED:
+      case ReplicationErrorCode.APPLY_FAILED:
+        return ErrorCategory.EXECUTION;
+      case ReplicationErrorCode.ELECTION_IN_PROGRESS:
+      case ReplicationErrorCode.STALE_LEADER:
+      case ReplicationErrorCode.QUORUM_NOT_REACHED:
+        return ErrorCategory.CONFLICT;
+      default:
+        return ErrorCategory.EXECUTION;
+    }
+  }
+
+  override isRetryable(): boolean {
+    return [
+      ReplicationErrorCode.CONNECTION_FAILED,
+      ReplicationErrorCode.STREAMING_ERROR,
+      ReplicationErrorCode.SYNC_FAILED,
+      ReplicationErrorCode.APPLY_FAILED,
+      ReplicationErrorCode.ELECTION_IN_PROGRESS,
+      ReplicationErrorCode.STALE_LEADER,
+    ].includes(this.code);
+  }
+
+  static fromJSON(json: SerializedError): ReplicationError {
+    const replicaIdStr = json.context?.metadata?.replicaId as string | undefined;
+    const lsnStr = json.context?.metadata?.lsn as string | undefined;
+    return new ReplicationError(
+      json.code as ReplicationErrorCode,
+      json.message,
+      replicaIdStr ? deserializeReplicaId(replicaIdStr) : undefined,
+      lsnStr ? BigInt(lsnStr) : undefined
+    );
   }
 }
+
+registerErrorClass('ReplicationError', ReplicationError);
 
 // =============================================================================
 // UTILITY TYPES

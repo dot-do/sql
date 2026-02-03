@@ -68,6 +68,79 @@ export {
 } from 'lake.do';
 
 // =============================================================================
+// Re-export Versioned CDC Protocol from shared-types
+// =============================================================================
+
+/**
+ * Versioned CDC Protocol types from `@dotdo/sql-types`.
+ *
+ * These types define the formal contract between DoSQL (producer) and DoLake (consumer):
+ *
+ * ## Protocol Version
+ *
+ * - {@link CDC_PROTOCOL_VERSION} - Current protocol version (v1)
+ * - {@link CDC_PROTOCOL_MIN_VERSION} - Minimum supported version
+ *
+ * ## Versioned Event Type
+ *
+ * - {@link VersionedCDCEvent} - The canonical CDC event with version field
+ *   - `version`: Protocol version number (required)
+ *   - `type`: 'INSERT' | 'UPDATE' | 'DELETE'
+ *   - `table`: Table name
+ *   - `lsn`: Log Sequence Number
+ *   - `timestamp`: Unix timestamp in milliseconds
+ *   - `before`/`after`: Row data
+ *
+ * ## Validation
+ *
+ * - {@link validateCDCEvent} - Validates events against the protocol spec
+ * - {@link isVersionedCDCEvent} - Type guard for versioned events
+ *
+ * ## Protocol Negotiation
+ *
+ * - {@link CDCProtocolCapabilities} - Producer/consumer capabilities
+ * - {@link negotiateProtocolVersion} - Negotiates common version
+ *
+ * @public
+ * @stability experimental
+ * @since 0.4.0
+ */
+export {
+  // Protocol Constants
+  CDC_PROTOCOL_VERSION,
+  CDC_PROTOCOL_MIN_VERSION,
+  CDC_PROTOCOL_HISTORY,
+
+  // Event Types
+  type CDCEventType,
+  type Row,
+  type VersionedCDCEvent,
+
+  // Protocol Negotiation
+  type CDCProtocolCapabilities,
+  type CDCProtocolNegotiationRequest,
+  type CDCProtocolNegotiationResponse,
+  DEFAULT_PRODUCER_CAPABILITIES,
+  DEFAULT_CONSUMER_CAPABILITIES,
+
+  // Validation Types
+  type CDCValidationResult,
+  type CDCValidationError,
+  type CDCValidationWarning,
+  CDCValidationErrorCode,
+  CDCValidationWarningCode,
+
+  // Validation Functions
+  validateCDCEvent,
+  isVersionedCDCEvent,
+  negotiateProtocolVersion,
+
+  // Utility Functions
+  createVersionedCDCEvent,
+  upgradeToVersionedCDCEvent,
+} from '@dotdo/sql-types';
+
+// =============================================================================
 // Timestamp Utilities
 // =============================================================================
 

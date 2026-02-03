@@ -338,7 +338,7 @@ function parseParameter(state: ParserState): { state: ParserState; expr: Paramet
 
   // Named parameter (:name or $name)
   const match = rest.match(/^[:$]([a-zA-Z_][a-zA-Z0-9_]*)/);
-  if (match) {
+  if (match && match[1]) {
     return {
       state: advance(state, match[0].length),
       expr: { type: 'parameter', name: match[1], raw: match[0] },

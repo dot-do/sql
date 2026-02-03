@@ -13,6 +13,7 @@ import type { WALEntry, WALReader, WALOperation, LSN } from '../wal/types.js';
 import { tailWAL } from '../wal/reader.js';
 import type { ChangeEvent, CDCFilter, TransactionEvent } from './types.js';
 import { createLSN, incrementLSN } from '../engine/types.js';
+import { decodeOrDefault } from '../utils/type-guards.js';
 
 // =============================================================================
 // Capture Types
@@ -366,7 +367,8 @@ export function walEntryToChangeEvent<T = unknown>(
   entry: WALEntry,
   decoder?: (data: Uint8Array) => T
 ): ChangeEvent<T> | TransactionEvent | null {
-  const decode = decoder ?? ((d: Uint8Array) => d as unknown as T);
+  // Create decoder with type-safe fallback using type guard utility
+  const decode = (d: Uint8Array): T => decodeOrDefault(d, decoder) as T;
 
   // Transaction control events
   if (entry.op === 'BEGIN' || entry.op === 'COMMIT' || entry.op === 'ROLLBACK') {

@@ -199,10 +199,7 @@ function buildExplainTree(
       return buildMergeNode(plan, cost, options);
 
     default:
-      return {
-        nodeType: 'Unknown',
-        operation: `Unknown plan type: ${(plan as unknown as { type: string }).type}`,
-      };
+      return assertNever(plan, `Unknown plan type in buildExplainTree`);
   }
 }
 

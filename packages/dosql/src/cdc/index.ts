@@ -147,3 +147,39 @@ export {
   type LakehouseAckWithBackpressure,
   DEFAULT_BACKPRESSURE_CONFIG,
 } from './backpressure.js';
+
+// Versioned CDC Protocol (formal contract between DoSQL and DoLake)
+export {
+  // Protocol Constants
+  CDC_PROTOCOL_VERSION,
+  CDC_PROTOCOL_MIN_VERSION,
+  CDC_PROTOCOL_HISTORY,
+
+  // Event Types
+  type CDCEventType,
+  type Row,
+  type VersionedCDCEvent,
+
+  // Protocol Negotiation
+  type CDCProtocolCapabilities,
+  type CDCProtocolNegotiationRequest,
+  type CDCProtocolNegotiationResponse,
+  DEFAULT_PRODUCER_CAPABILITIES,
+  DEFAULT_CONSUMER_CAPABILITIES,
+
+  // Validation Types
+  type CDCValidationResult,
+  type CDCValidationError,
+  type CDCValidationWarning,
+  CDCValidationErrorCode,
+  CDCValidationWarningCode,
+
+  // Validation Functions
+  validateCDCEvent,
+  isVersionedCDCEvent,
+  negotiateProtocolVersion,
+
+  // Utility Functions
+  createVersionedCDCEvent,
+  upgradeToVersionedCDCEvent,
+} from './types.js';

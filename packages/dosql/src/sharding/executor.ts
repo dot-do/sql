@@ -865,6 +865,12 @@ export class MockShardRPC implements ShardRPC {
   }
 }
 
+/**
+ * FakeShardRPC - Preferred name following the NO MOCKS philosophy.
+ * This has real in-memory shard data behavior, not stubbed mock behavior.
+ */
+export const FakeShardRPC = MockShardRPC;
+
 // =============================================================================
 // FACTORY FUNCTIONS
 // =============================================================================

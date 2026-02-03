@@ -3,15 +3,21 @@
  *
  * Reads rows from B-tree or columnar storage.
  * Supports predicate pushdown to filter at the storage level.
+ * Supports backpressure for large result sets.
  */
 
 import {
   type ScanPlan,
   type ExecutionContext,
-  type Operator,
   type Row,
   type Predicate,
   type SqlValue,
+  type BackpressureState,
+  type BackpressureStats,
+  type BackpressureOperator,
+  type WatermarkConfig,
+  type BackpressureController,
+  DEFAULT_WATERMARKS,
 } from '../types.js';
 import { evaluatePredicate } from './filter.js';
 import type { Predicate as ColumnarPredicate } from '../../columnar/index.js';
@@ -96,13 +102,25 @@ function toColumnarPredicates(predicate: Predicate | undefined): ColumnarPredica
 }
 
 /**
- * Scan operator implementation
+ * Scan operator implementation with backpressure support
  */
-export class ScanOperator implements Operator {
+export class ScanOperator implements BackpressureOperator {
   private plan: ScanPlan;
   private ctx!: ExecutionContext;
   private iterator: AsyncIterator<Row> | null = null;
   private outputColumns: string[];
+
+  // Backpressure state
+  private backpressureState: BackpressureState = 'flowing';
+  private watermarks: WatermarkConfig = DEFAULT_WATERMARKS;
+  private pauseCount = 0;
+  private resumeCount = 0;
+  private memoryUsage = 0;
+  private bufferedRows = 0;
+  private backpressureCallbacks: Array<(state: BackpressureState) => void> = [];
+  private pausePromise: Promise<void> | null = null;
+  private pauseResolve: (() => void) | null = null;
+  private controller: BackpressureController | null = null;
 
   constructor(plan: ScanPlan, ctx: ExecutionContext) {
     this.plan = plan;
@@ -110,9 +128,21 @@ export class ScanOperator implements Operator {
     this.outputColumns = plan.columns;
   }
 
+  /**
+   * Set the backpressure controller for this operator
+   */
+  setController(controller: BackpressureController): void {
+    this.controller = controller;
+  }
+
   async open(ctx: ExecutionContext): Promise<void> {
     this.ctx = ctx;
     const { table, source, predicate, columns } = this.plan;
+
+    // Reset backpressure state
+    this.backpressureState = 'flowing';
+    this.pausePromise = null;
+    this.pauseResolve = null;
 
     // Choose data source
     if (source === 'columnar') {
@@ -136,7 +166,17 @@ export class ScanOperator implements Operator {
   async next(): Promise<Row | null> {
     if (!this.iterator) return null;
 
+    // Wait if paused (backpressure)
+    if (this.pausePromise) {
+      await this.pausePromise;
+    }
+
     while (true) {
+      // Check if we need to pause again after each iteration
+      if (this.pausePromise) {
+        await this.pausePromise;
+      }
+
       const result = await this.iterator.next();
       if (result.done) return null;
 
@@ -170,10 +210,96 @@ export class ScanOperator implements Operator {
       await this.iterator.return();
     }
     this.iterator = null;
+
+    // Reset backpressure state
+    this.backpressureState = 'flowing';
+    this.memoryUsage = 0;
+    this.bufferedRows = 0;
+    this.pausePromise = null;
+    this.pauseResolve = null;
+    if (this.controller) {
+      this.controller.reportMemoryUsage(this, 0);
+    }
   }
 
   columns(): string[] {
     return this.outputColumns;
+  }
+
+  // ==========================================================================
+  // BACKPRESSURE SUPPORT
+  // ==========================================================================
+
+  async pause(): Promise<void> {
+    if (this.backpressureState === 'paused') {
+      return;
+    }
+
+    this.backpressureState = 'paused';
+    this.pauseCount++;
+    this.notifyBackpressureChange();
+
+    // Create a promise that will be resolved when resume() is called
+    this.pausePromise = new Promise<void>((resolve) => {
+      this.pauseResolve = resolve;
+    });
+
+    if (this.controller) {
+      this.controller.requestPause(this);
+    }
+  }
+
+  async resume(): Promise<void> {
+    if (this.backpressureState !== 'paused') {
+      return;
+    }
+
+    this.backpressureState = 'flowing';
+    this.resumeCount++;
+    this.notifyBackpressureChange();
+
+    // Resolve the pause promise to unblock waiting code
+    if (this.pauseResolve) {
+      this.pauseResolve();
+      this.pausePromise = null;
+      this.pauseResolve = null;
+    }
+
+    if (this.controller) {
+      this.controller.requestResume(this);
+    }
+  }
+
+  isPaused(): boolean {
+    return this.backpressureState === 'paused';
+  }
+
+  getBackpressureState(): BackpressureState {
+    return this.backpressureState;
+  }
+
+  getBackpressureStats(): BackpressureStats {
+    return {
+      memoryUsage: this.memoryUsage,
+      pauseCount: this.pauseCount,
+      resumeCount: this.resumeCount,
+      state: this.backpressureState,
+      bufferedRows: this.bufferedRows,
+    };
+  }
+
+  setWatermarks(config: WatermarkConfig): void {
+    this.watermarks = { ...config };
+  }
+
+  onBackpressure(callback: (state: BackpressureState) => void): void {
+    this.backpressureCallbacks.push(callback);
+  }
+
+  private notifyBackpressureChange(): void {
+    for (const callback of this.backpressureCallbacks) {
+      callback(this.backpressureState);
+    }
   }
 
   /**

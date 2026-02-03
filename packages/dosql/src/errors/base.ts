@@ -15,13 +15,17 @@
 
 // Re-export shared types from @dotdo/sql-types for consistency
 export {
+  BaseError,
   ErrorCategory,
+  registerErrorDeserializer,
+  deserializeError as deserializeBaseError,
   type ErrorContext,
   type SerializedError,
   type ErrorLogEntry,
 } from '@dotdo/sql-types';
 
 import {
+  BaseError,
   ErrorCategory,
   type ErrorContext,
   type SerializedError,
@@ -64,7 +68,7 @@ import {
  * }
  * ```
  */
-export abstract class DoSQLError extends Error {
+export abstract class DoSQLError extends BaseError {
   /** Machine-readable error code */
   abstract readonly code: string;
 

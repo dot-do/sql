@@ -9,6 +9,13 @@
  * - WITH CHECK OPTION
  */
 
+import {
+  DoSQLError,
+  ErrorCategory,
+  registerErrorClass,
+  type SerializedError,
+} from '../errors/base.js';
+
 // =============================================================================
 // View Definition Types
 // =============================================================================
@@ -463,19 +470,65 @@ export enum ViewErrorCode {
 }
 
 /**
- * Custom error class for view operations
+ * Error class for view operations
+ *
+ * Extends DoSQLError for unified error handling across the DoSQL ecosystem.
  */
-export class ViewError extends Error {
+export class ViewError extends DoSQLError {
+  readonly code: ViewErrorCode;
+  readonly category: ErrorCategory;
+  readonly viewName?: string;
+
   constructor(
-    public readonly code: ViewErrorCode,
+    code: ViewErrorCode,
     message: string,
-    public readonly viewName?: string,
-    public readonly cause?: Error
+    viewName?: string,
+    cause?: Error
   ) {
-    super(message);
+    super(message, cause ? { cause } : undefined);
     this.name = 'ViewError';
+    this.code = code;
+    this.viewName = viewName;
+    this.category = this.determineCategory();
+
+    if (this.viewName) {
+      this.context = { metadata: { viewName: this.viewName } };
+    }
+  }
+
+  private determineCategory(): ErrorCategory {
+    switch (this.code) {
+      case ViewErrorCode.VIEW_NOT_FOUND:
+        return ErrorCategory.RESOURCE;
+      case ViewErrorCode.VIEW_EXISTS:
+      case ViewErrorCode.HAS_DEPENDENTS:
+        return ErrorCategory.CONFLICT;
+      case ViewErrorCode.NOT_UPDATABLE:
+      case ViewErrorCode.INVALID_DEFINITION:
+      case ViewErrorCode.INVALID_REFERENCE:
+      case ViewErrorCode.CHECK_OPTION_VIOLATION:
+        return ErrorCategory.VALIDATION;
+      case ViewErrorCode.QUERY_ERROR:
+        return ErrorCategory.EXECUTION;
+      default:
+        return ErrorCategory.EXECUTION;
+    }
+  }
+
+  override isRetryable(): boolean {
+    return false;
+  }
+
+  static fromJSON(json: SerializedError): ViewError {
+    return new ViewError(
+      json.code as ViewErrorCode,
+      json.message,
+      json.context?.metadata?.viewName as string | undefined
+    );
   }
 }
+
+registerErrorClass('ViewError', ViewError);
 
 // =============================================================================
 // Utility Types

@@ -37,9 +37,11 @@ import type {
 // =============================================================================
 
 /**
- * Mock operator for testing pipeline composition
+ * Fake operator for testing pipeline composition.
+ * This is a "Fake" (test double with real behavior) - it has real operator
+ * implementation that iterates through data, not stubbed mock behavior.
  */
-class MockScanOperator implements Operator {
+class FakeScanOperator implements Operator {
   private rows: Row[];
   private index = 0;
   private cols: string[];
@@ -104,9 +106,10 @@ const DEPARTMENTS_COLUMNS = ['id', 'name', 'budget'];
 const ORDERS_COLUMNS = ['id', 'user_id', 'amount', 'status'];
 
 /**
- * Create a mock execution context
+ * Create a fake execution context for testing.
+ * This provides a minimal real context, not a mock with stubbed behavior.
  */
-function createMockContext(): ExecutionContext {
+function createFakeContext(): ExecutionContext {
   return {
     // Minimal context for testing
   } as ExecutionContext;
@@ -123,7 +126,7 @@ describe('ProjectOperator', () => {
       // When implemented: SELECT id, name FROM users
       const { ProjectOperator } = await import('../engine/operators/project.js');
 
-      const mockInput = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
+      const mockInput = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
       const projectPlan: ProjectPlan = {
         id: 1,
         type: 'project',
@@ -134,7 +137,7 @@ describe('ProjectOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new ProjectOperator(projectPlan, mockInput, ctx);
 
       await operator.open(ctx);
@@ -155,7 +158,7 @@ describe('ProjectOperator', () => {
       // SELECT * FROM users - all columns should pass through
       const { ProjectOperator } = await import('../engine/operators/project.js');
 
-      const mockInput = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
+      const mockInput = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
       const projectPlan: ProjectPlan = {
         id: 1,
         type: 'project',
@@ -166,7 +169,7 @@ describe('ProjectOperator', () => {
         })),
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new ProjectOperator(projectPlan, mockInput, ctx);
 
       await operator.open(ctx);
@@ -182,7 +185,7 @@ describe('ProjectOperator', () => {
       // SELECT id AS user_id, name AS full_name FROM users
       const { ProjectOperator } = await import('../engine/operators/project.js');
 
-      const mockInput = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
+      const mockInput = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
       const projectPlan: ProjectPlan = {
         id: 1,
         type: 'project',
@@ -193,7 +196,7 @@ describe('ProjectOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new ProjectOperator(projectPlan, mockInput, ctx);
 
       await operator.open(ctx);
@@ -210,7 +213,7 @@ describe('ProjectOperator', () => {
       // SELECT name, 'VIP' AS status FROM users
       const { ProjectOperator } = await import('../engine/operators/project.js');
 
-      const mockInput = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
+      const mockInput = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
       const projectPlan: ProjectPlan = {
         id: 1,
         type: 'project',
@@ -221,7 +224,7 @@ describe('ProjectOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new ProjectOperator(projectPlan, mockInput, ctx);
 
       await operator.open(ctx);
@@ -235,7 +238,7 @@ describe('ProjectOperator', () => {
       // SELECT amount, amount * 1.1 AS amount_with_tax FROM orders
       const { ProjectOperator } = await import('../engine/operators/project.js');
 
-      const mockInput = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+      const mockInput = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
       const projectPlan: ProjectPlan = {
         id: 1,
         type: 'project',
@@ -254,7 +257,7 @@ describe('ProjectOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new ProjectOperator(projectPlan, mockInput, ctx);
 
       await operator.open(ctx);
@@ -278,8 +281,8 @@ describe('JoinOperator', () => {
       // SELECT * FROM users u INNER JOIN departments d ON u.department_id = d.id
       const { JoinOperator } = await import('../engine/operators/join.js');
 
-      const usersInput = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
-      const departmentsInput = new MockScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
+      const usersInput = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
+      const departmentsInput = new FakeScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
 
       const joinPlan: JoinPlan = {
         id: 1,
@@ -295,7 +298,7 @@ describe('JoinOperator', () => {
         },
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new JoinOperator(joinPlan, usersInput, departmentsInput, ctx);
 
       await operator.open(ctx);
@@ -325,11 +328,11 @@ describe('JoinOperator', () => {
       // No matching rows scenario
       const { JoinOperator } = await import('../engine/operators/join.js');
 
-      const usersInput = new MockScanOperator(
+      const usersInput = new FakeScanOperator(
         [{ id: 1, name: 'Test', department_id: 999 }],
         USERS_COLUMNS
       );
-      const departmentsInput = new MockScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
+      const departmentsInput = new FakeScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
 
       const joinPlan: JoinPlan = {
         id: 1,
@@ -345,7 +348,7 @@ describe('JoinOperator', () => {
         },
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new JoinOperator(joinPlan, usersInput, departmentsInput, ctx);
 
       await operator.open(ctx);
@@ -361,8 +364,8 @@ describe('JoinOperator', () => {
       // SELECT * FROM users u LEFT JOIN departments d ON u.department_id = d.id
       const { JoinOperator } = await import('../engine/operators/join.js');
 
-      const usersInput = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
-      const departmentsInput = new MockScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
+      const usersInput = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
+      const departmentsInput = new FakeScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
 
       const joinPlan: JoinPlan = {
         id: 1,
@@ -378,7 +381,7 @@ describe('JoinOperator', () => {
         },
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new JoinOperator(joinPlan, usersInput, departmentsInput, ctx);
 
       await operator.open(ctx);
@@ -405,8 +408,8 @@ describe('JoinOperator', () => {
       // SELECT * FROM users u RIGHT JOIN departments d ON u.department_id = d.id
       const { JoinOperator } = await import('../engine/operators/join.js');
 
-      const usersInput = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
-      const departmentsInput = new MockScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
+      const usersInput = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
+      const departmentsInput = new FakeScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
 
       const joinPlan: JoinPlan = {
         id: 1,
@@ -422,7 +425,7 @@ describe('JoinOperator', () => {
         },
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new JoinOperator(joinPlan, usersInput, departmentsInput, ctx);
 
       await operator.open(ctx);
@@ -449,8 +452,8 @@ describe('JoinOperator', () => {
       // SELECT * FROM users u FULL OUTER JOIN departments d ON u.department_id = d.id
       const { JoinOperator } = await import('../engine/operators/join.js');
 
-      const usersInput = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
-      const departmentsInput = new MockScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
+      const usersInput = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
+      const departmentsInput = new FakeScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
 
       const joinPlan: JoinPlan = {
         id: 1,
@@ -466,7 +469,7 @@ describe('JoinOperator', () => {
         },
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new JoinOperator(joinPlan, usersInput, departmentsInput, ctx);
 
       await operator.open(ctx);
@@ -493,8 +496,8 @@ describe('JoinOperator', () => {
       const { JoinOperator } = await import('../engine/operators/join.js');
 
       // Small table (3 rows) joined with larger table (5 rows)
-      const smallInput = new MockScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
-      const largeInput = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
+      const smallInput = new FakeScanOperator(DEPARTMENTS_DATA, DEPARTMENTS_COLUMNS);
+      const largeInput = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
 
       const joinPlan: JoinPlan = {
         id: 1,
@@ -511,7 +514,7 @@ describe('JoinOperator', () => {
         algorithm: 'hash',
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new JoinOperator(joinPlan, smallInput, largeInput, ctx);
 
       // The operator should internally choose to build hash table on smaller side
@@ -542,7 +545,7 @@ describe('AggregateOperator', () => {
       // SELECT COUNT(*) FROM orders
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
-      const ordersInput = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+      const ordersInput = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
       const aggregatePlan: AggregatePlan = {
         id: 1,
         type: 'aggregate',
@@ -556,7 +559,7 @@ describe('AggregateOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new AggregateOperator(aggregatePlan, ordersInput, ctx);
 
       await operator.open(ctx);
@@ -570,7 +573,7 @@ describe('AggregateOperator', () => {
       // SELECT COUNT(status) FROM orders (non-null count)
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
-      const ordersInput = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+      const ordersInput = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
       const aggregatePlan: AggregatePlan = {
         id: 1,
         type: 'aggregate',
@@ -584,7 +587,7 @@ describe('AggregateOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new AggregateOperator(aggregatePlan, ordersInput, ctx);
 
       await operator.open(ctx);
@@ -598,7 +601,7 @@ describe('AggregateOperator', () => {
       // SELECT SUM(amount) FROM orders
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
-      const ordersInput = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+      const ordersInput = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
       const aggregatePlan: AggregatePlan = {
         id: 1,
         type: 'aggregate',
@@ -612,7 +615,7 @@ describe('AggregateOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new AggregateOperator(aggregatePlan, ordersInput, ctx);
 
       await operator.open(ctx);
@@ -627,7 +630,7 @@ describe('AggregateOperator', () => {
       // SELECT AVG(amount) FROM orders
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
-      const ordersInput = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+      const ordersInput = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
       const aggregatePlan: AggregatePlan = {
         id: 1,
         type: 'aggregate',
@@ -641,7 +644,7 @@ describe('AggregateOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new AggregateOperator(aggregatePlan, ordersInput, ctx);
 
       await operator.open(ctx);
@@ -656,7 +659,7 @@ describe('AggregateOperator', () => {
       // SELECT MIN(amount) FROM orders
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
-      const ordersInput = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+      const ordersInput = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
       const aggregatePlan: AggregatePlan = {
         id: 1,
         type: 'aggregate',
@@ -670,7 +673,7 @@ describe('AggregateOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new AggregateOperator(aggregatePlan, ordersInput, ctx);
 
       await operator.open(ctx);
@@ -684,7 +687,7 @@ describe('AggregateOperator', () => {
       // SELECT MAX(amount) FROM orders
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
-      const ordersInput = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+      const ordersInput = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
       const aggregatePlan: AggregatePlan = {
         id: 1,
         type: 'aggregate',
@@ -698,7 +701,7 @@ describe('AggregateOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new AggregateOperator(aggregatePlan, ordersInput, ctx);
 
       await operator.open(ctx);
@@ -714,7 +717,7 @@ describe('AggregateOperator', () => {
       // SELECT user_id, SUM(amount) FROM orders GROUP BY user_id
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
-      const ordersInput = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+      const ordersInput = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
       const aggregatePlan: AggregatePlan = {
         id: 1,
         type: 'aggregate',
@@ -728,7 +731,7 @@ describe('AggregateOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new AggregateOperator(aggregatePlan, ordersInput, ctx);
 
       await operator.open(ctx);
@@ -761,7 +764,7 @@ describe('AggregateOperator', () => {
       // SELECT user_id, status, COUNT(*) FROM orders GROUP BY user_id, status
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
-      const ordersInput = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+      const ordersInput = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
       const aggregatePlan: AggregatePlan = {
         id: 1,
         type: 'aggregate',
@@ -778,7 +781,7 @@ describe('AggregateOperator', () => {
         ],
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new AggregateOperator(aggregatePlan, ordersInput, ctx);
 
       await operator.open(ctx);
@@ -804,7 +807,7 @@ describe('AggregateOperator', () => {
       // SELECT user_id, SUM(amount) FROM orders GROUP BY user_id HAVING SUM(amount) > 300
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
-      const ordersInput = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+      const ordersInput = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
       const aggregatePlan: AggregatePlan = {
         id: 1,
         type: 'aggregate',
@@ -824,7 +827,7 @@ describe('AggregateOperator', () => {
         },
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new AggregateOperator(aggregatePlan, ordersInput, ctx);
 
       await operator.open(ctx);
@@ -849,7 +852,7 @@ describe('AggregateOperator', () => {
       // HAVING COUNT(*) >= 2 AND SUM(amount) >= 300
       const { AggregateOperator } = await import('../engine/operators/aggregate.js');
 
-      const ordersInput = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+      const ordersInput = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
       const aggregatePlan: AggregatePlan = {
         id: 1,
         type: 'aggregate',
@@ -885,7 +888,7 @@ describe('AggregateOperator', () => {
         },
       };
 
-      const ctx = createMockContext();
+      const ctx = createFakeContext();
       const operator = new AggregateOperator(aggregatePlan, ordersInput, ctx);
 
       await operator.open(ctx);
@@ -914,10 +917,10 @@ describe('Operator Pipeline Composition', () => {
     const { ProjectOperator } = await import('../engine/operators/project.js');
     const { FilterOperator } = await import('../engine/operators/filter.js');
 
-    const ctx = createMockContext();
+    const ctx = createFakeContext();
 
     // 1. Scan (mock)
-    const scanOperator = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
+    const scanOperator = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
 
     // 2. Filter
     const filterPlan: FilterPlan = {
@@ -977,11 +980,11 @@ describe('Operator Pipeline Composition', () => {
     const { SortOperator } = await import('../engine/operators/sort.js');
     const { LimitOperator } = await import('../engine/operators/limit.js');
 
-    const ctx = createMockContext();
+    const ctx = createFakeContext();
 
     // 1. Scans (mock)
-    const usersOperator = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
-    const ordersOperator = new MockScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
+    const usersOperator = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
+    const ordersOperator = new FakeScanOperator(ORDERS_DATA, ORDERS_COLUMNS);
 
     // 2. Join
     const joinPlan: JoinPlan = {
@@ -1055,9 +1058,9 @@ describe('Operator Pipeline Composition', () => {
     const { ProjectOperator } = await import('../engine/operators/project.js');
     const { FilterOperator } = await import('../engine/operators/filter.js');
 
-    const ctx = createMockContext();
+    const ctx = createFakeContext();
 
-    const scanOperator = new MockScanOperator(USERS_DATA, USERS_COLUMNS);
+    const scanOperator = new FakeScanOperator(USERS_DATA, USERS_COLUMNS);
 
     const filterPlan: FilterPlan = {
       id: 1,

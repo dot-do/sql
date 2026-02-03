@@ -24,6 +24,7 @@ import {
   isParquet,
 } from './parser.js';
 import { likeMatch } from '../utils/like.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // R2 TABLE SOURCE

@@ -758,8 +758,12 @@ export class DoSQLTarget extends RpcTarget implements DoSQLAPI {
         }
       },
       setStreamLimits: (options: { maxQueryStreams?: number; maxCdcSubscriptions?: number }) => {
-        this.#maxQueryStreams = options.maxQueryStreams;
-        this.#maxCdcSubscriptions = options.maxCdcSubscriptions;
+        if (options.maxQueryStreams !== undefined) {
+          this.#maxQueryStreams = options.maxQueryStreams;
+        }
+        if (options.maxCdcSubscriptions !== undefined) {
+          this.#maxCdcSubscriptions = options.maxCdcSubscriptions;
+        }
       },
       getStreamCount: () => this.#streams.size,
       getStreamStats: () => ({

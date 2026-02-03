@@ -2,17 +2,20 @@
  * B-tree Implementation for DoSQL
  *
  * A B+tree implementation for row storage in Durable Objects.
- * Uses the unified StorageInterface for page persistence with the following characteristics:
+ * Uses the unified StorageProvider for page persistence with the following characteristics:
  *
  * - Keys and values are serialized using pluggable codecs
  * - Pages are stored as storage blobs with configurable prefixes
  * - Leaf pages are linked for efficient range scans
  * - Supports concurrent reads (single-writer assumed)
- * - Works with any StorageInterface implementation (DO, R2, memory, etc.)
+ * - Works with any StorageProvider implementation (DO, R2, memory, etc.)
  */
 
-import type { StorageInterface } from '../storage/interface.js';
-import type { FSXBackend } from '../fsx/types.js';
+import {
+  type StorageProvider,
+  type AnyStorageBackend,
+  normalizeStorage,
+} from '../storage/provider.js';
 import {
   StorageError,
   StorageErrorCode,
@@ -51,52 +54,10 @@ import { LRUCache } from './lru-cache.js';
 const METADATA_KEY = '_meta';
 
 /**
- * Storage backend type that can be either the new StorageInterface or legacy FSXBackend.
- * This union type provides backward compatibility while allowing migration to the new interface.
- */
-type StorageBackend = StorageInterface | FSXBackend;
-
-/**
- * Normalize a storage backend to use consistent method names.
- * Supports both new StorageInterface (get/put) and legacy FSXBackend (read/write).
- */
-function normalizeStorage(storage: StorageBackend): {
-  read: (key: string) => Promise<Uint8Array | null>;
-  write: (key: string, data: Uint8Array) => Promise<void>;
-  delete: (key: string) => Promise<void>;
-  list: (prefix: string) => Promise<string[]>;
-} {
-  // Check if it's the new StorageInterface (has 'get' method)
-  if ('get' in storage && typeof storage.get === 'function') {
-    const si = storage as StorageInterface;
-    return {
-      read: (key) => si.get(key),
-      write: (key, data) => si.put(key, data),
-      delete: (key) => si.delete(key),
-      list: (prefix) => si.list(prefix),
-    };
-  }
-
-  // It's the legacy FSXBackend
-  const fsx = storage as FSXBackend;
-  return {
-    read: (key) => fsx.read(key),
-    write: (key, data) => fsx.write(key, data),
-    delete: (key) => fsx.delete(key),
-    list: (prefix) => fsx.list(prefix),
-  };
-}
-
-/**
  * B+tree implementation
  */
 export class BTreeImpl<K, V> implements BTree<K, V> {
-  private readonly storage: {
-    read: (key: string) => Promise<Uint8Array | null>;
-    write: (key: string, data: Uint8Array) => Promise<void>;
-    delete: (key: string) => Promise<void>;
-    list: (prefix: string) => Promise<string[]>;
-  };
+  private readonly storage: StorageProvider;
   private readonly keyCodec: KeyCodec<K>;
   private readonly valueCodec: ValueCodec<V>;
   private readonly config: BTreeConfig;
@@ -106,11 +67,12 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
   private readonly pageCache: LRUCache<number, Page>;
 
   constructor(
-    storage: StorageBackend,
+    storage: AnyStorageBackend,
     keyCodec: KeyCodec<K>,
     valueCodec: ValueCodec<V>,
     config: Partial<BTreeConfig> = {}
   ) {
+    // Normalize any storage backend to the unified StorageProvider interface
     this.storage = normalizeStorage(storage);
     this.keyCodec = keyCodec;
     this.valueCodec = valueCodec;
@@ -128,7 +90,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
         // Write back dirty pages before eviction
         if (dirty) {
           const data = serializePage(page);
-          await this.storage.write(this.pageKey(pageId), data);
+          await this.storage.put(this.pageKey(pageId), data);
         }
         // Call user-provided eviction callback
         if (this.userOnEvict) {
@@ -150,7 +112,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   private async loadMetadata(): Promise<void> {
     const key = this.config.pagePrefix + METADATA_KEY;
-    const data = await this.storage.read(key);
+    const data = await this.storage.get(key);
 
     if (data) {
       const json = new TextDecoder().decode(data);
@@ -178,7 +140,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
     if (!this.metadata) return;
     const key = this.config.pagePrefix + METADATA_KEY;
     const data = new TextEncoder().encode(JSON.stringify(this.metadata));
-    await this.storage.write(key, data);
+    await this.storage.put(key, data);
   }
 
   /**
@@ -198,7 +160,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
 
     // Cache miss - record it and read from storage
     this.pageCache.recordMiss();
-    const data = await this.storage.read(this.pageKey(pageId));
+    const data = await this.storage.get(this.pageKey(pageId));
     if (!data) {
       throw new StorageError(
         StorageErrorCode.INVALID_PAGE_ID,
@@ -218,7 +180,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
    */
   private async writePage(page: Page): Promise<void> {
     const data = serializePage(page);
-    await this.storage.write(this.pageKey(page.id), data);
+    await this.storage.put(this.pageKey(page.id), data);
     // Add to cache as clean (not dirty since we just wrote it)
     // Use setAsync to ensure any evicted dirty pages are written before continuing
     await this.pageCache.setAsync(page.id, page, { dirty: false });
@@ -250,7 +212,7 @@ export class BTreeImpl<K, V> implements BTree<K, V> {
       const page = this.pageCache.peek(pageId); // Use peek to avoid updating LRU order
       if (page) {
         const data = serializePage(page);
-        await this.storage.write(this.pageKey(pageId), data);
+        await this.storage.put(this.pageKey(pageId), data);
         this.pageCache.markClean(pageId);
       }
     }
@@ -1022,13 +984,34 @@ export interface BTreeExtended<K, V> extends BTree<K, V> {
 }
 
 /**
- * Create a new B-tree instance
+ * Create a new B-tree instance.
+ *
+ * @param storage - Any supported storage backend (StorageProvider, FSXBackend, or StorageInterface)
+ * @param keyCodec - Codec for serializing/deserializing keys
+ * @param valueCodec - Codec for serializing/deserializing values
+ * @param config - Optional B-tree configuration
+ * @returns A new B-tree instance
+ *
+ * @example
+ * ```typescript
+ * // With StorageProvider (recommended)
+ * const provider = createMemoryProvider();
+ * const btree = createBTree(provider, StringKeyCodec, JsonValueCodec);
+ *
+ * // With legacy FSXBackend
+ * const doBackend = new DOStorageBackend(state.storage);
+ * const btree = createBTree(doBackend, StringKeyCodec, JsonValueCodec);
+ *
+ * // With legacy StorageInterface
+ * const storage = createMemoryStorage();
+ * const btree = createBTree(storage, StringKeyCodec, JsonValueCodec);
+ * ```
  */
 export function createBTree<K, V>(
-  fsx: FSXBackend,
+  storage: AnyStorageBackend,
   keyCodec: KeyCodec<K>,
   valueCodec: ValueCodec<V>,
   config?: Partial<BTreeConfig>
 ): BTreeExtended<K, V> {
-  return new BTreeImpl(fsx, keyCodec, valueCodec, config);
+  return new BTreeImpl(storage, keyCodec, valueCodec, config);
 }

@@ -285,6 +285,7 @@ export {
 
 export {
   CompactionManager,
+  CompactionCoordinator,
   CompactionError,
   type CompactionConfig,
   type CompactionCandidate,
@@ -293,7 +294,17 @@ export {
   type FileInfo,
   type SpaceSavings,
   type AtomicCommitPreparation,
+  type CompactionCoordinationConfig,
+  type LockMode,
+  type LockState,
+  type LockAcquisitionResult,
+  type CompactionLease,
+  type CompactionCheckpoint,
+  type CompactionPhase,
+  type ConflictCheckResult,
+  type CompactionSession,
   DEFAULT_COMPACTION_CONFIG,
+  DEFAULT_COORDINATION_CONFIG,
 } from './compaction.js';
 
 // =============================================================================

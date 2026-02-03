@@ -899,12 +899,15 @@ describe('Remote Connection Modes', () => {
   describe('Local bun:sqlite Connection', () => {
     /**
      * Should create local SQLite connection
-     * Skipped: Requires bun:sqlite or better-sqlite3 which aren't available in
-     * the Cloudflare Workers vitest pool environment. createLocalConnection()
+     *
+     * SKIP REASON: Requires bun:sqlite or better-sqlite3 which aren't available
+     * in the Cloudflare Workers vitest pool environment. createLocalConnection()
      * dynamically imports bun:sqlite (or better-sqlite3 fallback), neither of
      * which can be resolved in the Workers runtime.
+     *
+     * RUN LOCALLY: npx bun test src/__tests__/bun-repl.test.ts
      */
-    it.skip('should create local SQLite connection', async () => {
+    it.skip('should create local SQLite connection (requires bun runtime)', async () => {
       const conn = await createLocalConnection({ database: ':memory:' });
 
       expect(conn).toBeDefined();

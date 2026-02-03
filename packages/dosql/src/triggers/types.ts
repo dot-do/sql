@@ -12,6 +12,12 @@
  */
 
 import type { DatabaseContext, DatabaseSchema, TableAccessor } from '../proc/types.js';
+import {
+  DoSQLError,
+  ErrorCategory,
+  registerErrorClass,
+  type SerializedError,
+} from '../errors/base.js';
 
 // =============================================================================
 // SQL Trigger Types
@@ -621,19 +627,65 @@ export enum TriggerErrorCode {
 }
 
 /**
- * Custom error class for trigger operations
+ * Error class for trigger operations
+ *
+ * Extends DoSQLError for unified error handling across the DoSQL ecosystem.
  */
-export class TriggerError extends Error {
+export class TriggerError extends DoSQLError {
+  readonly code: TriggerErrorCode;
+  readonly category: ErrorCategory;
+  readonly triggerName?: string;
+
   constructor(
-    public readonly code: TriggerErrorCode,
+    code: TriggerErrorCode,
     message: string,
-    public readonly triggerName?: string,
-    public readonly cause?: Error
+    triggerName?: string,
+    cause?: Error
   ) {
-    super(message);
+    super(message, cause ? { cause } : undefined);
     this.name = 'TriggerError';
+    this.code = code;
+    this.triggerName = triggerName;
+    this.category = this.determineCategory();
+
+    if (this.triggerName) {
+      this.context = { metadata: { triggerName: this.triggerName } };
+    }
+  }
+
+  private determineCategory(): ErrorCategory {
+    switch (this.code) {
+      case TriggerErrorCode.NOT_FOUND:
+        return ErrorCategory.RESOURCE;
+      case TriggerErrorCode.ALREADY_EXISTS:
+        return ErrorCategory.CONFLICT;
+      case TriggerErrorCode.INVALID_DEFINITION:
+        return ErrorCategory.VALIDATION;
+      case TriggerErrorCode.TIMEOUT:
+        return ErrorCategory.TIMEOUT;
+      case TriggerErrorCode.HANDLER_ERROR:
+      case TriggerErrorCode.MAX_DEPTH_EXCEEDED:
+      case TriggerErrorCode.OPERATION_REJECTED:
+        return ErrorCategory.EXECUTION;
+      default:
+        return ErrorCategory.EXECUTION;
+    }
+  }
+
+  override isRetryable(): boolean {
+    return this.code === TriggerErrorCode.TIMEOUT;
+  }
+
+  static fromJSON(json: SerializedError): TriggerError {
+    return new TriggerError(
+      json.code as TriggerErrorCode,
+      json.message,
+      json.context?.metadata?.triggerName as string | undefined
+    );
   }
 }
+
+registerErrorClass('TriggerError', TriggerError);
 
 // =============================================================================
 // Fluent Definition Types

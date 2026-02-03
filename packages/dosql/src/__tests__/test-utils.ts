@@ -142,6 +142,38 @@ export function createMockDOState(id?: string): MockDOState {
 }
 
 // =============================================================================
+// Fake Aliases (NO MOCKS Philosophy)
+// =============================================================================
+// Following the NO MOCKS philosophy, these are "Fakes" - test doubles with real
+// behavior (actual in-memory storage). The "Mock" names are kept for backward
+// compatibility, but new code should prefer the "Fake" names.
+
+/**
+ * FakeStorageTransaction - Preferred name following the NO MOCKS philosophy.
+ * This has real in-memory behavior, not stubbed mock behavior.
+ */
+export type FakeStorageTransaction = MockStorageTransaction;
+
+/**
+ * FakeDOStorage - Preferred name following the NO MOCKS philosophy.
+ * This has real in-memory storage behavior, not stubbed mock behavior.
+ */
+export const FakeDOStorage = MockDOStorage;
+
+/**
+ * FakeDOState - Preferred name following the NO MOCKS philosophy.
+ * This has real state behavior with in-memory storage.
+ */
+export const FakeDOState = MockDOState;
+
+/**
+ * Creates a fake DO state for testing (preferred name).
+ */
+export function createFakeDOState(id?: string): MockDOState {
+  return new MockDOState(id);
+}
+
+// =============================================================================
 // Trigger Test Utilities
 // =============================================================================
 
@@ -764,4 +796,158 @@ export interface D1QueryResults<T = unknown> {
  */
 export function extractIndexNames(results: D1QueryResults<D1IndexRow>): string[] {
   return results.results?.map((r) => r.name) ?? [];
+}
+
+// =============================================================================
+// Query Result Type Guards and Helpers
+// =============================================================================
+
+/**
+ * Type guard for checking if a value is a non-null object
+ */
+export function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Safely get a typed property from a query row
+ */
+export function getProperty<T>(row: unknown, key: string): T | undefined {
+  if (!isObject(row)) return undefined;
+  return row[key] as T | undefined;
+}
+
+/**
+ * Type assertion helper that validates the shape of a row
+ */
+export function assertRow<T extends Record<string, unknown>>(
+  row: unknown,
+  requiredKeys: (keyof T)[]
+): T {
+  if (!isObject(row)) {
+    throw new Error(`Expected object but got ${typeof row}`);
+  }
+  for (const key of requiredKeys) {
+    if (!(key in row)) {
+      throw new Error(`Missing required property: ${String(key)}`);
+    }
+  }
+  return row as T;
+}
+
+/**
+ * Helper to map results to typed array
+ */
+export function mapResults<T extends Record<string, unknown>>(
+  results: unknown[],
+  requiredKeys: (keyof T)[]
+): T[] {
+  return results.map((row) => assertRow<T>(row, requiredKeys));
+}
+
+// =============================================================================
+// Index Result Type Guards
+// =============================================================================
+
+/**
+ * Index info from pragma index_list
+ */
+export interface IndexListRow {
+  name: string;
+  unique?: number;
+  origin?: string;
+  partial?: number;
+}
+
+/**
+ * Type guard for index list row
+ */
+export function isIndexListRow(value: unknown): value is IndexListRow {
+  if (!isObject(value)) return false;
+  return typeof value.name === 'string';
+}
+
+/**
+ * Check if an index exists by name
+ */
+export function hasIndex(indexes: unknown, indexName: string): boolean {
+  if (!Array.isArray(indexes)) return false;
+  return indexes.some((idx) => isIndexListRow(idx) && idx.name === indexName);
+}
+
+/**
+ * Find an index by name
+ */
+export function findIndex(indexes: unknown, indexName: string): IndexListRow | undefined {
+  if (!Array.isArray(indexes)) return undefined;
+  return indexes.find((idx): idx is IndexListRow =>
+    isIndexListRow(idx) && idx.name === indexName
+  );
+}
+
+/**
+ * Get all index names from pragma result
+ */
+export function getIndexNamesFromPragma(indexes: unknown): string[] {
+  if (!Array.isArray(indexes)) return [];
+  return indexes
+    .filter(isIndexListRow)
+    .map((idx) => idx.name);
+}
+
+// =============================================================================
+// Error Type Guards
+// =============================================================================
+
+/**
+ * Capture error from function and return typed error or undefined
+ */
+export function captureError<E extends Error>(
+  fn: () => void,
+  ErrorClass: new (...args: unknown[]) => E
+): E | undefined {
+  try {
+    fn();
+    return undefined;
+  } catch (e) {
+    if (e instanceof ErrorClass) {
+      return e;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Async version of captureError
+ */
+export async function captureErrorAsync<E extends Error>(
+  fn: () => Promise<void>,
+  ErrorClass: new (...args: unknown[]) => E
+): Promise<E | undefined> {
+  try {
+    await fn();
+    return undefined;
+  } catch (e) {
+    if (e instanceof ErrorClass) {
+      return e;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Assert error has expected type and code
+ */
+export function assertErrorCode<E extends Error & { code: string }>(
+  error: unknown,
+  ErrorClass: new (...args: unknown[]) => E,
+  expectedCode?: string
+): E {
+  if (!(error instanceof ErrorClass)) {
+    throw new Error(`Expected ${ErrorClass.name} but got ${error?.constructor?.name ?? typeof error}`);
+  }
+  if (expectedCode !== undefined && error.code !== expectedCode) {
+    throw new Error(`Expected error code ${expectedCode} but got ${error.code}`);
+  }
+  return error;
 }

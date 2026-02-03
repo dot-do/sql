@@ -9,6 +9,12 @@ import type { BTree, KeyCodec, ValueCodec } from '../btree/types.js';
 import type { ColumnarTableSchema, RowGroup } from '../columnar/types.js';
 import type { FSXBackend } from '../fsx/types.js';
 import type { WALWriter, Checkpoint } from '../wal/types.js';
+import {
+  DoSQLError,
+  ErrorCategory,
+  registerErrorClass,
+  type SerializedError,
+} from '../errors/base.js';
 
 // =============================================================================
 // Configuration
@@ -574,16 +580,61 @@ export enum CompactionErrorCode {
 }
 
 /**
- * Custom error class for compaction operations
+ * Error class for compaction operations
+ *
+ * Extends DoSQLError for unified error handling across the DoSQL ecosystem.
  */
-export class CompactionError extends Error {
+export class CompactionError extends DoSQLError {
+  readonly code: CompactionErrorCode;
+  readonly category: ErrorCategory;
+  readonly jobId?: string;
+
   constructor(
-    public readonly code: CompactionErrorCode,
+    code: CompactionErrorCode,
     message: string,
-    public readonly jobId?: string,
-    public readonly cause?: Error
+    jobId?: string,
+    cause?: Error
   ) {
-    super(message);
+    super(message, cause ? { cause } : undefined);
     this.name = 'CompactionError';
+    this.code = code;
+    this.jobId = jobId;
+    this.category = this.determineCategory();
+
+    if (this.jobId) {
+      this.context = { metadata: { jobId: this.jobId } };
+    }
+  }
+
+  private determineCategory(): ErrorCategory {
+    switch (this.code) {
+      case CompactionErrorCode.INVALID_CONFIG:
+        return ErrorCategory.VALIDATION;
+      case CompactionErrorCode.JOB_CANCELLED:
+        return ErrorCategory.EXECUTION;
+      case CompactionErrorCode.DURABILITY_CHECK_FAILED:
+        return ErrorCategory.INTERNAL;
+      default:
+        return ErrorCategory.EXECUTION;
+    }
+  }
+
+  override isRetryable(): boolean {
+    return [
+      CompactionErrorCode.READ_FAILED,
+      CompactionErrorCode.WRITE_FAILED,
+      CompactionErrorCode.MANIFEST_FAILED,
+      CompactionErrorCode.SCHEDULER_ERROR,
+    ].includes(this.code);
+  }
+
+  static fromJSON(json: SerializedError): CompactionError {
+    return new CompactionError(
+      json.code as CompactionErrorCode,
+      json.message,
+      json.context?.metadata?.jobId as string | undefined
+    );
   }
 }
+
+registerErrorClass('CompactionError', CompactionError);

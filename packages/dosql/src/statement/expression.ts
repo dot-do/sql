@@ -11,6 +11,7 @@
  */
 
 import type { SqlValue } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 /**
  * Token types for the expression lexer
@@ -413,7 +414,7 @@ export function evaluateExpressionAST(
     }
 
     default:
-      return null;
+      return assertNever(node, `Unknown expression AST node type`);
   }
 }
 

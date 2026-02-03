@@ -32,6 +32,7 @@ import {
   createJSTriggerExecutor,
   type JSTriggerExecutorOptions,
 } from './js-executor.js';
+import { isSQLTriggerDefinition } from '../utils/type-guards.js';
 
 // =============================================================================
 // SQL Trigger Types
@@ -321,11 +322,11 @@ export function createSQLTriggerExecutor<DB extends DatabaseSchema = DatabaseSch
 
       // Execute SQL triggers (filter to only those with SQL body)
       for (const sqlTrigger of sqlTriggers) {
-        // Skip if not a SQL trigger (no body property)
-        const sqlDef = sqlTrigger as unknown as SQLTriggerDefinition | ParsedSQLTrigger;
-        if (!sqlDef.body) {
+        // Skip if not a SQL trigger - use type guard for safe narrowing
+        if (!isSQLTriggerDefinition(sqlTrigger)) {
           continue;
         }
+        const sqlDef = sqlTrigger;
 
         if (!shouldFireSQLTrigger(sqlDef, event.toUpperCase() as SQLTriggerEvent, oldRow, currentRow)) {
           continue;
@@ -434,11 +435,11 @@ export function createSQLTriggerExecutor<DB extends DatabaseSchema = DatabaseSch
 
       // Execute SQL triggers (filter to only those with SQL body)
       for (const sqlTrigger of sqlTriggers) {
-        // Skip if not a SQL trigger (no body property)
-        const sqlDef = sqlTrigger as unknown as SQLTriggerDefinition | ParsedSQLTrigger;
-        if (!sqlDef.body) {
+        // Skip if not a SQL trigger - use type guard for safe narrowing
+        if (!isSQLTriggerDefinition(sqlTrigger)) {
           continue;
         }
+        const sqlDef = sqlTrigger;
 
         if (!shouldFireSQLTrigger(sqlDef, event.toUpperCase() as SQLTriggerEvent, oldRow, newRow)) {
           continue;

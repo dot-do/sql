@@ -204,7 +204,7 @@ export { MockWebSocketTracker as FakeWebSocketTracker };
 /**
  * Type for the globalThis object with WebSocket property
  */
-interface GlobalWithWebSocket {
+export interface GlobalWithWebSocket {
   WebSocket: typeof MockWebSocket | typeof WebSocket;
 }
 
@@ -756,6 +756,151 @@ export interface WSResponseMessage {
 }
 
 /**
+ * Generic WebSocket message structure for incoming messages
+ */
+export interface WebSocketMessage {
+  type: string;
+  id?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Type guard for WebSocket message validation
+ * Verifies that an unknown value is a valid WebSocket message object
+ */
+export function isWebSocketMessage(data: unknown): data is WebSocketMessage {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    'type' in data &&
+    typeof (data as Record<string, unknown>).type === 'string'
+  );
+}
+
+/**
+ * Type guard for WSResponseMessage with more specific validation
+ */
+export function isWSResponseMessage(data: unknown): data is WSResponseMessage {
+  if (!isWebSocketMessage(data)) {
+    return false;
+  }
+  // WSResponseMessage always has a string type
+  // Optional: id, result, error
+  const msg = data as Record<string, unknown>;
+  if (msg.id !== undefined && typeof msg.id !== 'string') {
+    return false;
+  }
+  if (msg.error !== undefined) {
+    const err = msg.error;
+    if (
+      typeof err !== 'object' ||
+      err === null ||
+      typeof (err as Record<string, unknown>).code !== 'string' ||
+      typeof (err as Record<string, unknown>).message !== 'string'
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Error response message from WebSocket
+ */
+export interface WSErrorResponse {
+  id: string;
+  error: {
+    code: string;
+    message: string;
+  };
+}
+
+/**
+ * Type guard for WebSocket error response
+ */
+export function isWSErrorResponse(data: unknown): data is WSErrorResponse {
+  if (typeof data !== 'object' || data === null) {
+    return false;
+  }
+  const msg = data as Record<string, unknown>;
+  if (typeof msg.id !== 'string') {
+    return false;
+  }
+  if (typeof msg.error !== 'object' || msg.error === null) {
+    return false;
+  }
+  const err = msg.error as Record<string, unknown>;
+  return typeof err.code === 'string' && typeof err.message === 'string';
+}
+
+/**
+ * Creates a type-safe error response for WebSocket simulation
+ */
+export function createWSErrorResponse(
+  id: string,
+  code: string,
+  message: string
+): WSErrorResponse {
+  return {
+    id,
+    error: { code, message },
+  };
+}
+
+/**
+ * Transaction conflict error properties type
+ */
+export interface TransactionConflictDetails {
+  conflictingTransaction?: string;
+  conflictingTable?: string;
+  conflictingRow?: unknown;
+}
+
+/**
+ * Type guard for transaction conflict error details
+ */
+export function hasTransactionConflictDetails(
+  error: unknown
+): error is Error & TransactionConflictDetails {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const err = error as Error & Record<string, unknown>;
+  return (
+    'conflictingTransaction' in err ||
+    'conflictingTable' in err ||
+    'conflictingRow' in err
+  );
+}
+
+/**
+ * Request context error properties type
+ */
+export interface RequestContextDetails {
+  request?: {
+    sql: string;
+    method: string;
+  };
+}
+
+/**
+ * Type guard for error with request context
+ */
+export function hasRequestContext(
+  error: unknown
+): error is Error & RequestContextDetails {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const err = error as Error & Record<string, unknown>;
+  if (!('request' in err) || typeof err.request !== 'object' || err.request === null) {
+    return false;
+  }
+  const req = err.request as Record<string, unknown>;
+  return typeof req.sql === 'string' && typeof req.method === 'string';
+}
+
+/**
  * Rate limiting response
  */
 export interface RateLimitResponse extends WSResponseMessage {
@@ -1002,4 +1147,217 @@ export function createTypedMockWebSocket(url: string): TypedMockWebSocket {
   }, 10);
 
   return ws;
+}
+
+// =============================================================================
+// WebSocket Mock Type Guards and Utilities
+// =============================================================================
+
+/**
+ * Type guard to check if a value is a MockWebSocket instance
+ */
+export function isMockWebSocket(value: unknown): value is MockWebSocket {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const ws = value as Record<string, unknown>;
+  return (
+    typeof ws.url === 'string' &&
+    typeof ws.readyState === 'number' &&
+    typeof ws.send === 'function' &&
+    typeof ws.close === 'function' &&
+    typeof ws.addEventListener === 'function' &&
+    typeof ws.simulateClose === 'function' &&
+    typeof ws.simulateMessage === 'function' &&
+    typeof ws.simulateError === 'function'
+  );
+}
+
+/**
+ * Type guard to check if a constructor is a MockWebSocket class or subclass
+ */
+export function isMockWebSocketConstructor(
+  value: unknown
+): value is typeof MockWebSocket {
+  if (typeof value !== 'function') {
+    return false;
+  }
+  // Check for MockWebSocket static properties
+  const ctor = value as Record<string, unknown>;
+  return (
+    ctor.READY_STATE_CONNECTING === WebSocketReadyState.CONNECTING &&
+    ctor.READY_STATE_OPEN === WebSocketReadyState.OPEN &&
+    ctor.READY_STATE_CLOSING === WebSocketReadyState.CLOSING &&
+    ctor.READY_STATE_CLOSED === WebSocketReadyState.CLOSED
+  );
+}
+
+/**
+ * Captures references to MockWebSocket instances created during tests.
+ * Use this when you need to interact with the WebSocket instance that was created.
+ *
+ * @example
+ * ```ts
+ * const capture = createWebSocketCapture();
+ * globalWithWS.WebSocket = capture.createClass();
+ *
+ * // After client connects...
+ * const ws = capture.getInstance();
+ * if (ws) {
+ *   ws.simulateMessage({ ... });
+ * }
+ * ```
+ */
+export interface WebSocketCapture {
+  /** The most recently created MockWebSocket instance, or undefined */
+  instance: MockWebSocket | undefined;
+  /** All created MockWebSocket instances */
+  instances: MockWebSocket[];
+  /** Creates a MockWebSocket class that captures instances */
+  createClass(): typeof MockWebSocket;
+  /** Gets the most recent instance, throwing if none exists */
+  getInstance(): MockWebSocket;
+  /** Gets an instance by index */
+  getInstanceAt(index: number): MockWebSocket | undefined;
+  /** Clears all captured instances */
+  clear(): void;
+}
+
+/**
+ * Creates a WebSocket capture utility for tests
+ */
+export function createWebSocketCapture(): WebSocketCapture {
+  const instances: MockWebSocket[] = [];
+
+  const capture: WebSocketCapture = {
+    get instance() {
+      return instances[instances.length - 1];
+    },
+    instances,
+    createClass() {
+      return class CapturedMockWebSocket extends MockWebSocket {
+        constructor(url: string) {
+          super(url);
+          instances.push(this);
+        }
+      };
+    },
+    getInstance() {
+      const inst = instances[instances.length - 1];
+      if (!inst) {
+        throw new Error('No MockWebSocket instance has been created yet');
+      }
+      return inst;
+    },
+    getInstanceAt(index: number) {
+      return instances[index];
+    },
+    clear() {
+      instances.length = 0;
+    },
+  };
+
+  return capture;
+}
+
+/**
+ * Type for WebSocket class constructor compatible with global WebSocket
+ */
+export type WebSocketConstructor = typeof MockWebSocket | typeof WebSocket;
+
+/**
+ * Safely sets the global WebSocket to a mock implementation.
+ * Returns the original WebSocket for cleanup.
+ *
+ * @example
+ * ```ts
+ * const restore = setGlobalWebSocket(MockWebSocket);
+ * // ... run tests ...
+ * restore();
+ * ```
+ */
+export function setGlobalWebSocket(
+  MockClass: WebSocketConstructor
+): () => void {
+  const global = getGlobalWithWebSocket();
+  const original = global.WebSocket;
+  global.WebSocket = MockClass;
+  return () => {
+    global.WebSocket = original;
+  };
+}
+
+/**
+ * Creates a MockWebSocket class with custom send behavior for testing.
+ * Useful for testing error conditions or custom responses.
+ *
+ * @example
+ * ```ts
+ * const capture = createWebSocketCapture();
+ * const CustomWS = createCustomMockWebSocket((ws, data) => {
+ *   // Custom send behavior
+ *   const request = JSON.parse(data);
+ *   ws.simulateMessage({ id: request.id, error: { code: 'ERROR', message: 'Test error' } });
+ * }, capture);
+ * globalWithWS.WebSocket = CustomWS;
+ * ```
+ */
+export function createCustomMockWebSocket(
+  onSend: (ws: MockWebSocket, data: string) => void,
+  capture?: WebSocketCapture
+): typeof MockWebSocket {
+  return class CustomMockWebSocket extends MockWebSocket {
+    constructor(url: string) {
+      super(url);
+      if (capture) {
+        capture.instances.push(this);
+      }
+    }
+
+    send(data: string): void {
+      this.lastUsedAt = Date.now();
+      onSend(this, data);
+    }
+  };
+}
+
+/**
+ * Creates a MockWebSocket class that never completes the connection.
+ * Useful for testing connection timeout scenarios.
+ */
+export function createNonConnectingWebSocket(
+  capture?: WebSocketCapture
+): typeof MockWebSocket {
+  return class NonConnectingWebSocket extends MockWebSocket {
+    constructor(url: string) {
+      super(url);
+      // Override the auto-open behavior from parent
+      this.readyState = WebSocketReadyState.CONNECTING;
+      if (capture) {
+        capture.instances.push(this);
+      }
+    }
+  };
+}
+
+/**
+ * Creates a MockWebSocket class that immediately fails on creation.
+ * Useful for testing connection error scenarios.
+ */
+export function createFailingWebSocket(
+  errorFactory: () => Error,
+  capture?: WebSocketCapture
+): typeof MockWebSocket {
+  return class FailingWebSocket extends MockWebSocket {
+    constructor(url: string) {
+      super(url);
+      if (capture) {
+        capture.instances.push(this);
+      }
+      // Schedule error after construction
+      setTimeout(() => {
+        this.simulateError(errorFactory());
+      }, 5);
+    }
+  };
 }

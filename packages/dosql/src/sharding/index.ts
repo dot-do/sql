@@ -1585,3 +1585,215 @@ export {
   // Parser types
   type WhereOperator,
 } from './parser/index.js';
+
+// =============================================================================
+// REGION ROUTER EXPORTS
+// =============================================================================
+
+/**
+ * Cross-region read replica routing components.
+ *
+ * Handles region-aware routing for read replicas:
+ * - Route reads to nearest replica by geographic region
+ * - Configurable staleness tolerance for eventual consistency
+ * - Automatic primary fallback when replicas are stale
+ * - Region health monitoring and failover
+ *
+ * @example Region-aware routing
+ * ```typescript
+ * import {
+ *   createRegionRouter,
+ *   coloToRegion,
+ *   estimateInterRegionLatency,
+ * } from '@dosql/sharding';
+ *
+ * // Create region router with shards
+ * const router = createRegionRouter(shards, {
+ *   maxStalenessMs: 5000,      // 5s max staleness
+ *   preferSameRegion: true,    // Prefer same-region replicas
+ *   latencyWeight: 0.7,        // 70% weight on latency
+ *   stalenessWeight: 0.3,      // 30% weight on staleness
+ * }, request.cf?.colo);
+ *
+ * // Map Cloudflare colo to region
+ * const region = coloToRegion(request.cf?.colo ?? 'IAD');
+ * router.setCurrentRegion(region);
+ *
+ * // Select best replica for a read
+ * const selection = router.selectReplica('shard-1', 'replicaPreferred');
+ * console.log(selection.replicaId);       // 'replica-1-west'
+ * console.log(selection.fallbackToPrimary); // false
+ *
+ * // Track replica health
+ * router.recordSuccess('shard-1', 'replica-1-west', 15);
+ * router.updateReplicaLag('shard-1', 'replica-1-west', 100n, 110n, 500);
+ *
+ * // Check if replica is fresh enough
+ * if (router.isReplicaFresh('shard-1', 'replica-1-west', 5000)) {
+ *   // Use replica
+ * } else {
+ *   // Fallback to primary
+ * }
+ *
+ * // Get region health
+ * const health = router.getRegionHealth('us-west');
+ * console.log(health?.status);  // 'healthy'
+ * ```
+ */
+export {
+  /**
+   * Cross-region read replica router.
+   * Provides intelligent routing with staleness tolerance and health monitoring.
+   */
+  RegionRouter,
+
+  /**
+   * Factory function to create a region router.
+   */
+  createRegionRouter,
+
+  /**
+   * Map Cloudflare colo code to a region identifier.
+   */
+  coloToRegion,
+
+  /**
+   * Estimate latency between two regions.
+   */
+  estimateInterRegionLatency,
+
+  /**
+   * Common region mappings from Cloudflare colo codes.
+   */
+  REGION_MAPPINGS,
+
+  /**
+   * Default region router configuration.
+   */
+  DEFAULT_REGION_ROUTER_CONFIG,
+
+  /**
+   * Region router configuration type.
+   */
+  type RegionRouterConfig,
+
+  /**
+   * Region identifier type.
+   */
+  type RegionId,
+
+  /**
+   * Region latency information.
+   */
+  type RegionLatency,
+
+  /**
+   * Replica lag information for staleness detection.
+   */
+  type ReplicaLag,
+
+  /**
+   * Region health status.
+   */
+  type RegionHealth,
+
+  /**
+   * Replica selection result.
+   */
+  type ReplicaSelection,
+} from './region-router.js';
+
+// =============================================================================
+// MIGRATION EXPORTS
+// =============================================================================
+
+/**
+ * Configuration versioning and migration utilities.
+ *
+ * Provides version tracking, migration support, and safe resharding:
+ * - Config version tracking with semver format
+ * - Automatic migration path finding
+ * - Rollback support for reversible migrations
+ * - Configuration validation before applying
+ *
+ * @example Basic migration setup
+ * ```typescript
+ * import {
+ *   createVersionedVSchema,
+ *   createConfigManager,
+ *   createMigration,
+ *   createMigrationStep,
+ * } from '@dosql/sharding';
+ *
+ * // Create versioned config
+ * const vschema = createVersionedVSchema(myVSchema, '1.0.0', {
+ *   description: 'Initial configuration',
+ * });
+ *
+ * // Create config manager
+ * const manager = createConfigManager(vschema);
+ *
+ * // Define migration
+ * const migration = createMigration({
+ *   id: 'add-shard-3',
+ *   fromVersion: '1.0.0',
+ *   toVersion: '1.1.0',
+ *   description: 'Add third shard for scaling',
+ *   steps: [
+ *     createMigrationStep({
+ *       id: 'add-shard',
+ *       description: 'Add shard-3',
+ *       shards: ['shard-3'],
+ *       reversible: true,
+ *       execute: async (ctx) => { ... },
+ *       rollback: async (ctx) => { ... },
+ *     }),
+ *   ],
+ * });
+ *
+ * manager.registerMigration(migration);
+ *
+ * // Execute migration
+ * const record = await manager.migrate('1.1.0');
+ * console.log(record.status); // 'completed'
+ * ```
+ */
+export {
+  // Types
+  type ConfigVersion,
+  type MigrationStatus,
+  type MigrationDirection,
+  type VersionedVSchema,
+  type VersionedShardingConfig,
+  type MigrationRecord,
+  type MigrationStep,
+  type Migration,
+  type MigrationContext,
+  type ValidationError,
+  type ValidationResult,
+
+  // Config manager
+  ShardingConfigManager,
+  createConfigManager,
+
+  // Versioned VSchema
+  createVersionedVSchema,
+
+  // Migration helpers
+  createMigration,
+  createMigrationStep,
+  addShardStep,
+  removeShardStep,
+  changeVindexStep,
+  addTableStep,
+  removeTableStep,
+
+  // Checksum utilities
+  calculateConfigChecksum,
+  verifyConfigChecksum,
+
+  // Version utilities
+  incrementVersion,
+  parseVersion,
+  isCompatibleVersion,
+} from './migration.js';

@@ -293,6 +293,42 @@ export class MessageParseError extends BaseError {
 registerErrorDeserializer('MessageParseError', MessageParseError.fromJSON);
 
 // =============================================================================
+// Configuration Error
+// =============================================================================
+
+/**
+ * Error thrown when client configuration is invalid.
+ */
+export class ConfigurationError extends BaseError {
+  readonly code = 'CONFIG_INVALID';
+  readonly category = ErrorCategory.VALIDATION;
+  readonly field?: string;
+
+  constructor(message: string, field?: string) {
+    super(message);
+    this.name = 'ConfigurationError';
+    if (field) {
+      this.field = field;
+    }
+  }
+
+  override isRetryable(): boolean {
+    return false;
+  }
+
+  override toUserMessage(): string {
+    return this.message;
+  }
+
+  static fromJSON(json: SerializedError): ConfigurationError {
+    const field = json.context?.metadata?.field as string | undefined;
+    return new ConfigurationError(json.message, field);
+  }
+}
+
+registerErrorDeserializer('ConfigurationError', ConfigurationError.fromJSON);
+
+// =============================================================================
 // Utility Functions
 // =============================================================================
 

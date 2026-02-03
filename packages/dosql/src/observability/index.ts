@@ -544,3 +544,50 @@ export {
   type TraceAwareLogger,
   DEFAULT_UNIFIED_CONFIG,
 } from './unified.js';
+
+// =============================================================================
+// EXPORTERS
+// =============================================================================
+
+export {
+  // Types
+  type MetricsExporter,
+  type TraceExporter,
+  type ExportResult,
+  type MetricDataPoint,
+  type MetricsExporterConfig,
+  type SpanData,
+  type TraceExporterConfig,
+  DEFAULT_METRICS_EXPORTER_CONFIG,
+  DEFAULT_TRACE_EXPORTER_CONFIG,
+  spanToSpanData,
+
+  // Prometheus
+  type PrometheusExporterConfig,
+  type PrometheusEndpointOptions,
+  PrometheusExporter,
+  DEFAULT_PROMETHEUS_CONFIG,
+  createPrometheusExporter,
+  createPrometheusEndpoint,
+
+  // OpenTelemetry
+  type OTLPTraceExporterConfig,
+  OTLPTraceExporter,
+  SpanCollector,
+  DEFAULT_OTLP_CONFIG,
+  createOTLPTraceExporter,
+  createSpanCollector,
+
+  // Datadog
+  type DatadogMetricsConfig,
+  type DatadogTraceConfig,
+  type DatadogIntegrationConfig,
+  type DatadogIntegration,
+  DatadogMetricsExporter,
+  DatadogTraceExporter,
+  createDatadogMetricsExporter,
+  createDatadogTraceExporter,
+  createDatadogIntegration,
+  getDatadogLogContext,
+  formatDatadogTraceString,
+} from './exporters/index.js';

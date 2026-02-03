@@ -323,7 +323,7 @@ function getSourceLocation(): { file: string; line: number } | undefined {
 
   // Parse stack frame: "    at functionName (file:line:column)"
   const match = callerLine.match(/at\s+(?:.*?\s+)?\(?(.+?):(\d+):\d+\)?$/);
-  if (match) {
+  if (match && match[1] && match[2]) {
     return {
       file: match[1],
       line: parseInt(match[2], 10),

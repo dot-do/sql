@@ -6,6 +6,7 @@
  */
 
 import type { SqlValue } from './types.js';
+import { assertNever } from '../utils/assert-never.js';
 
 // =============================================================================
 // ARITHMETIC EXPRESSION PARSING
@@ -383,8 +384,10 @@ export function evaluateExpression(node: ExprNode, row: Record<string, SqlValue>
           return null;
       }
     }
+
+    default:
+      return assertNever(node, `Unknown expression node type`);
   }
-  return null;
 }
 
 /**

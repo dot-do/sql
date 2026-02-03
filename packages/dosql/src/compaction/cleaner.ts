@@ -18,6 +18,7 @@ import type {
   RowGroupManifestEntry,
 } from './types.js';
 import { CompactionError, CompactionErrorCode } from './types.js';
+import { toBigIntSafe } from '../utils/type-guards.js';
 
 // =============================================================================
 // Manifest Management
@@ -44,16 +45,16 @@ export async function loadManifest(
   try {
     const manifest = JSON.parse(new TextDecoder().decode(data)) as CompactionManifest;
 
-    // Convert bigint LSN values back from strings
+    // Convert bigint LSN values back from strings using type-safe conversion
     if (manifest.lastCompactedLSN !== undefined) {
-      manifest.lastCompactedLSN = BigInt(manifest.lastCompactedLSN as unknown as string);
+      manifest.lastCompactedLSN = toBigIntSafe(manifest.lastCompactedLSN);
     }
 
     for (const entry of manifest.rowGroups) {
       if (entry.lsnRange) {
         entry.lsnRange = [
-          BigInt(entry.lsnRange[0] as unknown as string),
-          BigInt(entry.lsnRange[1] as unknown as string),
+          toBigIntSafe(entry.lsnRange[0]),
+          toBigIntSafe(entry.lsnRange[1]),
         ];
       }
     }

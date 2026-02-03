@@ -5,18 +5,18 @@
  * Identifies small files, merges them into larger ones, and updates manifests atomically.
  *
  * Issue: pocs-kh7k - Add manifest file compaction for DoLake Parquet files
+ * Issue: sql-8euu - Add write coordination with locking for compaction
  */
 
 import {
   type DataFile,
   type ManifestFile,
   type IcebergTableMetadata,
-  type IcebergSnapshot,
   generateUUID,
   generateSnapshotId,
 } from './types.js';
 import { partitionToPath } from './iceberg.js';
-import { CompactionError, DoLakeErrorCode } from './errors.js';
+import { CompactionError } from './errors.js';
 
 // =============================================================================
 // Compaction Configuration
@@ -148,6 +148,791 @@ export interface AtomicCommitPreparation {
 export { CompactionError } from './errors.js';
 
 // =============================================================================
+// Compaction Coordination Types
+// =============================================================================
+
+/**
+ * Lock mode for compaction coordination
+ */
+export type LockMode = 'exclusive' | 'shared';
+
+/**
+ * Lock state representing current write/compaction locks
+ */
+export interface LockState {
+  /** Whether an exclusive lock is held */
+  exclusiveLockHolder: string | null;
+  /** Set of shared lock holders (write operations) */
+  sharedLockHolders: Set<string>;
+  /** Timestamp when the lock was acquired */
+  acquiredAt: number;
+  /** Lock expiration time (for lease-based coordination) */
+  expiresAt: number;
+}
+
+/**
+ * Lease for compaction coordination
+ */
+export interface CompactionLease {
+  /** Unique lease ID */
+  leaseId: string;
+  /** Table/partition being compacted */
+  targetKey: string;
+  /** Worker ID holding the lease */
+  workerId: string;
+  /** Timestamp when lease was acquired */
+  acquiredAt: number;
+  /** Timestamp when lease expires */
+  expiresAt: number;
+  /** Number of times lease has been renewed */
+  renewCount: number;
+}
+
+/**
+ * Compaction checkpoint for resumable compaction
+ */
+export interface CompactionCheckpoint {
+  /** Unique checkpoint ID */
+  checkpointId: string;
+  /** Table/partition being compacted */
+  targetKey: string;
+  /** Current phase of compaction */
+  phase: CompactionPhase;
+  /** Files already processed */
+  processedFiles: string[];
+  /** Files remaining to process */
+  remainingFiles: string[];
+  /** Output file path (if any) */
+  outputFilePath: string | null;
+  /** Timestamp when checkpoint was created */
+  createdAt: number;
+  /** Timestamp of last update */
+  updatedAt: number;
+  /** Associated lease ID */
+  leaseId: string | null;
+  /** Sequence number at start of compaction */
+  startSequenceNumber: bigint;
+  /** Any intermediate data */
+  intermediateData: Record<string, unknown>;
+}
+
+/**
+ * Phases of compaction operation
+ */
+export type CompactionPhase =
+  | 'initializing'
+  | 'acquiring_lock'
+  | 'reading_files'
+  | 'merging'
+  | 'writing_output'
+  | 'updating_manifest'
+  | 'cleaning_up'
+  | 'completed'
+  | 'failed';
+
+/**
+ * Result of a lock acquisition attempt
+ */
+export interface LockAcquisitionResult {
+  /** Whether the lock was acquired */
+  acquired: boolean;
+  /** Lock holder ID if acquired */
+  lockId: string | null;
+  /** Reason for failure if not acquired */
+  reason: string | null;
+  /** Time to wait before retry (ms) */
+  retryAfterMs: number | null;
+  /** Current holder if lock is held by another */
+  currentHolder: string | null;
+}
+
+/**
+ * Conflict detection result
+ */
+export interface ConflictCheckResult {
+  /** Whether a conflict was detected */
+  hasConflict: boolean;
+  /** Type of conflict */
+  conflictType: 'new_data' | 'concurrent_compaction' | 'schema_change' | null;
+  /** Details about the conflict */
+  details: string | null;
+  /** Files that caused the conflict */
+  conflictingFiles: string[];
+  /** Sequence number where conflict was detected */
+  conflictSequenceNumber: bigint | null;
+}
+
+/**
+ * Configuration for compaction coordination
+ */
+export interface CompactionCoordinationConfig {
+  /** Default lease duration in milliseconds */
+  leaseDurationMs: number;
+  /** Maximum lease duration including renewals */
+  maxLeaseDurationMs: number;
+  /** Lock acquisition timeout in milliseconds */
+  lockTimeoutMs: number;
+  /** Maximum wait time for active writes to complete */
+  writeWaitTimeoutMs: number;
+  /** Checkpoint interval in milliseconds */
+  checkpointIntervalMs: number;
+  /** Whether to enable automatic checkpointing */
+  enableAutoCheckpoint: boolean;
+  /** Maximum retries for lock acquisition */
+  maxLockRetries: number;
+  /** Delay between lock retry attempts */
+  lockRetryDelayMs: number;
+}
+
+/**
+ * Default coordination configuration
+ */
+export const DEFAULT_COORDINATION_CONFIG: Readonly<CompactionCoordinationConfig> = {
+  leaseDurationMs: 60_000, // 1 minute
+  maxLeaseDurationMs: 300_000, // 5 minutes
+  lockTimeoutMs: 10_000, // 10 seconds
+  writeWaitTimeoutMs: 30_000, // 30 seconds
+  checkpointIntervalMs: 5_000, // 5 seconds
+  enableAutoCheckpoint: true,
+  maxLockRetries: 3,
+  lockRetryDelayMs: 1_000, // 1 second
+};
+
+// =============================================================================
+// Compaction Coordinator
+// =============================================================================
+
+/**
+ * Compaction Coordinator
+ *
+ * Manages coordination between compaction operations and active writes.
+ * Implements lease-based locking, checkpointing, and conflict detection.
+ */
+export class CompactionCoordinator {
+  private readonly config: CompactionCoordinationConfig;
+  private readonly locks: Map<string, LockState> = new Map();
+  private readonly leases: Map<string, CompactionLease> = new Map();
+  private readonly checkpoints: Map<string, CompactionCheckpoint> = new Map();
+  private readonly pendingWrites: Map<string, Set<string>> = new Map();
+  private readonly workerId: string;
+
+  constructor(config: Partial<CompactionCoordinationConfig> = {}) {
+    this.config = { ...DEFAULT_COORDINATION_CONFIG, ...config };
+    this.workerId = generateUUID();
+  }
+
+  /**
+   * Get the worker ID for this coordinator
+   */
+  getWorkerId(): string {
+    return this.workerId;
+  }
+
+  // ===========================================================================
+  // Lock Management
+  // ===========================================================================
+
+  /**
+   * Acquire an exclusive lock for compaction, blocking writes
+   */
+  async acquireExclusiveLock(
+    targetKey: string,
+    timeout?: number
+  ): Promise<LockAcquisitionResult> {
+    const effectiveTimeout = timeout ?? this.config.lockTimeoutMs;
+    const lockId = generateUUID();
+
+    // Check for existing locks
+    const existing = this.locks.get(targetKey);
+    if (existing) {
+      // Check if existing lock has expired
+      if (existing.expiresAt < Date.now()) {
+        this.locks.delete(targetKey);
+      } else if (existing.exclusiveLockHolder) {
+        return {
+          acquired: false,
+          lockId: null,
+          reason: 'exclusive_lock_held',
+          retryAfterMs: existing.expiresAt - Date.now(),
+          currentHolder: existing.exclusiveLockHolder,
+        };
+      } else if (existing.sharedLockHolders.size > 0) {
+        // Wait for shared locks (writes) to complete
+        const waitResult = await this.waitForSharedLocks(targetKey, effectiveTimeout);
+        if (!waitResult.acquired) {
+          return waitResult;
+        }
+      }
+    }
+
+    // Acquire the exclusive lock
+    const now = Date.now();
+    this.locks.set(targetKey, {
+      exclusiveLockHolder: lockId,
+      sharedLockHolders: new Set(),
+      acquiredAt: now,
+      expiresAt: now + this.config.leaseDurationMs,
+    });
+
+    return {
+      acquired: true,
+      lockId,
+      reason: null,
+      retryAfterMs: null,
+      currentHolder: null,
+    };
+  }
+
+  /**
+   * Acquire a shared lock for write operations
+   */
+  acquireSharedLock(targetKey: string, writeId: string): LockAcquisitionResult {
+    const existing = this.locks.get(targetKey);
+
+    // Check for exclusive lock (compaction in progress)
+    if (existing?.exclusiveLockHolder) {
+      // Check if the exclusive lock has expired
+      if (existing.expiresAt < Date.now()) {
+        this.locks.delete(targetKey);
+      } else {
+        return {
+          acquired: false,
+          lockId: null,
+          reason: 'compaction_in_progress',
+          retryAfterMs: existing.expiresAt - Date.now(),
+          currentHolder: existing.exclusiveLockHolder,
+        };
+      }
+    }
+
+    // Acquire or add to shared lock
+    const now = Date.now();
+    if (existing && !existing.exclusiveLockHolder) {
+      existing.sharedLockHolders.add(writeId);
+      // Extend expiration for the longest-held lock
+      existing.expiresAt = Math.max(
+        existing.expiresAt,
+        now + this.config.leaseDurationMs
+      );
+    } else {
+      const sharedLockHolders = new Set<string>();
+      sharedLockHolders.add(writeId);
+      this.locks.set(targetKey, {
+        exclusiveLockHolder: null,
+        sharedLockHolders,
+        acquiredAt: now,
+        expiresAt: now + this.config.leaseDurationMs,
+      });
+    }
+
+    // Track pending writes
+    let pending = this.pendingWrites.get(targetKey);
+    if (!pending) {
+      pending = new Set();
+      this.pendingWrites.set(targetKey, pending);
+    }
+    pending.add(writeId);
+
+    return {
+      acquired: true,
+      lockId: writeId,
+      reason: null,
+      retryAfterMs: null,
+      currentHolder: null,
+    };
+  }
+
+  /**
+   * Release a lock
+   */
+  releaseLock(targetKey: string, lockId: string): void {
+    const existing = this.locks.get(targetKey);
+    if (!existing) return;
+
+    if (existing.exclusiveLockHolder === lockId) {
+      // Release exclusive lock
+      this.locks.delete(targetKey);
+    } else if (existing.sharedLockHolders.has(lockId)) {
+      // Release shared lock
+      existing.sharedLockHolders.delete(lockId);
+      if (existing.sharedLockHolders.size === 0 && !existing.exclusiveLockHolder) {
+        this.locks.delete(targetKey);
+      }
+    }
+
+    // Clean up pending writes
+    const pending = this.pendingWrites.get(targetKey);
+    if (pending) {
+      pending.delete(lockId);
+      if (pending.size === 0) {
+        this.pendingWrites.delete(targetKey);
+      }
+    }
+  }
+
+  /**
+   * Check if a target has an exclusive lock (compaction in progress)
+   */
+  hasExclusiveLock(targetKey: string): boolean {
+    const existing = this.locks.get(targetKey);
+    if (!existing) return false;
+
+    // Check for expiration
+    if (existing.expiresAt < Date.now()) {
+      this.locks.delete(targetKey);
+      return false;
+    }
+
+    return existing.exclusiveLockHolder !== null;
+  }
+
+  /**
+   * Check if a target has active writes
+   */
+  hasActiveWrites(targetKey: string): boolean {
+    const existing = this.locks.get(targetKey);
+    if (!existing) return false;
+
+    // Check for expiration
+    if (existing.expiresAt < Date.now()) {
+      this.locks.delete(targetKey);
+      return false;
+    }
+
+    return existing.sharedLockHolders.size > 0;
+  }
+
+  /**
+   * Get the number of active writes for a target
+   */
+  getActiveWriteCount(targetKey: string): number {
+    const existing = this.locks.get(targetKey);
+    if (!existing || existing.expiresAt < Date.now()) {
+      return 0;
+    }
+    return existing.sharedLockHolders.size;
+  }
+
+  /**
+   * Wait for shared locks to be released
+   */
+  private async waitForSharedLocks(
+    targetKey: string,
+    timeout: number
+  ): Promise<LockAcquisitionResult> {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeout) {
+      const existing = this.locks.get(targetKey);
+      if (!existing || existing.sharedLockHolders.size === 0) {
+        return {
+          acquired: true,
+          lockId: null,
+          reason: null,
+          retryAfterMs: null,
+          currentHolder: null,
+        };
+      }
+
+      // Wait a bit before checking again
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    const existing = this.locks.get(targetKey);
+    return {
+      acquired: false,
+      lockId: null,
+      reason: 'write_wait_timeout',
+      retryAfterMs: this.config.lockRetryDelayMs,
+      currentHolder: existing
+        ? Array.from(existing.sharedLockHolders).join(', ')
+        : null,
+    };
+  }
+
+  // ===========================================================================
+  // Lease Management
+  // ===========================================================================
+
+  /**
+   * Acquire a lease for compaction
+   */
+  async acquireLease(targetKey: string): Promise<CompactionLease | null> {
+    // First, try to acquire the exclusive lock
+    const lockResult = await this.acquireExclusiveLock(targetKey);
+    if (!lockResult.acquired || !lockResult.lockId) {
+      return null;
+    }
+
+    // Check for existing lease
+    const existing = this.leases.get(targetKey);
+    if (existing && existing.expiresAt > Date.now()) {
+      // Release the lock we just acquired
+      this.releaseLock(targetKey, lockResult.lockId);
+      return null;
+    }
+
+    const now = Date.now();
+    const lease: CompactionLease = {
+      leaseId: generateUUID(),
+      targetKey,
+      workerId: this.workerId,
+      acquiredAt: now,
+      expiresAt: now + this.config.leaseDurationMs,
+      renewCount: 0,
+    };
+
+    this.leases.set(targetKey, lease);
+    return lease;
+  }
+
+  /**
+   * Renew an existing lease
+   */
+  renewLease(leaseId: string): boolean {
+    for (const [key, lease] of this.leases) {
+      if (lease.leaseId === leaseId) {
+        const now = Date.now();
+        const totalDuration = now - lease.acquiredAt + this.config.leaseDurationMs;
+
+        // Check if we've exceeded max lease duration
+        if (totalDuration > this.config.maxLeaseDurationMs) {
+          return false;
+        }
+
+        lease.expiresAt = now + this.config.leaseDurationMs;
+        lease.renewCount++;
+
+        // Also extend the lock
+        const lock = this.locks.get(key);
+        if (lock) {
+          lock.expiresAt = lease.expiresAt;
+        }
+
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Release a lease
+   */
+  releaseLease(leaseId: string): void {
+    for (const [key, lease] of this.leases) {
+      if (lease.leaseId === leaseId) {
+        this.leases.delete(key);
+
+        // Also release the exclusive lock
+        const lock = this.locks.get(key);
+        if (lock?.exclusiveLockHolder) {
+          this.releaseLock(key, lock.exclusiveLockHolder);
+        }
+        break;
+      }
+    }
+  }
+
+  /**
+   * Check if a lease is still valid
+   */
+  isLeaseValid(leaseId: string): boolean {
+    for (const [, lease] of this.leases) {
+      if (lease.leaseId === leaseId) {
+        return lease.expiresAt > Date.now();
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Get lease by target key
+   */
+  getLease(targetKey: string): CompactionLease | null {
+    const lease = this.leases.get(targetKey);
+    if (lease && lease.expiresAt > Date.now()) {
+      return lease;
+    }
+    return null;
+  }
+
+  // ===========================================================================
+  // Checkpoint Management
+  // ===========================================================================
+
+  /**
+   * Create a new checkpoint for a compaction operation
+   */
+  createCheckpoint(
+    targetKey: string,
+    leaseId: string | null,
+    files: string[],
+    sequenceNumber: bigint
+  ): CompactionCheckpoint {
+    const now = Date.now();
+    const checkpoint: CompactionCheckpoint = {
+      checkpointId: generateUUID(),
+      targetKey,
+      phase: 'initializing',
+      processedFiles: [],
+      remainingFiles: [...files],
+      outputFilePath: null,
+      createdAt: now,
+      updatedAt: now,
+      leaseId,
+      startSequenceNumber: sequenceNumber,
+      intermediateData: {},
+    };
+
+    this.checkpoints.set(checkpoint.checkpointId, checkpoint);
+    return checkpoint;
+  }
+
+  /**
+   * Update checkpoint progress
+   */
+  updateCheckpoint(
+    checkpointId: string,
+    updates: Partial<Pick<CompactionCheckpoint,
+      'phase' | 'processedFiles' | 'remainingFiles' | 'outputFilePath' | 'intermediateData'
+    >>
+  ): boolean {
+    const checkpoint = this.checkpoints.get(checkpointId);
+    if (!checkpoint) return false;
+
+    checkpoint.updatedAt = Date.now();
+
+    if (updates.phase !== undefined) {
+      checkpoint.phase = updates.phase;
+    }
+    if (updates.processedFiles !== undefined) {
+      checkpoint.processedFiles = updates.processedFiles;
+    }
+    if (updates.remainingFiles !== undefined) {
+      checkpoint.remainingFiles = updates.remainingFiles;
+    }
+    if (updates.outputFilePath !== undefined) {
+      checkpoint.outputFilePath = updates.outputFilePath;
+    }
+    if (updates.intermediateData !== undefined) {
+      checkpoint.intermediateData = {
+        ...checkpoint.intermediateData,
+        ...updates.intermediateData,
+      };
+    }
+
+    return true;
+  }
+
+  /**
+   * Get a checkpoint by ID
+   */
+  getCheckpoint(checkpointId: string): CompactionCheckpoint | null {
+    return this.checkpoints.get(checkpointId) ?? null;
+  }
+
+  /**
+   * Get checkpoint by target key (for recovery)
+   */
+  getCheckpointByTarget(targetKey: string): CompactionCheckpoint | null {
+    for (const [, checkpoint] of this.checkpoints) {
+      if (
+        checkpoint.targetKey === targetKey &&
+        checkpoint.phase !== 'completed' &&
+        checkpoint.phase !== 'failed'
+      ) {
+        return checkpoint;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Mark a checkpoint as completed and clean it up
+   */
+  completeCheckpoint(checkpointId: string): void {
+    const checkpoint = this.checkpoints.get(checkpointId);
+    if (checkpoint) {
+      checkpoint.phase = 'completed';
+      checkpoint.updatedAt = Date.now();
+      // Clean up after a short delay
+      setTimeout(() => {
+        this.checkpoints.delete(checkpointId);
+      }, 5000);
+    }
+  }
+
+  /**
+   * Mark a checkpoint as failed
+   */
+  failCheckpoint(checkpointId: string, reason?: string): void {
+    const checkpoint = this.checkpoints.get(checkpointId);
+    if (checkpoint) {
+      checkpoint.phase = 'failed';
+      checkpoint.updatedAt = Date.now();
+      if (reason) {
+        checkpoint.intermediateData.failureReason = reason;
+      }
+    }
+  }
+
+  /**
+   * Get all active (non-completed, non-failed) checkpoints
+   */
+  getActiveCheckpoints(): CompactionCheckpoint[] {
+    const active: CompactionCheckpoint[] = [];
+    for (const [, checkpoint] of this.checkpoints) {
+      if (checkpoint.phase !== 'completed' && checkpoint.phase !== 'failed') {
+        active.push(checkpoint);
+      }
+    }
+    return active;
+  }
+
+  // ===========================================================================
+  // Conflict Detection
+  // ===========================================================================
+
+  /**
+   * Check for conflicts during compaction
+   */
+  checkForConflicts(
+    targetKey: string,
+    startSequenceNumber: bigint,
+    currentSequenceNumber: bigint,
+    originalFiles: string[],
+    currentFiles: string[]
+  ): ConflictCheckResult {
+    // Check for new data (sequence number advanced)
+    if (currentSequenceNumber > startSequenceNumber) {
+      const newFiles = currentFiles.filter(f => !originalFiles.includes(f));
+      if (newFiles.length > 0) {
+        return {
+          hasConflict: true,
+          conflictType: 'new_data',
+          details: `New files added during compaction: ${newFiles.length} files`,
+          conflictingFiles: newFiles,
+          conflictSequenceNumber: currentSequenceNumber,
+        };
+      }
+    }
+
+    // Check for concurrent compaction (files removed)
+    const removedFiles = originalFiles.filter(f => !currentFiles.includes(f));
+    if (removedFiles.length > 0) {
+      return {
+        hasConflict: true,
+        conflictType: 'concurrent_compaction',
+        details: `Files removed by concurrent operation: ${removedFiles.length} files`,
+        conflictingFiles: removedFiles,
+        conflictSequenceNumber: currentSequenceNumber,
+      };
+    }
+
+    return {
+      hasConflict: false,
+      conflictType: null,
+      details: null,
+      conflictingFiles: [],
+      conflictSequenceNumber: null,
+    };
+  }
+
+  /**
+   * Resolve a conflict by determining the appropriate action
+   */
+  resolveConflict(conflict: ConflictCheckResult): 'retry' | 'abort' | 'merge' {
+    if (!conflict.hasConflict) {
+      return 'merge'; // No conflict, proceed with merge
+    }
+
+    switch (conflict.conflictType) {
+      case 'new_data':
+        // New data arrived - can potentially include in merge
+        if (conflict.conflictingFiles.length <= 10) {
+          return 'merge'; // Small amount of new data, include it
+        }
+        return 'retry'; // Too much new data, start over
+
+      case 'concurrent_compaction':
+        // Another compaction modified our files - abort
+        return 'abort';
+
+      case 'schema_change':
+        // Schema changed - abort to avoid data corruption
+        return 'abort';
+
+      default:
+        return 'abort';
+    }
+  }
+
+  // ===========================================================================
+  // Cleanup
+  // ===========================================================================
+
+  /**
+   * Clean up expired locks and leases
+   */
+  cleanupExpired(): void {
+    const now = Date.now();
+
+    // Clean up expired locks
+    for (const [key, lock] of this.locks) {
+      if (lock.expiresAt < now) {
+        this.locks.delete(key);
+      }
+    }
+
+    // Clean up expired leases
+    for (const [key, lease] of this.leases) {
+      if (lease.expiresAt < now) {
+        this.leases.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Get current coordination statistics
+   */
+  getStats(): {
+    activeLocks: number;
+    exclusiveLocks: number;
+    sharedLocks: number;
+    activeLeases: number;
+    activeCheckpoints: number;
+  } {
+    let exclusiveLocks = 0;
+    let sharedLocks = 0;
+    const now = Date.now();
+
+    for (const [, lock] of this.locks) {
+      if (lock.expiresAt > now) {
+        if (lock.exclusiveLockHolder) {
+          exclusiveLocks++;
+        }
+        sharedLocks += lock.sharedLockHolders.size;
+      }
+    }
+
+    let activeLeases = 0;
+    for (const [, lease] of this.leases) {
+      if (lease.expiresAt > now) {
+        activeLeases++;
+      }
+    }
+
+    return {
+      activeLocks: exclusiveLocks + (sharedLocks > 0 ? 1 : 0),
+      exclusiveLocks,
+      sharedLocks,
+      activeLeases,
+      activeCheckpoints: this.getActiveCheckpoints().length,
+    };
+  }
+}
+
+// =============================================================================
 // Compaction Manager
 // =============================================================================
 
@@ -156,9 +941,14 @@ export { CompactionError } from './errors.js';
  *
  * Manages the compaction of small Parquet files into larger ones to
  * improve query performance and reduce file count overhead.
+ *
+ * Now includes write coordination to prevent compaction during active writes
+ * and vice versa (Issue: sql-8euu).
  */
 export class CompactionManager {
   private readonly config: CompactionConfig;
+  private readonly coordinator: CompactionCoordinator;
+  private readonly coordinationConfig: CompactionCoordinationConfig;
   private metrics: CompactionMetrics = {
     totalCompactions: 0,
     successfulCompactions: 0,
@@ -170,9 +960,21 @@ export class CompactionManager {
   };
   private totalDurationMs = 0;
 
-  constructor(config: Partial<CompactionConfig> = {}) {
+  constructor(
+    config: Partial<CompactionConfig> = {},
+    coordinationConfig: Partial<CompactionCoordinationConfig> = {}
+  ) {
     this.config = { ...DEFAULT_COMPACTION_CONFIG, ...config };
+    this.coordinationConfig = { ...DEFAULT_COORDINATION_CONFIG, ...coordinationConfig };
+    this.coordinator = new CompactionCoordinator(this.coordinationConfig);
     this.validateConfig();
+  }
+
+  /**
+   * Get the coordinator for advanced usage
+   */
+  getCoordinator(): CompactionCoordinator {
+    return this.coordinator;
   }
 
   /**
@@ -536,4 +1338,230 @@ export class CompactionManager {
     };
     this.totalDurationMs = 0;
   }
+
+  // ===========================================================================
+  // Write Coordination
+  // ===========================================================================
+
+  /**
+   * Start a write operation with coordination
+   *
+   * Call this before writing data to a table/partition to prevent
+   * compaction from starting during the write.
+   */
+  startWrite(targetKey: string): LockAcquisitionResult {
+    const writeId = generateUUID();
+    return this.coordinator.acquireSharedLock(targetKey, writeId);
+  }
+
+  /**
+   * Complete a write operation
+   *
+   * Call this after a write is completed to release the write lock.
+   */
+  completeWrite(targetKey: string, writeId: string): void {
+    this.coordinator.releaseLock(targetKey, writeId);
+  }
+
+  /**
+   * Check if writes are blocked for a target (compaction in progress)
+   */
+  isWriteBlocked(targetKey: string): boolean {
+    return this.coordinator.hasExclusiveLock(targetKey);
+  }
+
+  /**
+   * Check if compaction is blocked for a target (active writes)
+   */
+  isCompactionBlocked(targetKey: string): boolean {
+    return this.coordinator.hasActiveWrites(targetKey);
+  }
+
+  /**
+   * Get the number of active writes for a target
+   */
+  getActiveWriteCount(targetKey: string): number {
+    return this.coordinator.getActiveWriteCount(targetKey);
+  }
+
+  // ===========================================================================
+  // Coordinated Compaction
+  // ===========================================================================
+
+  /**
+   * Start a coordinated compaction operation
+   *
+   * Acquires a lease and blocks writes during compaction.
+   */
+  async startCompaction(
+    targetKey: string,
+    files: DataFile[],
+    sequenceNumber: bigint
+  ): Promise<CompactionSession | null> {
+    // Try to acquire a lease
+    const lease = await this.coordinator.acquireLease(targetKey);
+    if (!lease) {
+      return null;
+    }
+
+    // Create a checkpoint
+    const checkpoint = this.coordinator.createCheckpoint(
+      targetKey,
+      lease.leaseId,
+      files.map(f => f['file-path']),
+      sequenceNumber
+    );
+
+    return {
+      lease,
+      checkpoint,
+      manager: this,
+      coordinator: this.coordinator,
+    };
+  }
+
+  /**
+   * Resume an interrupted compaction from checkpoint
+   */
+  async resumeCompaction(targetKey: string): Promise<CompactionSession | null> {
+    const checkpoint = this.coordinator.getCheckpointByTarget(targetKey);
+    if (!checkpoint) {
+      return null;
+    }
+
+    // Try to acquire a new lease
+    const lease = await this.coordinator.acquireLease(targetKey);
+    if (!lease) {
+      return null;
+    }
+
+    // Update checkpoint with new lease
+    checkpoint.leaseId = lease.leaseId;
+    checkpoint.updatedAt = Date.now();
+
+    return {
+      lease,
+      checkpoint,
+      manager: this,
+      coordinator: this.coordinator,
+    };
+  }
+
+  /**
+   * Check for conflicts during compaction
+   */
+  checkCompactionConflicts(
+    session: CompactionSession,
+    currentSequenceNumber: bigint,
+    currentFiles: string[]
+  ): ConflictCheckResult {
+    return this.coordinator.checkForConflicts(
+      session.checkpoint.targetKey,
+      session.checkpoint.startSequenceNumber,
+      currentSequenceNumber,
+      session.checkpoint.remainingFiles,
+      currentFiles
+    );
+  }
+
+  /**
+   * Complete a coordinated compaction operation
+   */
+  completeCompaction(session: CompactionSession, result: CompactionResult): void {
+    // Record the result
+    this.recordCompactionResult(result);
+
+    // Complete the checkpoint
+    if (result.success) {
+      this.coordinator.completeCheckpoint(session.checkpoint.checkpointId);
+    } else {
+      this.coordinator.failCheckpoint(
+        session.checkpoint.checkpointId,
+        result.error ?? 'Unknown error'
+      );
+    }
+
+    // Release the lease
+    this.coordinator.releaseLease(session.lease.leaseId);
+  }
+
+  /**
+   * Abort a coordinated compaction operation
+   */
+  abortCompaction(session: CompactionSession, reason: string): void {
+    this.coordinator.failCheckpoint(session.checkpoint.checkpointId, reason);
+    this.coordinator.releaseLease(session.lease.leaseId);
+
+    this.recordCompactionResult({
+      success: false,
+      filesCompacted: 0,
+      bytesCompacted: BigInt(0),
+      outputFiles: 0,
+      outputBytes: BigInt(0),
+      durationMs: Date.now() - session.checkpoint.createdAt,
+      error: reason,
+    });
+  }
+
+  /**
+   * Renew the lease for an active compaction session
+   */
+  renewCompactionLease(session: CompactionSession): boolean {
+    return this.coordinator.renewLease(session.lease.leaseId);
+  }
+
+  /**
+   * Update checkpoint progress during compaction
+   */
+  updateCompactionProgress(
+    session: CompactionSession,
+    phase: CompactionPhase,
+    processedFiles: string[]
+  ): void {
+    const remaining = session.checkpoint.remainingFiles.filter(
+      f => !processedFiles.includes(f)
+    );
+
+    this.coordinator.updateCheckpoint(session.checkpoint.checkpointId, {
+      phase,
+      processedFiles,
+      remainingFiles: remaining,
+    });
+
+    session.checkpoint.phase = phase;
+    session.checkpoint.processedFiles = processedFiles;
+    session.checkpoint.remainingFiles = remaining;
+  }
+
+  /**
+   * Get coordination statistics
+   */
+  getCoordinationStats(): ReturnType<CompactionCoordinator['getStats']> {
+    return this.coordinator.getStats();
+  }
+
+  /**
+   * Clean up expired locks and leases
+   */
+  cleanupExpiredCoordination(): void {
+    this.coordinator.cleanupExpired();
+  }
+}
+
+// =============================================================================
+// Compaction Session
+// =============================================================================
+
+/**
+ * Represents an active compaction session with coordination
+ */
+export interface CompactionSession {
+  /** The lease for this compaction */
+  lease: CompactionLease;
+  /** Checkpoint for resumable compaction */
+  checkpoint: CompactionCheckpoint;
+  /** Reference to the manager */
+  manager: CompactionManager;
+  /** Reference to the coordinator */
+  coordinator: CompactionCoordinator;
 }

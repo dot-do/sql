@@ -15,10 +15,10 @@ export default defineWorkersConfig({
         '**/tests/**',
       ],
       thresholds: {
-        lines: 50,
-        branches: 50,
-        functions: 50,
-        statements: 50,
+        lines: 80,
+        branches: 80,
+        functions: 80,
+        statements: 80,
       },
     },
     poolOptions: {

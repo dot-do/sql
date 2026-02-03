@@ -10,6 +10,14 @@
  * @packageDocumentation
  */
 
+import {
+  DoSQLError,
+  ErrorCategory,
+  registerErrorClass,
+  type ErrorContext,
+  type SerializedError,
+} from '../errors/base.js';
+
 // =============================================================================
 // Branded Types
 // =============================================================================
@@ -523,19 +531,73 @@ export enum BranchErrorCode {
 }
 
 /**
- * Branch operation error
+ * Error class for branch operations
+ *
+ * Extends DoSQLError for unified error handling across the DoSQL ecosystem.
  */
-export class BranchError extends Error {
+export class BranchError extends DoSQLError {
+  readonly code: BranchErrorCode;
+  readonly category: ErrorCategory;
+  readonly branch?: BranchId | string;
+  readonly details?: Record<string, unknown>;
+
   constructor(
-    public readonly code: BranchErrorCode,
+    code: BranchErrorCode,
     message: string,
-    public readonly branch?: BranchId | string,
-    public readonly details?: Record<string, unknown>
+    branch?: BranchId | string,
+    details?: Record<string, unknown>
   ) {
     super(message);
     this.name = 'BranchError';
+    this.code = code;
+    this.branch = branch;
+    this.details = details;
+    this.category = this.determineCategory();
+
+    if (this.branch || this.details) {
+      this.context = {
+        metadata: {
+          ...(this.branch && { branch: this.branch }),
+          ...(this.details && { details: this.details }),
+        },
+      };
+    }
+  }
+
+  private determineCategory(): ErrorCategory {
+    switch (this.code) {
+      case BranchErrorCode.BRANCH_NOT_FOUND:
+      case BranchErrorCode.COMMIT_NOT_FOUND:
+        return ErrorCategory.RESOURCE;
+      case BranchErrorCode.BRANCH_EXISTS:
+      case BranchErrorCode.MERGE_CONFLICT:
+      case BranchErrorCode.NOT_FAST_FORWARD:
+      case BranchErrorCode.NOT_MERGED:
+        return ErrorCategory.CONFLICT;
+      case BranchErrorCode.UNCOMMITTED_CHANGES:
+      case BranchErrorCode.INVALID_BRANCH_NAME:
+      case BranchErrorCode.INVALID_OPERATION:
+        return ErrorCategory.VALIDATION;
+      default:
+        return ErrorCategory.EXECUTION;
+    }
+  }
+
+  override isRetryable(): boolean {
+    return false;
+  }
+
+  static fromJSON(json: SerializedError): BranchError {
+    return new BranchError(
+      json.code as BranchErrorCode,
+      json.message,
+      json.context?.metadata?.branch as string | undefined,
+      json.context?.metadata?.details as Record<string, unknown> | undefined
+    );
   }
 }
+
+registerErrorClass('BranchError', BranchError);
 
 // =============================================================================
 // Branch Manager Interface

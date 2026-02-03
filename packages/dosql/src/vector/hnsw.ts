@@ -69,8 +69,12 @@ class MinHeap {
   private bubbleUp(index: number): void {
     while (index > 0) {
       const parentIndex = Math.floor((index - 1) / 2);
-      if (this.heap[parentIndex]!.distance <= this.heap[index]!.distance) break;
-      [this.heap[parentIndex], this.heap[index]] = [this.heap[index]!, this.heap[parentIndex]!];
+      // Indices are guaranteed valid: index > 0 ensures parentIndex is valid,
+      // and index was just used for push(), so both are within bounds
+      const parentItem = this.heap[parentIndex];
+      const currentItem = this.heap[index];
+      if (!parentItem || !currentItem || parentItem.distance <= currentItem.distance) break;
+      [this.heap[parentIndex], this.heap[index]] = [currentItem, parentItem];
       index = parentIndex;
     }
   }
@@ -82,15 +86,25 @@ class MinHeap {
       const right = 2 * index + 2;
       let smallest = index;
 
-      if (left < length && this.heap[left]!.distance < this.heap[smallest]!.distance) {
+      // Use safe access with null checks for heap operations
+      const currentItem = this.heap[index];
+      const leftItem = left < length ? this.heap[left] : undefined;
+      const rightItem = right < length ? this.heap[right] : undefined;
+      const smallestItem = this.heap[smallest];
+
+      if (leftItem && smallestItem && leftItem.distance < smallestItem.distance) {
         smallest = left;
       }
-      if (right < length && this.heap[right]!.distance < this.heap[smallest]!.distance) {
+      const updatedSmallestItem = this.heap[smallest];
+      if (rightItem && updatedSmallestItem && rightItem.distance < updatedSmallestItem.distance) {
         smallest = right;
       }
 
       if (smallest === index) break;
-      [this.heap[index], this.heap[smallest]] = [this.heap[smallest]!, this.heap[index]!];
+      const swapItem = this.heap[smallest];
+      if (currentItem && swapItem) {
+        [this.heap[index], this.heap[smallest]] = [swapItem, currentItem];
+      }
       index = smallest;
     }
   }
@@ -138,8 +152,12 @@ class MaxHeap {
   private bubbleUp(index: number): void {
     while (index > 0) {
       const parentIndex = Math.floor((index - 1) / 2);
-      if (this.heap[parentIndex]!.distance >= this.heap[index]!.distance) break;
-      [this.heap[parentIndex], this.heap[index]] = [this.heap[index]!, this.heap[parentIndex]!];
+      // Indices are guaranteed valid: index > 0 ensures parentIndex is valid,
+      // and index was just used for push(), so both are within bounds
+      const parentItem = this.heap[parentIndex];
+      const currentItem = this.heap[index];
+      if (!parentItem || !currentItem || parentItem.distance >= currentItem.distance) break;
+      [this.heap[parentIndex], this.heap[index]] = [currentItem, parentItem];
       index = parentIndex;
     }
   }
@@ -151,15 +169,25 @@ class MaxHeap {
       const right = 2 * index + 2;
       let largest = index;
 
-      if (left < length && this.heap[left]!.distance > this.heap[largest]!.distance) {
+      // Use safe access with null checks for heap operations
+      const currentItem = this.heap[index];
+      const leftItem = left < length ? this.heap[left] : undefined;
+      const rightItem = right < length ? this.heap[right] : undefined;
+      const largestItem = this.heap[largest];
+
+      if (leftItem && largestItem && leftItem.distance > largestItem.distance) {
         largest = left;
       }
-      if (right < length && this.heap[right]!.distance > this.heap[largest]!.distance) {
+      const updatedLargestItem = this.heap[largest];
+      if (rightItem && updatedLargestItem && rightItem.distance > updatedLargestItem.distance) {
         largest = right;
       }
 
       if (largest === index) break;
-      [this.heap[index], this.heap[largest]] = [this.heap[largest]!, this.heap[index]!];
+      const swapItem = this.heap[largest];
+      if (currentItem && swapItem) {
+        [this.heap[index], this.heap[largest]] = [swapItem, currentItem];
+      }
       index = largest;
     }
   }

@@ -11,6 +11,8 @@
  *
  * Uses nested loop join by default, with hash join optimization
  * for equality conditions.
+ *
+ * Supports backpressure with memory limits for hash table builds.
  */
 
 import {
@@ -21,6 +23,12 @@ import {
   type SqlValue,
   type Expression,
   type Predicate,
+  type BackpressureState,
+  type BackpressureStats,
+  type BackpressureOperator,
+  type WatermarkConfig,
+  type BackpressureController,
+  DEFAULT_WATERMARKS,
 } from '../types.js';
 import { evaluatePredicate, evaluateExpression } from './filter.js';
 
@@ -117,11 +125,12 @@ function extractEqualityKeys(
 // =============================================================================
 
 /**
- * Join operator implementation
+ * Join operator implementation with backpressure support
  *
  * Implements various join types using either nested loop or hash join.
+ * Supports memory limits for hash table builds to prevent OOM.
  */
-export class JoinOperator implements Operator {
+export class JoinOperator implements BackpressureOperator {
   private plan: JoinPlan;
   private leftInput: Operator;
   private rightInput: Operator;
@@ -148,6 +157,19 @@ export class JoinOperator implements Operator {
   private leftTableName: string;
   private rightTableName: string;
 
+  // Backpressure state
+  private backpressureState: BackpressureState = 'flowing';
+  private watermarks: WatermarkConfig = DEFAULT_WATERMARKS;
+  private pauseCount = 0;
+  private resumeCount = 0;
+  private memoryUsage = 0;
+  private bufferedRows = 0;
+  private backpressureCallbacks: Array<(state: BackpressureState) => void> = [];
+  private pausePromise: Promise<void> | null = null;
+  private pauseResolve: (() => void) | null = null;
+  private controller: BackpressureController | null = null;
+  private memoryLimitExceeded = false;
+
   constructor(
     plan: JoinPlan,
     leftInput: Operator,
@@ -167,6 +189,13 @@ export class JoinOperator implements Operator {
     this.useHashJoin = plan.algorithm === 'hash' || (this.hashKey !== null && plan.joinType === 'inner');
   }
 
+  /**
+   * Set the backpressure controller for this operator
+   */
+  setController(controller: BackpressureController): void {
+    this.controller = controller;
+  }
+
   async open(ctx: ExecutionContext): Promise<void> {
     this.ctx = ctx;
 
@@ -180,6 +209,14 @@ export class JoinOperator implements Operator {
     this.leftExhausted = false;
     this.emittingUnmatchedRight = false;
     this.unmatchedRightIndex = 0;
+
+    // Reset backpressure state
+    this.backpressureState = 'flowing';
+    this.memoryUsage = 0;
+    this.bufferedRows = 0;
+    this.pausePromise = null;
+    this.pauseResolve = null;
+    this.memoryLimitExceeded = false;
 
     await this.leftInput.open(ctx);
     await this.rightInput.open(ctx);
@@ -196,14 +233,61 @@ export class JoinOperator implements Operator {
   }
 
   /**
-   * Materialize all right-side rows into memory
+   * Materialize all right-side rows into memory with memory limits
    */
   private async materializeRight(): Promise<void> {
     this.rightRows = [];
+    this.memoryUsage = 0;
+    this.bufferedRows = 0;
     let row: Row | null;
+
     while ((row = await this.rightInput.next()) !== null) {
+      // Estimate memory for this row
+      const rowSize = this.estimateRowSize(row);
+      this.memoryUsage += rowSize;
+      this.bufferedRows++;
+
       this.rightRows.push(row);
+
+      // Check memory limits - notify via backpressure state change
+      if (this.memoryUsage >= this.watermarks.highWatermark) {
+        this.memoryLimitExceeded = true;
+        if (this.backpressureState === 'flowing') {
+          this.backpressureState = 'draining';
+          this.notifyBackpressureChange();
+        }
+      }
+
+      // Report memory usage to controller
+      if (this.controller) {
+        this.controller.reportMemoryUsage(this, this.memoryUsage);
+      }
     }
+  }
+
+  /**
+   * Estimate memory size of a row (rough approximation)
+   */
+  private estimateRowSize(row: Row): number {
+    let size = 0;
+    for (const value of Object.values(row)) {
+      if (value === null) {
+        size += 8;
+      } else if (typeof value === 'string') {
+        size += value.length * 2; // UTF-16
+      } else if (typeof value === 'number') {
+        size += 8;
+      } else if (typeof value === 'bigint') {
+        size += 16;
+      } else if (typeof value === 'boolean') {
+        size += 4;
+      } else if (value instanceof Date) {
+        size += 8;
+      } else if (value instanceof Uint8Array) {
+        size += value.length;
+      }
+    }
+    return size + 64; // Object overhead
   }
 
   /**
@@ -434,6 +518,17 @@ export class JoinOperator implements Operator {
     await this.rightInput.close();
     this.rightRows = [];
     this.hashTable.clear();
+
+    // Reset backpressure state
+    this.backpressureState = 'flowing';
+    this.memoryUsage = 0;
+    this.bufferedRows = 0;
+    this.pausePromise = null;
+    this.pauseResolve = null;
+    this.memoryLimitExceeded = false;
+    if (this.controller) {
+      this.controller.reportMemoryUsage(this, 0);
+    }
   }
 
   columns(): string[] {
@@ -445,6 +540,87 @@ export class JoinOperator implements Operator {
       c.includes('.') ? c : `${this.rightTableName}.${c}`
     );
     return [...leftCols, ...rightCols];
+  }
+
+  // ==========================================================================
+  // BACKPRESSURE SUPPORT
+  // ==========================================================================
+
+  async pause(): Promise<void> {
+    if (this.backpressureState === 'paused') {
+      return;
+    }
+
+    this.backpressureState = 'paused';
+    this.pauseCount++;
+    this.notifyBackpressureChange();
+
+    this.pausePromise = new Promise<void>((resolve) => {
+      this.pauseResolve = resolve;
+    });
+
+    if (this.controller) {
+      this.controller.requestPause(this);
+    }
+  }
+
+  async resume(): Promise<void> {
+    if (this.backpressureState !== 'paused') {
+      return;
+    }
+
+    this.backpressureState = 'flowing';
+    this.resumeCount++;
+    this.notifyBackpressureChange();
+
+    if (this.pauseResolve) {
+      this.pauseResolve();
+      this.pausePromise = null;
+      this.pauseResolve = null;
+    }
+
+    if (this.controller) {
+      this.controller.requestResume(this);
+    }
+  }
+
+  isPaused(): boolean {
+    return this.backpressureState === 'paused';
+  }
+
+  getBackpressureState(): BackpressureState {
+    return this.backpressureState;
+  }
+
+  getBackpressureStats(): BackpressureStats {
+    return {
+      memoryUsage: this.memoryUsage,
+      pauseCount: this.pauseCount,
+      resumeCount: this.resumeCount,
+      state: this.backpressureState,
+      bufferedRows: this.bufferedRows,
+    };
+  }
+
+  setWatermarks(config: WatermarkConfig): void {
+    this.watermarks = { ...config };
+  }
+
+  onBackpressure(callback: (state: BackpressureState) => void): void {
+    this.backpressureCallbacks.push(callback);
+  }
+
+  /**
+   * Check if memory limit was exceeded during hash build
+   */
+  isMemoryLimitExceeded(): boolean {
+    return this.memoryLimitExceeded;
+  }
+
+  private notifyBackpressureChange(): void {
+    for (const callback of this.backpressureCallbacks) {
+      callback(this.backpressureState);
+    }
   }
 
   /**

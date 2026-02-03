@@ -40,11 +40,13 @@ import {
   parseUpdate,
   parseDelete,
   parseReplace,
-  type DMLStatement,
-  type ParseResult as DMLParseResultType,
 } from './dml.js';
 
-import { isParseSuccess as isDMLParseSuccess } from './dml-types.js';
+import {
+  isParseSuccess as isDMLParseSuccess,
+  type DMLStatement,
+  type ParseResult as DMLParseResultType,
+} from './dml-types.js';
 
 import { SubqueryParser, type ParsedSelect } from './subquery.js';
 
@@ -206,6 +208,11 @@ export function detectStatementType(sql: string): StatementType {
   if (!trimmed) return 'UNKNOWN';
 
   const upper = trimmed.toUpperCase();
+
+  // EXPLAIN statements (check before other statements since EXPLAIN can wrap them)
+  if (upper.startsWith('EXPLAIN ') || upper.startsWith('EXPLAIN\n') || upper.startsWith('EXPLAIN\t')) {
+    return 'EXPLAIN';
+  }
 
   // WITH clause means SELECT (CTE)
   if (upper.startsWith('WITH ') || upper.startsWith('WITH\n') || upper.startsWith('WITH\t')) {
@@ -519,6 +526,92 @@ function createParseError(error: unknown, sql: string): ParseError {
 }
 
 // =============================================================================
+// EXPLAIN STATEMENT TYPES
+// =============================================================================
+
+/**
+ * EXPLAIN statement AST
+ */
+export interface ExplainStatement {
+  type: 'explain';
+  /** The statement being explained */
+  statement: ParsedSelect | DMLStatement;
+  /** Whether this is EXPLAIN QUERY PLAN */
+  queryPlan?: boolean;
+  /** Whether this is EXPLAIN ANALYZE */
+  analyze?: boolean;
+  /** Source location */
+  location?: SourceLocation;
+}
+
+// =============================================================================
+// EXPLAIN PARSER
+// =============================================================================
+
+/**
+ * Parse an EXPLAIN statement
+ *
+ * Syntax:
+ * - EXPLAIN [QUERY PLAN] statement
+ * - EXPLAIN ANALYZE statement (PostgreSQL-style)
+ */
+function parseExplainStatement(sql: string, options: UnifiedParseOptions = {}): ParseResult {
+  const trimmed = sql.trim();
+
+  // Remove EXPLAIN prefix
+  let remaining = trimmed.slice(7).trim(); // "EXPLAIN " is 7 chars
+  let queryPlan = false;
+  let analyze = false;
+
+  // Check for QUERY PLAN
+  if (remaining.toUpperCase().startsWith('QUERY PLAN')) {
+    queryPlan = true;
+    remaining = remaining.slice(10).trim(); // "QUERY PLAN" is 10 chars
+  }
+  // Check for ANALYZE
+  else if (remaining.toUpperCase().startsWith('ANALYZE')) {
+    analyze = true;
+    remaining = remaining.slice(7).trim(); // "ANALYZE" is 7 chars
+  }
+
+  // Parse the inner statement
+  const innerResult = defaultParse(remaining, options);
+
+  if (!innerResult.success) {
+    return {
+      success: false,
+      error: {
+        message: `Failed to parse statement after EXPLAIN: ${innerResult.error.message}`,
+        sql,
+        location: innerResult.error.location,
+      },
+    };
+  }
+
+  const explainAst: ExplainStatement = {
+    type: 'explain',
+    statement: innerResult.ast as ParsedSelect | DMLStatement,
+  };
+
+  if (queryPlan) {
+    explainAst.queryPlan = true;
+  }
+  if (analyze) {
+    explainAst.analyze = true;
+  }
+
+  if (options.includeLocations) {
+    explainAst.location = { line: 1, column: 1, offset: 0 };
+  }
+
+  return {
+    success: true,
+    statementType: 'EXPLAIN',
+    ast: explainAst as UnifiedAST,
+  };
+}
+
+// =============================================================================
 // UNIFIED PARSER
 // =============================================================================
 
@@ -543,6 +636,9 @@ function defaultParse(sql: string, options: UnifiedParseOptions = {}): ParseResu
 
   // Route to appropriate parser
   switch (statementType) {
+    case 'EXPLAIN':
+      return parseExplainStatement(trimmed, options);
+
     case 'SELECT':
       return parseSelect(trimmed, options);
 
@@ -655,6 +751,13 @@ export function isDMLStatement(ast: UnifiedAST): ast is DMLStatement & { locatio
   if (!ast || !('type' in ast)) return false;
   const dmlTypes = ['insert', 'update', 'delete', 'replace'];
   return dmlTypes.includes(ast.type as string);
+}
+
+/**
+ * Check if AST is an EXPLAIN statement
+ */
+export function isExplainStatement(ast: UnifiedAST): ast is ExplainStatement {
+  return ast && 'type' in ast && ast.type === 'explain';
 }
 
 // =============================================================================

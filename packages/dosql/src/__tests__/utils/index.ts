@@ -9,6 +9,8 @@
 
 export {
   MockQueryExecutor,
+  // Preferred name following NO MOCKS philosophy (FakeQueryExecutor is an alias)
+  FakeQueryExecutor,
   // SQL tokenization helpers (for advanced testing)
   tokenizeSql,
   hasMultipleStatements,

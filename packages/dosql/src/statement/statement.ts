@@ -1438,7 +1438,11 @@ export class InMemoryEngine implements ExecutionEngine {
           if (!groups.has(groupKey)) {
             groups.set(groupKey, []);
           }
-          groups.get(groupKey)!.push(row);
+          // groups.get(groupKey) is guaranteed to exist after the set() above
+          const groupRows = groups.get(groupKey);
+          if (groupRows) {
+            groupRows.push(row);
+          }
         }
 
         // For each group, compute aggregates
@@ -3101,7 +3105,10 @@ export class InMemoryEngine implements ExecutionEngine {
     if (tableRefs.length === 0) return null;
 
     // For backwards compatibility, tableName is the first table
-    const tableName = tableRefs[0]!.tableName;
+    // tableRefs[0] is guaranteed to exist when length > 0
+    const firstTableRef = tableRefs[0];
+    if (!firstTableRef) return null;
+    const tableName = firstTableRef.tableName;
 
     let whereClause: string | undefined;
     let groupBy: string[] | undefined;

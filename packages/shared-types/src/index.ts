@@ -3480,3 +3480,55 @@ export {
   serializeSchemaVersion,
   deserializeSchemaVersion,
 } from './branded-types.js';
+
+// =============================================================================
+// CDC Protocol (Formal Contract between DoSQL and DoLake)
+// =============================================================================
+
+/**
+ * CDC Protocol types and utilities for the DoSQL/DoLake ecosystem.
+ *
+ * This module provides the formal contract for CDC streaming:
+ * - Versioned protocol definitions
+ * - VersionedCDCEvent interface with version field
+ * - Validation functions for CDC events
+ * - Protocol negotiation types
+ *
+ * @public
+ * @stability experimental
+ * @since 0.4.0
+ */
+export {
+  // Protocol Constants
+  CDC_PROTOCOL_VERSION,
+  CDC_PROTOCOL_MIN_VERSION,
+  CDC_PROTOCOL_HISTORY,
+
+  // Event Types
+  type CDCEventType,
+  type Row,
+  type VersionedCDCEvent,
+
+  // Protocol Negotiation
+  type CDCProtocolCapabilities,
+  type CDCProtocolNegotiationRequest,
+  type CDCProtocolNegotiationResponse,
+  DEFAULT_PRODUCER_CAPABILITIES,
+  DEFAULT_CONSUMER_CAPABILITIES,
+
+  // Validation Types
+  type CDCValidationResult,
+  type CDCValidationError,
+  type CDCValidationWarning,
+  CDCValidationErrorCode,
+  CDCValidationWarningCode,
+
+  // Validation Functions
+  validateCDCEvent,
+  isVersionedCDCEvent,
+  negotiateProtocolVersion,
+
+  // Utility Functions
+  createVersionedCDCEvent,
+  upgradeToVersionedCDCEvent,
+} from './cdc-protocol.js';

@@ -747,13 +747,19 @@ function optimizeScan(
     return plan;
   }
 
+  // selectedIndex is guaranteed to exist when accessMethod !== 'tableScan'
+  const selectedIndex = selection.selectedIndex;
+  if (!selectedIndex) {
+    return plan;
+  }
+
   // Convert to index lookup
   const indexLookup: IndexLookupPlan = {
     id: plan.id,
     type: 'indexLookup',
     table: plan.table,
     alias: plan.alias,
-    index: selection.selectedIndex!.name,
+    index: selectedIndex.name,
     lookupKey: selection.indexPredicates.map(p => ({
       type: 'literal' as const,
       value: p.value,
@@ -766,9 +772,11 @@ function optimizeScan(
 
   // If there are filter predicates, wrap in a filter node
   if (selection.filterPredicates.length > 0) {
+    // First predicate is guaranteed to exist when length > 0
+    const firstPredicate = selection.filterPredicates[0];
     const filterPredicate: Predicate =
-      selection.filterPredicates.length === 1
-        ? selection.filterPredicates[0]!
+      selection.filterPredicates.length === 1 && firstPredicate
+        ? firstPredicate
         : {
             type: 'logical',
             op: 'and',

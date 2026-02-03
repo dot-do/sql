@@ -585,6 +585,131 @@ export interface ExecutionOptions {
 }
 
 // =============================================================================
+// BACKPRESSURE TYPES
+// =============================================================================
+
+/**
+ * Backpressure state for streaming operators
+ */
+export type BackpressureState = 'flowing' | 'paused' | 'draining';
+
+/**
+ * Memory watermark configuration for backpressure
+ */
+export interface WatermarkConfig {
+  /** High watermark in bytes - pause when exceeded */
+  highWatermark: number;
+  /** Low watermark in bytes - resume when below */
+  lowWatermark: number;
+}
+
+/**
+ * Default watermark configuration
+ * Sized for Cloudflare Workers memory constraints (128MB limit)
+ */
+export const DEFAULT_WATERMARKS: WatermarkConfig = {
+  highWatermark: 32 * 1024 * 1024, // 32MB
+  lowWatermark: 16 * 1024 * 1024, // 16MB
+};
+
+/**
+ * Backpressure statistics
+ */
+export interface BackpressureStats {
+  /** Current memory usage in bytes */
+  memoryUsage: number;
+  /** Number of times the operator was paused */
+  pauseCount: number;
+  /** Number of times the operator was resumed */
+  resumeCount: number;
+  /** Current backpressure state */
+  state: BackpressureState;
+  /** Number of rows buffered */
+  bufferedRows: number;
+}
+
+/**
+ * Interface for operators that support backpressure
+ */
+export interface BackpressureSupport {
+  /**
+   * Pause the operator - stop producing new rows until resume() is called.
+   * Returns a promise that resolves when the operator is fully paused.
+   */
+  pause(): Promise<void>;
+
+  /**
+   * Resume the operator after being paused.
+   * Returns a promise that resolves when the operator is ready to produce rows.
+   */
+  resume(): Promise<void>;
+
+  /**
+   * Check if the operator is currently paused
+   */
+  isPaused(): boolean;
+
+  /**
+   * Get the current backpressure state
+   */
+  getBackpressureState(): BackpressureState;
+
+  /**
+   * Get backpressure statistics
+   */
+  getBackpressureStats(): BackpressureStats;
+
+  /**
+   * Set watermark configuration for memory-based backpressure
+   */
+  setWatermarks(config: WatermarkConfig): void;
+
+  /**
+   * Register a callback to be notified when backpressure state changes
+   */
+  onBackpressure(callback: (state: BackpressureState) => void): void;
+}
+
+/**
+ * Backpressure controller for coordinating between operators
+ */
+export interface BackpressureController {
+  /**
+   * Request the pipeline to pause
+   * @param source - The operator requesting the pause
+   */
+  requestPause(source: Operator): void;
+
+  /**
+   * Request the pipeline to resume
+   * @param source - The operator requesting the resume
+   */
+  requestResume(source: Operator): void;
+
+  /**
+   * Check if the pipeline should pause based on memory pressure
+   */
+  shouldPause(): boolean;
+
+  /**
+   * Report memory usage from an operator
+   * @param source - The operator reporting
+   * @param bytes - Current memory usage in bytes
+   */
+  reportMemoryUsage(source: Operator, bytes: number): void;
+
+  /**
+   * Get total memory usage across all operators
+   */
+  getTotalMemoryUsage(): number;
+
+  /**
+   * Get the configured watermarks
+   */
+  getWatermarks(): WatermarkConfig;
+}
+
+// =============================================================================
 // OPERATOR INTERFACE
 // =============================================================================
 
@@ -608,6 +733,12 @@ export interface Operator extends AsyncIterable<Row> {
   /** Async iterator support - enables `for await (const row of operator)` */
   [Symbol.asyncIterator](): AsyncIterator<Row>;
 }
+
+/**
+ * Operator with backpressure support
+ * Extends the base Operator interface with backpressure capabilities
+ */
+export interface BackpressureOperator extends Operator, BackpressureSupport {}
 
 /**
  * Operator factory function

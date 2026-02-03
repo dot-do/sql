@@ -55,8 +55,10 @@ export {
   DEFAULT_BTREE_CONFIG,
   DEFAULT_PAGE_CACHE_CONFIG,
 
-  // Storage interface (unified abstraction)
+  // Storage interfaces (prefer StorageProvider for new code)
   type StorageInterface,
+  type StorageProvider,
+  type PageStorage,
 
   // Codec types
   type KeyCodec,

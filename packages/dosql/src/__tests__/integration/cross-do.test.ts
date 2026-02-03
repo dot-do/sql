@@ -136,9 +136,11 @@ import type { DOStorageBackend } from '../../fsx/types.js';
 // =============================================================================
 
 /**
- * Create a mock FSX backend for testing
+ * Create a fake FSX backend for testing.
+ * Uses real in-memory storage - this is a "Fake" (test double with real behavior),
+ * not a mock with stubbed behavior.
  */
-function createMockBackend(): DOStorageBackend {
+function createFakeBackend(): DOStorageBackend {
   const storage = new Map<string, Uint8Array>();
 
   return {
@@ -355,7 +357,7 @@ class TestShardCoordinator {
    * Create a new shard with its own storage
    */
   createShard(shardId: string): void {
-    const backend = createMockBackend();
+    const backend = createFakeBackend();
     const walWriter = createWALWriter(backend);
     const walReader = createWALReader(backend);
     this.shards.set(shardId, { backend, walWriter, walReader });
@@ -997,10 +999,10 @@ describe('Cross-DO Communication: Replication State Synchronization', () => {
   let replicaWalWriter: WALWriter;
 
   beforeEach(() => {
-    primaryBackend = createMockBackend();
+    primaryBackend = createFakeBackend();
     primaryWalWriter = createWALWriter(primaryBackend);
     primaryWalReader = createWALReader(primaryBackend);
-    replicaBackend = createMockBackend();
+    replicaBackend = createFakeBackend();
     replicaWalWriter = createWALWriter(replicaBackend);
   });
 
@@ -1261,7 +1263,7 @@ describe('Cross-DO Communication: Replica Promotion Scenarios', () => {
   let primaryWalReader: WALReader;
 
   beforeEach(() => {
-    primaryBackend = createMockBackend();
+    primaryBackend = createFakeBackend();
     primaryWalWriter = createWALWriter(primaryBackend);
     primaryWalReader = createWALReader(primaryBackend);
   });
@@ -1356,7 +1358,7 @@ describe('Cross-DO Communication: Replica Promotion Scenarios', () => {
 
   describe('Replica Role Changes', () => {
     it('promotes replica to primary', async () => {
-      const replicaBackend = createMockBackend();
+      const replicaBackend = createFakeBackend();
       const replicaWalWriter = createWALWriter(replicaBackend);
       const replica = createReplica({ backend: replicaBackend, walWriter: replicaWalWriter });
       const replicaId = createReplicaId('us-west', 'replica-1');
@@ -1369,7 +1371,7 @@ describe('Cross-DO Communication: Replica Promotion Scenarios', () => {
     });
 
     it('demotes primary to replica', async () => {
-      const replicaBackend = createMockBackend();
+      const replicaBackend = createFakeBackend();
       const replicaWalWriter = createWALWriter(replicaBackend);
       const replica = createReplica({ backend: replicaBackend, walWriter: replicaWalWriter });
       const replicaId = createReplicaId('us-west', 'replica-1');
@@ -1385,7 +1387,7 @@ describe('Cross-DO Communication: Replica Promotion Scenarios', () => {
     });
 
     it('stops streaming on promotion', async () => {
-      const replicaBackend = createMockBackend();
+      const replicaBackend = createFakeBackend();
       const replicaWalWriter = createWALWriter(replicaBackend);
       const replica = createReplica({ backend: replicaBackend, walWriter: replicaWalWriter });
       const replicaId = createReplicaId('us-west', 'replica-1');
@@ -1399,7 +1401,7 @@ describe('Cross-DO Communication: Replica Promotion Scenarios', () => {
     });
 
     it('restarts streaming on demotion', async () => {
-      const replicaBackend = createMockBackend();
+      const replicaBackend = createFakeBackend();
       const replicaWalWriter = createWALWriter(replicaBackend);
       const replica = createReplica({ backend: replicaBackend, walWriter: replicaWalWriter });
       const replicaId = createReplicaId('us-west', 'replica-1');

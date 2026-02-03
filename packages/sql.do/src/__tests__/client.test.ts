@@ -42,12 +42,16 @@ import {
   createEventListener,
   createReconnectionCollector,
   createQueryLogCollector,
+  createWSErrorResponse,
+  hasTransactionConflictDetails,
+  hasRequestContext,
   type TestClientConfig,
   type ExtendedClient,
   type ExtendedTransactionContext,
   type ReconnectingEvent,
   type QueryLogEntry,
   type TransactionContextWithIdempotency,
+  type GlobalWithWebSocket,
 } from './test-utils.js';
 
 // =============================================================================
@@ -183,14 +187,16 @@ describe('DoSQLClient Constructor Validation', () => {
 
 describe('Connection Management', () => {
   let originalWebSocket: typeof globalThis.WebSocket;
+  let globalWithWS: GlobalWithWebSocket;
 
   beforeEach(() => {
+    globalWithWS = getGlobalWithWebSocket();
     originalWebSocket = globalThis.WebSocket;
-    (globalThis as any).WebSocket = MockWebSocket;
+    globalWithWS.WebSocket = MockWebSocket;
   });
 
   afterEach(() => {
-    (globalThis as any).WebSocket = originalWebSocket;
+    globalWithWS.WebSocket = originalWebSocket;
   });
 
   /**
@@ -305,10 +311,12 @@ describe('Connection Management', () => {
 describe('Query Execution', () => {
   let originalWebSocket: typeof globalThis.WebSocket;
   let mockWs: MockWebSocket;
+  let globalWithWS: GlobalWithWebSocket;
 
   beforeEach(() => {
+    globalWithWS = getGlobalWithWebSocket();
     originalWebSocket = globalThis.WebSocket;
-    (globalThis as any).WebSocket = class extends MockWebSocket {
+    globalWithWS.WebSocket = class extends MockWebSocket {
       constructor(url: string) {
         super(url);
         mockWs = this;
@@ -317,7 +325,7 @@ describe('Query Execution', () => {
   });
 
   afterEach(() => {
-    (globalThis as any).WebSocket = originalWebSocket;
+    globalWithWS.WebSocket = originalWebSocket;
   });
 
   /**
@@ -446,14 +454,16 @@ describe('Query Execution', () => {
 
 describe('Batch Execution', () => {
   let originalWebSocket: typeof globalThis.WebSocket;
+  let globalWithWS: GlobalWithWebSocket;
 
   beforeEach(() => {
+    globalWithWS = getGlobalWithWebSocket();
     originalWebSocket = globalThis.WebSocket;
-    (globalThis as any).WebSocket = MockWebSocket;
+    globalWithWS.WebSocket = MockWebSocket;
   });
 
   afterEach(() => {
-    (globalThis as any).WebSocket = originalWebSocket;
+    globalWithWS.WebSocket = originalWebSocket;
   });
 
   /**
@@ -589,14 +599,16 @@ describe('Batch Execution', () => {
 
 describe('Transaction Management', () => {
   let originalWebSocket: typeof globalThis.WebSocket;
+  let globalWithWS: GlobalWithWebSocket;
 
   beforeEach(() => {
+    globalWithWS = getGlobalWithWebSocket();
     originalWebSocket = globalThis.WebSocket;
-    (globalThis as any).WebSocket = MockWebSocket;
+    globalWithWS.WebSocket = MockWebSocket;
   });
 
   afterEach(() => {
-    (globalThis as any).WebSocket = originalWebSocket;
+    globalWithWS.WebSocket = originalWebSocket;
   });
 
   /**
@@ -735,12 +747,17 @@ describe('Transaction Management', () => {
           message: 'Transaction conflict detected',
         });
       });
-    } catch (error) {
-      const err = error as { conflictingTransaction?: string; conflictingTable?: string; conflictingRow?: unknown };
-      // GAP: Conflict details should be exposed
-      expect(err.conflictingTransaction).toBeDefined();
-      expect(err.conflictingTable).toBe('accounts');
-      expect(err.conflictingRow).toBeDefined();
+    } catch (error: unknown) {
+      // Use type guard to check for transaction conflict details
+      if (hasTransactionConflictDetails(error)) {
+        // GAP: Conflict details should be exposed
+        expect(error.conflictingTransaction).toBeDefined();
+        expect(error.conflictingTable).toBe('accounts');
+        expect(error.conflictingRow).toBeDefined();
+      } else {
+        // If type guard fails, the test should fail too
+        expect(hasTransactionConflictDetails(error)).toBe(true);
+      }
     }
   });
 
@@ -802,14 +819,16 @@ describe('Transaction Management', () => {
 
 describe('Query vs Execute Semantics', () => {
   let originalWebSocket: typeof globalThis.WebSocket;
+  let globalWithWS: GlobalWithWebSocket;
 
   beforeEach(() => {
+    globalWithWS = getGlobalWithWebSocket();
     originalWebSocket = globalThis.WebSocket;
-    (globalThis as any).WebSocket = MockWebSocket;
+    globalWithWS.WebSocket = MockWebSocket;
   });
 
   afterEach(() => {
-    (globalThis as any).WebSocket = originalWebSocket;
+    globalWithWS.WebSocket = originalWebSocket;
   });
 
   /**
@@ -933,10 +952,12 @@ describe('Query vs Execute Semantics', () => {
 describe('WebSocket Reconnection', () => {
   let originalWebSocket: typeof globalThis.WebSocket;
   let mockWs: MockWebSocket;
+  let globalWithWS: GlobalWithWebSocket;
 
   beforeEach(() => {
+    globalWithWS = getGlobalWithWebSocket();
     originalWebSocket = globalThis.WebSocket;
-    (globalThis as any).WebSocket = class extends MockWebSocket {
+    globalWithWS.WebSocket = class extends MockWebSocket {
       constructor(url: string) {
         super(url);
         mockWs = this;
@@ -945,7 +966,7 @@ describe('WebSocket Reconnection', () => {
   });
 
   afterEach(() => {
-    (globalThis as any).WebSocket = originalWebSocket;
+    globalWithWS.WebSocket = originalWebSocket;
   });
 
   /**
@@ -1097,7 +1118,7 @@ describe('WebSocket Reconnection', () => {
     await (client as any).connect?.();
 
     // Fail connection permanently
-    (globalThis as any).WebSocket = class extends MockWebSocket {
+    globalWithWS.WebSocket = class extends MockWebSocket {
       constructor(url: string) {
         super(url);
         setTimeout(() => this.simulateError(new Error('Connection refused')), 10);
@@ -1129,10 +1150,12 @@ describe('WebSocket Reconnection', () => {
 describe('Network Error Handling', () => {
   let originalWebSocket: typeof globalThis.WebSocket;
   let mockWs: MockWebSocket;
+  let globalWithWS: GlobalWithWebSocket;
 
   beforeEach(() => {
+    globalWithWS = getGlobalWithWebSocket();
     originalWebSocket = globalThis.WebSocket;
-    (globalThis as any).WebSocket = class extends MockWebSocket {
+    globalWithWS.WebSocket = class extends MockWebSocket {
       constructor(url: string) {
         super(url);
         mockWs = this;
@@ -1141,7 +1164,7 @@ describe('Network Error Handling', () => {
   });
 
   afterEach(() => {
-    (globalThis as any).WebSocket = originalWebSocket;
+    globalWithWS.WebSocket = originalWebSocket;
   });
 
   /**

@@ -75,10 +75,11 @@ import type { DOStorageBackend } from '../../fsx/types.js';
 // =============================================================================
 
 /**
- * Create a mock FSX backend for testing
- * Uses real in-memory storage (no mocks)
+ * Create a fake FSX backend for testing.
+ * Uses real in-memory storage - this is a "Fake" (test double with real behavior),
+ * not a mock with stubbed behavior.
  */
-function createMockBackend(): DOStorageBackend & { clear: () => void } {
+function createFakeBackend(): DOStorageBackend & { clear: () => void } {
   const storage = new Map<string, Uint8Array>();
 
   return {
@@ -186,7 +187,7 @@ class SimulatedReplicationNetwork {
   private networkPartitions: Set<string> = new Set();
 
   constructor(config: Partial<ReplicationConfig> = {}) {
-    this.primaryBackend = createMockBackend();
+    this.primaryBackend = createFakeBackend();
     this.primaryWalWriter = createWALWriter(this.primaryBackend);
     this.primaryWalReader = createWALReader(this.primaryBackend);
     this.primary = createPrimary({
@@ -204,7 +205,7 @@ class SimulatedReplicationNetwork {
     replicaId: ReplicaId,
     config: Partial<ReplicationConfig> = {}
   ): Promise<ReturnType<typeof createReplica>> {
-    const backend = createMockBackend();
+    const backend = createFakeBackend();
     const walWriter = createWALWriter(backend);
     const replica = createReplica({
       backend,
@@ -459,7 +460,7 @@ describe('Cross-DO Replication: Primary to Replica WAL Streaming', () => {
 
   describe('WAL Batch Verification', () => {
     it('verifies checksum on WAL batch application', async () => {
-      const backend = createMockBackend();
+      const backend = createFakeBackend();
       const walWriter = createWALWriter(backend);
       const replica = createReplica({ backend, walWriter });
       const replicaId = createReplicaId('us-west', 'replica-1');
@@ -477,7 +478,7 @@ describe('Cross-DO Replication: Primary to Replica WAL Streaming', () => {
     });
 
     it('rejects WAL batch with invalid checksum', async () => {
-      const backend = createMockBackend();
+      const backend = createFakeBackend();
       const walWriter = createWALWriter(backend);
       const replica = createReplica({ backend, walWriter });
       const replicaId = createReplicaId('us-west', 'replica-1');
@@ -590,7 +591,7 @@ describe('Cross-DO Replication: Replica Catch-Up After Disconnect', () => {
 
   describe('Snapshot-Based Catch-Up', () => {
     it('uses snapshot for far-behind replicas', async () => {
-      const primaryBackend = createMockBackend();
+      const primaryBackend = createFakeBackend();
       const primaryWalWriter = createWALWriter(primaryBackend);
       const primaryWalReader = createWALReader(primaryBackend);
       const primary = createPrimary({
@@ -599,7 +600,7 @@ describe('Cross-DO Replication: Replica Catch-Up After Disconnect', () => {
         walReader: primaryWalReader,
       });
 
-      const replicaBackend = createMockBackend();
+      const replicaBackend = createFakeBackend();
       const replicaWalWriter = createWALWriter(replicaBackend);
       const replica = createReplica({
         backend: replicaBackend,
@@ -646,7 +647,7 @@ describe('Cross-DO Replication: Replica Catch-Up After Disconnect', () => {
 
   describe('Duplicate Entry Handling', () => {
     it('detects and reports duplicate WAL entries', async () => {
-      const backend = createMockBackend();
+      const backend = createFakeBackend();
       const walWriter = createWALWriter(backend);
       const replica = createReplica({ backend, walWriter });
       const replicaId = createReplicaId('us-west', 'replica-1');
@@ -679,7 +680,7 @@ describe('Cross-DO Replication: Leader Election on Primary Failure', () => {
 
   describe('Election Initiation', () => {
     it('replica starts election after primary timeout', async () => {
-      const backend = createMockBackend();
+      const backend = createFakeBackend();
       const walWriter = createWALWriter(backend);
       const replica = createReplica({
         backend,
@@ -702,8 +703,8 @@ describe('Cross-DO Replication: Leader Election on Primary Failure', () => {
     });
 
     it('multiple replicas can compete in election', async () => {
-      const backend1 = createMockBackend();
-      const backend2 = createMockBackend();
+      const backend1 = createFakeBackend();
+      const backend2 = createFakeBackend();
       const walWriter1 = createWALWriter(backend1);
       const walWriter2 = createWALWriter(backend2);
 
@@ -738,7 +739,7 @@ describe('Cross-DO Replication: Leader Election on Primary Failure', () => {
 
   describe('Vote Request Handling', () => {
     it('grants vote to candidate with higher LSN', async () => {
-      const backend = createMockBackend();
+      const backend = createFakeBackend();
       const walWriter = createWALWriter(backend);
       const replica = createReplica({
         backend,
@@ -767,7 +768,7 @@ describe('Cross-DO Replication: Leader Election on Primary Failure', () => {
     });
 
     it('rejects vote from candidate with lower LSN', async () => {
-      const backend = createMockBackend();
+      const backend = createFakeBackend();
       const walWriter = createWALWriter(backend);
       const replica = createReplica({
         backend,
@@ -794,7 +795,7 @@ describe('Cross-DO Replication: Leader Election on Primary Failure', () => {
     });
 
     it('only votes once per term', async () => {
-      const backend = createMockBackend();
+      const backend = createFakeBackend();
       const walWriter = createWALWriter(backend);
       const replica = createReplica({
         backend,
@@ -842,7 +843,7 @@ describe('Cross-DO Replication: Leader Election on Primary Failure', () => {
 
   describe('Auto-Promotion', () => {
     it('auto-promotes with quorum size 1', async () => {
-      const backend = createMockBackend();
+      const backend = createFakeBackend();
       const walWriter = createWALWriter(backend);
       const replica = createReplica({
         backend,
@@ -866,7 +867,7 @@ describe('Cross-DO Replication: Leader Election on Primary Failure', () => {
     });
 
     it('generates valid fencing token on promotion', async () => {
-      const backend = createMockBackend();
+      const backend = createFakeBackend();
       const walWriter = createWALWriter(backend);
       const replica = createReplica({
         backend,
@@ -889,7 +890,7 @@ describe('Cross-DO Replication: Leader Election on Primary Failure', () => {
 
   describe('Failover Coordination', () => {
     it('primary selects best candidate based on LSN', async () => {
-      const primaryBackend = createMockBackend();
+      const primaryBackend = createFakeBackend();
       const primaryWalWriter = createWALWriter(primaryBackend);
       const primaryWalReader = createWALReader(primaryBackend);
       const primary = createPrimary({
@@ -930,7 +931,7 @@ describe('Cross-DO Replication: Leader Election on Primary Failure', () => {
     });
 
     it('rejects failover when no healthy candidates', async () => {
-      const primaryBackend = createMockBackend();
+      const primaryBackend = createFakeBackend();
       const primaryWalWriter = createWALWriter(primaryBackend);
       const primaryWalReader = createWALReader(primaryBackend);
       const primary = createPrimary({
@@ -1270,7 +1271,7 @@ describe('Cross-DO Replication: Multi-Region Replication Simulation', () => {
 
   describe('Replication Lag Across Regions', () => {
     it('detects cross-region replication lag', async () => {
-      const primaryBackend = createMockBackend();
+      const primaryBackend = createFakeBackend();
       const primaryWalWriter = createWALWriter(primaryBackend);
       const primaryWalReader = createWALReader(primaryBackend);
       const primary = createPrimary({
@@ -1308,7 +1309,7 @@ describe('Cross-DO Replication: Multi-Region Replication Simulation', () => {
 
   describe('Split-Brain Detection Across Regions', () => {
     it('detects split-brain with multiple leaders in different regions', async () => {
-      const backend = createMockBackend();
+      const backend = createFakeBackend();
       const walWriter = createWALWriter(backend);
       const replica = createReplica({
         backend,
@@ -1347,7 +1348,7 @@ describe('Cross-DO Replication: Multi-Region Replication Simulation', () => {
     });
 
     it('uses fencing tokens to resolve split-brain', async () => {
-      const backend = createMockBackend();
+      const backend = createFakeBackend();
       const walWriter = createWALWriter(backend);
       const replica = createReplica({
         backend,

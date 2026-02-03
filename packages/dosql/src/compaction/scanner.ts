@@ -14,6 +14,7 @@ import type {
   ScanOptions,
 } from './types.js';
 import { CompactionError, CompactionErrorCode } from './types.js';
+import { toBigIntSafe } from '../utils/type-guards.js';
 
 // =============================================================================
 // Row Metadata Tracking
@@ -337,9 +338,9 @@ export class CompactionScanner<K, V> {
     if (storedData) {
       try {
         const metadata = JSON.parse(new TextDecoder().decode(storedData)) as RowMetadata;
-        // Convert LSN back to bigint if present
+        // Convert LSN back to bigint if present using type-safe conversion
         if (metadata.lsn !== undefined) {
-          metadata.lsn = BigInt(metadata.lsn as unknown as string);
+          metadata.lsn = toBigIntSafe(metadata.lsn);
         }
         this.metadataCache.set(keyStr, metadata);
         return metadata;
